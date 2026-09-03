@@ -27,8 +27,11 @@ final class TilingController {
 
     /// Last frame we observed per tiled window (for edge-change detection).
     private var lastKnownFrames: [WindowID: CGRect] = [:]
-    /// Frames we recently asked AX to set (echo suppression).
-    private var expectedFrames: [WindowID: (frame: CGRect, date: Date)] = [:]
+    /// Frames we recently asked AX to set (echo suppression). Apps animate
+    /// AX frame writes, emitting notification streams that converge on the
+    /// requested frame; we swallow while converging and escape as soon as a
+    /// tick moves away from it (a real user grab).
+    private var expectedFrames: [WindowID: ExpectedWrite] = [:]
     /// Elements with resize/move observers registered (CFHash keyed; we can
     /// never unregister, so dedupe to avoid duplicate callbacks on re-tile).
     private var observedElements: Set<UInt> = []
@@ -38,8 +41,16 @@ final class TilingController {
     private var applyExclusions: Set<WindowID> = []
 
     private static let echoTolerance: CGFloat = 32
-    private static let echoMaxAge: TimeInterval = 0.5
+    private static let staleWrite: TimeInterval = 3
     private static let edgeMoveThreshold: CGFloat = 1
+
+    private struct ExpectedWrite {
+        let frame: CGRect
+        /// Last observed sum-of-edge-deltas from `frame`. Starts at infinity;
+        /// only a strictly increasing distance means a user took over.
+        var lastDistance: CGFloat
+        let date: Date
+    }
 
     /// Called after any state change (for menu refresh).
     var onChange: (() -> Void)?
@@ -99,7 +110,7 @@ final class TilingController {
         let current = AXKit.frame(of: record.element) ?? record.preTileFrame
         let bounds = visibleBounds(for: current)
         let target = grid.rect(for: slot, in: bounds)
-        expectedFrames[id] = (target, Date())
+        markExpected(id, target)
         lastKnownFrames[id] = target
         AXKit.setFrame(record.element, to: target)
     }
@@ -113,7 +124,7 @@ final class TilingController {
                 ?? record.preTileFrame
             let bounds = visibleBounds(for: frame)
             let target = grid.rect(for: slot, in: bounds)
-            expectedFrames[occupant] = (target, Date())
+            markExpected(occupant, target)
             AXKit.setFrame(record.element, to: target)
         }
     }
@@ -218,19 +229,27 @@ final class TilingController {
         guard records[id] != nil else { return } // untiled since registration
         guard let frame = AXKit.frame(of: element) else { return }
 
-        // Echo suppression: our own writes come back as notifications, and an
-        // AX frame write applies in two steps (size, then position) — so the
-        // intermediate frame intentionally does NOT match the expected final
-        // frame. While a write is in flight (recent, unconsumed), swallow
-        // everything and just track the frames; only process once settled.
-        if let entry = expectedFrames[id] {
-            let close = framesClose(entry.frame, frame, tolerance: Self.echoTolerance)
-            if close || Date().timeIntervalSince(entry.date) <= Self.echoMaxAge {
+        // Echo suppression: our writes apply (often animated) as a stream of
+        // notifications converging on the requested frame. Swallow them; a
+        // tick that moves AWAY from the target means a real user drag took
+        // over, so we clear the entry and process it.
+        if var entry = expectedFrames[id] {
+            if framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
+                expectedFrames[id] = nil // write fully applied
                 lastKnownFrames[id] = frame
-                if close { expectedFrames[id] = nil }
                 return
             }
-            expectedFrames[id] = nil
+            let distance = frameDistance(entry.frame, frame)
+            if distance > entry.lastDistance + 1 {
+                expectedFrames[id] = nil // user took over
+            } else if Date().timeIntervalSince(entry.date) > Self.staleWrite {
+                expectedFrames[id] = nil // write never applied; stop waiting
+            } else {
+                entry.lastDistance = distance
+                expectedFrames[id] = entry
+                lastKnownFrames[id] = frame
+                return
+            }
         }
 
         let previous = lastKnownFrames[id]
@@ -286,6 +305,16 @@ final class TilingController {
     private func framesClose(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
         abs(a.minX - b.minX) <= tolerance && abs(a.maxX - b.maxX) <= tolerance
             && abs(a.minY - b.minY) <= tolerance && abs(a.maxY - b.maxY) <= tolerance
+    }
+
+    /// Sum of per-edge deltas between two frames.
+    private func frameDistance(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        abs(a.minX - b.minX) + abs(a.maxX - b.maxX)
+            + abs(a.minY - b.minY) + abs(a.maxY - b.maxY)
+    }
+
+    private func markExpected(_ id: WindowID, _ frame: CGRect) {
+        expectedFrames[id] = ExpectedWrite(frame: frame, lastDistance: .infinity, date: Date())
     }
 
     private static let observerCallback: AXObserverCallback = {
