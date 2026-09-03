@@ -1,15 +1,20 @@
 import AppKit
+import ApplicationServices
 
-/// Glues the pure `TilingState` to real windows via AX.
+/// Glues the pure `TilingState` + `GridLayout` to real windows via AX.
 ///
-/// Owns the window registry (WindowID -> AXUIElement + pre-tile frame) and
-/// enforces the eviction semantics decided in design:
-/// - Tiling over an occupied slot evicts the occupant(s) (restores their
-///   pre-tile floating frames).
-/// - Dragging a window out of its tile is a later milestone; for now untile
-///   happens via hotkey toggle (same slot key) or eviction.
+/// Responsibilities:
+/// - Tiling/eviction per the decided rules (see TilingState).
+/// - Live drag resize (observe & compensate): AXObserver notifications on
+///   tiled windows -> detect which edge the user dragged -> move the
+///   corresponding grid splitter -> push new rects to the neighbor windows.
+///   Writes are bookkept in `expectedFrames` so our own echoes don't recurse.
 final class TilingController {
+    /// The single controller instance (AXObserver callbacks have no user data).
+    static weak var active: TilingController?
+
     private(set) var state = TilingState()
+    private(set) var grid = GridLayout()
 
     private struct Record {
         let element: AXUIElement
@@ -20,8 +25,28 @@ final class TilingController {
     private var records: [WindowID: Record] = [:]
     private var nextID: WindowID = 1
 
+    /// Last frame we observed per tiled window (for edge-change detection).
+    private var lastKnownFrames: [WindowID: CGRect] = [:]
+    /// Frames we recently asked AX to set (echo suppression).
+    private var expectedFrames: [WindowID: (frame: CGRect, date: Date)] = [:]
+    /// Elements with resize/move observers registered (CFHash keyed; we can
+    /// never unregister, so dedupe to avoid duplicate callbacks on re-tile).
+    private var observedElements: Set<UInt> = []
+    private var observers: [pid_t: AXObserver] = [:]
+
+    private var applyScheduled = false
+    private var applyExclusions: Set<WindowID> = []
+
+    private static let echoTolerance: CGFloat = 32
+    private static let echoMaxAge: TimeInterval = 0.5
+    private static let edgeMoveThreshold: CGFloat = 1
+
     /// Called after any state change (for menu refresh).
     var onChange: (() -> Void)?
+
+    init() {
+        TilingController.active = self
+    }
 
     // MARK: Hotkey entry point
 
@@ -54,6 +79,7 @@ final class TilingController {
             records[id] = record
         }
         state.commit(window: id, into: slot)
+        observe(window: id, record: record)
         applyLayout(for: id)
     }
 
@@ -62,6 +88,8 @@ final class TilingController {
             AXKit.setFrame(record.element, to: record.preTileFrame)
         }
         records[id] = nil
+        lastKnownFrames[id] = nil
+        expectedFrames[id] = nil
         state.remove(window: id)
     }
 
@@ -69,11 +97,45 @@ final class TilingController {
     private func applyLayout(for id: WindowID) {
         guard let record = records[id], let slot = state.slot(of: id) else { return }
         let current = AXKit.frame(of: record.element) ?? record.preTileFrame
-        let screen = NSScreen.screens.first {
-            $0.visibleFrame.contains(CGPoint(x: current.midX, y: current.midY))
-        } ?? NSScreen.main
-        guard let bounds = screen?.visibleFrame else { return }
-        AXKit.setFrame(record.element, to: slot.rect(in: bounds))
+        let bounds = visibleBounds(for: current)
+        let target = grid.rect(for: slot, in: bounds)
+        expectedFrames[id] = (target, Date())
+        lastKnownFrames[id] = target
+        AXKit.setFrame(record.element, to: target)
+    }
+
+    /// Recomputes and pushes rects for all occupants (resize propagation).
+    private func applyAll(excluding excluded: Set<WindowID> = []) {
+        for (slot, occupant) in state.occupants {
+            guard !excluded.contains(occupant), let record = records[occupant] else { continue }
+            let frame =
+                lastKnownFrames[occupant] ?? AXKit.frame(of: record.element)
+                ?? record.preTileFrame
+            let bounds = visibleBounds(for: frame)
+            let target = grid.rect(for: slot, in: bounds)
+            expectedFrames[occupant] = (target, Date())
+            AXKit.setFrame(record.element, to: target)
+        }
+    }
+
+    /// Coalesces rapid resize notifications into one apply per runloop tick.
+    private func scheduleApply(excluding id: WindowID) {
+        applyExclusions.insert(id)
+        guard !applyScheduled else { return }
+        applyScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.applyScheduled = false
+            let excluded = self.applyExclusions
+            self.applyExclusions = []
+            self.applyAll(excluding: excluded)
+        }
+    }
+
+    private func visibleBounds(for frame: CGRect) -> CGRect {
+        NSScreen.screens.first {
+            $0.visibleFrame.contains(CGPoint(x: frame.midX, y: frame.midY))
+        }?.visibleFrame ?? NSScreen.main?.visibleFrame ?? frame
     }
 
     // MARK: Registry
@@ -94,6 +156,8 @@ final class TilingController {
     private func pruneDeadWindows() {
         for (id, record) in records where !AXKit.isAlive(record.element) {
             records[id] = nil
+            lastKnownFrames[id] = nil
+            expectedFrames[id] = nil
             state.remove(window: id)
         }
     }
@@ -106,6 +170,119 @@ final class TilingController {
             untile(window: id)
         }
         onChange?()
+    }
+
+    // MARK: Live resize (observe & compensate)
+
+    private func observe(window id: WindowID, record: Record) {
+        let key = UInt(CFHash(record.element))
+        guard !observedElements.contains(key) else { return }
+        observedElements.insert(key)
+
+        let observer: AXObserver
+        if let existing = observers[record.pid] {
+            observer = existing
+        } else {
+            var created: AXObserver?
+            let result = AXObserverCreate(record.pid, Self.observerCallback, &created)
+            guard result == .success, let newObserver = created else {
+                observedElements.remove(key)
+                NSLog("tiled: AXObserverCreate failed for pid %d (%d)", record.pid, result.rawValue)
+                return
+            }
+            observer = newObserver
+            observers[record.pid] = observer
+            CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), CFRunLoopMode.commonModes)
+        }
+
+        for name in [kAXWindowResizedNotification, kAXWindowMovedNotification] {
+            let status = AXObserverAddNotification(
+                observer, record.element, name as CFString,
+                UnsafeMutableRawPointer(bitPattern: id))
+            if status != .success {
+                NSLog(
+                    "tiled: could not observe %@ on pid %d (%d)", name as String, record.pid,
+                    status.rawValue)
+            }
+        }
+    }
+
+    func handleAXNotification(notification: String, windowID id: WindowID, element: AXUIElement) {
+        guard records[id] != nil else { return } // untiled since registration
+        guard let frame = AXKit.frame(of: element) else { return }
+
+        // Echo suppression: our own writes come back as notifications.
+        if let entry = expectedFrames[id] {
+            if Date().timeIntervalSince(entry.date) > Self.echoMaxAge {
+                expectedFrames[id] = nil  // stale; treat as a real change
+            } else if framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
+                expectedFrames[id] = nil
+                lastKnownFrames[id] = frame
+                return
+            }
+        }
+
+        let previous = lastKnownFrames[id]
+        lastKnownFrames[id] = frame
+
+        // Moves (title-bar drags) don't propagate yet; only resizes do.
+        guard
+            notification == kAXWindowResizedNotification as String,
+            let previous,
+            frame.size != previous.size
+        else { return }
+
+        processResize(windowID: id, from: previous, to: frame)
+    }
+
+    /// Detects which edges moved, maps them to grid boundaries, updates the
+    /// splitters from the dragged window's *actual* frame, then pushes new
+    /// rects to the neighbors.
+    private func processResize(windowID id: WindowID, from old: CGRect, to new: CGRect) {
+        guard let slot = state.slot(of: id) else { return }
+        let bounds = visibleBounds(for: new)
+        let threshold = Self.edgeMoveThreshold
+
+        func moved(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) > threshold }
+
+        var changed = false
+        for edge in TileEdge.allCases {
+            let edgeMoved: Bool
+            let position: CGFloat
+            switch edge {
+            case .left:
+                edgeMoved = moved(new.minX, old.minX); position = new.minX
+            case .right:
+                edgeMoved = moved(new.maxX, old.maxX); position = new.maxX
+            case .top:
+                edgeMoved = moved(new.maxY, old.maxY); position = new.maxY
+            case .bottom:
+                edgeMoved = moved(new.minY, old.minY); position = new.minY
+            }
+            guard edgeMoved else { continue }
+            // The dragged window's own edge is the source of truth; skip it
+            // below so we never fight an in-progress native drag.
+            guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
+            if grid.update(boundary: boundary, toPosition: position, in: bounds) {
+                changed = true
+            }
+        }
+        if changed {
+            scheduleApply(excluding: id)
+        }
+    }
+
+    private func framesClose(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
+        abs(a.minX - b.minX) <= tolerance && abs(a.maxX - b.maxX) <= tolerance
+            && abs(a.minY - b.minY) <= tolerance && abs(a.maxY - b.maxY) <= tolerance
+    }
+
+    private static let observerCallback: AXObserverCallback = {
+        _, element, notification, refcon in
+        guard let refcon, let controller = TilingController.active else { return }
+        let id = Int(bitPattern: refcon)
+        controller.handleAXNotification(
+            notification: notification as String, windowID: id, element: element)
     }
 
     // MARK: Presentation

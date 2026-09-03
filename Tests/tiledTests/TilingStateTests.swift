@@ -112,21 +112,4 @@ final class TilingStateTests: XCTestCase {
         XCTAssertFalse(Slot.topLeft.overlaps(.topRight))
         XCTAssertFalse(Slot.topLeft.overlaps(.bottomLeft))
     }
-
-    // MARK: Geometry
-
-    func testQuadPlacementRects() {
-        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
-        // AppKit coordinates: y grows upward, so the top quads live at midY..
-        XCTAssertEqual(Slot.topLeft.rect(in: bounds), CGRect(x: 0, y: 400, width: 500, height: 400))
-        XCTAssertEqual(Slot.topRight.rect(in: bounds), CGRect(x: 500, y: 400, width: 500, height: 400))
-        XCTAssertEqual(Slot.bottomLeft.rect(in: bounds), CGRect(x: 0, y: 0, width: 500, height: 400))
-        XCTAssertEqual(Slot.bottomRight.rect(in: bounds), CGRect(x: 500, y: 0, width: 500, height: 400))
-    }
-
-    func testHalfPlacementRects() {
-        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
-        XCTAssertEqual(Slot.leftHalf.rect(in: bounds), CGRect(x: 0, y: 0, width: 500, height: 800))
-        XCTAssertEqual(Slot.rightHalf.rect(in: bounds), CGRect(x: 500, y: 0, width: 500, height: 800))
-    }
 }
