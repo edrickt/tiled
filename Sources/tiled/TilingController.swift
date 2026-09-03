@@ -236,8 +236,11 @@ final class TilingController {
         }
     }
 
-    func handleAXNotification(notification: String, windowID id: WindowID, element: AXUIElement) {
-        guard records[id] != nil else { return } // untiled since registration
+    func handleAXNotification(notification: String, element: AXUIElement) {
+        // The observer refcon ids go stale (registrations outlive untiled
+        // records and can never be removed), so resolve the window by element
+        // identity. Windows that are currently untiled are ignored.
+        guard let id = currentID(for: element) else { return }
         guard let frame = AXKit.frame(of: element) else { return }
         dbg("notif win\(id) \(notification as String) frame=\(frame)")
 
@@ -268,17 +271,19 @@ final class TilingController {
             }
         }
 
+        // Diff against the previous frame of ANY kind. Drags that change a
+        // window's origin arrive as Moved+Resized pairs with identical
+        // frames; comparing Resized against the paired Moved would silently
+        // drop every left/top/corner drag. Origin-only changes are title-bar
+        // moves: v1 leaves them off-grid until the next layout assertion.
         let previous = lastKnownFrames[id]
         lastKnownFrames[id] = frame
-
-        // Moves (title-bar drags) don't propagate yet; only resizes do.
-        guard
-            notification == kAXWindowResizedNotification as String,
-            let previous,
-            frame.size != previous.size
-        else { return }
-
-        processResize(windowID: id, from: previous, to: frame)
+        guard let previous, previous != frame else { return }
+        guard previous.size == frame.size else {
+            processResize(windowID: id, from: previous, to: frame)
+            return
+        }
+        dbg("move win\(id) ignored (origin-only change)")
     }
 
     /// Detects which edges moved, maps them to grid boundaries, updates the
@@ -334,12 +339,18 @@ final class TilingController {
         expectedFrames[id] = ExpectedWrite(frame: frame, lastDistance: .infinity, date: Date())
     }
 
+    private func currentID(for element: AXUIElement) -> WindowID? {
+        for (id, record) in records where CFEqual(record.element, element) {
+            return id
+        }
+        return nil
+    }
+
     private static let observerCallback: AXObserverCallback = {
-        _, element, notification, refcon in
-        guard let refcon, let controller = TilingController.active else { return }
-        let id = Int(bitPattern: refcon)
+        _, element, notification, _ in
+        guard let controller = TilingController.active else { return }
         controller.handleAXNotification(
-            notification: notification as String, windowID: id, element: element)
+            notification: notification as String, element: element)
     }
 
     // MARK: Presentation
