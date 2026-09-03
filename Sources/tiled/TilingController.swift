@@ -172,6 +172,13 @@ final class TilingController {
         onChange?()
     }
 
+    /// Snaps all splitters back to defaults and re-tiles everyone.
+    func resetGrid() {
+        grid = GridLayout()
+        applyAll()
+        onChange?()
+    }
+
     // MARK: Live resize (observe & compensate)
 
     private func observe(window id: WindowID, record: Record) {
@@ -211,15 +218,19 @@ final class TilingController {
         guard records[id] != nil else { return } // untiled since registration
         guard let frame = AXKit.frame(of: element) else { return }
 
-        // Echo suppression: our own writes come back as notifications.
+        // Echo suppression: our own writes come back as notifications, and an
+        // AX frame write applies in two steps (size, then position) — so the
+        // intermediate frame intentionally does NOT match the expected final
+        // frame. While a write is in flight (recent, unconsumed), swallow
+        // everything and just track the frames; only process once settled.
         if let entry = expectedFrames[id] {
-            if Date().timeIntervalSince(entry.date) > Self.echoMaxAge {
-                expectedFrames[id] = nil  // stale; treat as a real change
-            } else if framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
-                expectedFrames[id] = nil
+            let close = framesClose(entry.frame, frame, tolerance: Self.echoTolerance)
+            if close || Date().timeIntervalSince(entry.date) <= Self.echoMaxAge {
                 lastKnownFrames[id] = frame
+                if close { expectedFrames[id] = nil }
                 return
             }
+            expectedFrames[id] = nil
         }
 
         let previous = lastKnownFrames[id]

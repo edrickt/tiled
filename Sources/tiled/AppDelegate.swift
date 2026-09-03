@@ -88,6 +88,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     title: "Untile All", action: #selector(untileAll(_:)), keyEquivalent: "")
                 untile.target = self
                 menu.addItem(untile)
+                let reset = NSMenuItem(
+                    title: "Reset Layout", action: #selector(resetGrid(_:)), keyEquivalent: "")
+                reset.target = self
+                menu.addItem(reset)
             }
         } else {
             let item = NSMenuItem(
@@ -112,6 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func untileAll(_ sender: NSMenuItem) {
         controller.untileAll()
+    }
+
+    @objc private func resetGrid(_ sender: NSMenuItem) {
+        controller.resetGrid()
     }
 
     @objc private func openAccessibilitySettings(_ sender: NSMenuItem) {
