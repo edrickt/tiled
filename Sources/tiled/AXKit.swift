@@ -59,16 +59,30 @@ enum AXKit {
     // MARK: Geometry
 
     /// Frame of a window in AppKit global coordinates (bottom-left origin).
+    /// The AX position attribute is the top-left corner in top-left-origin
+    /// global coordinates, so the y axis must be converted here — everything
+    /// downstream (layout, drag detection, echo suppression) speaks AppKit.
     static func frame(of element: AXUIElement) -> CGRect? {
         guard
-            let origin = readPoint(element, positionAttribute),
+            let axOrigin = readPoint(element, positionAttribute),
             let size = readSize(element, sizeAttribute)
         else { return nil }
-        return CGRect(origin: origin, size: size)
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? (axOrigin.y + size.height)
+        return CGRect(
+            x: axOrigin.x,
+            y: primaryTop - axOrigin.y - size.height,
+            width: size.width,
+            height: size.height)
     }
 
     /// Sets position and size. `nsFrame` uses AppKit global coordinates
     /// (bottom-left origin); converted to AX top-left coordinates internally.
+    ///
+    /// Position is written BEFORE size: AX size-sets anchor the window's
+    /// top-left at its *current* position, so sizing first can push a bottom
+    /// window past the screen bottom, where AppKit silently clamps the height
+    /// and the later position write can't undo it. Anchoring at the target
+    /// top-left (always inside the visible frame) never clamps.
     @discardableResult
     static func setFrame(_ element: AXUIElement, to nsFrame: CGRect) -> Bool {
         guard
@@ -76,10 +90,10 @@ enum AXKit {
             let positionValue = pointValue(axTopLeft(of: nsFrame))
         else { return false }
 
-        let sizeOK = AXUIElementSetAttributeValue(
-            element, kAXSizeAttribute as CFString, sizeValue) == .success
         let positionOK = AXUIElementSetAttributeValue(
             element, kAXPositionAttribute as CFString, positionValue) == .success
+        let sizeOK = AXUIElementSetAttributeValue(
+            element, kAXSizeAttribute as CFString, sizeValue) == .success
         return sizeOK && positionOK
     }
 

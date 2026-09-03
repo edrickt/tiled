@@ -55,6 +55,14 @@ final class TilingController {
     /// Called after any state change (for menu refresh).
     var onChange: (() -> Void)?
 
+    private static let debugLogging = ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1"
+
+    private func dbg(_ message: @autoclosure () -> String) {
+        if Self.debugLogging {
+            NSLog("tiled: %@", message())
+        }
+    }
+
     init() {
         TilingController.active = self
     }
@@ -92,6 +100,7 @@ final class TilingController {
         state.commit(window: id, into: slot)
         observe(window: id, record: record)
         applyLayout(for: id)
+        dbg("place win\(id) -> \(slot.rawValue)")
     }
 
     private func untile(window id: WindowID) {
@@ -113,6 +122,7 @@ final class TilingController {
         markExpected(id, target)
         lastKnownFrames[id] = target
         AXKit.setFrame(record.element, to: target)
+        dbg("applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) target=\(target)")
     }
 
     /// Recomputes and pushes rects for all occupants (resize propagation).
@@ -126,6 +136,7 @@ final class TilingController {
             let target = grid.rect(for: slot, in: bounds)
             markExpected(occupant, target)
             AXKit.setFrame(record.element, to: target)
+            dbg("applyAll win\(occupant) slot=\(slot.rawValue) target=\(target)")
         }
     }
 
@@ -228,6 +239,7 @@ final class TilingController {
     func handleAXNotification(notification: String, windowID id: WindowID, element: AXUIElement) {
         guard records[id] != nil else { return } // untiled since registration
         guard let frame = AXKit.frame(of: element) else { return }
+        dbg("notif win\(id) \(notification as String) frame=\(frame)")
 
         // Echo suppression: our writes apply (often animated) as a stream of
         // notifications converging on the requested frame. Swallow them; a
@@ -237,17 +249,21 @@ final class TilingController {
             if framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
                 expectedFrames[id] = nil // write fully applied
                 lastKnownFrames[id] = frame
+                dbg("echo win\(id) consumed")
                 return
             }
             let distance = frameDistance(entry.frame, frame)
             if distance > entry.lastDistance + 1 {
                 expectedFrames[id] = nil // user took over
+                dbg("echo win\(id) ESCAPE dist=\(distance) last=\(entry.lastDistance)")
             } else if Date().timeIntervalSince(entry.date) > Self.staleWrite {
                 expectedFrames[id] = nil // write never applied; stop waiting
+                dbg("echo win\(id) stale")
             } else {
                 entry.lastDistance = distance
                 expectedFrames[id] = entry
                 lastKnownFrames[id] = frame
+                dbg("echo win\(id) converging dist=\(distance)")
                 return
             }
         }
@@ -295,6 +311,7 @@ final class TilingController {
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
             if grid.update(boundary: boundary, toPosition: position, in: bounds) {
                 changed = true
+                dbg("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(grid)")
             }
         }
         if changed {
