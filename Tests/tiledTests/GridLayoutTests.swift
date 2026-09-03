@@ -46,24 +46,36 @@ final class GridLayoutTests: XCTestCase {
             CGRect(x: 500, y: 50, width: 600, height: 800))
     }
 
-    func testCustomRowSplitsAreIndependentPerColumn() {
+    func testCustomRowSplitAppliesToBothColumns() {
         var grid = GridLayout()
-        grid.leftRowSplit = 0.25
-        grid.rightRowSplit = 0.75
-        // Left column: TL is tall, BL is short.
+        grid.rowSplit = 0.25
+        // Both columns share the single horizontal divider.
         XCTAssertEqual(
             grid.rect(for: .topLeft, in: bounds),
             CGRect(x: 100, y: 250, width: 500, height: 600))
         XCTAssertEqual(
             grid.rect(for: .bottomLeft, in: bounds),
             CGRect(x: 100, y: 50, width: 500, height: 200))
-        // Right column: TR short, BR tall.
         XCTAssertEqual(
             grid.rect(for: .topRight, in: bounds),
-            CGRect(x: 600, y: 650, width: 500, height: 200))
+            CGRect(x: 600, y: 250, width: 500, height: 600))
         XCTAssertEqual(
             grid.rect(for: .bottomRight, in: bounds),
-            CGRect(x: 600, y: 50, width: 500, height: 600))
+            CGRect(x: 600, y: 50, width: 500, height: 200))
+    }
+
+    func testDraggingLeftColumnRowEdgeMovesRightColumnTiles() {
+        // Regression: after dragging the left column's horizontal divider,
+        // tiles placed in the RIGHT column must respect it (the grid has one
+        // shared horizontal divider, not one per column).
+        var grid = GridLayout()
+        grid.update(boundary: .rowSplit, toPosition: bounds.minY + 0.7 * bounds.height, in: bounds)
+        XCTAssertEqual(
+            grid.rect(for: .topRight, in: bounds).minY,
+            bounds.minY + 0.7 * bounds.height, accuracy: 0.001)
+        XCTAssertEqual(
+            grid.rect(for: .bottomRight, in: bounds).maxY,
+            bounds.minY + 0.7 * bounds.height, accuracy: 0.001)
     }
 
     // MARK: Edge -> boundary mapping
@@ -76,10 +88,10 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(GridLayout.boundary(edge: .left, slot: .topRight), .columnSplit)
         XCTAssertEqual(GridLayout.boundary(edge: .left, slot: .bottomRight), .columnSplit)
         XCTAssertEqual(GridLayout.boundary(edge: .left, slot: .rightHalf), .columnSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .bottom, slot: .topLeft), .leftRowSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .top, slot: .bottomLeft), .leftRowSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .bottom, slot: .topRight), .rightRowSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .top, slot: .bottomRight), .rightRowSplit)
+        XCTAssertEqual(GridLayout.boundary(edge: .bottom, slot: .topLeft), .rowSplit)
+        XCTAssertEqual(GridLayout.boundary(edge: .top, slot: .bottomLeft), .rowSplit)
+        XCTAssertEqual(GridLayout.boundary(edge: .bottom, slot: .topRight), .rowSplit)
+        XCTAssertEqual(GridLayout.boundary(edge: .top, slot: .bottomRight), .rowSplit)
 
         // Screen edges are fixed.
         XCTAssertNil(GridLayout.boundary(edge: .left, slot: .topLeft))
@@ -123,8 +135,8 @@ final class GridLayoutTests: XCTestCase {
     func testDragBottomLeftTopEdgeMovesLeftRowSplit() {
         var grid = GridLayout()
         // BL's top edge dragged up from y=450 to y=650 -> TL shrinks vertically.
-        grid.update(boundary: .leftRowSplit, toPosition: 650, in: bounds)
-        XCTAssertEqual(grid.leftRowSplit, 0.75, accuracy: 0.001)
+        grid.update(boundary: .rowSplit, toPosition: 650, in: bounds)
+        XCTAssertEqual(grid.rowSplit, 0.75, accuracy: 0.001)
         let tl = grid.rect(for: .topLeft, in: bounds)
         XCTAssertEqual(tl.height, 200, accuracy: 0.5)
         XCTAssertEqual(tl.minY, 650, accuracy: 0.5)
@@ -136,10 +148,10 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(grid.columnSplit, GridLayout.columnClamp.lowerBound, accuracy: 0.001)
         grid.update(boundary: .columnSplit, toPosition: bounds.maxX, in: bounds)
         XCTAssertEqual(grid.columnSplit, GridLayout.columnClamp.upperBound, accuracy: 0.001)
-        grid.update(boundary: .leftRowSplit, toPosition: bounds.minY, in: bounds)
-        XCTAssertEqual(grid.leftRowSplit, GridLayout.rowClamp.lowerBound, accuracy: 0.001)
-        grid.update(boundary: .rightRowSplit, toPosition: bounds.maxY, in: bounds)
-        XCTAssertEqual(grid.rightRowSplit, GridLayout.rowClamp.upperBound, accuracy: 0.001)
+        grid.update(boundary: .rowSplit, toPosition: bounds.minY, in: bounds)
+        XCTAssertEqual(grid.rowSplit, GridLayout.rowClamp.lowerBound, accuracy: 0.001)
+        grid.update(boundary: .rowSplit, toPosition: bounds.maxY, in: bounds)
+        XCTAssertEqual(grid.rowSplit, GridLayout.rowClamp.upperBound, accuracy: 0.001)
     }
 
     func testUpdateReturnsFalseWhenUnchanged() {
@@ -154,8 +166,7 @@ final class GridLayoutTests: XCTestCase {
         // Neighboring tiles must share the exact divider line.
         var grid = GridLayout()
         grid.columnSplit = 0.37
-        grid.leftRowSplit = 0.42
-        grid.rightRowSplit = 0.66
+        grid.rowSplit = 0.42
         let tl = grid.rect(for: .topLeft, in: bounds)
         let tr = grid.rect(for: .topRight, in: bounds)
         let bl = grid.rect(for: .bottomLeft, in: bounds)
@@ -164,6 +175,7 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(bl.maxX, br.minX, accuracy: 0.001)
         XCTAssertEqual(tl.minY, bl.maxY, accuracy: 0.001) // shared row divider
         XCTAssertEqual(tr.minY, br.maxY, accuracy: 0.001) // shared row divider
+        XCTAssertEqual(tl.minY, tr.minY, accuracy: 0.001) // one divider across both columns
         XCTAssertEqual(tl.maxY, bounds.maxY, accuracy: 0.001) // tops at screen top
         XCTAssertEqual(bl.minY, bounds.minY, accuracy: 0.001) // bottoms at screen bottom
     }
