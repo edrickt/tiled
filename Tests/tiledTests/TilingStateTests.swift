@@ -117,10 +117,11 @@ final class TilingStateTests: XCTestCase {
 
     func testQuadPlacementRects() {
         let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
-        XCTAssertEqual(Slot.topLeft.rect(in: bounds), CGRect(x: 0, y: 0, width: 500, height: 400))
-        XCTAssertEqual(Slot.topRight.rect(in: bounds), CGRect(x: 500, y: 0, width: 500, height: 400))
-        XCTAssertEqual(Slot.bottomLeft.rect(in: bounds), CGRect(x: 0, y: 400, width: 500, height: 400))
-        XCTAssertEqual(Slot.bottomRight.rect(in: bounds), CGRect(x: 500, y: 400, width: 500, height: 400))
+        // AppKit coordinates: y grows upward, so the top quads live at midY..
+        XCTAssertEqual(Slot.topLeft.rect(in: bounds), CGRect(x: 0, y: 400, width: 500, height: 400))
+        XCTAssertEqual(Slot.topRight.rect(in: bounds), CGRect(x: 500, y: 400, width: 500, height: 400))
+        XCTAssertEqual(Slot.bottomLeft.rect(in: bounds), CGRect(x: 0, y: 0, width: 500, height: 400))
+        XCTAssertEqual(Slot.bottomRight.rect(in: bounds), CGRect(x: 500, y: 0, width: 500, height: 400))
     }
 
     func testHalfPlacementRects() {

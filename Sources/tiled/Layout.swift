@@ -31,18 +31,19 @@ enum Slot: String, CaseIterable {
     }
 
     /// Fixed rect within the given bounds (a screen's visible frame, AppKit coordinates).
+    /// Note: AppKit y grows upward, so `minY` is the BOTTOM of the bounds.
     func rect(in bounds: CGRect) -> CGRect {
         let w = bounds.width / 2
         let h = bounds.height / 2
         return switch self {
         case .topLeft:
-            CGRect(x: bounds.minX, y: bounds.minY, width: w, height: h)
-        case .topRight:
-            CGRect(x: bounds.midX, y: bounds.minY, width: w, height: h)
-        case .bottomLeft:
             CGRect(x: bounds.minX, y: bounds.midY, width: w, height: h)
-        case .bottomRight:
+        case .topRight:
             CGRect(x: bounds.midX, y: bounds.midY, width: w, height: h)
+        case .bottomLeft:
+            CGRect(x: bounds.minX, y: bounds.minY, width: w, height: h)
+        case .bottomRight:
+            CGRect(x: bounds.midX, y: bounds.minY, width: w, height: h)
         case .leftHalf:
             CGRect(x: bounds.minX, y: bounds.minY, width: w, height: bounds.height)
         case .rightHalf:
