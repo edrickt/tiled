@@ -225,6 +225,11 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(Slot.topLeft.title, "Top Left")
         XCTAssertEqual(Slot.leftHalf.title, "Left Half")
         XCTAssertEqual(Slot.sixthTopLeft.title, "Top Left Sixth")
+        XCTAssertEqual(Slot.sixthLeft.title, "Left Third")
+        XCTAssertEqual(Slot.sixthMiddle.title, "Middle Third")
+        XCTAssertEqual(Slot.sixthRight.title, "Right Third")
+        XCTAssertEqual(Slot.sixthsLeftTwoThirds.title, "Left Two-Thirds")
+        XCTAssertEqual(Slot.sixthsRightTwoThirds.title, "Right Two-Thirds")
         XCTAssertEqual(
             Set(Slot.allCases.map { HotkeyStore.defaultBinding(for: $0).label }).count,
             17) // default combos unique

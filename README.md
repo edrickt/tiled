@@ -37,12 +37,24 @@ under **Tile Focused Window** in the menu bar menu.
 | ⌥⇧⌘L   | Right third        |
 | ⌥⇧⌘H   | Left two-thirds    |
 | ⌥⇧⌘;   | Right two-thirds   |
+| ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
 
-The full list lives in the app too: menu bar → **Keyboard Shortcuts…**.
+First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
+to tile it top-left, and you're going — with a miniature preview showing
+what Top Left covers. Dismiss the guide once; reopen it anytime from the menu bar menu → tiled Guide.
+
+The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
+
+Shortcuts are remappable: open the Shortcuts tab, click a shortcut, and
+press a new combo. Esc keeps the old one, ⌫ disables that slot.
+Disable or re-enable a whole layout at once with the Enable/Disable all
+button beside each section header — your combos are parked aside and
+restored unchanged.
 
 If a shortcut is already owned by another app, that slot shows a warning in
-the menu instead of silently doing nothing. tiled's shortcuts are currently
-fixed; if one collides, change or disable it in the other app.
+the menu instead of silently doing nothing. If two tiled slots use the same
+combo, the Shortcuts tab names the conflict and keeps the old binding until
+you pick a free one.
 
 ## Tiling rules
 
@@ -58,9 +70,14 @@ fixed; if one collides, change or disable it in the other app.
 - Tiling a window into its own tile does nothing — no restore, no reassert.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.
-- Use **Untile All** in the menu to restore every tiled window.
+- Use **Untile All** in the menu to restore every tiled window, or open a
+  tiled window's submenu to focus it, untile just that window, or tile the
+  focused window into its slot.
 - Quarters and sixths are mutually exclusive on screen: requesting a slot in
-  the other layout evicts every tiled window and switches layouts.
+  the other layout untiles every tiled window and switches layouts. The menu
+  names the switch and how to undo it ("Switched to Sixths · 3 windows
+  untiled. Undo: Restore 3 Evicted Windows") — undo is one step (⌘Z).
+  Safe to explore: destruction is always reversible.
 - Some apps refuse programmatic resizing. When that happens the window is
   left alone and the menu says which app refused — state and screen never
   silently disagree.
@@ -70,7 +87,7 @@ fixed; if one collides, change or disable it in the other app.
 Drag any edge of a tiled window and the shared grid divider moves with it;
 neighbors on the other side follow. Vertical and horizontal dividers are
 independent per column (quarters) or per third (sixths), so resizing one
-column never moves the other. **Reset Layout** in the menu snaps all
+column never moves the other. **Reset Dividers** in the menu snaps all
 dividers back to even splits.
 
 ## Building & running
@@ -114,5 +131,5 @@ Quitting tiled leaves your windows where they are.
 - [x] Display-change reassertion + automatic cleanup of closed windows
 - [ ] Drag-out-to-untile (drop inside tile = snap back, outside = untile)
 - [ ] Owned overlay resize handles
-- [ ] Remappable shortcuts
+- [x] Remappable shortcuts
 - [ ] Gaps? (decided: no gaps for now)

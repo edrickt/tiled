@@ -52,6 +52,33 @@ final class TilingController {
         let date: Date
     }
 
+    /// Snapshot of windows evicted by the last layout switch, enabling a
+    /// one-step undo ("Restore Evicted Windows"). Records are rebuilt from
+    /// live elements on undo; dead windows are skipped. Cleared by any new
+    /// tiling action, bulk op, or use — exactly one undo step exists.
+    private struct EvictedWindow {
+        let element: AXUIElement
+        let pid: pid_t
+        let slot: Slot
+        let preTileFrame: CGRect
+    }
+
+    private var evictedSnapshot: [EvictedWindow]?
+    private var switchRequester: WindowID?
+
+    /// Whether a layout-switch undo is available (menu item visibility).
+    var canUndoSwitch: Bool { evictedSnapshot?.isEmpty == false }
+
+    /// Count for the undo menu title (0 when unavailable).
+    var evictedCount: Int { evictedSnapshot?.count ?? 0 }
+
+    /// Last layout-switch notice (shown in the status menu). A cross-layout
+    /// hotkey untiles every other tiled window; the notice always carries
+    /// the undo offer, so the first encounter teaches reversibility instead
+    /// of just reporting destruction. Cleared on the next tiling attempt.
+    /// Never overwrites a real error (refusals, restore failures win).
+    private(set) var lastNotice: String?
+
     /// Last user-visible tiling failure (shown in the status menu).
     /// Cleared on the next tiling attempt.
     private(set) var lastTileError: String?
@@ -61,6 +88,18 @@ final class TilingController {
 
     /// Called after any state change (for menu refresh).
     var onChange: (() -> Void)?
+
+    /// Feedback for ineffective hotkey presses: the hotkey path is the
+    /// primary interface, so silence trains users to press harder, not
+    /// smarter. The delegate turns these into a haptic + announcement;
+    /// state and menu side effects are unchanged (safe no-ops stay safe).
+    enum Feedback {
+        case noFocusedWindow
+        case alreadyTiled(slot: Slot)
+        case refused(windowName: String?)
+    }
+
+    var onFeedback: ((Feedback) -> Void)?
 
     private static let debugLogging = ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1"
 
@@ -111,16 +150,25 @@ final class TilingController {
 
     func handle(slot: Slot) {
         pruneDeadWindows()
-        guard let focused = AXKit.focusedWindow() else { return }
+        guard let focused = AXKit.focusedWindow() else {
+            dbg("no focused window for \(slot.rawValue)")
+            onFeedback?(.noFocusedWindow)
+            return
+        }
         let id = windowID(for: focused.element, pid: focused.pid)
         let decision = state.plan(window: id, into: slot)
         guard decision != .noop else {
             // Already in that tile: a strict no-op — no state, error, or
-            // menu side effects.
+            // menu side effects. Still signal it so the hotkey path can
+            // confirm subtly (the Welcome tab teaches this as safety).
             dbg("noop win\(id) already in \(slot.rawValue)")
+            onFeedback?(.alreadyTiled(slot: slot))
             return
         }
         lastTileError = nil
+        lastNotice = nil
+        evictedSnapshot = nil
+        switchRequester = nil
 
         switch decision {
         case .noop:
@@ -133,6 +181,7 @@ final class TilingController {
             }
             if failed > 0 {
                 lastTileError = Self.refusalMessage(count: failed)
+                onFeedback?(.refused(windowName: nil))
             }
             dbg("swap win\(id) -> \(slot.rawValue) placements=\(placements)")
         case .switchLayout:
@@ -140,8 +189,26 @@ final class TilingController {
             // else first (restoring it would delete its record, so `place`
             // would bail and the window would merely untile). Its old tile
             // is vacated by the commit inside `place`.
-            let restoreFailures = restore(decision.windowsToRestore(requester: id))
+            let evicted = decision.windowsToRestore(requester: id)
+            evictedSnapshot = evicted.compactMap { id in
+                records[id].map {
+                    EvictedWindow(
+                        element: $0.element, pid: $0.pid,
+                        slot: state.slot(of: id) ?? slot, preTileFrame: $0.preTileFrame)
+                }
+            }
+            switchRequester = id
+            let restoreFailures = restore(evicted)
             place(window: id, into: slot)
+            if lastTileError == nil, restoreFailures.isEmpty, !evicted.isEmpty {
+                let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
+                lastNotice =
+                    "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. " +
+                    "Undo: Restore \(noun == "1 window" ? "1 Evicted Window" : "\(evicted.count) Evicted Windows")."
+            } else {
+                evictedSnapshot = nil
+                switchRequester = nil
+            }
             reportRestoreFailures(restoreFailures)
             dbg("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
         case .tile:
@@ -173,6 +240,7 @@ final class TilingController {
             expectedFrames[id] = nil
             let name = appName(for: id) ?? "That window"
             lastTileError = "\(name) couldn't be tiled — the app refused to resize it."
+            onFeedback?(.refused(windowName: name))
             dbg("place FAILED win\(id) -> \(slot.rawValue)")
             return
         }
@@ -183,7 +251,7 @@ final class TilingController {
     /// Returns false when the restore was attempted and refused, so the
     /// caller can say so instead of silently leaving a stray window behind.
     @discardableResult
-    private func untile(window id: WindowID) -> Bool {
+    private func restoreWindow(id: WindowID) -> Bool {
         var restored = true
         if let record = records[id], record.preTileFrame != .zero {
             restored = AXKit.setFrame(record.element, to: record.preTileFrame)
@@ -201,7 +269,7 @@ final class TilingController {
         var failures: [String] = []
         for evicted in ids {
             let name = appName(for: evicted) ?? "A window"
-            if !untile(window: evicted) {
+            if !restoreWindow(id: evicted) {
                 failures.append(name)
             }
         }
@@ -270,10 +338,43 @@ final class TilingController {
         }
     }
 
+    /// Pure screen-ownership rule, extracted for tests: index of the
+    /// screen showing the largest share of `frame`, so straddles resolve
+    /// to the mostly-visible side and never jitter on the midpoint.
+    /// Compared by intersection *area*, not width: vertically stacked
+    /// displays at equal widths produce equal-width intersections, so a
+    /// width-only comparison always returns the first screen. Ties resolve
+    /// to the first screen; zero-area intersections and zero-overlap yield
+    /// nil, and the caller falls back to the midpoint screen, then main.
+    static func owningScreenIndex(frames: [CGRect], for frame: CGRect) -> Int? {
+        let areas = frames.map { rect -> CGFloat in
+            let overlap = rect.intersection(frame)
+            guard !overlap.isNull else { return 0 }
+            return overlap.width * overlap.height
+        }
+        guard
+            let largest = areas.enumerated().max(by: { $0.element < $1.element }),
+            largest.element > 0
+        else { return nil }
+        return largest.offset
+    }
+
+    /// Screen owning `frame`: the display showing the largest share of
+    /// the window (straddles resolve to the mostly-visible side, never
+    /// jittering on the midpoint). Ties and zero-overlap fall back to the
+    /// midpoint screen, then main — so off-screen or inter-Space windows
+    /// still tile somewhere sane instead of using raw frame coordinates.
     private func visibleBounds(for frame: CGRect) -> CGRect {
-        NSScreen.screens.first {
-            $0.visibleFrame.contains(CGPoint(x: frame.midX, y: frame.midY))
-        }?.visibleFrame ?? NSScreen.main?.visibleFrame ?? frame
+        let screens = NSScreen.screens
+        if let index = Self.owningScreenIndex(frames: screens.map(\.frame), for: frame) {
+            return screens[index].visibleFrame
+        }
+        let point = CGPoint(x: frame.midX, y: frame.midY)
+        if let containing = screens.first(where: { $0.frame.contains(point) }) {
+            return containing.visibleFrame
+        }
+        dbg("no screen overlaps \(frame); falling back to main")
+        return NSScreen.main?.visibleFrame ?? frame
     }
 
     // MARK: Registry
@@ -305,15 +406,59 @@ final class TilingController {
     func untileAll() {
         pruneDeadWindows()
         lastTileError = nil
+        lastNotice = nil
+        evictedSnapshot = nil
+        switchRequester = nil
         reportRestoreFailures(restore(state.tiledWindows))
         onChange?()
     }
 
     /// Snaps all splitters back to defaults and re-tiles everyone.
-    func resetGrid() {
+    func resetDividers() {
         grid = GridLayout()
         lastTileError = nil
+        lastNotice = nil
+        evictedSnapshot = nil
+        switchRequester = nil
         applyAll()
+        onChange?()
+    }
+
+    /// Undoes the last layout switch: the requester is restored to its
+    /// pre-tile frame and every surviving evicted window returns to its
+    /// slot. One step only — using it (or any new action) clears it.
+    func undoLayoutSwitch() {
+        guard let snapshot = evictedSnapshot, !snapshot.isEmpty else { return }
+        pruneDeadWindows()
+        lastTileError = nil
+        lastNotice = nil
+        evictedSnapshot = nil
+        if let requester = switchRequester {
+            _ = restoreWindow(id: requester)
+        }
+        switchRequester = nil
+        var restored = 0
+        for entry in snapshot {
+            guard AXKit.isAlive(entry.element) else { continue }
+            let id = windowID(for: entry.element, pid: entry.pid)
+            guard var record = records[id] else { continue }
+            record.preTileFrame = entry.preTileFrame
+            records[id] = record
+            state.commit(window: id, into: entry.slot)
+            observe(window: id, record: record)
+            if applyLayout(for: id) {
+                restored += 1
+            } else {
+                state.remove(window: id)
+                records[id] = nil
+            }
+        }
+        if restored > 0 {
+            let noun = restored == 1 ? "1 window" : "\(restored) windows"
+            lastNotice = "Undid layout switch \u{00B7} \(noun) restored."
+        } else {
+            lastTileError = "Couldn't restore the evicted windows."
+        }
         onChange?()
     }
 
@@ -472,6 +617,7 @@ final class TilingController {
     // MARK: Presentation
 
     struct TiledWindowInfo {
+        let id: WindowID
         let slot: Slot
         let appName: String?
     }
@@ -481,7 +627,26 @@ final class TilingController {
     var tiledWindowsInfo: [TiledWindowInfo] {
         state.occupants
             .sorted { $0.key.rawValue < $1.key.rawValue }
-            .map { slot, id in TiledWindowInfo(slot: slot, appName: appName(for: id)) }
+            .map { slot, id in TiledWindowInfo(id: id, slot: slot, appName: appName(for: id)) }
+    }
+
+    /// Brings a tiled window to the front without disturbing the layout.
+    func focus(window id: WindowID) {
+        guard let record = records[id] else { return }
+        AXUIElementSetAttributeValue(
+            record.element, kAXMainAttribute as CFString, kCFBooleanTrue)
+        NSRunningApplication(processIdentifier: record.pid)?.activate()
+    }
+
+    /// Untiles one window, restoring its pre-tile frame.
+    func untile(window id: WindowID) {
+        pruneDeadWindows()
+        lastTileError = nil
+        lastNotice = nil
+        evictedSnapshot = nil
+        switchRequester = nil
+        reportRestoreFailures(restoreWindow(id: id) ? [] : [appName(for: id) ?? "A window"])
+        onChange?()
     }
 
     private func appName(for id: WindowID) -> String? {

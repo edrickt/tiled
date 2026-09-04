@@ -658,4 +658,52 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertGreaterThan(quartersToSixths, 0, "BFS never switched quarters -> sixths")
         XCTAssertGreaterThan(sixthsToQuarters, 0, "BFS never switched sixths -> quarters")
     }
+
+    // MARK: Switch-undo contract (controller-level state machine)
+
+    /// The undo snapshot mirrors the pure plan's eviction set exactly:
+    /// every window the plan names must be restorable, the requester
+    /// itself must never be in it.
+    func testUndoSnapshotMirrorsPlanEvictionSet() {
+        for config in Self.quartersConfigs + Self.sixthsConfigs {
+            let (state, ids) = makeState(slots: config)
+            let requester = 1000 // untiled window pressing into the other layout
+            let fromLayout = config.first!.layout
+            let target: Slot =
+                fromLayout == .quarters ? .sixthTopLeft : .topLeft
+            let plan = state.plan(window: requester, into: target)
+            guard case .switchLayout(let evicting) = plan else {
+                XCTFail("expected switchLayout for \(config)")
+                continue
+            }
+            XCTAssertEqual(Set(evicting), Set(ids), "snapshot must name every tiled window")
+            XCTAssertFalse(evicting.contains(requester), "requester moves, never evicts")
+            // Undo restores exactly the pre-switch occupancy.
+            var undone = state
+            for evicted in evicting { undone.remove(window: evicted) }
+            // Requester was never tiled: nothing to remove for it.
+            XCTAssertNil(undone.slot(of: requester))
+            for (slot, id) in zip(config, ids) {
+                undone.commit(window: id, into: slot)
+            }
+            XCTAssertEqual(undone, state, "undo must reproduce pre-switch state")
+            assertHealthy(undone, context: "undo of \(config)")
+        }
+    }
+
+    /// The requester is excluded from the restore set even when already
+    /// tiled (it moves, its record must survive until place runs).
+    func testRequesterExcludedFromRestoreSet() {
+        let (state, ids) = makeState(slots: [.topLeft, .bottomRight])
+        let requester = ids[0] // already tiled, pressing into sixths
+        let plan = state.plan(window: requester, into: .sixthMiddle)
+        guard case .switchLayout(let evicting) = plan else {
+            XCTFail("expected switchLayout")
+            return
+        }
+        XCTAssertEqual(
+            plan.windowsToRestore(requester: requester), [ids[1]],
+            "only the OTHER window restores; the requester moves")
+        XCTAssertFalse(evicting.contains(requester) == false, "plan names all, filter excludes")
+    }
 }

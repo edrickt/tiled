@@ -36,8 +36,17 @@ extension Slot {
 /// Registers the global ⌥⇧ hotkeys via Carbon's RegisterEventHotKey
 /// (still the most reliable global hotkey mechanism on macOS).
 final class HotkeyService {
+    /// Reserved Carbon id for the Settings fallback hotkey (⌃⌥⇧⌘,).
+    /// Slot ids occupy 1...allCases.count, so this can never collide.
+    static let settingsHotkeyID: UInt32 = 999
+    /// The fallback combo: deliberately over-modified so it collides with
+    /// nothing (all four modifiers + comma).
+    static let settingsModifiers = UInt32(controlKey | optionKey | shiftKey | cmdKey)
+    static let settingsKeyCode = UInt32(kVK_ANSI_Comma)
+
     private final class Context {
         var handler: ((Slot) -> Void)?
+        var settingsHandler: (() -> Void)?
         let slotByID: [UInt32: Slot]
 
         init() {
@@ -68,6 +77,16 @@ final class HotkeyService {
         set { context.handler = newValue }
     }
 
+    /// Fired by the ⌃⌥⇧⌘, fallback combo: opens Settings even when the
+    /// menu-bar icon is hidden (the icon is otherwise the only handle).
+    var settingsHandler: (() -> Void)? {
+        get { context.settingsHandler }
+        set { context.settingsHandler = newValue }
+    }
+
+    /// Whether the fallback combo registered (false = owned by another app).
+    private(set) var settingsHotkeyFailed = false
+
     init(store: HotkeyStore = HotkeyStore()) {
         self.store = store
         Self.installEventHandler(with: context)
@@ -88,6 +107,21 @@ final class HotkeyService {
 
     private func registerHotkeys() {
         failedSlots = []
+        settingsHotkeyFailed = false
+        var settingsRef: EventHotKeyRef?
+        if RegisterEventHotKey(
+            Self.settingsKeyCode,
+            Self.settingsModifiers,
+            EventHotKeyID(signature: Self.signature, id: Self.settingsHotkeyID),
+            GetApplicationEventTarget(),
+            0,
+            &settingsRef) == noErr
+        {
+            hotKeyRefs.append(settingsRef)
+        } else {
+            settingsHotkeyFailed = true
+            NSLog("tiled: failed to register settings fallback hotkey")
+        }
         for slot in Slot.allCases {
             let binding = store.binding(for: slot)
             // A disabled slot registers nothing and warns about nothing.
@@ -136,6 +170,10 @@ final class HotkeyService {
             &hotKeyID)
         guard status == noErr else { return status }
         let context = Unmanaged<Context>.fromOpaque(userData!).takeUnretainedValue()
+        if hotKeyID.id == HotkeyService.settingsHotkeyID {
+            DispatchQueue.main.async { context.settingsHandler?() }
+            return noErr
+        }
         guard let slot = context.slotByID[hotKeyID.id] else { return OSStatus(eventNotHandledErr) }
         DispatchQueue.main.async { context.handler?(slot) }
         return noErr

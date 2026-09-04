@@ -87,6 +87,22 @@ enum Slot: String, CaseIterable {
         !cells.isDisjoint(with: other.cells)
     }
 
+    /// Sixths submenu groupings (corners / thirds / two-thirds): 11 flat
+    /// items exceed working memory at the moment of action, so the menu
+    /// chunks them under disabled sub-headers.
+    static var sixthsCorners: [Slot] {
+        [.sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+         .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight]
+    }
+
+    static var sixthsThirds: [Slot] {
+        [.sixthLeft, .sixthMiddle, .sixthRight]
+    }
+
+    static var sixthsTwoThirds: [Slot] {
+        [.sixthsLeftTwoThirds, .sixthsRightTwoThirds]
+    }
+
     // MARK: Presentation
 
     var title: String {
@@ -103,11 +119,11 @@ enum Slot: String, CaseIterable {
         case .sixthBottomLeft: "Bottom Left Sixth"
         case .sixthBottomMiddle: "Bottom Middle Sixth"
         case .sixthBottomRight: "Bottom Right Sixth"
-        case .sixthLeft: "Left Sixth"
-        case .sixthMiddle: "Middle Sixth"
-        case .sixthRight: "Right Sixth"
-        case .sixthsLeftTwoThirds: "Left Two Sixths"
-        case .sixthsRightTwoThirds: "Right Two Sixths"
+        case .sixthLeft: "Left Third"
+        case .sixthMiddle: "Middle Third"
+        case .sixthRight: "Right Third"
+        case .sixthsLeftTwoThirds: "Left Two-Thirds"
+        case .sixthsRightTwoThirds: "Right Two-Thirds"
         }
     }
 }

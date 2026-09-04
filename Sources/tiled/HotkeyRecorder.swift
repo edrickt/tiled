@@ -26,6 +26,24 @@ enum HotkeyRecorder {
         63, // fn
     ]
 
+    /// Keycodes that must pass through to the responder chain even while
+    /// armed: navigation keys are never bindings (a combo needs ≥1 of
+    /// ⌃⌥⇧⌘), so swallowing them would trap keyboard users mid-record.
+    /// The monitor checks this first and returns the event unswallowed.
+    static func shouldPassThrough(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown,
+              carbonFlags(from: event.modifierFlags) == 0
+        else { return false }
+        switch Int(event.keyCode) {
+        case kVK_Tab, kVK_Return,
+            kVK_UpArrow, kVK_DownArrow, kVK_LeftArrow, kVK_RightArrow,
+            kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown:
+            return true
+        default:
+            return false
+        }
+    }
+
     static func outcome(for event: NSEvent) -> Outcome? {
         guard event.type == .keyDown, !event.isARepeat else { return nil }
         let carbonModifiers = carbonFlags(from: event.modifierFlags)

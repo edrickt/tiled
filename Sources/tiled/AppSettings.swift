@@ -5,6 +5,7 @@ import Foundation
 final class AppSettings {
     private let defaults: UserDefaults
     private static let hideIconKey = "hideMenuBarIcon"
+    private static let welcomeKey = "didDismissWelcome"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -15,5 +16,11 @@ final class AppSettings {
     var hideMenuBarIcon: Bool {
         get { defaults.bool(forKey: Self.hideIconKey) }
         set { defaults.set(newValue, forKey: Self.hideIconKey) }
+    }
+
+    /// The first-run Welcome tab, dismissed for good via its button.
+    var didDismissWelcome: Bool {
+        get { defaults.bool(forKey: Self.welcomeKey) }
+        set { defaults.set(newValue, forKey: Self.welcomeKey) }
     }
 }
