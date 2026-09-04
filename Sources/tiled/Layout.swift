@@ -235,7 +235,6 @@ struct GridLayout: Equatable {
         let leftRowY = position(of: .leftRowSplit, in: bounds)
         let rightRowY = position(of: .rightRowSplit, in: bounds)
         let x13 = bounds.minX + bounds.width / 3
-        let x12 = bounds.minX + bounds.width / 2
         let x23 = bounds.minX + 2 * bounds.width / 3
         let midY = bounds.minY + bounds.height / 2
         return switch slot {
