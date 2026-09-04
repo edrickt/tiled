@@ -288,10 +288,10 @@ final class GridLayoutTests: XCTestCase {
     }
 
     func testBoundaryMappingExhaustive() {
-        // All 68 (slot, edge) pairs: 6 column-split, 2 left-row, 2 right-row,
-        // 58 fixed. Sixths rects are fixed fractions with no draggable
-        // splitters, so every sixths edge maps to nil.
-        var expectations: [(Slot, TileEdge, GridBoundary?)] = [
+        // All 68 (slot, edge) pairs: quarters map 6 column-split, 2
+        // left-row, 2 right-row; sixths map 7 left-split, 7 right-split, 6
+        // row-split; everything else is a fixed screen edge.
+        let expectations: [(Slot, TileEdge, GridBoundary?)] = [
             (.topLeft, .right, .columnSplit),
             (.bottomLeft, .right, .columnSplit),
             (.leftHalf, .right, .columnSplit),
@@ -308,12 +308,46 @@ final class GridLayoutTests: XCTestCase {
             (.bottomRight, .right, nil), (.bottomRight, .bottom, nil),
             (.leftHalf, .left, nil), (.leftHalf, .top, nil), (.leftHalf, .bottom, nil),
             (.rightHalf, .right, nil), (.rightHalf, .top, nil), (.rightHalf, .bottom, nil),
+            // Sixths left divider (left-third right edge; middle-third,
+            // right-two-thirds left edge).
+            (.sixthTopLeft, .right, .sixthsLeftSplit),
+            (.sixthBottomLeft, .right, .sixthsLeftSplit),
+            (.sixthLeft, .right, .sixthsLeftSplit),
+            (.sixthTopMiddle, .left, .sixthsLeftSplit),
+            (.sixthBottomMiddle, .left, .sixthsLeftSplit),
+            (.sixthMiddle, .left, .sixthsLeftSplit),
+            (.sixthsRightTwoThirds, .left, .sixthsLeftSplit),
+            // Sixths right divider (middle-third, left-two-thirds right
+            // edge; right-third left edge).
+            (.sixthTopMiddle, .right, .sixthsRightSplit),
+            (.sixthBottomMiddle, .right, .sixthsRightSplit),
+            (.sixthMiddle, .right, .sixthsRightSplit),
+            (.sixthsLeftTwoThirds, .right, .sixthsRightSplit),
+            (.sixthTopRight, .left, .sixthsRightSplit),
+            (.sixthBottomRight, .left, .sixthsRightSplit),
+            (.sixthRight, .left, .sixthsRightSplit),
+            // Sixths row divider (corner bottoms/tops).
+            (.sixthTopLeft, .bottom, .sixthsRowSplit),
+            (.sixthTopMiddle, .bottom, .sixthsRowSplit),
+            (.sixthTopRight, .bottom, .sixthsRowSplit),
+            (.sixthBottomLeft, .top, .sixthsRowSplit),
+            (.sixthBottomMiddle, .top, .sixthsRowSplit),
+            (.sixthBottomRight, .top, .sixthsRowSplit),
+            // Sixths fixed screen edges.
+            (.sixthTopLeft, .left, nil), (.sixthTopLeft, .top, nil),
+            (.sixthTopMiddle, .top, nil),
+            (.sixthTopRight, .right, nil), (.sixthTopRight, .top, nil),
+            (.sixthBottomLeft, .left, nil), (.sixthBottomLeft, .bottom, nil),
+            (.sixthBottomMiddle, .bottom, nil),
+            (.sixthBottomRight, .right, nil), (.sixthBottomRight, .bottom, nil),
+            (.sixthLeft, .left, nil), (.sixthLeft, .top, nil), (.sixthLeft, .bottom, nil),
+            (.sixthMiddle, .top, nil), (.sixthMiddle, .bottom, nil),
+            (.sixthRight, .right, nil), (.sixthRight, .top, nil), (.sixthRight, .bottom, nil),
+            (.sixthsLeftTwoThirds, .left, nil), (.sixthsLeftTwoThirds, .top, nil),
+            (.sixthsLeftTwoThirds, .bottom, nil),
+            (.sixthsRightTwoThirds, .right, nil), (.sixthsRightTwoThirds, .top, nil),
+            (.sixthsRightTwoThirds, .bottom, nil),
         ]
-        for slot in Slot.allCases where slot.layout == .sixths {
-            for edge in TileEdge.allCases {
-                expectations.append((slot, edge, nil))
-            }
-        }
         XCTAssertEqual(expectations.count, Slot.allCases.count * TileEdge.allCases.count)
         for (slot, edge, expected) in expectations {
             XCTAssertEqual(
@@ -376,7 +410,7 @@ final class GridLayoutTests: XCTestCase {
         // loudly instead of silently leaving an edge unmapped.
         XCTAssertEqual(Slot.allCases.count, 17)
         XCTAssertEqual(TileEdge.allCases.count, 4)
-        XCTAssertEqual(GridBoundary.allCases.count, 3)
+        XCTAssertEqual(GridBoundary.allCases.count, 6)
         XCTAssertEqual(
             GridLayout.boundary(edge: .right, slot: .topLeft), .columnSplit)
     }
@@ -493,9 +527,9 @@ final class GridLayoutTests: XCTestCase {
         }
     }
 
-    func testSixthsIgnoreSplitters() {
-        // Sixths are fixed fractions: dragging quarters splitters must not
-        // move any sixths rect.
+    func testLayoutsIgnoreEachOthersSplitters() {
+        // Splitter sets are independent: dragging quarters splitters must
+        // not move any sixths rect, and vice versa.
         var grid = GridLayout()
         grid.columnSplit = 0.25
         grid.leftRowSplit = 0.75
@@ -506,6 +540,192 @@ final class GridLayoutTests: XCTestCase {
                 grid.rect(for: slot, in: bounds), fixed.rect(for: slot, in: bounds),
                 "\(slot.rawValue) moved with quarters splitters")
         }
+        var sixthsMoved = GridLayout()
+        sixthsMoved.sixthsLeftSplit = 0.2
+        sixthsMoved.sixthsRightSplit = 0.8
+        sixthsMoved.sixthsRowSplit = 0.3
+        for slot in Slot.allCases where slot.layout == .quarters {
+            XCTAssertEqual(
+                sixthsMoved.rect(for: slot, in: bounds), fixed.rect(for: slot, in: bounds),
+                "\(slot.rawValue) moved with sixths splitters")
+        }
+    }
+
+    func testSixthsDefaultsAreOneThirdTwoThirdsHalf() {
+        let grid = GridLayout()
+        XCTAssertEqual(grid.sixthsLeftSplit, 1.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(grid.sixthsRightSplit, 2.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(grid.sixthsRowSplit, 0.5)
+        XCTAssertEqual(grid.position(of: .sixthsLeftSplit, in: bounds), 100 + 1000.0 / 3.0, accuracy: 0.001)
+        XCTAssertEqual(grid.position(of: .sixthsRightSplit, in: bounds), 100 + 2000.0 / 3.0, accuracy: 0.001)
+        XCTAssertEqual(grid.position(of: .sixthsRowSplit, in: bounds), 450)
+    }
+
+    // MARK: Sixths live resize (would have caught the missing drag support)
+
+    /// Simulates TilingController.processResize for one dragged edge:
+    /// maps the edge to a boundary and updates it from the dragged
+    /// position. Returns the boundary that moved, if any.
+    @discardableResult
+    private func drag(
+        grid: inout GridLayout,
+        slot: Slot,
+        edge: TileEdge,
+        to position: CGFloat
+    ) -> GridBoundary? {
+        guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else {
+            return nil
+        }
+        return grid.update(boundary: boundary, toPosition: position, in: bounds) ? boundary : nil
+    }
+
+    func testEverySixthsInteriorEdgeDragsASplitter() {
+        // Regression test for the actual bug: every interior sixths edge
+        // must resolve to a draggable boundary (previously all returned
+        // nil, so processResize skipped sixths drags entirely).
+        let interior: [(Slot, TileEdge)] = [
+            (.sixthTopLeft, .right), (.sixthTopLeft, .bottom),
+            (.sixthTopMiddle, .left), (.sixthTopMiddle, .right), (.sixthTopMiddle, .bottom),
+            (.sixthTopRight, .left), (.sixthTopRight, .bottom),
+            (.sixthBottomLeft, .right), (.sixthBottomLeft, .top),
+            (.sixthBottomMiddle, .left), (.sixthBottomMiddle, .right), (.sixthBottomMiddle, .top),
+            (.sixthBottomRight, .left), (.sixthBottomRight, .top),
+            (.sixthLeft, .right), (.sixthMiddle, .left), (.sixthMiddle, .right),
+            (.sixthRight, .left),
+            (.sixthsLeftTwoThirds, .right), (.sixthsRightTwoThirds, .left),
+        ]
+        XCTAssertEqual(interior.count, 20)
+        for (slot, edge) in interior {
+            XCTAssertNotNil(
+                GridLayout.boundary(edge: edge, slot: slot),
+                "\(slot.rawValue) \(edge) is not draggable")
+        }
+    }
+
+    func testDragSixthsLeftDividerMovesBothRows() {
+        // Drag the left-thirds divider from 1/3 to 0.25: every tile touching
+        // it follows in both rows; the middle/right divider stays put.
+        var grid = GridLayout()
+        grid.update(
+            boundary: .sixthsLeftSplit, toPosition: bounds.minX + 0.25 * bounds.width,
+            in: bounds)
+        XCTAssertEqual(grid.sixthsLeftSplit, 0.25, accuracy: 0.001)
+        XCTAssertEqual(grid.sixthsRightSplit, 2.0 / 3.0, accuracy: 0.0001)
+        let divider = bounds.minX + 0.25 * bounds.width
+        XCTAssertEqual(grid.rect(for: .sixthTopLeft, in: bounds).maxX, divider, accuracy: 0.5)
+        XCTAssertEqual(grid.rect(for: .sixthBottomLeft, in: bounds).maxX, divider, accuracy: 0.5)
+        XCTAssertEqual(grid.rect(for: .sixthLeft, in: bounds).maxX, divider, accuracy: 0.5)
+        XCTAssertEqual(grid.rect(for: .sixthTopMiddle, in: bounds).minX, divider, accuracy: 0.5)
+        XCTAssertEqual(grid.rect(for: .sixthBottomMiddle, in: bounds).minX, divider, accuracy: 0.5)
+        XCTAssertEqual(grid.rect(for: .sixthMiddle, in: bounds).minX, divider, accuracy: 0.5)
+        XCTAssertEqual(
+            grid.rect(for: .sixthsRightTwoThirds, in: bounds).minX, divider, accuracy: 0.5)
+        // Right side untouched.
+        XCTAssertEqual(
+            grid.rect(for: .sixthRight, in: bounds).minX,
+            bounds.minX + 2 * bounds.width / 3, accuracy: 0.5)
+    }
+
+    func testDragSixthsRightDividerMovesBothRows() {
+        // Mirror: drag the middle/right divider rightwards to 0.8.
+        var grid = GridLayout()
+        XCTAssertEqual(
+            drag(grid: &grid, slot: .sixthRight, edge: .left,
+                to: bounds.minX + 0.8 * bounds.width),
+            .sixthsRightSplit)
+        XCTAssertEqual(grid.sixthsRightSplit, 0.8, accuracy: 0.001)
+        let divider = bounds.minX + 0.8 * bounds.width
+        XCTAssertEqual(grid.rect(for: .sixthTopRight, in: bounds).minX, divider, accuracy: 0.5)
+        XCTAssertEqual(grid.rect(for: .sixthBottomRight, in: bounds).minX, divider, accuracy: 0.5)
+        XCTAssertEqual(grid.rect(for: .sixthRight, in: bounds).minX, divider, accuracy: 0.5)
+        XCTAssertEqual(grid.rect(for: .sixthMiddle, in: bounds).maxX, divider, accuracy: 0.5)
+        XCTAssertEqual(
+            grid.rect(for: .sixthsLeftTwoThirds, in: bounds).maxX, divider, accuracy: 0.5)
+        XCTAssertEqual(grid.sixthsLeftSplit, 1.0 / 3.0, accuracy: 0.0001)
+    }
+
+    func testDragSixthsRowDividerMovesAllColumns() {
+        // One shared row divider: dragging a corner's horizontal edge moves
+        // every column's corners (unlike quarters' per-column dividers).
+        var grid = GridLayout()
+        XCTAssertEqual(
+            drag(grid: &grid, slot: .sixthTopMiddle, edge: .bottom,
+                to: bounds.minY + 0.7 * bounds.height),
+            .sixthsRowSplit)
+        XCTAssertEqual(grid.sixthsRowSplit, 0.7, accuracy: 0.001)
+        let divider = bounds.minY + 0.7 * bounds.height
+        for top in [Slot.sixthTopLeft, .sixthTopMiddle, .sixthTopRight] {
+            XCTAssertEqual(grid.rect(for: top, in: bounds).minY, divider, accuracy: 0.5)
+        }
+        for bottom in [Slot.sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight] {
+            XCTAssertEqual(grid.rect(for: bottom, in: bounds).maxY, divider, accuracy: 0.5)
+        }
+        // Full-height thirds are unaffected.
+        XCTAssertEqual(grid.rect(for: .sixthMiddle, in: bounds).height, bounds.height)
+    }
+
+    func testSixthsDividersCannotCross() {
+        // Dragging the left divider past the right one clamps against it
+        // instead of inverting the middle third (and symmetrically).
+        var grid = GridLayout()
+        XCTAssertTrue(
+            grid.update(
+                boundary: .sixthsLeftSplit, toPosition: bounds.maxX, in: bounds))
+        XCTAssertEqual(grid.sixthsLeftSplit, grid.sixthsRightSplit - 0.01, accuracy: 0.0001)
+        XCTAssertGreaterThan(
+            grid.rect(for: .sixthMiddle, in: bounds).width, 0)
+        var mirrored = GridLayout()
+        XCTAssertTrue(
+            mirrored.update(
+                boundary: .sixthsRightSplit, toPosition: bounds.minX, in: bounds))
+        XCTAssertEqual(
+            mirrored.sixthsRightSplit, mirrored.sixthsLeftSplit + 0.01, accuracy: 0.0001)
+        XCTAssertGreaterThan(
+            mirrored.rect(for: .sixthMiddle, in: bounds).width, 0)
+    }
+
+    func testSixthsUpdatesClamp() {
+        var grid = GridLayout()
+        grid.update(boundary: .sixthsLeftSplit, toPosition: bounds.minX, in: bounds)
+        XCTAssertEqual(grid.sixthsLeftSplit, GridLayout.sixthsColumnClamp.lowerBound, accuracy: 0.001)
+        grid.update(boundary: .sixthsRightSplit, toPosition: bounds.maxX, in: bounds)
+        XCTAssertEqual(grid.sixthsRightSplit, GridLayout.sixthsColumnClamp.upperBound, accuracy: 0.001)
+        grid.update(boundary: .sixthsRowSplit, toPosition: bounds.minY, in: bounds)
+        XCTAssertEqual(grid.sixthsRowSplit, GridLayout.rowClamp.lowerBound, accuracy: 0.001)
+        grid.update(boundary: .sixthsRowSplit, toPosition: bounds.maxY, in: bounds)
+        XCTAssertEqual(grid.sixthsRowSplit, GridLayout.rowClamp.upperBound, accuracy: 0.001)
+    }
+
+    func testSixthsTilesStayFlushAfterDrag() {
+        // After arbitrary drags, neighbors still share exact divider lines.
+        var grid = GridLayout()
+        grid.update(
+            boundary: .sixthsLeftSplit, toPosition: bounds.minX + 0.29 * bounds.width,
+            in: bounds)
+        grid.update(
+            boundary: .sixthsRightSplit, toPosition: bounds.minX + 0.71 * bounds.width,
+            in: bounds)
+        grid.update(
+            boundary: .sixthsRowSplit, toPosition: bounds.minY + 0.62 * bounds.height,
+            in: bounds)
+        let tl = grid.rect(for: .sixthTopLeft, in: bounds)
+        let tm = grid.rect(for: .sixthTopMiddle, in: bounds)
+        let tr = grid.rect(for: .sixthTopRight, in: bounds)
+        let bl = grid.rect(for: .sixthBottomLeft, in: bounds)
+        let bm = grid.rect(for: .sixthBottomMiddle, in: bounds)
+        let br = grid.rect(for: .sixthBottomRight, in: bounds)
+        XCTAssertEqual(tl.maxX, tm.minX, accuracy: 0.001)
+        XCTAssertEqual(tm.maxX, tr.minX, accuracy: 0.001)
+        XCTAssertEqual(bl.maxX, bm.minX, accuracy: 0.001)
+        XCTAssertEqual(bm.maxX, br.minX, accuracy: 0.001)
+        XCTAssertEqual(tl.minY, bl.maxY, accuracy: 0.001)
+        XCTAssertEqual(tm.minY, bm.maxY, accuracy: 0.001)
+        XCTAssertEqual(tr.minY, br.maxY, accuracy: 0.001)
+        // Thirds agree with their stacked corners.
+        XCTAssertEqual(grid.rect(for: .sixthLeft, in: bounds).maxX, tl.maxX, accuracy: 0.001)
+        XCTAssertEqual(grid.rect(for: .sixthMiddle, in: bounds).minX, tm.minX, accuracy: 0.001)
+        XCTAssertEqual(grid.rect(for: .sixthMiddle, in: bounds).maxX, tm.maxX, accuracy: 0.001)
+        XCTAssertEqual(grid.rect(for: .sixthRight, in: bounds).minX, tr.minX, accuracy: 0.001)
     }
 
     func testDefaultSplitsAreCentered() {

@@ -141,17 +141,24 @@ enum GridBoundary: CaseIterable {
     case columnSplit // vertical divider between left and right columns
     case leftRowSplit // horizontal divider for the left column only
     case rightRowSplit // horizontal divider for the right column only
+    case sixthsLeftSplit // vertical divider between the left and middle thirds
+    case sixthsRightSplit // vertical divider between the middle and right thirds
+    case sixthsRowSplit // horizontal divider between the top and bottom sixths
 }
 
-/// The tile grid geometry: three splitter fractions over a screen's visible
-/// frame. Every occupied slot's rect derives from these.
+/// The tile grid geometry: splitter fractions over a screen's visible frame.
+/// Every occupied slot's rect derives from these.
 ///
-/// The vertical divider is shared by both rows; each column has its own
-/// independent horizontal divider:
+/// Quarters: the vertical divider is shared by both rows; each column has
+/// its own independent horizontal divider:
 /// - Dragging right half's left edge -> columnSplit -> both left windows resize.
 /// - Dragging BL's right edge -> columnSplit -> right side shrinks, TL grows.
 /// - Dragging BL's top edge -> leftRowSplit -> TL shrinks vertically, right
 ///   column unaffected (and symmetrically, BR's top edge -> rightRowSplit).
+///
+/// Sixths: two vertical dividers (default 1/3, 2/3) plus one shared row
+/// divider (default 1/2). The layouts' splitters are independent: dragging
+/// in sixths never moves quarters tiles and vice versa.
 struct GridLayout: Equatable {
     /// Fraction of width where the left column ends.
     var columnSplit: CGFloat = 0.5
@@ -161,9 +168,16 @@ struct GridLayout: Equatable {
     /// Independent from the left: dragging BL's top edge moves leftRowSplit
     /// only, so TR/BR keep their rects (and vice versa).
     var rightRowSplit: CGFloat = 0.5
+    /// Fraction of width where the left sixths third ends (default 1/3).
+    var sixthsLeftSplit: CGFloat = 1.0 / 3.0
+    /// Fraction of width where the middle sixths third ends (default 2/3).
+    var sixthsRightSplit: CGFloat = 2.0 / 3.0
+    /// Fraction of height where the sixths row divider sits (default 1/2).
+    var sixthsRowSplit: CGFloat = 0.5
 
     static let columnClamp: ClosedRange<CGFloat> = 0.15...0.85
     static let rowClamp: ClosedRange<CGFloat> = 0.2...0.8
+    static let sixthsColumnClamp: ClosedRange<CGFloat> = 0.1...0.9
 
     /// Which grid boundary an edge of `slot` corresponds to.
     /// nil = screen edge (fixed, cannot be dragged).
@@ -176,6 +190,27 @@ struct GridLayout: Equatable {
             return .leftRowSplit
         case (.topRight, .bottom), (.bottomRight, .top):
             return .rightRowSplit
+        // Sixths thirds dividers (shared across rows):
+        // - left/middle boundary: right edge of the left third,
+        //   left edge of the middle third and of the right two-thirds.
+        case (.sixthTopLeft, .right), (.sixthBottomLeft, .right),
+            (.sixthLeft, .right),
+            (.sixthTopMiddle, .left), (.sixthBottomMiddle, .left),
+            (.sixthMiddle, .left), (.sixthsRightTwoThirds, .left):
+            return .sixthsLeftSplit
+        // - middle/right boundary: right edge of the middle third and of the
+        //   left two-thirds, left edge of the right third.
+        case (.sixthTopMiddle, .right), (.sixthBottomMiddle, .right),
+            (.sixthMiddle, .right), (.sixthsLeftTwoThirds, .right),
+            (.sixthTopRight, .left), (.sixthBottomRight, .left),
+            (.sixthRight, .left):
+            return .sixthsRightSplit
+        // Sixths row divider (shared by all three columns).
+        case (.sixthTopLeft, .bottom), (.sixthTopMiddle, .bottom),
+            (.sixthTopRight, .bottom),
+            (.sixthBottomLeft, .top), (.sixthBottomMiddle, .top),
+            (.sixthBottomRight, .top):
+            return .sixthsRowSplit
         default:
             return nil // screen edges
         }
@@ -190,6 +225,12 @@ struct GridLayout: Equatable {
             bounds.minY + leftRowSplit * bounds.height
         case .rightRowSplit:
             bounds.minY + rightRowSplit * bounds.height
+        case .sixthsLeftSplit:
+            bounds.minX + sixthsLeftSplit * bounds.width
+        case .sixthsRightSplit:
+            bounds.minX + sixthsRightSplit * bounds.width
+        case .sixthsRowSplit:
+            bounds.minY + sixthsRowSplit * bounds.height
         }
     }
 
@@ -217,7 +258,35 @@ struct GridLayout: Equatable {
             guard abs(clamped - rightRowSplit) > 0.001 else { return false }
             rightRowSplit = clamped
             return true
+        case .sixthsLeftSplit:
+            // Ordering guard: the left divider can never cross the right
+            // one, so a wild drag clamps against the sibling instead of
+            // inverting the middle third (and symmetrically below).
+            var clamped = Self.clampedSixthsColumn(toPosition: position, in: bounds)
+            clamped = min(clamped, sixthsRightSplit - 0.01)
+            guard abs(clamped - sixthsLeftSplit) > 0.001 else { return false }
+            sixthsLeftSplit = clamped
+            return true
+        case .sixthsRightSplit:
+            var clamped = Self.clampedSixthsColumn(toPosition: position, in: bounds)
+            clamped = max(clamped, sixthsLeftSplit + 0.01)
+            guard abs(clamped - sixthsRightSplit) > 0.001 else { return false }
+            sixthsRightSplit = clamped
+            return true
+        case .sixthsRowSplit:
+            let clamped = Self.clampedRowSplit(toPosition: position, in: bounds)
+            guard abs(clamped - sixthsRowSplit) > 0.001 else { return false }
+            sixthsRowSplit = clamped
+            return true
         }
+    }
+
+    private static func clampedSixthsColumn(toPosition position: CGFloat, in bounds: CGRect) -> CGFloat {
+        min(
+            max(
+                (position - bounds.minX) / bounds.width,
+                Self.sixthsColumnClamp.lowerBound),
+            Self.sixthsColumnClamp.upperBound)
     }
 
     private static func clampedRowSplit(toPosition position: CGFloat, in bounds: CGRect) -> CGFloat {
@@ -228,15 +297,15 @@ struct GridLayout: Equatable {
 
     /// Rect for `slot` within `bounds` (AppKit coordinates, y grows upward).
     ///
-    /// Quarters rects derive from the draggable splitters. Sixths rects are
-    /// fixed fractions (1/3, 2/3, 1/2) — sixths columns have no splitters.
+    /// Quarters rects derive from the quarters splitters; sixths rects from
+    /// the sixths splitters (defaults 1/3, 2/3, 1/2).
     func rect(for slot: Slot, in bounds: CGRect) -> CGRect {
         let x = position(of: .columnSplit, in: bounds)
         let leftRowY = position(of: .leftRowSplit, in: bounds)
         let rightRowY = position(of: .rightRowSplit, in: bounds)
-        let x13 = bounds.minX + bounds.width / 3
-        let x23 = bounds.minX + 2 * bounds.width / 3
-        let midY = bounds.minY + bounds.height / 2
+        let x13 = position(of: .sixthsLeftSplit, in: bounds)
+        let x23 = position(of: .sixthsRightSplit, in: bounds)
+        let midY = position(of: .sixthsRowSplit, in: bounds)
         return switch slot {
         case .leftHalf:
             CGRect(x: bounds.minX, y: bounds.minY, width: x - bounds.minX, height: bounds.height)
