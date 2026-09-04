@@ -110,51 +110,6 @@ enum Slot: String, CaseIterable {
         case .sixthsRightTwoThirds: "Right Two Sixths"
         }
     }
-
-    var hotkeyLabel: String {
-        switch self {
-        case .topLeft: "⌥⇧U"
-        case .topRight: "⌥⇧O"
-        case .bottomLeft: "⌥⇧M"
-        case .bottomRight: "⌥⇧."
-        case .leftHalf: "⌥⇧J"
-        case .rightHalf: "⌥⇧L"
-        case .sixthTopLeft: "⌥⇧⌘U"
-        case .sixthTopMiddle: "⌥⇧⌘I"
-        case .sixthTopRight: "⌥⇧⌘O"
-        case .sixthBottomLeft: "⌥⇧⌘M"
-        case .sixthBottomMiddle: "⌥⇧⌘,"
-        case .sixthBottomRight: "⌥⇧⌘."
-        case .sixthLeft: "⌥⇧⌘J"
-        case .sixthMiddle: "⌥⇧⌘K"
-        case .sixthRight: "⌥⇧⌘L"
-        case .sixthsLeftTwoThirds: "⌥⇧⌘H"
-        case .sixthsRightTwoThirds: "⌥⇧⌘;"
-        }
-    }
-}
-
-extension Slot {
-    /// Plain-text hotkey reference for the Shortcuts window. Derived from
-    /// the same titles and labels as the status menu, so the three can
-    /// never disagree about what a shortcut does.
-    static var cheatsheetText: String {
-        var lines = [
-            "Tile the focused window. Tiling a window",
-            "into its own tile does nothing.",
-            "",
-        ]
-        for layout in [LayoutKind.quarters, LayoutKind.sixths] as [LayoutKind] {
-            lines.append(layout == .quarters ? "Quarters — hold ⌥⇧" : "Sixths — hold ⌥⇧⌘")
-            for slot in Slot.allCases where slot.layout == layout {
-                lines.append("\(slot.hotkeyLabel)\t\(slot.title)")
-            }
-            lines.append("")
-        }
-        lines.append("Drag a tiled window's edge to resize it —")
-        lines.append("neighbors sharing the edge follow.")
-        return lines.joined(separator: "\n")
-    }
 }
 
 /// An edge of a window's frame.

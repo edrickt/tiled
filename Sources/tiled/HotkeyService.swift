@@ -57,6 +57,7 @@ final class HotkeyService {
     private var hotKeyRefs: [EventHotKeyRef?] = []
     private let context = Context()
     private static var handlerInstalled = false
+    private let store: HotkeyStore
 
     /// Slots whose global hotkey could not be registered (likely owned by
     /// another app). Surfaced in the status menu; never just logged.
@@ -67,17 +68,34 @@ final class HotkeyService {
         set { context.handler = newValue }
     }
 
-    init() {
+    init(store: HotkeyStore = HotkeyStore()) {
+        self.store = store
         Self.installEventHandler(with: context)
         registerHotkeys()
     }
 
+    /// Unregisters everything and registers from the store again.
+    /// Called after the user edits bindings in Settings; failedSlots is
+    /// recomputed, so newly freed (or newly conflicted) slots surface in
+    /// the menu without a relaunch.
+    func reload() {
+        for ref in hotKeyRefs {
+            if let ref { UnregisterEventHotKey(ref) }
+        }
+        hotKeyRefs = []
+        registerHotkeys()
+    }
+
     private func registerHotkeys() {
+        failedSlots = []
         for slot in Slot.allCases {
+            let binding = store.binding(for: slot)
+            // A disabled slot registers nothing and warns about nothing.
+            guard let keyCode = binding.keyCode else { continue }
             var ref: EventHotKeyRef?
             let status = RegisterEventHotKey(
-                slot.keyCode,
-                slot.modifiers,
+                keyCode,
+                binding.modifiers,
                 EventHotKeyID(signature: Self.signature, id: slot.hotkeyID),
                 GetApplicationEventTarget(),
                 0,

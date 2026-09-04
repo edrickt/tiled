@@ -3,14 +3,18 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let controller = TilingController()
+    private let hotkeyStore = HotkeyStore()
     private var hotkeys: HotkeyService?
     private var permissionTimer: Timer?
-    private var shortcutsWindow: NSWindow?
+    private let settings = AppSettings()
+    private var settingsController: SettingsWindowController?
     private var menuOpen = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         controller.onChange = { [weak self] in self?.refreshMenu() }
-        setupStatusItem()
+        if !settings.hideMenuBarIcon {
+            setupStatusItem()
+        }
 
         if AXKit.promptIfUntrusted() {
             start()
@@ -18,6 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pollForPermission()
         }
         refreshMenu()
+        // Hidden-icon recovery: with no status item there is no other way
+        // back in, so a fresh launch opens Settings automatically.
+        if settings.hideMenuBarIcon {
+            showSettings(nil)
+        }
     }
 
     // Quitting leaves windows where they are. The manager must not
@@ -28,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func start() {
         permissionTimer?.invalidate()
         permissionTimer = nil
-        let service = HotkeyService()
+        let service = HotkeyService(store: hotkeyStore)
         service.handler = { [weak self] slot in self?.controller.handle(slot: slot) }
         hotkeys = service
         refreshMenu()
@@ -51,12 +60,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Status item / menu
 
     private func setupStatusItem() {
+        guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(
             systemSymbolName: "square.grid.2x2",
             accessibilityDescription: "tiled")
         item.menu = menu()
         statusItem = item
+    }
+
+    /// Toggles the menu-bar icon live when the Settings checkbox changes.
+    private func setIconHidden(_ hidden: Bool) {
+        if hidden {
+            if let item = statusItem {
+                NSStatusBar.system.removeStatusItem(item)
+                statusItem = nil
+            }
+        } else {
+            setupStatusItem()
+        }
     }
 
     private func refreshMenu() {
@@ -71,24 +93,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
 
+        // 1. Status: warnings if any, else layout + tiled count.
         let warnings = activeWarnings
         if !warnings.isEmpty {
             for warning in warnings {
                 menu.addItem(disabledItem(warning))
             }
-            menu.addItem(.separator())
+        } else if controller.isTrusted {
+            let count = controller.tiledWindowsInfo.count
+            menu.addItem(disabledItem(
+                "Layout: \(controller.activeLayout.title) · \(count) tiled"))
         }
+        menu.addItem(.separator())
 
         if controller.isTrusted {
+            // 2. Act: tile the focused window.
             let tile = NSMenuItem(title: "Tile Focused Window", action: nil, keyEquivalent: "")
             let submenu = NSMenu()
             submenu.autoenablesItems = false
-            submenu.addItem(disabledItem("Quarters — hold ⌥⇧"))
+            submenu.addItem(disabledItem("Quarters"))
             for slot in Slot.allCases where slot.layout == .quarters {
                 submenu.addItem(tileItem(for: slot))
             }
             submenu.addItem(.separator())
-            submenu.addItem(disabledItem("Sixths — hold ⌥⇧⌘"))
+            submenu.addItem(disabledItem("Sixths"))
             for slot in Slot.allCases where slot.layout == .sixths {
                 submenu.addItem(tileItem(for: slot))
             }
@@ -96,12 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(tile)
             menu.addItem(.separator())
 
-            let layoutItem = NSMenuItem(
-                title: "Layout: \(controller.activeLayout.title)", action: nil,
-                keyEquivalent: "")
-            layoutItem.isEnabled = false
-            menu.addItem(layoutItem)
-            menu.addItem(.separator())
+            // 3. Manage: the tiled windows plus bulk actions.
             let tiled = controller.tiledWindowsInfo
             if tiled.isEmpty {
                 let item = NSMenuItem(title: "No tiled windows", action: nil, keyEquivalent: "")
@@ -109,13 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 menu.addItem(item)
             } else {
                 for info in tiled {
-                    let name = info.appName ?? "window"
-                    let item = NSMenuItem(
-                        title: "\(info.slot.title) — \(name) (\(info.slot.hotkeyLabel))",
-                        action: nil,
-                        keyEquivalent: "")
-                    item.isEnabled = false
-                    menu.addItem(item)
+                    menu.addItem(disabledItem(windowLine(for: info)))
                 }
                 menu.addItem(.separator())
                 let untile = NSMenuItem(
@@ -139,12 +156,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(settings)
         }
 
+        // 4. App.
         menu.addItem(.separator())
-        let shortcuts = NSMenuItem(
-            title: "Keyboard Shortcuts…", action: #selector(showShortcuts(_:)),
-            keyEquivalent: "")
-        shortcuts.target = self
-        menu.addItem(shortcuts)
+        let settingsItem = NSMenuItem(
+            title: "Settings…", action: #selector(showSettings(_:)),
+            keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
         let quit = NSMenuItem(
             title: "Quit tiled", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
@@ -153,14 +171,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// User-visible problems: the last tiling failure, plus any hotkeys
     /// owned by another app. Failures are reported here, never only logged.
+    /// Labels come from the store so they reflect custom bindings.
     private var activeWarnings: [String] {
         var warnings: [String] = []
         if let error = controller.lastTileError {
             warnings.append(error)
         }
         for slot in hotkeys?.failedSlots ?? [] {
+            let label = hotkeyStore.binding(for: slot).label ?? "Disabled"
             warnings.append(
-                "\(slot.hotkeyLabel) is already used by another app — “\(slot.title)” has no hotkey.")
+                "\(label) is already used by another app — “\(slot.title)” has no hotkey.")
         }
         return warnings
     }
@@ -173,10 +193,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// One clickable equivalent per global hotkey. The shortcut itself stays
     /// in the title text rather than a key equivalent: firing both would
-    /// tile-then-untile in one keypress.
+    /// tile-then-untile in one keypress. Labels come from the store so
+    /// custom bindings show live; disabled slots show no combo.
     private func tileItem(for slot: Slot) -> NSMenuItem {
+        let label = hotkeyStore.binding(for: slot).label
         let item = NSMenuItem(
-            title: "\(slot.title) — \(slot.hotkeyLabel)",
+            title: label.map { "\(slot.title) — \($0)" } ?? slot.title,
             action: #selector(tileSlot(_:)),
             keyEquivalent: "")
         item.target = self
@@ -184,7 +206,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
+    /// One line of the tiled-windows list: slot, app, and live combo.
+    private func windowLine(for info: TilingController.TiledWindowInfo) -> String {
+        let name = info.appName ?? "window"
+        if let label = hotkeyStore.binding(for: info.slot).label {
+            return "\(info.slot.title) — \(name) (\(label))"
+        }
+        return "\(info.slot.title) — \(name)"
+    }
+
     // MARK: Actions
+
+    @objc private func showSettings(_ sender: Any?) {
+        if settingsController == nil {
+            let controller = SettingsWindowController(
+                settings: settings, hotkeyStore: hotkeyStore)
+            controller.onHideIconChange = { [weak self] hidden in
+                self?.setIconHidden(hidden)
+            }
+            controller.onHotkeysChange = { [weak self] in
+                self?.hotkeys?.reload()
+                self?.refreshMenu()
+            }
+            settingsController = controller
+        }
+        settingsController?.show()
+    }
 
     @objc private func tileSlot(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
@@ -199,42 +246,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func resetGrid(_ sender: NSMenuItem) {
         controller.resetGrid()
-    }
-
-    @objc private func showShortcuts(_ sender: NSMenuItem) {
-        if shortcutsWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 420, height: 480),
-                styleMask: [.titled, .closable],
-                backing: .buffered, defer: false)
-            window.title = "tiled Shortcuts"
-            window.center()
-            window.isReleasedWhenClosed = false
-
-            let scroll = NSScrollView(frame: window.contentView!.bounds)
-            scroll.autoresizingMask = [.width, .height]
-            scroll.hasVerticalScroller = true
-            scroll.borderType = .noBorder
-
-            let text = NSTextView(frame: scroll.contentView.bounds)
-            text.string = Slot.cheatsheetText
-            text.isEditable = false
-            text.isSelectable = true
-            text.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-            text.textContainerInset = NSSize(width: 16, height: 16)
-            text.minSize = NSSize(width: 0, height: scroll.contentSize.height)
-            text.maxSize = NSSize(
-                width: scroll.contentSize.width, height: .greatestFiniteMagnitude)
-            text.isVerticallyResizable = true
-            text.isHorizontallyResizable = false
-            text.autoresizingMask = [.width]
-            scroll.documentView = text
-
-            window.contentView?.addSubview(scroll)
-            shortcutsWindow = window
-        }
-        shortcutsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func openAccessibilitySettings(_ sender: NSMenuItem) {

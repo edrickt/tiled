@@ -220,12 +220,14 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(Slot.allCases.count, 17)
         for slot in Slot.allCases {
             XCTAssertFalse(slot.title.isEmpty)
-            XCTAssertFalse(slot.hotkeyLabel.isEmpty)
+            XCTAssertNotNil(HotkeyStore.defaultBinding(for: slot).label)
         }
         XCTAssertEqual(Slot.topLeft.title, "Top Left")
         XCTAssertEqual(Slot.leftHalf.title, "Left Half")
         XCTAssertEqual(Slot.sixthTopLeft.title, "Top Left Sixth")
-        XCTAssertEqual(Set(Slot.allCases.map(\.hotkeyLabel)).count, 17) // labels unique
+        XCTAssertEqual(
+            Set(Slot.allCases.map { HotkeyStore.defaultBinding(for: $0).label }).count,
+            17) // default combos unique
     }
 
     func testHotkeyIDRoundTripsEverySlot() {
