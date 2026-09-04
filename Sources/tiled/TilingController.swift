@@ -112,12 +112,19 @@ final class TilingController {
     func handle(slot: Slot) {
         pruneDeadWindows()
         guard let focused = AXKit.focusedWindow() else { return }
-        lastTileError = nil
         let id = windowID(for: focused.element, pid: focused.pid)
+        let decision = state.plan(window: id, into: slot)
+        guard decision != .noop else {
+            // Already in that tile: a strict no-op — no state, error, or
+            // menu side effects.
+            dbg("noop win\(id) already in \(slot.rawValue)")
+            return
+        }
+        lastTileError = nil
 
-        switch state.plan(window: id, into: slot) {
-        case .untile:
-            untile(window: id)
+        switch decision {
+        case .noop:
+            break // unreachable (guarded above)
         case .swap(let placements):
             state.commitSwaps(placements)
             var failed = 0
@@ -128,13 +135,17 @@ final class TilingController {
                 lastTileError = Self.refusalMessage(count: failed)
             }
             dbg("swap win\(id) -> \(slot.rawValue) placements=\(placements)")
-        case .switchLayout(let evicting):
-            let restoreFailures = restore(evicting)
+        case .switchLayout:
+            // The requester moves rather than evicts: restore everyone
+            // else first (restoring it would delete its record, so `place`
+            // would bail and the window would merely untile). Its old tile
+            // is vacated by the commit inside `place`.
+            let restoreFailures = restore(decision.windowsToRestore(requester: id))
             place(window: id, into: slot)
             reportRestoreFailures(restoreFailures)
-            dbg("switchLayout win\(id) -> \(slot.rawValue) evicted=\(evicting)")
-        case .tile(let evicting):
-            let restoreFailures = restore(evicting)
+            dbg("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
+        case .tile:
+            let restoreFailures = restore(decision.windowsToRestore(requester: id))
             place(window: id, into: slot)
             reportRestoreFailures(restoreFailures)
         }

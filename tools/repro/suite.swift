@@ -136,8 +136,7 @@ func doTile(_ t: String, _ slot: String) {
     focus(t)
     hotkey(slot)
     usleep(900_000)
-    if tiled[t] == slot { // toggle off
-        tiled[t] = nil
+    if tiled[t] == slot { // same-tile re-press is a no-op
         return
     }
     for (other, s) in tiled where other != t && overlaps(s, slot) {
@@ -276,9 +275,12 @@ if col == colSaved && row == rowSaved {
 } else {
     fail += 1; print(">>>> FAILED S7: splitters moved on screen-edge drag")
 }
-// Both windows were mutated off-grid; restore via toggle
-doTile("HOSTA", "TL"); doTile("HOSTA", "TL")
-doTile("HOSTB", "BL"); doTile("HOSTB", "BL")
+// Both windows were mutated off-grid; cycle them through an overlapping
+// slot (evicting, never swapping) so each is placed back onto the grid.
+// Self-tile is a no-op, so a direct re-press would leave them off-grid.
+doTile("HOSTA", "LH") // evicts B; A placed into the left half
+doTile("HOSTB", "BL") // evicts A; B placed into bottom left
+doTile("HOSTA", "TL") // disjoint: A placed back into top left
 verify("S7b A and B retiled after off-grid mutations")
 
 // MARK: S8 - half over two quads evicts both
@@ -291,12 +293,14 @@ verify("S8 LH over TL+BL: A in left half, B evicted")
 doTile("HOSTB", "BR")
 verify("S9 B tiled BR, D evicted")
 
-// MARK: S10 - toggle untile / retile
+// MARK: S10 - same-tile re-press is a no-op
 
-doTile("HOSTA", "LH") // toggle off
-verify("S10a A untiled via toggle, restored to pre-tile frame")
-doTile("HOSTA", "LH") // retile into resized grid
-verify("S10b A retiled into resized left half")
+doTile("HOSTA", "LH") // already in LH: no-op, stays tiled
+verify("S10a A still tiled LH after same-tile re-press")
+doTile("HOSTA", "TL") // overlapping move: vacates LH, A lands TL
+verify("S10b A moved LH -> TL")
+doTile("HOSTA", "LH") // back into the resized left half
+verify("S10c A retiled into resized left half")
 
 // MARK: S11 - moving a tiled window is inert (v1), grid intact
 
@@ -319,16 +323,13 @@ if actualFrame("HOSTD") == nil {
 } else {
     fail += 1; print(">>>> FAILED S12a: HOSTD still alive")
 }
-doTile("HOSTC", "TR") // trigger prune via hotkey path (toggle off TR)
+doTile("HOSTC", "TR") // no-op re-press; still runs prune via hotkey path
 verify("S12b state healthy after close + hotkey")
-doTile("HOSTC", "TR") // back on
 
-// MARK: S13 - full untile / retile cycle
+// MARK: S13 - retile cycle across slots
 
-doTile("HOSTA", "LH"); doTile("HOSTB", "BR"); doTile("HOSTC", "TR") // untile all three
-verify("S13a all untiled, all restored to pre-tile frames")
 doTile("HOSTA", "TL"); doTile("HOSTB", "BL"); doTile("HOSTC", "TR")
-verify("S13b retiled TL+BL+TR with current splitters")
+verify("S13 retiled TL+BL+TR with current splitters")
 
 // MARK: S14 - half over two occupied quads: double eviction
 
@@ -344,7 +345,7 @@ verify("S14c full grid restored")
 for i in 1...3 {
     dragEdge("HOSTB", "right", 60)
     dragEdge("HOSTA", "bottom", -40)
-    doTile("HOSTC", "TR"); doTile("HOSTC", "TR") // on/off
+    doTile("HOSTC", "TR") // no-op re-press: layout untouched
     verify("S15 iteration \(i)")
 }
 

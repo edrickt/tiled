@@ -17,13 +17,13 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(state.slot(of: a), .topLeft)
     }
 
-    func testToggleUntiles() {
+    func testSameSlotIsNoop() {
         var state = TilingState()
         state.commit(window: a, into: .topLeft)
-        XCTAssertEqual(state.plan(window: a, into: .topLeft), .untile)
-        state.remove(window: a)
-        XCTAssertNil(state.occupant(of: .topLeft))
-        XCTAssertNil(state.slot(of: a))
+        XCTAssertEqual(state.plan(window: a, into: .topLeft), .noop)
+        // Nothing committed: the window stays exactly where it was.
+        XCTAssertEqual(state.occupant(of: .topLeft), a)
+        XCTAssertEqual(state.slot(of: a), .topLeft)
     }
 
     func testSecondWindowIntoOccupiedSlotEvictsFirst() {
@@ -357,11 +357,11 @@ final class TilingStateTests: XCTestCase {
         XCTAssertNil(state.occupant(of: .leftHalf))
     }
 
-    func testSameWindowRetilingSameSlotToggles() {
-        // Already covered for quads; halves toggle too.
+    func testSameWindowRetilingSameHalfIsNoop() {
+        // Already covered for quads; halves noop too.
         var state = TilingState()
         state.commit(window: a, into: .leftHalf)
-        XCTAssertEqual(state.plan(window: a, into: .leftHalf), .untile)
+        XCTAssertEqual(state.plan(window: a, into: .leftHalf), .noop)
     }
 
     func testDifferentWindowIntoOccupiedHalfEvicts() {
@@ -585,7 +585,7 @@ final class TilingStateTests: XCTestCase {
 
     func testSwapIsExhaustiveAndLeavesNoGhosts() {
         // Every requester/target pair over disjoint starting layouts from
-        // BOTH geometries. Same-layout pairs yield untile / plain tile /
+        // BOTH geometries. Same-layout pairs yield noop / plain tile /
         // swap / eviction (cross-checked by the brute-force oracle);
         // cross-layout pairs must reset with the full eviction set.
         // Committing any plan leaves one window per slot, no window in two
@@ -651,7 +651,7 @@ final class TilingStateTests: XCTestCase {
                     let swapPossible = !blockers.isEmpty && Self.bruteForceFits(
                         count: blockers.count, within: free, layout: target.layout)
                     if requester == target {
-                        XCTAssertEqual(plan, .untile, "\(requester) -> \(target)")
+                        XCTAssertEqual(plan, .noop, "\(requester) -> \(target)")
                     } else if swapPossible {
                         guard case .swap = plan else {
                             XCTFail("\(requester) -> \(target): swap fits but got \(plan)")
@@ -666,10 +666,9 @@ final class TilingStateTests: XCTestCase {
                             "\(requester) -> \(target)")
                     }
                     switch plan {
-                    case .untile:
+                    case .noop:
                         XCTAssertEqual(requester, target)
-                        state.remove(window: requesterWindow)
-                        XCTAssertNil(state.slot(of: requesterWindow))
+                        XCTAssertEqual(state.occupant(of: target), requesterWindow)
                     case .switchLayout:
                         XCTFail("same-layout pair \(requester) -> \(target) reset")
                         continue
@@ -785,12 +784,12 @@ final class TilingStateTests: XCTestCase {
             .switchLayout(evicting: [a, b]))
     }
 
-    func testCrossLayoutToggleStillUntiles() {
-        // Same slot, same window: toggle wins. Target and occupant share a
+    func testSameSlotSameWindowIsNoop() {
+        // Same slot, same window: noop wins. Target and occupant share a
         // layout by definition, so switchLayout must never fire for it.
         var state = TilingState()
         state.commit(window: a, into: .sixthLeft)
-        XCTAssertEqual(state.plan(window: a, into: .sixthLeft), .untile)
+        XCTAssertEqual(state.plan(window: a, into: .sixthLeft), .noop)
     }
 
     func testLayoutSwitchEvictionsAreSorted() {
@@ -898,8 +897,9 @@ final class TilingStateTests: XCTestCase {
         var state = TilingState()
         for (window, slot) in requests {
             switch state.plan(window: window, into: slot) {
-            case .untile:
-                state.remove(window: window)
+            case .noop:
+                break // no state change
+
             case .swap(let placements):
                 state.commitSwaps(placements)
             case .tile(let evicting), .switchLayout(let evicting):
@@ -978,12 +978,13 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(end.occupant(of: .sixthMiddle), c)
     }
 
-    func testSixthsToggleOffAndRefill() {
-        // Tiling the same slot twice untiles; the freed sixth is reusable.
+    func testSixthsSameSlotIsNoop() {
+        // Repeating the same request changes nothing, so the slot stays
+        // taken and a different window evicts the occupant.
         let end = drive([
             (a, .sixthTopLeft), (b, .sixthTopMiddle),
-            (a, .sixthTopLeft), // toggle a off
-            (c, .sixthTopLeft),
+            (a, .sixthTopLeft), // noop: a stays
+            (c, .sixthTopLeft), // evicts a
         ])
         XCTAssertEqual(end.occupant(of: .sixthTopLeft), c)
         XCTAssertEqual(end.occupant(of: .sixthTopMiddle), b)
@@ -1042,8 +1043,9 @@ final class TilingStateTests: XCTestCase {
                 for target in targets {
                     var next = state
                     switch next.plan(window: window, into: target) {
-                    case .untile:
-                        next.remove(window: window)
+                    case .noop:
+                        break // no state change
+
                     case .swap(let placements):
                         next.commitSwaps(placements)
                     case .tile(let evicting), .switchLayout(let evicting):

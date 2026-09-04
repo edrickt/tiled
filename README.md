@@ -7,8 +7,8 @@ sharing the edge follow.
 
 ## Hotkeys
 
-Tile the focused window. Pressing a slot's shortcut again untiles it
-(restores its pre-tile frame). Every shortcut also exists as a menu item
+Tile the focused window. Tiling a window into its own tile is a no-op (it
+stays exactly where it is). Every shortcut also exists as a menu item
 under **Tile Focused Window** in the menu bar menu.
 
 ### Quarters — hold ⌥⇧
@@ -55,8 +55,10 @@ fixed; if one collides, change or disable it in the other app.
   vacates, they **swap** instead — nobody is untiled. (Top left → occupied
   bottom right exchanges the two windows; left half → occupied top right
   exchanges the half and the quad.)
+- Tiling a window into its own tile does nothing — no restore, no reassert.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.
+- Use **Untile All** in the menu to restore every tiled window.
 - Quarters and sixths are mutually exclusive on screen: requesting a slot in
   the other layout evicts every tiled window and switches layouts.
 - Some apps refuse programmatic resizing. When that happens the window is

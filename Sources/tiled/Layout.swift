@@ -140,8 +140,8 @@ extension Slot {
     /// never disagree about what a shortcut does.
     static var cheatsheetText: String {
         var lines = [
-            "Tile the focused window. Press the same",
-            "shortcut again to untile it.",
+            "Tile the focused window. Tiling a window",
+            "into its own tile does nothing.",
             "",
         ]
         for layout in [LayoutKind.quarters, LayoutKind.sixths] as [LayoutKind] {
@@ -439,8 +439,31 @@ enum TilePlan: Equatable {
     /// tiled window is untiled (restored), the layout switches, and the
     /// requesting window is placed into the target slot.
     case switchLayout(evicting: [WindowID])
-    /// The window already occupies the slot; untile it (toggle).
-    case untile
+    /// The window already occupies the slot; nothing happens.
+    case noop
+}
+
+extension TilePlan {
+    /// Windows the controller must restore (untile) before committing this
+    /// plan for `requester`.
+    ///
+    /// `.switchLayout`'s eviction set names every tiled window, including
+    /// the requester itself when it is already tiled — but the requester
+    /// is moving, not being evicted: its old tile is vacated by the
+    /// subsequent commit, and its record (and pre-tile frame) must survive
+    /// until `place` runs. Restoring it first would delete its record, so
+    /// `place` would bail and the window would merely untile instead of
+    /// landing in its new tile. `.tile` never names the requester
+    /// (blockers exclude it by construction), so the filter is a no-op
+    /// there; `.swap`/`.noop` restore nothing.
+    func windowsToRestore(requester: WindowID) -> [WindowID] {
+        switch self {
+        case .tile(let evicting), .switchLayout(let evicting):
+            return evicting.filter { $0 != requester }
+        case .swap, .noop:
+            return []
+        }
+    }
 }
 
 /// Pure tiling state: which window occupies which slot.
@@ -470,7 +493,7 @@ struct TilingState: Equatable {
     /// Decides what happens when `window` requests `slot`.
     ///
     /// Rules (as decided):
-    /// - Same window already in the slot -> toggle off.
+    /// - Same window already in the slot -> no-op.
     /// - Request in a different layout than the active one -> reset: evict
     ///   every tiled window, switch layouts, place the requester.
     /// - Same layout, no overlap with other windows -> plain tile. A tiled
@@ -485,7 +508,7 @@ struct TilingState: Equatable {
     ///   one quad, so both are evicted instead of swapped. An untiled
     ///   requester vacates nothing, so it always evicts.
     func plan(window: WindowID, into slot: Slot) -> TilePlan {
-        if occupantBySlot[slot] == window { return .untile }
+        if occupantBySlot[slot] == window { return .noop }
         if !occupantBySlot.isEmpty, slot.layout != activeLayout {
             return .switchLayout(evicting: tiledWindows.sorted())
         }
