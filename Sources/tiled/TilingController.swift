@@ -77,6 +77,12 @@ final class TilingController {
         switch state.plan(window: id, into: slot) {
         case .untile:
             untile(window: id)
+        case .swap(let placements):
+            state.commitSwaps(placements)
+            for occupant in placements.keys {
+                applyLayout(for: occupant)
+            }
+            dbg("swap win\(id) -> \(slot.rawValue) placements=\(placements)")
         case .tile(let evicting):
             for evicted in evicting {
                 untile(window: evicted)

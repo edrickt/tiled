@@ -267,6 +267,119 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(state.occupant(of: .rightHalf), a)
     }
 
+    // MARK: Swapping
+
+    func testQuadToOccupiedQuadSwaps() {
+        // TL -> occupied BR: the two windows exchange places, nobody is untiled.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomRight)
+        XCTAssertEqual(
+            state.plan(window: a, into: .bottomRight),
+            .swap(placements: [a: .bottomRight, b: .topLeft]))
+        if case .swap(let placements) = state.plan(window: a, into: .bottomRight) {
+            state.commitSwaps(placements)
+        }
+        XCTAssertEqual(state.occupant(of: .bottomRight), a)
+        XCTAssertEqual(state.occupant(of: .topLeft), b)
+        XCTAssertEqual(state.tiledWindows.sorted(), [a, b])
+    }
+
+    func testHalfToOccupiedQuadSwapsAndStaysWhole() {
+        // LeftHalf -> occupied TR: the half moves to the quad, the quad
+        // window takes over the whole half (not just one of its quads).
+        var state = TilingState()
+        state.commit(window: a, into: .leftHalf)
+        state.commit(window: b, into: .topRight)
+        XCTAssertEqual(
+            state.plan(window: a, into: .topRight),
+            .swap(placements: [a: .topRight, b: .leftHalf]))
+    }
+
+    func testQuadToOccupiedHalfSwapsIntoVacatedQuad() {
+        // TR -> TL (occupied by LeftHalf): quad takes TL, the half-window
+        // takes over the vacated TR quad.
+        var state = TilingState()
+        state.commit(window: a, into: .topRight)
+        state.commit(window: b, into: .leftHalf)
+        XCTAssertEqual(
+            state.plan(window: a, into: .topLeft),
+            .swap(placements: [a: .topLeft, b: .topRight]))
+    }
+
+    func testTwoHalvesSwap() {
+        var state = TilingState()
+        state.commit(window: a, into: .leftHalf)
+        state.commit(window: b, into: .rightHalf)
+        XCTAssertEqual(
+            state.plan(window: a, into: .rightHalf),
+            .swap(placements: [a: .rightHalf, b: .leftHalf]))
+    }
+
+    func testAdjacentQuadsSwap() {
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomLeft)
+        XCTAssertEqual(
+            state.plan(window: a, into: .bottomLeft),
+            .swap(placements: [a: .bottomLeft, b: .topLeft]))
+    }
+
+    func testSwapBacktracksWhenLargestFirstFails() {
+        // RightHalf -> LeftHalf (occupied by two quads): greedy would give
+        // the whole right half to the first blocker and strand the second,
+        // so it must split into TR + BR instead.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomLeft)
+        state.commit(window: c, into: .rightHalf)
+        XCTAssertEqual(
+            state.plan(window: c, into: .leftHalf),
+            .swap(placements: [c: .leftHalf, a: .topRight, b: .bottomRight]))
+    }
+
+    func testSwapWithoutRoomFallsBackToEviction() {
+        // All four quads tiled; TL -> RightHalf overlaps two windows but
+        // vacates one quad, so both are evicted instead of swapped.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomLeft)
+        state.commit(window: c, into: .topRight)
+        let d = 4
+        state.commit(window: d, into: .bottomRight)
+        XCTAssertEqual(
+            state.plan(window: a, into: .rightHalf), .tile(evicting: [c, d]))
+    }
+
+    func testUntiledRequesterAlwaysEvicts() {
+        // An untiled window vacates nothing, so even a clean 1-for-1
+        // takeover evicts rather than swaps.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomRight)
+        XCTAssertEqual(state.plan(window: c, into: .bottomRight), .tile(evicting: [b]))
+        XCTAssertEqual(state.plan(window: c, into: .leftHalf), .tile(evicting: [a]))
+    }
+
+    func testSwapKeepsDisjointWindowsInPlace() {
+        // TL -> occupied BR swaps the pair; the other two quads are untouched.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomRight)
+        state.commit(window: c, into: .topRight)
+        let d = 4
+        state.commit(window: d, into: .bottomLeft)
+        if case .swap(let placements) = state.plan(window: a, into: .bottomRight) {
+            state.commitSwaps(placements)
+        } else {
+            XCTFail("expected a swap")
+        }
+        XCTAssertEqual(state.occupant(of: .bottomRight), a)
+        XCTAssertEqual(state.occupant(of: .topLeft), b)
+        XCTAssertEqual(state.occupant(of: .topRight), c)
+        XCTAssertEqual(state.occupant(of: .bottomLeft), d)
+    }
+
     func testThirdWindowIntoDisjointSlotCoexists() {
         var state = TilingState()
         state.commit(window: a, into: .topLeft)
