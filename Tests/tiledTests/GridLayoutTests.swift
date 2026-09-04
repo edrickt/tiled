@@ -103,30 +103,6 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(grid.rect(for: .bottomLeft, in: bounds), oldBL)
     }
 
-    // MARK: Edge -> boundary mapping
-
-    func testBoundaryMapping() {
-        // Interior edges map to splitters.
-        XCTAssertEqual(GridLayout.boundary(edge: .right, slot: .topLeft), .columnSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .right, slot: .bottomLeft), .columnSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .right, slot: .leftHalf), .columnSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .left, slot: .topRight), .columnSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .left, slot: .bottomRight), .columnSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .left, slot: .rightHalf), .columnSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .bottom, slot: .topLeft), .leftRowSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .top, slot: .bottomLeft), .leftRowSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .bottom, slot: .topRight), .rightRowSplit)
-        XCTAssertEqual(GridLayout.boundary(edge: .top, slot: .bottomRight), .rightRowSplit)
-
-        // Screen edges are fixed.
-        XCTAssertNil(GridLayout.boundary(edge: .left, slot: .topLeft))
-        XCTAssertNil(GridLayout.boundary(edge: .top, slot: .topLeft))
-        XCTAssertNil(GridLayout.boundary(edge: .bottom, slot: .bottomLeft))
-        XCTAssertNil(GridLayout.boundary(edge: .right, slot: .rightHalf))
-        XCTAssertNil(GridLayout.boundary(edge: .top, slot: .leftHalf))
-        XCTAssertNil(GridLayout.boundary(edge: .bottom, slot: .rightHalf))
-    }
-
     // MARK: Splitter updates (the live-resize math)
 
     func testDragBottomRightLeftEdgeUpdatesColumnSplit() {
@@ -389,6 +365,48 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(grid.rightRowSplit, GridLayout.rowClamp.lowerBound)
     }
 
+    func testEnumCompleteness() {
+        // Adding a slot/edge/boundary without updating the mapping must fail
+        // loudly instead of silently leaving an edge unmapped.
+        XCTAssertEqual(Slot.allCases.count, 6)
+        XCTAssertEqual(TileEdge.allCases.count, 4)
+        XCTAssertEqual(GridBoundary.allCases.count, 3)
+        XCTAssertEqual(
+            GridLayout.boundary(edge: .right, slot: .topLeft), .columnSplit)
+    }
+
+    func testDefaultSplitsAreCentered() {
+        XCTAssertEqual(GridLayout().columnSplit, 0.5)
+        XCTAssertEqual(GridLayout().leftRowSplit, 0.5)
+        XCTAssertEqual(GridLayout().rightRowSplit, 0.5)
+        XCTAssertEqual(GridLayout(), GridLayout(columnSplit: 0.5, leftRowSplit: 0.5, rightRowSplit: 0.5))
+    }
+
+    func testQuadsPartitionTheirHalf() {
+        // TL + BL exactly cover Left; TR + BR exactly cover Right, at any
+        // splitter position (union height = full height, widths agree).
+        var grid = GridLayout()
+        grid.columnSplit = 0.37
+        grid.leftRowSplit = 0.42
+        grid.rightRowSplit = 0.63
+        for (quad1, quad2, half) in [
+            (Slot.topLeft, Slot.bottomLeft, Slot.leftHalf),
+            (Slot.topRight, Slot.bottomRight, Slot.rightHalf),
+        ] as [(Slot, Slot, Slot)] {
+            let first = grid.rect(for: quad1, in: bounds)
+            let second = grid.rect(for: quad2, in: bounds)
+            let whole = grid.rect(for: half, in: bounds)
+            XCTAssertEqual(first.width, whole.width, accuracy: 0.001)
+            XCTAssertEqual(second.width, whole.width, accuracy: 0.001)
+            XCTAssertEqual(first.minX, whole.minX, accuracy: 0.001)
+            XCTAssertEqual(
+                first.height + second.height, whole.height, accuracy: 0.001)
+            XCTAssertEqual(first.maxY, whole.maxY, accuracy: 0.001)
+            XCTAssertEqual(second.minY, whole.minY, accuracy: 0.001)
+            XCTAssertEqual(first.minY, second.maxY, accuracy: 0.001)
+        }
+    }
+
     func testRectsWithZeroOriginBounds() {
         let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
         let grid = GridLayout()
@@ -404,5 +422,24 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(
             grid.rect(for: .bottomRight, in: screen),
             CGRect(x: 960, y: 0, width: 960, height: 540))
+    }
+
+    func testRectsWithNegativeOriginBounds() {
+        // Secondary monitors left of the main screen have negative origins;
+        // rects must track the origin, not assume (0, 0).
+        let second = CGRect(x: -1920, y: 0, width: 1920, height: 1080)
+        let grid = GridLayout()
+        XCTAssertEqual(
+            grid.rect(for: .leftHalf, in: second),
+            CGRect(x: -1920, y: 0, width: 960, height: 1080))
+        XCTAssertEqual(
+            grid.rect(for: .rightHalf, in: second),
+            CGRect(x: -960, y: 0, width: 960, height: 1080))
+        XCTAssertEqual(
+            grid.rect(for: .topLeft, in: second),
+            CGRect(x: -1920, y: 540, width: 960, height: 540))
+        XCTAssertEqual(
+            grid.rect(for: .bottomRight, in: second),
+            CGRect(x: -960, y: 0, width: 960, height: 540))
     }
 }
