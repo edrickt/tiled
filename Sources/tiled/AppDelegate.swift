@@ -124,6 +124,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 menu.addItem(disabledItem(notice))
             }
             let count = controller.tiledWindowsInfo.count
+            // The count line doubles as the empty state: "0 tiled" reads
+            // as a status, so no separate "No tiled windows" row that
+            // would contradict an undo notice above it.
             menu.addItem(disabledItem(
                 "Layout: \(controller.activeLayout.title) · \(count) tiled"))
         }
@@ -158,13 +161,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(tile)
             menu.addItem(.separator())
 
-            // 3. Manage: the tiled windows plus bulk actions.
+            // 3. Manage: the tiled windows plus bulk actions. Empty state
+            // needs no row — the status line already reports "0 tiled".
             let tiled = controller.tiledWindowsInfo
-            if tiled.isEmpty {
-                let item = NSMenuItem(title: "No tiled windows", action: nil, keyEquivalent: "")
-                item.isEnabled = false
-                menu.addItem(item)
-            } else {
+            if !tiled.isEmpty {
                 for info in tiled {
                     menu.addItem(windowItem(for: info))
                 }

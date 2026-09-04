@@ -57,7 +57,7 @@ final class GeneralTab: NSObject {
         divider.boxType = .separator
         stack.addArrangedSubview(divider)
 
-        let guideLabel = NSTextField(labelWithString: "Guide")
+        let guideLabel = NSTextField(labelWithString: "First-run guide")
         guideLabel.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
         guideLabel.textColor = .secondaryLabelColor
         stack.addArrangedSubview(guideLabel)

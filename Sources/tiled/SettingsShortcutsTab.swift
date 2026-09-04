@@ -84,7 +84,8 @@ final class ShortcutsTab: NSObject {
         resetButton.bezelStyle = .rounded
         footer.addArrangedSubview(resetButton)
         let hint = NSTextField(wrappingLabelWithString:
-            "Click a shortcut, press a new combo. Click again or Esc keeps the old one, ⌫ disables.")
+            "Click a shortcut, press a new combo. Click again or Esc keeps the old one, ⌫ disables. " +
+            "A clash keeps your old combo and names its owner above.")
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         footer.addArrangedSubview(hint)
@@ -149,8 +150,9 @@ final class ShortcutsTab: NSObject {
     }
 
     /// Section header row: disclosure triangle (collapse only) plus a
-    /// small Enable/Disable-all button (bulk action). Two controls, two
-    /// jobs — the header never pretends to be the bulk toggle.
+    /// small Enable/Disable-all button with its scope in the title
+    /// ("Enable all 6"). Two controls, two jobs — the header never
+    /// pretends to be the bulk toggle.
     private func sectionHeader(for layout: LayoutKind) -> NSView {
         let name = layout == .quarters ? "Quarters" : "Sixths"
         let count = Slot.allCases.filter { $0.layout == layout }.count
@@ -163,16 +165,29 @@ final class ShortcutsTab: NSObject {
             target: self, action: #selector(sectionToggled(_:)))
         header.bezelStyle = .disclosure
         header.setButtonType(.onOff)
+        // setButtonType clears the title: restore it after. Without
+        // this the header renders as a bare triangle (seen on hardware).
+        header.title = "\(name) (\(count))"
         header.identifier = NSUserInterfaceItemIdentifier(layout.rawValue)
         header.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         header.state = collapsedSections.contains(layout) ? .off : .on
         header.toolTip = collapsedSections.contains(layout)
             ? "Show \(name) shortcuts"
             : "Hide \(name) shortcuts"
+        // Disclosure + onOff buttons report a triangle-only intrinsic
+        // size (seen on hardware: 13pt frame, title set but clipped), so
+        // the stack would squeeze the label to nothing. Pin an explicit
+        // width measured from the title instead of fighting the cell.
+        let titleWidth = (header.title as NSString).size(withAttributes: [
+            .font: header.font ?? .systemFont(ofSize: NSFont.systemFontSize),
+        ]).width
+        header.widthAnchor.constraint(equalToConstant: titleWidth + 28).isActive = true
         row.addArrangedSubview(header)
 
+        // Enable-all restores up to a whole section at once: name the
+        // scope on the button so the consequence is visible before click.
         let bulk = NSButton(
-            title: sectionHasDisabledSlot(layout) ? "Enable all" : "Disable all",
+            title: sectionHasDisabledSlot(layout) ? "Enable all \(count)" : "Disable all \(count)",
             target: self, action: #selector(sectionBulkToggled(_:)))
         bulk.bezelStyle = .inline
         bulk.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
