@@ -102,6 +102,15 @@ final class TilingStateTests: XCTestCase {
 
     // MARK: Overlap matrix
 
+    func testSlotQuads() {
+        XCTAssertEqual(Slot.topLeft.quads, [.topLeft])
+        XCTAssertEqual(Slot.topRight.quads, [.topRight])
+        XCTAssertEqual(Slot.bottomLeft.quads, [.bottomLeft])
+        XCTAssertEqual(Slot.bottomRight.quads, [.bottomRight])
+        XCTAssertEqual(Slot.leftHalf.quads, [.topLeft, .bottomLeft])
+        XCTAssertEqual(Slot.rightHalf.quads, [.topRight, .bottomRight])
+    }
+
     func testSlotOverlapMatrix() {
         XCTAssertTrue(Slot.topLeft.overlaps(.leftHalf))
         XCTAssertTrue(Slot.bottomLeft.overlaps(.leftHalf))
@@ -111,5 +120,159 @@ final class TilingStateTests: XCTestCase {
         XCTAssertFalse(Slot.leftHalf.overlaps(.rightHalf))
         XCTAssertFalse(Slot.topLeft.overlaps(.topRight))
         XCTAssertFalse(Slot.topLeft.overlaps(.bottomLeft))
+    }
+
+    func testOverlapIsCompleteAndSymmetric() {
+        // Halves overlap their own quads (all 8 combos), nothing else.
+        let halves: [(Slot, Slot, Slot)] = [
+            (.leftHalf, .topLeft, .bottomLeft),
+            (.rightHalf, .topRight, .bottomRight),
+        ]
+        for (half, first, second) in halves {
+            XCTAssertTrue(half.overlaps(first))
+            XCTAssertTrue(half.overlaps(second))
+            XCTAssertTrue(first.overlaps(half))
+            XCTAssertTrue(second.overlaps(half))
+        }
+        XCTAssertFalse(Slot.leftHalf.overlaps(.topRight))
+        XCTAssertFalse(Slot.leftHalf.overlaps(.bottomRight))
+        XCTAssertFalse(Slot.rightHalf.overlaps(.topLeft))
+        XCTAssertFalse(Slot.rightHalf.overlaps(.bottomLeft))
+        // Every slot overlaps itself; quads never overlap each other.
+        for slot in Slot.allCases {
+            XCTAssertTrue(slot.overlaps(slot))
+        }
+        let quads: [Slot] = [.topLeft, .topRight, .bottomLeft, .bottomRight]
+        for first in quads {
+            for second in quads where first != second {
+                XCTAssertFalse(first.overlaps(second))
+                XCTAssertFalse(second.overlaps(first))
+            }
+        }
+    }
+
+    func testSlotPresentation() {
+        XCTAssertEqual(Slot.allCases.count, 6)
+        for slot in Slot.allCases {
+            XCTAssertFalse(slot.title.isEmpty)
+            XCTAssertFalse(slot.hotkeyLabel.isEmpty)
+        }
+        XCTAssertEqual(Slot.topLeft.title, "Top Left")
+        XCTAssertEqual(Slot.leftHalf.title, "Left Half")
+        XCTAssertEqual(Set(Slot.allCases.map(\.hotkeyLabel)).count, 6) // labels unique
+    }
+
+    // MARK: Edge cases
+
+    func testPlanIntoEmptySlotEvictsNothing() {
+        // Untouched state: nothing to evict from any slot.
+        for slot in Slot.allCases {
+            XCTAssertEqual(
+                TilingState().plan(window: a, into: slot), .tile(evicting: []))
+        }
+    }
+
+    func testEvictionsAreSorted() {
+        // Deterministic order: evicted ids come back sorted, not in slot order.
+        var state = TilingState()
+        state.commit(window: c, into: .topLeft)
+        state.commit(window: a, into: .bottomLeft)
+        XCTAssertEqual(state.plan(window: b, into: .leftHalf), .tile(evicting: [a, c]))
+    }
+
+    func testRightHalfOverTwoQuadsEvictsBoth() {
+        var state = TilingState()
+        state.commit(window: a, into: .topRight)
+        state.commit(window: b, into: .bottomRight)
+        XCTAssertEqual(state.plan(window: c, into: .rightHalf), .tile(evicting: [a, b]))
+    }
+
+    func testQuadOverOccupiedHalfKeepsOtherSide() {
+        // Tiling TL over a full left+right layout evicts Left only; Right stays.
+        var state = TilingState()
+        state.commit(window: a, into: .leftHalf)
+        state.commit(window: b, into: .rightHalf)
+        XCTAssertEqual(state.plan(window: c, into: .topLeft), .tile(evicting: [a]))
+        state.remove(window: a) // controller untiles evicted windows before placing
+        state.commit(window: c, into: .topLeft)
+        XCTAssertEqual(state.occupant(of: .topLeft), c)
+        XCTAssertEqual(state.occupant(of: .rightHalf), b)
+        XCTAssertNil(state.occupant(of: .leftHalf))
+    }
+
+    func testSameWindowRetilingSameSlotToggles() {
+        // Already covered for quads; halves toggle too.
+        var state = TilingState()
+        state.commit(window: a, into: .leftHalf)
+        XCTAssertEqual(state.plan(window: a, into: .leftHalf), .untile)
+    }
+
+    func testDifferentWindowIntoOccupiedHalfEvicts() {
+        var state = TilingState()
+        state.commit(window: a, into: .rightHalf)
+        XCTAssertEqual(state.plan(window: b, into: .rightHalf), .tile(evicting: [a]))
+        state.commit(window: b, into: .rightHalf)
+        XCTAssertEqual(state.occupant(of: .rightHalf), b)
+        XCTAssertEqual(state.slot(of: b), .rightHalf)
+        XCTAssertNil(state.slot(of: a))
+    }
+
+    func testFullScreenOfQuadsThenHalfEvictsColumnOnly() {
+        // TL+BL+TR tiled; Left evicts the left column, TR survives.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomLeft)
+        state.commit(window: c, into: .topRight)
+        let d = 4
+        XCTAssertEqual(state.plan(window: d, into: .leftHalf), .tile(evicting: [a, b]))
+        state.remove(window: a)
+        state.remove(window: b)
+        state.commit(window: d, into: .leftHalf)
+        XCTAssertEqual(state.occupant(of: .leftHalf), d)
+        XCTAssertEqual(state.occupant(of: .topRight), c)
+        XCTAssertNil(state.slot(of: a))
+        XCTAssertNil(state.slot(of: b))
+    }
+
+    func testCommitClearsPendingEvictions() {
+        // The caller removes evicted windows, then commits: no ghost occupants.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomLeft)
+        let plan = state.plan(window: c, into: .leftHalf)
+        XCTAssertEqual(plan, .tile(evicting: [a, b]))
+        if case .tile(let evicting) = plan {
+            for evicted in evicting { state.remove(window: evicted) }
+        }
+        state.commit(window: c, into: .leftHalf)
+        XCTAssertEqual(state.occupants, [.leftHalf: c])
+        XCTAssertEqual(state.tiledWindows, [c])
+    }
+
+    func testRemoveUnknownWindowIsNoop() {
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.remove(window: 999)
+        XCTAssertEqual(state.occupant(of: .topLeft), a)
+        XCTAssertEqual(state.tiledWindows, [a])
+    }
+
+    func testWindowMovesBetweenDisjointSlots() {
+        // TL -> RightHalf: leaves the quad, no eviction.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        XCTAssertEqual(state.plan(window: a, into: .rightHalf), .tile(evicting: []))
+        state.commit(window: a, into: .rightHalf)
+        XCTAssertNil(state.occupant(of: .topLeft))
+        XCTAssertEqual(state.occupant(of: .rightHalf), a)
+    }
+
+    func testThirdWindowIntoDisjointSlotCoexists() {
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomLeft)
+        XCTAssertEqual(state.plan(window: c, into: .topRight), .tile(evicting: []))
+        state.commit(window: c, into: .topRight)
+        XCTAssertEqual(state.tiledWindows.sorted(), [a, b, c])
     }
 }

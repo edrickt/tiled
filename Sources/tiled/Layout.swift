@@ -63,22 +63,28 @@ enum TileEdge: CaseIterable {
 /// A movable boundary in the grid. Screen edges are fixed, not boundaries.
 enum GridBoundary: CaseIterable {
     case columnSplit // vertical divider between left and right columns
-    case rowSplit // horizontal divider shared by both columns
+    case leftRowSplit // horizontal divider for the left column only
+    case rightRowSplit // horizontal divider for the right column only
 }
 
 /// The tile grid geometry: three splitter fractions over a screen's visible
 /// frame. Every occupied slot's rect derives from these.
 ///
-/// All example behaviors from the design derive from this model:
+/// The vertical divider is shared by both rows; each column has its own
+/// independent horizontal divider:
 /// - Dragging right half's left edge -> columnSplit -> both left windows resize.
 /// - Dragging BL's right edge -> columnSplit -> right side shrinks, TL grows.
-/// - Dragging BL's top edge -> leftRowSplit -> TL shrinks vertically.
+/// - Dragging BL's top edge -> leftRowSplit -> TL shrinks vertically, right
+///   column unaffected (and symmetrically, BR's top edge -> rightRowSplit).
 struct GridLayout: Equatable {
     /// Fraction of width where the left column ends.
     var columnSplit: CGFloat = 0.5
-    /// Fraction of height where the row divider sits (shared by both columns:
-    /// the model is a 2×2 grid, so there is exactly one horizontal divider).
-    var rowSplit: CGFloat = 0.5
+    /// Fraction of height where the left column's row divider sits.
+    var leftRowSplit: CGFloat = 0.5
+    /// Fraction of height where the right column's row divider sits.
+    /// Independent from the left: dragging BL's top edge moves leftRowSplit
+    /// only, so TR/BR keep their rects (and vice versa).
+    var rightRowSplit: CGFloat = 0.5
 
     static let columnClamp: ClosedRange<CGFloat> = 0.15...0.85
     static let rowClamp: ClosedRange<CGFloat> = 0.2...0.8
@@ -90,9 +96,10 @@ struct GridLayout: Equatable {
         case (.topLeft, .right), (.bottomLeft, .right), (.leftHalf, .right),
             (.topRight, .left), (.bottomRight, .left), (.rightHalf, .left):
             return .columnSplit
-        case (.topLeft, .bottom), (.bottomLeft, .top),
-            (.topRight, .bottom), (.bottomRight, .top):
-            return .rowSplit
+        case (.topLeft, .bottom), (.bottomLeft, .top):
+            return .leftRowSplit
+        case (.topRight, .bottom), (.bottomRight, .top):
+            return .rightRowSplit
         default:
             return nil // screen edges
         }
@@ -103,8 +110,10 @@ struct GridLayout: Equatable {
         switch boundary {
         case .columnSplit:
             bounds.minX + columnSplit * bounds.width
-        case .rowSplit:
-            bounds.minY + rowSplit * bounds.height
+        case .leftRowSplit:
+            bounds.minY + leftRowSplit * bounds.height
+        case .rightRowSplit:
+            bounds.minY + rightRowSplit * bounds.height
         }
     }
 
@@ -122,20 +131,30 @@ struct GridLayout: Equatable {
             guard abs(clamped - columnSplit) > 0.001 else { return false }
             columnSplit = clamped
             return true
-        case .rowSplit:
-            let clamped = min(
-                max((position - bounds.minY) / bounds.height, Self.rowClamp.lowerBound),
-                Self.rowClamp.upperBound)
-            guard abs(clamped - rowSplit) > 0.001 else { return false }
-            rowSplit = clamped
+        case .leftRowSplit:
+            let clamped = Self.clampedRowSplit(toPosition: position, in: bounds)
+            guard abs(clamped - leftRowSplit) > 0.001 else { return false }
+            leftRowSplit = clamped
+            return true
+        case .rightRowSplit:
+            let clamped = Self.clampedRowSplit(toPosition: position, in: bounds)
+            guard abs(clamped - rightRowSplit) > 0.001 else { return false }
+            rightRowSplit = clamped
             return true
         }
+    }
+
+    private static func clampedRowSplit(toPosition position: CGFloat, in bounds: CGRect) -> CGFloat {
+        min(
+            max((position - bounds.minY) / bounds.height, Self.rowClamp.lowerBound),
+            Self.rowClamp.upperBound)
     }
 
     /// Rect for `slot` within `bounds` (AppKit coordinates, y grows upward).
     func rect(for slot: Slot, in bounds: CGRect) -> CGRect {
         let x = position(of: .columnSplit, in: bounds)
-        let rowY = position(of: .rowSplit, in: bounds)
+        let leftRowY = position(of: .leftRowSplit, in: bounds)
+        let rightRowY = position(of: .rightRowSplit, in: bounds)
         return switch slot {
         case .leftHalf:
             CGRect(x: bounds.minX, y: bounds.minY, width: x - bounds.minX, height: bounds.height)
@@ -143,18 +162,18 @@ struct GridLayout: Equatable {
             CGRect(x: x, y: bounds.minY, width: bounds.maxX - x, height: bounds.height)
         case .topLeft:
             CGRect(
-                x: bounds.minX, y: rowY, width: x - bounds.minX,
-                height: bounds.maxY - rowY)
+                x: bounds.minX, y: leftRowY, width: x - bounds.minX,
+                height: bounds.maxY - leftRowY)
         case .bottomLeft:
             CGRect(
                 x: bounds.minX, y: bounds.minY, width: x - bounds.minX,
-                height: rowY - bounds.minY)
+                height: leftRowY - bounds.minY)
         case .topRight:
             CGRect(
-                x: x, y: rowY, width: bounds.maxX - x, height: bounds.maxY - rowY)
+                x: x, y: rightRowY, width: bounds.maxX - x, height: bounds.maxY - rightRowY)
         case .bottomRight:
             CGRect(
-                x: x, y: bounds.minY, width: bounds.maxX - x, height: rowY - bounds.minY)
+                x: x, y: bounds.minY, width: bounds.maxX - x, height: rightRowY - bounds.minY)
         }
     }
 }
