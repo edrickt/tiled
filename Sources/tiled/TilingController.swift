@@ -52,6 +52,13 @@ final class TilingController {
         let date: Date
     }
 
+    /// Last user-visible tiling failure (shown in the status menu).
+    /// Cleared on the next tiling attempt.
+    private(set) var lastTileError: String?
+
+    private var pruneTimer: Timer?
+    private var screenObserver: NSObjectProtocol?
+
     /// Called after any state change (for menu refresh).
     var onChange: (() -> Void)?
 
@@ -65,6 +72,39 @@ final class TilingController {
 
     init() {
         TilingController.active = self
+        // Windows closed while tiled otherwise linger as ghosts until the
+        // next hotkey; release their slots within seconds instead.
+        let prune = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) {
+            [weak self] _ in
+            guard let self else { return }
+            let before = self.state.tiledWindows.count
+            self.pruneDeadWindows()
+            if self.state.tiledWindows.count != before {
+                self.onChange?()
+            }
+        }
+        // Fire in event-tracking modes too, so a long-open menu doesn't
+        // stall cleanup; the menu rebuild is suppressed while open anyway.
+        RunLoop.main.add(prune, forMode: .common)
+        pruneTimer = prune
+        // Reassert the layout when displays change (unplug, rearrange,
+        // resolution): splitter fractions stay valid, pixels don't.
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.dbg("screens changed; reasserting layout")
+            self.applyAll()
+            self.onChange?()
+        }
+    }
+
+    deinit {
+        pruneTimer?.invalidate()
+        if let screenObserver {
+            NotificationCenter.default.removeObserver(screenObserver)
+        }
     }
 
     // MARK: Hotkey entry point
@@ -72,6 +112,7 @@ final class TilingController {
     func handle(slot: Slot) {
         pruneDeadWindows()
         guard let focused = AXKit.focusedWindow() else { return }
+        lastTileError = nil
         let id = windowID(for: focused.element, pid: focused.pid)
 
         switch state.plan(window: id, into: slot) {
@@ -79,21 +120,23 @@ final class TilingController {
             untile(window: id)
         case .swap(let placements):
             state.commitSwaps(placements)
+            var failed = 0
             for occupant in placements.keys {
-                applyLayout(for: occupant)
+                if !applyLayout(for: occupant) { failed += 1 }
+            }
+            if failed > 0 {
+                lastTileError = Self.refusalMessage(count: failed)
             }
             dbg("swap win\(id) -> \(slot.rawValue) placements=\(placements)")
         case .switchLayout(let evicting):
-            for evicted in evicting {
-                untile(window: evicted)
-            }
+            let restoreFailures = restore(evicting)
             place(window: id, into: slot)
+            reportRestoreFailures(restoreFailures)
             dbg("switchLayout win\(id) -> \(slot.rawValue) evicted=\(evicting)")
         case .tile(let evicting):
-            for evicted in evicting {
-                untile(window: evicted)
-            }
+            let restoreFailures = restore(evicting)
             place(window: id, into: slot)
+            reportRestoreFailures(restoreFailures)
         }
         onChange?()
     }
@@ -111,34 +154,80 @@ final class TilingController {
         }
         state.commit(window: id, into: slot)
         observe(window: id, record: record)
-        applyLayout(for: id)
+        if !applyLayout(for: id) {
+            // The window refused the frame (some apps ignore AX resizes):
+            // roll back occupancy so state and screen agree, and say so.
+            state.remove(window: id)
+            lastKnownFrames[id] = nil
+            expectedFrames[id] = nil
+            let name = appName(for: id) ?? "That window"
+            lastTileError = "\(name) couldn't be tiled — the app refused to resize it."
+            dbg("place FAILED win\(id) -> \(slot.rawValue)")
+            return
+        }
         dbg("place win\(id) -> \(slot.rawValue)")
     }
 
-    private func untile(window id: WindowID) {
+    /// Restores the window's pre-tile frame and releases its slot.
+    /// Returns false when the restore was attempted and refused, so the
+    /// caller can say so instead of silently leaving a stray window behind.
+    @discardableResult
+    private func untile(window id: WindowID) -> Bool {
+        var restored = true
         if let record = records[id], record.preTileFrame != .zero {
-            AXKit.setFrame(record.element, to: record.preTileFrame)
+            restored = AXKit.setFrame(record.element, to: record.preTileFrame)
         }
         records[id] = nil
         lastKnownFrames[id] = nil
         expectedFrames[id] = nil
         state.remove(window: id)
+        return restored
+    }
+
+    /// Untiles every window in `ids`, returning the display names of those
+    /// whose pre-tile frame refused to restore.
+    private func restore(_ ids: [WindowID]) -> [String] {
+        var failures: [String] = []
+        for evicted in ids {
+            let name = appName(for: evicted) ?? "A window"
+            if !untile(window: evicted) {
+                failures.append(name)
+            }
+        }
+        return failures
+    }
+
+    /// Reports restore failures unless a more relevant error (e.g. the
+    /// requested tiling itself failing) already took the slot.
+    private func reportRestoreFailures(_ failures: [String]) {
+        guard !failures.isEmpty, lastTileError == nil else { return }
+        if failures.count == 1 {
+            lastTileError =
+                "Couldn't restore “\(failures[0])” — it may still be sitting in its old tile."
+        } else {
+            lastTileError =
+                "Couldn't restore \(failures.count) windows — they may still be sitting in their old tiles."
+        }
     }
 
     /// Applies `id`'s slot rect on the screen the window currently lives on.
-    private func applyLayout(for id: WindowID) {
-        guard let record = records[id], let slot = state.slot(of: id) else { return }
+    /// Returns whether the AX write succeeded (some windows refuse resizes).
+    @discardableResult
+    private func applyLayout(for id: WindowID) -> Bool {
+        guard let record = records[id], let slot = state.slot(of: id) else { return false }
         let current = AXKit.frame(of: record.element) ?? record.preTileFrame
         let bounds = visibleBounds(for: current)
         let target = grid.rect(for: slot, in: bounds)
         markExpected(id, target)
         lastKnownFrames[id] = target
-        AXKit.setFrame(record.element, to: target)
-        dbg("applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) target=\(target)")
+        let ok = AXKit.setFrame(record.element, to: target)
+        dbg("applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) target=\(target) ok=\(ok)")
+        return ok
     }
 
     /// Recomputes and pushes rects for all occupants (resize propagation).
     private func applyAll(excluding excluded: Set<WindowID> = []) {
+        var failed = 0
         for (slot, occupant) in state.occupants {
             guard !excluded.contains(occupant), let record = records[occupant] else { continue }
             let frame =
@@ -147,8 +236,11 @@ final class TilingController {
             let bounds = visibleBounds(for: frame)
             let target = grid.rect(for: slot, in: bounds)
             markExpected(occupant, target)
-            AXKit.setFrame(record.element, to: target)
+            if !AXKit.setFrame(record.element, to: target) { failed += 1 }
             dbg("applyAll win\(occupant) slot=\(slot.rawValue) target=\(target)")
+        }
+        if failed > 0 {
+            lastTileError = Self.refusalMessage(count: failed)
         }
     }
 
@@ -163,6 +255,7 @@ final class TilingController {
             let excluded = self.applyExclusions
             self.applyExclusions = []
             self.applyAll(excluding: excluded)
+            self.onChange?()
         }
     }
 
@@ -200,15 +293,15 @@ final class TilingController {
 
     func untileAll() {
         pruneDeadWindows()
-        for id in state.tiledWindows {
-            untile(window: id)
-        }
+        lastTileError = nil
+        reportRestoreFailures(restore(state.tiledWindows))
         onChange?()
     }
 
     /// Snaps all splitters back to defaults and re-tiles everyone.
     func resetGrid() {
         grid = GridLayout()
+        lastTileError = nil
         applyAll()
         onChange?()
     }
@@ -377,12 +470,19 @@ final class TilingController {
     var tiledWindowsInfo: [TiledWindowInfo] {
         state.occupants
             .sorted { $0.key.rawValue < $1.key.rawValue }
-            .map { slot, id in
-                let appName = records[id].flatMap {
-                    NSRunningApplication(processIdentifier: $0.pid)?.localizedName
-                }
-                return TiledWindowInfo(slot: slot, appName: appName)
-            }
+            .map { slot, id in TiledWindowInfo(slot: slot, appName: appName(for: id)) }
+    }
+
+    private func appName(for id: WindowID) -> String? {
+        records[id].flatMap {
+            NSRunningApplication(processIdentifier: $0.pid)?.localizedName
+        }
+    }
+
+    private static func refusalMessage(count: Int) -> String {
+        count == 1
+            ? "Couldn't move that window — the app refused to resize it."
+            : "Couldn't move \(count) windows — an app refused to resize."
     }
 
     var isTrusted: Bool { AXKit.isTrusted }

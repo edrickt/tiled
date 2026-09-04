@@ -134,6 +134,29 @@ enum Slot: String, CaseIterable {
     }
 }
 
+extension Slot {
+    /// Plain-text hotkey reference for the Shortcuts window. Derived from
+    /// the same titles and labels as the status menu, so the three can
+    /// never disagree about what a shortcut does.
+    static var cheatsheetText: String {
+        var lines = [
+            "Tile the focused window. Press the same",
+            "shortcut again to untile it.",
+            "",
+        ]
+        for layout in [LayoutKind.quarters, LayoutKind.sixths] as [LayoutKind] {
+            lines.append(layout == .quarters ? "Quarters — hold ⌥⇧" : "Sixths — hold ⌥⇧⌘")
+            for slot in Slot.allCases where slot.layout == layout {
+                lines.append("\(slot.hotkeyLabel)\t\(slot.title)")
+            }
+            lines.append("")
+        }
+        lines.append("Drag a tiled window's edge to resize it —")
+        lines.append("neighbors sharing the edge follow.")
+        return lines.joined(separator: "\n")
+    }
+}
+
 /// An edge of a window's frame.
 enum TileEdge: CaseIterable {
     case left, right, top, bottom

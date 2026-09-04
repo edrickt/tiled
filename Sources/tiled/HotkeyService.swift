@@ -1,5 +1,5 @@
-import AppKit
 import Carbon.HIToolbox
+import Foundation
 
 extension Slot {
     /// Modifier set for this slot's hotkey: quarters use ⌥⇧, sixths add ⌘.
@@ -58,6 +58,10 @@ final class HotkeyService {
     private let context = Context()
     private static var handlerInstalled = false
 
+    /// Slots whose global hotkey could not be registered (likely owned by
+    /// another app). Surfaced in the status menu; never just logged.
+    private(set) var failedSlots: [Slot] = []
+
     var handler: ((Slot) -> Void)? {
         get { context.handler }
         set { context.handler = newValue }
@@ -81,6 +85,7 @@ final class HotkeyService {
             if status == noErr {
                 hotKeyRefs.append(ref)
             } else {
+                failedSlots.append(slot)
                 NSLog("tiled: failed to register hotkey for %@ (osstatus %d)", slot.rawValue, status)
             }
         }

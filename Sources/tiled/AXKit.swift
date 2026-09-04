@@ -28,9 +28,10 @@ enum AXKit {
             AXUIElementCopyAttributeValue(
                 systemWide, kAXFocusedApplicationAttribute as CFString, &appValue)
                 == .success,
-            let app = appValue
+            let rawApp = appValue,
+            CFGetTypeID(rawApp) == AXUIElementGetTypeID()
         else { return nil }
-        let appElement = app as! AXUIElement
+        let appElement = rawApp as! AXUIElement
 
         var pid: pid_t = 0
         guard AXUIElementGetPid(appElement, &pid) == .success else { return nil }
@@ -40,10 +41,11 @@ enum AXKit {
             AXUIElementCopyAttributeValue(
                 appElement, kAXFocusedWindowAttribute as CFString, &winValue)
                 == .success,
-            let win = winValue
+            let rawWin = winValue,
+            CFGetTypeID(rawWin) == AXUIElementGetTypeID()
         else { return nil }
 
-        return (win as! AXUIElement, pid)
+        return (rawWin as! AXUIElement, pid)
     }
 
     // MARK: Liveness
@@ -122,24 +124,28 @@ enum AXKit {
     }
 
     private static func readPoint(_ element: AXUIElement, _ attribute: String) -> CGPoint? {
-        var value: CFTypeRef?
-        guard
-            AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
-            let axValue = value
-        else { return nil }
+        guard let axValue = readAXValue(element, attribute) else { return nil }
         var point = CGPoint()
-        guard AXValueGetValue(axValue as! AXValue, pointType, &point) else { return nil }
+        guard AXValueGetValue(axValue, pointType, &point) else { return nil }
         return point
     }
 
     private static func readSize(_ element: AXUIElement, _ attribute: String) -> CGSize? {
+        guard let axValue = readAXValue(element, attribute) else { return nil }
+        var size = CGSize()
+        guard AXValueGetValue(axValue, sizeType, &size) else { return nil }
+        return size
+    }
+
+    /// Reads an attribute expected to hold an AXValue, verifying the type
+    /// before casting (AX returns whatever the app provides).
+    private static func readAXValue(_ element: AXUIElement, _ attribute: String) -> AXValue? {
         var value: CFTypeRef?
         guard
             AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
-            let axValue = value
+            let raw = value,
+            CFGetTypeID(raw) == AXValueGetTypeID()
         else { return nil }
-        var size = CGSize()
-        guard AXValueGetValue(axValue as! AXValue, sizeType, &size) else { return nil }
-        return size
+        return (raw as! AXValue)
     }
 }
