@@ -2,7 +2,8 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private let controller = TilingController()
+    private let gateway = LiveWindowGateway()
+    private lazy var controller = TilingController(gateway: gateway)
     private let hotkeyStore = HotkeyStore()
     private var hotkeys: HotkeyService?
     private var permissionTimer: Timer?
@@ -19,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setupStatusItem()
         }
 
-        if AXKit.promptIfUntrusted() {
+        if gateway.promptIfUntrusted() {
             start()
         } else {
             pollForPermission()
@@ -31,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if firstRun {
             // Trusted path: present immediately. Permission-waiting path:
             // present on grant (see start(afterPermissionWait)).
-            if AXKit.isTrusted {
+            if gateway.isTrusted {
                 showSettings(selecting: .welcome)
             }
         } else if settings.hideMenuBarIcon {
@@ -69,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 timer.invalidate()
                 return
             }
-            if AXKit.isTrusted {
+            if gateway.isTrusted {
                 self.start(afterPermissionWait: true)
             }
             self.refreshMenu()

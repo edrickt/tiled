@@ -1,0 +1,130 @@
+import XCTest
+@testable import tiled
+
+/// TilingController through the `WindowGateway` seam: the first tests that
+/// drive `handle(slot:)` itself instead of re-implementing its plan/commit
+/// dance in the test (cf. LayoutSwitchTests' "commits a plan exactly like
+/// handle does" helpers). The fake stands in for AX.
+final class ControllerGatewayTests: XCTestCase {
+    /// Screen the fake tiles onto. `owningScreenIndex` falls back to
+    /// midpoint-then-main with no screens, so tests assert state + frames
+    /// written to the fake, never absolute screen pixels.
+    private var gateway: FakeWindowGateway!
+    private var controller: TilingController!
+
+    override func setUp() {
+        super.setUp()
+        gateway = FakeWindowGateway()
+        controller = TilingController(gateway: gateway)
+    }
+
+    // MARK: Hotkey entry point
+
+    func testHandleTilesFocusedWindow() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        XCTAssertEqual(controller.state.occupant(of: .topLeft), 1)
+    }
+
+    func testHandleWithNoFocusedWindowIsSafeNoop() {
+        gateway.focused = nil
+
+        controller.handle(slot: .topLeft)
+
+        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertNil(controller.lastTileError)
+    }
+
+    func testRetileOwnSlotIsNoop() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        XCTAssertNil(controller.lastTileError)
+    }
+
+    func testRefusedResizeRollsBackAndReports() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        gateway.refuseNextWrites(handle)
+
+        controller.handle(slot: .topLeft)
+
+        XCTAssertNil(controller.state.slot(of: 1))
+        XCTAssertNotNil(controller.lastTileError)
+    }
+
+    // MARK: Observation wiring
+
+    func testTilingRegistersObservation() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(gateway.observedHandles(), [handle])
+    }
+
+    func testUserDragMovesSplitterAndNeighbors() {
+        // Tile two left-column quads, then drag the shared row edge down:
+        // the splitter follows the dragged window's actual frame, and the
+        // neighbor is re-pushed on the next runloop tick.
+        let top = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        let bottom = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = top
+        controller.handle(slot: .topLeft)
+        gateway.focused = bottom
+        controller.handle(slot: .bottomLeft)
+
+        // Simulate the user grabbing BL's *top* edge (the row divider;
+        // the bottom edge is a fixed screen edge): an echo-converging
+        // tick first (swallowed, like an animated write), then a larger
+        // move away — the escape the echo logic treats as a real drag.
+        var first = gateway.frame(of: bottom)!
+        first.size.height -= 10
+        gateway.simulateChange(bottom, to: first)
+        var moved = gateway.frame(of: bottom)!
+        moved.size.height -= 60
+        gateway.focused = bottom
+        gateway.simulateChange(bottom, to: moved)
+
+        let expectation = XCTestExpectation(description: "coalesced apply")
+        DispatchQueue.main.async {
+            // The dragged window keeps its frame (source of truth); the
+            // grid moved, so a re-tile would now use the new splitter.
+            XCTAssertEqual(self.gateway.frame(of: bottom), moved)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+        // A real screen exists in the test process, so the grid runs in
+        // real visible-frame coordinates: the dragged top edge (509.5 -
+        // 70 = 439.5 in a 1019pt-tall visible frame) lands the left row
+        // split near 0.43. That pins the full path honestly; pure
+        // splitter math belongs to GridLayoutTests.
+        XCTAssertEqual(self.controller.grid.leftRowSplit, 439.5 / 1019.0, accuracy: 0.01)
+    }
+
+    // MARK: Ghost cleanup
+
+    func testClosedWindowPrunesOnNextHandle() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(controller.state.occupant(of: .topLeft), 1)
+
+        gateway.kill(handle)
+        let other = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        gateway.focused = other
+        controller.handle(slot: .topRight)
+
+        XCTAssertNil(controller.state.slot(of: 1))
+        XCTAssertEqual(controller.state.occupant(of: .topRight), 2)
+    }
+}

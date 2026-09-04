@@ -1,7 +1,9 @@
 import AppKit
-import ApplicationServices
 
-/// Glues the pure `TilingState` + `GridLayout` to real windows via AX.
+/// Glues the pure `TilingState` + `GridLayout` to real windows through a
+/// `WindowGateway` — never touching AX types directly. All element
+/// identity, coordinate conversion, observation, and activation live
+/// behind the seam; this module owns only tiling decisions and records.
 ///
 /// Responsibilities:
 /// - Tiling/eviction per the decided rules (see TilingState).
@@ -10,15 +12,13 @@ import ApplicationServices
 ///   corresponding grid splitter -> push new rects to the neighbor windows.
 ///   Writes are bookkept in `expectedFrames` so our own echoes don't recurse.
 final class TilingController {
-    /// The single controller instance (AXObserver callbacks have no user data).
-    static weak var active: TilingController?
+    private let gateway: WindowGateway
 
     private(set) var state = TilingState()
     private(set) var grid = GridLayout()
 
     private struct Record {
-        let element: AXUIElement
-        let pid: pid_t
+        let handle: WindowHandle
         var preTileFrame: CGRect
     }
 
@@ -27,15 +27,11 @@ final class TilingController {
 
     /// Last frame we observed per tiled window (for edge-change detection).
     private var lastKnownFrames: [WindowID: CGRect] = [:]
-    /// Frames we recently asked AX to set (echo suppression). Apps animate
+    /// Frames we recently asked the gateway to set (echo suppression). Apps animate
     /// AX frame writes, emitting notification streams that converge on the
     /// requested frame; we swallow while converging and escape as soon as a
     /// tick moves away from it (a real user grab).
     private var expectedFrames: [WindowID: ExpectedWrite] = [:]
-    /// Elements with resize/move observers registered (CFHash keyed; we can
-    /// never unregister, so dedupe to avoid duplicate callbacks on re-tile).
-    private var observedElements: Set<UInt> = []
-    private var observers: [pid_t: AXObserver] = [:]
 
     private var applyScheduled = false
     private var applyExclusions: Set<WindowID> = []
@@ -54,11 +50,10 @@ final class TilingController {
 
     /// Snapshot of windows evicted by the last layout switch, enabling a
     /// one-step undo ("Restore Evicted Windows"). Records are rebuilt from
-    /// live elements on undo; dead windows are skipped. Cleared by any new
+    /// live handles on undo; dead windows are skipped. Cleared by any new
     /// tiling action, bulk op, or use — exactly one undo step exists.
     private struct EvictedWindow {
-        let element: AXUIElement
-        let pid: pid_t
+        let handle: WindowHandle
         let slot: Slot
         let preTileFrame: CGRect
     }
@@ -109,8 +104,8 @@ final class TilingController {
         }
     }
 
-    init() {
-        TilingController.active = self
+    init(gateway: WindowGateway = LiveWindowGateway()) {
+        self.gateway = gateway
         // Windows closed while tiled otherwise linger as ghosts until the
         // next hotkey; release their slots within seconds instead.
         let prune = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) {
@@ -150,12 +145,12 @@ final class TilingController {
 
     func handle(slot: Slot) {
         pruneDeadWindows()
-        guard let focused = AXKit.focusedWindow() else {
+        guard let handle = gateway.focusedWindow() else {
             dbg("no focused window for \(slot.rawValue)")
             onFeedback?(.noFocusedWindow)
             return
         }
-        let id = windowID(for: focused.element, pid: focused.pid)
+        let id = windowID(for: handle)
         let decision = state.plan(window: id, into: slot)
         guard decision != .noop else {
             // Already in that tile: a strict no-op — no state, error, or
@@ -193,8 +188,8 @@ final class TilingController {
             evictedSnapshot = evicted.compactMap { id in
                 records[id].map {
                     EvictedWindow(
-                        element: $0.element, pid: $0.pid,
-                        slot: state.slot(of: id) ?? slot, preTileFrame: $0.preTileFrame)
+                        handle: $0.handle, slot: state.slot(of: id) ?? slot,
+                        preTileFrame: $0.preTileFrame)
                 }
             }
             switchRequester = id
@@ -227,11 +222,11 @@ final class TilingController {
             // First tiling: remember where to restore when untiled.
             // A window moving between overlapping slots (e.g. Left -> BottomLeft)
             // keeps its original pre-tile frame.
-            record.preTileFrame = AXKit.frame(of: record.element) ?? record.preTileFrame
+            record.preTileFrame = gateway.frame(of: record.handle) ?? record.preTileFrame
             records[id] = record
         }
         state.commit(window: id, into: slot)
-        observe(window: id, record: record)
+        observe(window: id)
         if !applyLayout(for: id) {
             // The window refused the frame (some apps ignore AX resizes):
             // roll back occupancy so state and screen agree, and say so.
@@ -254,7 +249,7 @@ final class TilingController {
     private func restoreWindow(id: WindowID) -> Bool {
         var restored = true
         if let record = records[id], record.preTileFrame != .zero {
-            restored = AXKit.setFrame(record.element, to: record.preTileFrame)
+            restored = gateway.setFrame(record.handle, to: record.preTileFrame)
         }
         records[id] = nil
         lastKnownFrames[id] = nil
@@ -294,12 +289,12 @@ final class TilingController {
     @discardableResult
     private func applyLayout(for id: WindowID) -> Bool {
         guard let record = records[id], let slot = state.slot(of: id) else { return false }
-        let current = AXKit.frame(of: record.element) ?? record.preTileFrame
+        let current = gateway.frame(of: record.handle) ?? record.preTileFrame
         let bounds = visibleBounds(for: current)
         let target = grid.rect(for: slot, in: bounds)
         markExpected(id, target)
         lastKnownFrames[id] = target
-        let ok = AXKit.setFrame(record.element, to: target)
+        let ok = gateway.setFrame(record.handle, to: target)
         dbg("applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) target=\(target) ok=\(ok)")
         return ok
     }
@@ -310,12 +305,12 @@ final class TilingController {
         for (slot, occupant) in state.occupants {
             guard !excluded.contains(occupant), let record = records[occupant] else { continue }
             let frame =
-                lastKnownFrames[occupant] ?? AXKit.frame(of: record.element)
+                lastKnownFrames[occupant] ?? gateway.frame(of: record.handle)
                 ?? record.preTileFrame
             let bounds = visibleBounds(for: frame)
             let target = grid.rect(for: slot, in: bounds)
             markExpected(occupant, target)
-            if !AXKit.setFrame(record.element, to: target) { failed += 1 }
+            if !gateway.setFrame(record.handle, to: target) { failed += 1 }
             dbg("applyAll win\(occupant) slot=\(slot.rawValue) target=\(target)")
         }
         if failed > 0 {
@@ -379,13 +374,13 @@ final class TilingController {
 
     // MARK: Registry
 
-    private func windowID(for element: AXUIElement, pid: pid_t) -> WindowID {
-        for (id, record) in records where CFEqual(record.element, element) {
+    private func windowID(for handle: WindowHandle) -> WindowID {
+        for (id, record) in records where record.handle == handle {
             return id
         }
         let id = nextID
         nextID += 1
-        records[id] = Record(element: element, pid: pid, preTileFrame: .zero)
+        records[id] = Record(handle: handle, preTileFrame: .zero)
         return id
     }
 
@@ -393,7 +388,7 @@ final class TilingController {
     /// Called lazily before each hotkey; proper AXObserver-driven cleanup is
     /// a later milestone.
     private func pruneDeadWindows() {
-        for (id, record) in records where !AXKit.isAlive(record.element) {
+        for (id, record) in records where !gateway.isAlive(record.handle) {
             records[id] = nil
             lastKnownFrames[id] = nil
             expectedFrames[id] = nil
@@ -439,13 +434,13 @@ final class TilingController {
         switchRequester = nil
         var restored = 0
         for entry in snapshot {
-            guard AXKit.isAlive(entry.element) else { continue }
-            let id = windowID(for: entry.element, pid: entry.pid)
+            guard gateway.isAlive(entry.handle) else { continue }
+            let id = windowID(for: entry.handle)
             guard var record = records[id] else { continue }
             record.preTileFrame = entry.preTileFrame
             records[id] = record
             state.commit(window: id, into: entry.slot)
-            observe(window: id, record: record)
+            observe(window: id)
             if applyLayout(for: id) {
                 restored += 1
             } else {
@@ -464,46 +459,27 @@ final class TilingController {
 
     // MARK: Live resize (observe & compensate)
 
-    private func observe(window id: WindowID, record: Record) {
-        let key = UInt(CFHash(record.element))
-        guard !observedElements.contains(key) else { return }
-        observedElements.insert(key)
-
-        let observer: AXObserver
-        if let existing = observers[record.pid] {
-            observer = existing
-        } else {
-            var created: AXObserver?
-            let result = AXObserverCreate(record.pid, Self.observerCallback, &created)
-            guard result == .success, let newObserver = created else {
-                observedElements.remove(key)
-                NSLog("tiled: AXObserverCreate failed for pid %d (%d)", record.pid, result.rawValue)
-                return
-            }
-            observer = newObserver
-            observers[record.pid] = observer
-            CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), CFRunLoopMode.commonModes)
-        }
-
-        for name in [kAXWindowResizedNotification, kAXWindowMovedNotification] {
-            let status = AXObserverAddNotification(
-                observer, record.element, name as CFString,
-                UnsafeMutableRawPointer(bitPattern: id))
-            if status != .success {
-                NSLog(
-                    "tiled: could not observe %@ on pid %d (%d)", name as String, record.pid,
-                    status.rawValue)
-            }
+    /// Registers the gateway's change handler: the gateway resolves element
+    /// identity and dedupes registrations behind the seam, so this module
+    /// only maps the callback back to its window id.
+    private func observe(window id: WindowID) {
+        guard let record = records[id] else { return }
+        let handle = record.handle
+        gateway.observe(handle) { [weak self] in
+            self?.handleWindowChange(handle: handle)
         }
     }
 
-    func handleAXNotification(notification: String, element: AXUIElement) {
-        // The observer refcon ids go stale (registrations outlive untiled
-        // records and can never be removed), so resolve the window by element
-        // identity. Windows that are currently untiled are ignored.
-        guard let id = currentID(for: element) else { return }
-        guard let frame = AXKit.frame(of: element) else { return }
-        dbg("notif win\(id) \(notification as String) frame=\(frame)")
+    /// Gateway change callback: the gateway resolved element identity and
+    /// deduped registration behind the seam; this module maps the callback
+    /// back to its window id and diffs the new frame (echo suppression +
+    /// edge detection live here).
+    private func handleWindowChange(handle: WindowHandle) {
+        // Windows currently untiled are ignored: observation registrations
+        // outlive records, so resolve the id from live records only.
+        guard let id = currentID(for: handle) else { return }
+        guard let frame = gateway.frame(of: handle) else { return }
+        dbg("notif win\(id) frame=\(frame)")
 
         // Echo suppression: our writes apply (often animated) as a stream of
         // notifications converging on the requested frame. Swallow them; a
@@ -600,18 +576,11 @@ final class TilingController {
         expectedFrames[id] = ExpectedWrite(frame: frame, lastDistance: .infinity, date: Date())
     }
 
-    private func currentID(for element: AXUIElement) -> WindowID? {
-        for (id, record) in records where CFEqual(record.element, element) {
+    private func currentID(for handle: WindowHandle) -> WindowID? {
+        for (id, record) in records where record.handle == handle {
             return id
         }
         return nil
-    }
-
-    private static let observerCallback: AXObserverCallback = {
-        _, element, notification, _ in
-        guard let controller = TilingController.active else { return }
-        controller.handleAXNotification(
-            notification: notification as String, element: element)
     }
 
     // MARK: Presentation
@@ -633,9 +602,7 @@ final class TilingController {
     /// Brings a tiled window to the front without disturbing the layout.
     func focus(window id: WindowID) {
         guard let record = records[id] else { return }
-        AXUIElementSetAttributeValue(
-            record.element, kAXMainAttribute as CFString, kCFBooleanTrue)
-        NSRunningApplication(processIdentifier: record.pid)?.activate()
+        gateway.focus(record.handle)
     }
 
     /// Untiles one window, restoring its pre-tile frame.
@@ -650,9 +617,7 @@ final class TilingController {
     }
 
     private func appName(for id: WindowID) -> String? {
-        records[id].flatMap {
-            NSRunningApplication(processIdentifier: $0.pid)?.localizedName
-        }
+        records[id].flatMap { gateway.appName(of: $0.handle) }
     }
 
     private static func refusalMessage(count: Int) -> String {
@@ -661,5 +626,5 @@ final class TilingController {
             : "Couldn't move \(count) windows — an app refused to resize."
     }
 
-    var isTrusted: Bool { AXKit.isTrusted }
+    var isTrusted: Bool { gateway.isTrusted }
 }
