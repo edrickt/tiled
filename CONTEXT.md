@@ -35,3 +35,7 @@ _Avoid_: focused window (focus is how it's usually found, not what it is)
 **Window handle**:
 The controller's opaque reference to a managed window, issued by the window gateway.
 _Avoid_: window id (that's the pure-state key), element
+
+**Plan execution**:
+Committing a decided plan (tile, swap, or switch): snapshot, restore, place, rollback, and notice logic. Owned by the plan executor; the controller keeps focus, pruning, and dispatch.
+_Avoid_: placement (which is only the place step), commit

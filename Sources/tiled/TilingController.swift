@@ -10,6 +10,8 @@ import AppKit
 /// it gateway callbacks and performs the writes it schedules.
 final class TilingController {
     private let gateway: WindowGateway
+    private lazy var executor = PlanExecutor(
+        gateway: gateway, log: { [weak self] in self?.dbg($0) })
 
     /// The drag-resize loop. Lazy so its context closures can capture
     /// self: the tracker decides (echo, edges, splitters), this module
@@ -31,24 +33,17 @@ final class TilingController {
     /// it for tests and menus that read `controller.grid`.
     var grid: GridLayout { tracker.grid }
 
-    private struct Record {
-        let handle: WindowHandle
-        var preTileFrame: CGRect
-    }
-
-    private var records: [WindowID: Record] = [:]
+    /// Registry of managed windows. `PlanExecutor` reads and mutates
+    /// these through `execute`/`undo`; `WindowRecord` is its type so both
+    /// modules share one record shape.
+    private var records: [WindowID: WindowRecord] = [:]
     private var nextID: WindowID = 1
 
     /// Snapshot of windows evicted by the last layout switch, enabling a
-    /// one-step undo ("Restore Evicted Windows"). Records are rebuilt from
-    /// live handles on undo; dead windows are skipped. Cleared by any new
-    /// tiling action, bulk op, or use — exactly one undo step exists.
-    private struct EvictedWindow {
-        let handle: WindowHandle
-        let slot: Slot
-        let preTileFrame: CGRect
-    }
-
+    /// one-step undo ("Restore Evicted Windows"). `EvictedWindow` lives
+    /// in PlanExecutor.swift; the snapshot is filled from `Outcome`.
+    /// Cleared by any new tiling action, bulk op, or use — exactly one
+    /// undo step exists.
     private var evictedSnapshot: [EvictedWindow]?
     private var switchRequester: WindowID?
 
@@ -156,87 +151,34 @@ final class TilingController {
         evictedSnapshot = nil
         switchRequester = nil
 
-        switch decision {
-        case .noop:
-            break // unreachable (guarded above)
-        case .swap(let placements):
-            state.commitSwaps(placements)
-            var failed = 0
-            for occupant in placements.keys {
-                if !applyLayout(for: occupant) { failed += 1 }
-            }
-            if failed > 0 {
-                lastTileError = Self.refusalMessage(count: failed)
-                onFeedback?(.refused(windowName: nil))
-            }
-            dbg("swap win\(id) -> \(slot.rawValue) placements=\(placements)")
-        case .switchLayout:
-            // The requester moves rather than evicts: restore everyone
-            // else first (restoring it would delete its record, so `place`
-            // would bail and the window would merely untile). Its old tile
-            // is vacated by the commit inside `place`.
-            let evicted = decision.windowsToRestore(requester: id)
-            evictedSnapshot = evicted.compactMap { id in
-                records[id].map {
-                    EvictedWindow(
-                        handle: $0.handle, slot: state.slot(of: id) ?? slot,
-                        preTileFrame: $0.preTileFrame)
-                }
-            }
-            switchRequester = id
-            let restoreFailures = restore(evicted)
-            place(window: id, into: slot)
-            if lastTileError == nil, restoreFailures.isEmpty, !evicted.isEmpty {
-                let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
-                lastNotice =
-                    "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. " +
-                    "Undo: Restore \(noun == "1 window" ? "1 Evicted Window" : "\(evicted.count) Evicted Windows")."
-            } else {
-                evictedSnapshot = nil
-                switchRequester = nil
-            }
-            reportRestoreFailures(restoreFailures)
-            dbg("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
-        case .tile:
-            let restoreFailures = restore(decision.windowsToRestore(requester: id))
-            place(window: id, into: slot)
-            reportRestoreFailures(restoreFailures)
+        let result = executor.execute(
+            decision: decision, requester: id, slot: slot,
+            state: state, records: records, nextID: nextID,
+            tracker: tracker,
+            boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
+            observe: { [weak self] in self?.observe(window: $0) })
+        state = result.state
+        records = result.records
+        nextID = result.nextID
+        let outcome = result.outcome
+        if let feedback = outcome.feedback {
+            onFeedback?(feedback)
         }
+        lastNotice = outcome.notice
+        if let error = outcome.error {
+            lastTileError = error
+        }
+        evictedSnapshot = outcome.snapshot
+        switchRequester = outcome.requester
         onChange?()
     }
 
-    // MARK: Placement
+    // MARK: Placement (delegated)
 
-    private func place(window id: WindowID, into slot: Slot) {
-        guard var record = records[id] else { return }
-        if state.slot(of: id) == nil {
-            // First tiling: remember where to restore when untiled.
-            // A window moving between overlapping slots (e.g. Left -> BottomLeft)
-            // keeps its original pre-tile frame.
-            record.preTileFrame = gateway.frame(of: record.handle) ?? record.preTileFrame
-            records[id] = record
-        }
-        state.commit(window: id, into: slot)
-        observe(window: id)
-        if !applyLayout(for: id) {
-            // The window refused the frame (some apps ignore AX resizes):
-            // roll back occupancy so state and screen agree, and say so.
-            state.remove(window: id)
-            tracker.forget(id)
-            let name = appName(for: id) ?? "That window"
-            lastTileError = "\(name) couldn't be tiled — the app refused to resize it."
-            onFeedback?(.refused(windowName: name))
-            dbg("place FAILED win\(id) -> \(slot.rawValue)")
-            return
-        }
-        dbg("place win\(id) -> \(slot.rawValue)")
-    }
-
-    /// Restores the window's pre-tile frame and releases its slot.
-    /// Returns false when the restore was attempted and refused, so the
-    /// caller can say so instead of silently leaving a stray window behind.
-    @discardableResult
-    private func restoreWindow(id: WindowID) -> Bool {
+    /// Single-window restore shared by `untile` and `untileAll`: restores
+    /// the pre-tile frame, releases the slot, and reports refusal so the
+    /// caller can name the window instead of leaving a stray behind.
+    private func restoreOne(_ id: WindowID) -> String? {
         var restored = true
         if let record = records[id], record.preTileFrame != .zero {
             restored = gateway.setFrame(record.handle, to: record.preTileFrame)
@@ -244,48 +186,8 @@ final class TilingController {
         records[id] = nil
         tracker.forget(id)
         state.remove(window: id)
-        return restored
-    }
-
-    /// Untiles every window in `ids`, returning the display names of those
-    /// whose pre-tile frame refused to restore.
-    private func restore(_ ids: [WindowID]) -> [String] {
-        var failures: [String] = []
-        for evicted in ids {
-            let name = appName(for: evicted) ?? "A window"
-            if !restoreWindow(id: evicted) {
-                failures.append(name)
-            }
-        }
-        return failures
-    }
-
-    /// Reports restore failures unless a more relevant error (e.g. the
-    /// requested tiling itself failing) already took the slot.
-    private func reportRestoreFailures(_ failures: [String]) {
-        guard !failures.isEmpty, lastTileError == nil else { return }
-        if failures.count == 1 {
-            lastTileError =
-                "Couldn't restore “\(failures[0])” — it may still be sitting in its old tile."
-        } else {
-            lastTileError =
-                "Couldn't restore \(failures.count) windows — they may still be sitting in their old tiles."
-        }
-    }
-
-    /// Applies `id`'s slot rect on the screen the window currently lives on.
-    /// Returns whether the gateway write succeeded (some windows refuse
-    /// resizes). The tracker bookkeeps the write for echo suppression.
-    @discardableResult
-    private func applyLayout(for id: WindowID) -> Bool {
-        guard let record = records[id], let slot = state.slot(of: id) else { return false }
-        let current = gateway.frame(of: record.handle) ?? record.preTileFrame
-        let bounds = visibleBounds(for: current)
-        let target = tracker.grid.rect(for: slot, in: bounds)
-        tracker.markExpected(id, target)
-        let ok = gateway.setFrame(record.handle, to: target)
-        dbg("applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) target=\(target) ok=\(ok)")
-        return ok
+        if restored { return nil }
+        return appName(for: id) ?? "A window"
     }
 
     /// Recomputes and pushes rects for all occupants (resize propagation).
@@ -379,7 +281,7 @@ final class TilingController {
         }
         let id = nextID
         nextID += 1
-        records[id] = Record(handle: handle, preTileFrame: .zero)
+        records[id] = WindowRecord(handle: handle, preTileFrame: .zero)
         return id
     }
 
@@ -402,8 +304,23 @@ final class TilingController {
         lastNotice = nil
         evictedSnapshot = nil
         switchRequester = nil
-        reportRestoreFailures(restore(state.tiledWindows))
+        let failures = state.tiledWindows.compactMap { restoreOne($0) }
+        reportRestoreFailures(failures)
         onChange?()
+    }
+
+    /// Reports restore failures unless a more relevant error already took
+    /// the slot. Shared by `untile`/`untileAll`; plan execution reports
+    /// its own through `Outcome.error` with the same precedence rule.
+    private func reportRestoreFailures(_ failures: [String]) {
+        guard !failures.isEmpty, lastTileError == nil else { return }
+        if failures.count == 1 {
+            lastTileError =
+                "Couldn't restore “\(failures[0])” — it may still be sitting in its old tile."
+        } else {
+            lastTileError =
+                "Couldn't restore \(failures.count) windows — they may still be sitting in their old tiles."
+        }
     }
 
     /// Snaps all splitters back to defaults and re-tiles everyone.
@@ -417,41 +334,28 @@ final class TilingController {
         onChange?()
     }
 
-    /// Undoes the last layout switch: the requester is restored to its
-    /// pre-tile frame and every surviving evicted window returns to its
-    /// slot. One step only — using it (or any new action) clears it.
+    /// Undoes the last layout switch via the executor: the requester is
+    /// restored and every surviving evicted window returns to its slot.
+    /// One step only — using it (or any new action) clears it.
     func undoLayoutSwitch() {
         guard let snapshot = evictedSnapshot, !snapshot.isEmpty else { return }
         pruneDeadWindows()
         lastTileError = nil
         lastNotice = nil
         evictedSnapshot = nil
-        if let requester = switchRequester {
-            _ = restoreWindow(id: requester)
-        }
+        let requester = switchRequester
         switchRequester = nil
-        var restored = 0
-        for entry in snapshot {
-            guard gateway.isAlive(entry.handle) else { continue }
-            let id = windowID(for: entry.handle)
-            guard var record = records[id] else { continue }
-            record.preTileFrame = entry.preTileFrame
-            records[id] = record
-            state.commit(window: id, into: entry.slot)
-            observe(window: id)
-            if applyLayout(for: id) {
-                restored += 1
-            } else {
-                state.remove(window: id)
-                records[id] = nil
-                tracker.forget(id)
-            }
-        }
-        if restored > 0 {
-            let noun = restored == 1 ? "1 window" : "\(restored) windows"
-            lastNotice = "Undid layout switch \u{00B7} \(noun) restored."
-        } else {
-            lastTileError = "Couldn't restore the evicted windows."
+        let result = executor.undo(
+            snapshot: snapshot, requester: requester,
+            state: state, records: records, nextID: nextID, tracker: tracker,
+            boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
+            observe: { [weak self] in self?.observe(window: $0) })
+        state = result.state
+        records = result.records
+        nextID = result.nextID
+        lastNotice = result.notice
+        if let error = result.error {
+            lastTileError = error
         }
         onChange?()
     }
@@ -508,7 +412,9 @@ final class TilingController {
         lastNotice = nil
         evictedSnapshot = nil
         switchRequester = nil
-        reportRestoreFailures(restoreWindow(id: id) ? [] : [appName(for: id) ?? "A window"])
+        if let failure = restoreOne(id) {
+            reportRestoreFailures([failure])
+        }
         onChange?()
     }
 
