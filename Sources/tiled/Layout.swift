@@ -1,33 +1,87 @@
 import CoreGraphics
 
-/// The four quadrants of a screen.
-enum Quad: String, CaseIterable {
-    case topLeft, topRight, bottomLeft, bottomRight
+/// Which tiling geometry a slot belongs to.
+///
+/// Layouts are mutually exclusive on screen: requesting a slot in a layout
+/// other than the active one resets the space (evicts every tiled window)
+/// and switches to the requested layout. See `TilingState.plan(window:into:)`.
+enum LayoutKind: String {
+    case quarters
+    case sixths
+
+    var title: String {
+        switch self {
+        case .quarters: "Quarters"
+        case .sixths: "Sixths"
+        }
+    }
 }
 
-/// A tile a window can occupy. Quads cover one quadrant; halves span a full column.
+/// Atomic tiling cell: the common refinement of the quarters split (1/2)
+/// and the sixths splits (1/3, 2/3). Four vertical strips x top/bottom rows.
 ///
-/// Overlap rule: two slots overlap iff their quad sets intersect.
+/// Strips run left to right: 0 = [0, 1/3), 1 = [1/3, 1/2),
+/// 2 = [1/2, 2/3), 3 = [2/3, 1].
+enum TileCell: String, CaseIterable, Hashable {
+    case col0Top, col1Top, col2Top, col3Top
+    case col0Bottom, col1Bottom, col2Bottom, col3Bottom
+}
+
+/// A tile a window can occupy.
+///
+/// Overlap rule: two slots overlap iff their cell sets intersect.
 /// The controller enforces "one window per tile" via the eviction/swap rules in
 /// `TilingState.plan(window:into:)`.
+///
+/// Quarters slots tile the screen as 2x2 quads plus full-column halves.
+/// Sixths slots tile it as a 3x2 grid (corner/middle sixths) plus full-height
+/// thirds and two-thirds. Quads and sixths are both unions of `TileCell`s, so
+/// cross-layout overlap falls out of the same cell-set intersection.
 enum Slot: String, CaseIterable {
+    // Quarters
     case topLeft, topRight, bottomLeft, bottomRight
     case leftHalf, rightHalf
+    // Sixths: corners, middles, thirds, two-thirds
+    case sixthTopLeft, sixthTopMiddle, sixthTopRight
+    case sixthBottomLeft, sixthBottomMiddle, sixthBottomRight
+    case sixthLeft, sixthMiddle, sixthRight
+    case sixthsLeftTwoThirds, sixthsRightTwoThirds
 
-    /// The quadrants this slot covers.
-    var quads: Set<Quad> {
+    /// Which layout this slot belongs to.
+    var layout: LayoutKind {
         switch self {
-        case .topLeft: [.topLeft]
-        case .topRight: [.topRight]
-        case .bottomLeft: [.bottomLeft]
-        case .bottomRight: [.bottomRight]
-        case .leftHalf: [.topLeft, .bottomLeft]
-        case .rightHalf: [.topRight, .bottomRight]
+        case .topLeft, .topRight, .bottomLeft, .bottomRight, .leftHalf, .rightHalf:
+            .quarters
+        default:
+            .sixths
+        }
+    }
+
+    /// The cells this slot covers.
+    var cells: Set<TileCell> {
+        switch self {
+        case .topLeft: [.col0Top, .col1Top]
+        case .topRight: [.col2Top, .col3Top]
+        case .bottomLeft: [.col0Bottom, .col1Bottom]
+        case .bottomRight: [.col2Bottom, .col3Bottom]
+        case .leftHalf: [.col0Top, .col1Top, .col0Bottom, .col1Bottom]
+        case .rightHalf: [.col2Top, .col3Top, .col2Bottom, .col3Bottom]
+        case .sixthTopLeft: [.col0Top]
+        case .sixthTopMiddle: [.col1Top, .col2Top]
+        case .sixthTopRight: [.col3Top]
+        case .sixthBottomLeft: [.col0Bottom]
+        case .sixthBottomMiddle: [.col1Bottom, .col2Bottom]
+        case .sixthBottomRight: [.col3Bottom]
+        case .sixthLeft: [.col0Top, .col0Bottom]
+        case .sixthMiddle: [.col1Top, .col2Top, .col1Bottom, .col2Bottom]
+        case .sixthRight: [.col3Top, .col3Bottom]
+        case .sixthsLeftTwoThirds: [.col0Top, .col1Top, .col2Top, .col0Bottom, .col1Bottom, .col2Bottom]
+        case .sixthsRightTwoThirds: [.col1Top, .col2Top, .col3Top, .col1Bottom, .col2Bottom, .col3Bottom]
         }
     }
 
     func overlaps(_ other: Slot) -> Bool {
-        !quads.isDisjoint(with: other.quads)
+        !cells.isDisjoint(with: other.cells)
     }
 
     // MARK: Presentation
@@ -40,6 +94,17 @@ enum Slot: String, CaseIterable {
         case .bottomRight: "Bottom Right"
         case .leftHalf: "Left Half"
         case .rightHalf: "Right Half"
+        case .sixthTopLeft: "Top Left Sixth"
+        case .sixthTopMiddle: "Top Middle Sixth"
+        case .sixthTopRight: "Top Right Sixth"
+        case .sixthBottomLeft: "Bottom Left Sixth"
+        case .sixthBottomMiddle: "Bottom Middle Sixth"
+        case .sixthBottomRight: "Bottom Right Sixth"
+        case .sixthLeft: "Left Sixth"
+        case .sixthMiddle: "Middle Sixth"
+        case .sixthRight: "Right Sixth"
+        case .sixthsLeftTwoThirds: "Left Two Sixths"
+        case .sixthsRightTwoThirds: "Right Two Sixths"
         }
     }
 
@@ -51,6 +116,17 @@ enum Slot: String, CaseIterable {
         case .bottomRight: "⌥⇧."
         case .leftHalf: "⌥⇧J"
         case .rightHalf: "⌥⇧L"
+        case .sixthTopLeft: "⌥⇧⌘U"
+        case .sixthTopMiddle: "⌥⇧⌘I"
+        case .sixthTopRight: "⌥⇧⌘O"
+        case .sixthBottomLeft: "⌥⇧⌘M"
+        case .sixthBottomMiddle: "⌥⇧⌘,"
+        case .sixthBottomRight: "⌥⇧⌘."
+        case .sixthLeft: "⌥⇧⌘J"
+        case .sixthMiddle: "⌥⇧⌘K"
+        case .sixthRight: "⌥⇧⌘L"
+        case .sixthsLeftTwoThirds: "⌥⇧⌘H"
+        case .sixthsRightTwoThirds: "⌥⇧⌘;"
         }
     }
 }
@@ -151,10 +227,17 @@ struct GridLayout: Equatable {
     }
 
     /// Rect for `slot` within `bounds` (AppKit coordinates, y grows upward).
+    ///
+    /// Quarters rects derive from the draggable splitters. Sixths rects are
+    /// fixed fractions (1/3, 2/3, 1/2) — sixths columns have no splitters.
     func rect(for slot: Slot, in bounds: CGRect) -> CGRect {
         let x = position(of: .columnSplit, in: bounds)
         let leftRowY = position(of: .leftRowSplit, in: bounds)
         let rightRowY = position(of: .rightRowSplit, in: bounds)
+        let x13 = bounds.minX + bounds.width / 3
+        let x12 = bounds.minX + bounds.width / 2
+        let x23 = bounds.minX + 2 * bounds.width / 3
+        let midY = bounds.minY + bounds.height / 2
         return switch slot {
         case .leftHalf:
             CGRect(x: bounds.minX, y: bounds.minY, width: x - bounds.minX, height: bounds.height)
@@ -174,6 +257,28 @@ struct GridLayout: Equatable {
         case .bottomRight:
             CGRect(
                 x: x, y: bounds.minY, width: bounds.maxX - x, height: rightRowY - bounds.minY)
+        case .sixthTopLeft:
+            CGRect(x: bounds.minX, y: midY, width: x13 - bounds.minX, height: bounds.maxY - midY)
+        case .sixthTopMiddle:
+            CGRect(x: x13, y: midY, width: x23 - x13, height: bounds.maxY - midY)
+        case .sixthTopRight:
+            CGRect(x: x23, y: midY, width: bounds.maxX - x23, height: bounds.maxY - midY)
+        case .sixthBottomLeft:
+            CGRect(x: bounds.minX, y: bounds.minY, width: x13 - bounds.minX, height: midY - bounds.minY)
+        case .sixthBottomMiddle:
+            CGRect(x: x13, y: bounds.minY, width: x23 - x13, height: midY - bounds.minY)
+        case .sixthBottomRight:
+            CGRect(x: x23, y: bounds.minY, width: bounds.maxX - x23, height: midY - bounds.minY)
+        case .sixthLeft:
+            CGRect(x: bounds.minX, y: bounds.minY, width: x13 - bounds.minX, height: bounds.height)
+        case .sixthMiddle:
+            CGRect(x: x13, y: bounds.minY, width: x23 - x13, height: bounds.height)
+        case .sixthRight:
+            CGRect(x: x23, y: bounds.minY, width: bounds.maxX - x23, height: bounds.height)
+        case .sixthsLeftTwoThirds:
+            CGRect(x: bounds.minX, y: bounds.minY, width: x23 - bounds.minX, height: bounds.height)
+        case .sixthsRightTwoThirds:
+            CGRect(x: x13, y: bounds.minY, width: bounds.maxX - x13, height: bounds.height)
         }
     }
 }
@@ -189,6 +294,10 @@ enum TilePlan: Equatable {
     /// Exchange places: every listed window moves to its slot, nobody is
     /// untiled. Always includes the requesting window -> the target slot.
     case swap(placements: [WindowID: Slot])
+    /// The request targets a different layout than the active one: every
+    /// tiled window is untiled (restored), the layout switches, and the
+    /// requesting window is placed into the target slot.
+    case switchLayout(evicting: [WindowID])
     /// The window already occupies the slot; untile it (toggle).
     case untile
 }
@@ -210,23 +319,35 @@ struct TilingState: Equatable {
 
     var tiledWindows: [WindowID] { Array(Set(occupantBySlot.values)) }
 
+    /// The layout currently on screen: the layout of any tiled window, or
+    /// quarters when the space is empty (quarters hotkeys tile without a
+    /// reset on first use).
+    var activeLayout: LayoutKind {
+        occupantBySlot.keys.first.map(\.layout) ?? .quarters
+    }
+
     /// Decides what happens when `window` requests `slot`.
     ///
     /// Rules (as decided):
     /// - Same window already in the slot -> toggle off.
-    /// - No overlap with other windows -> plain tile. A tiled window moves to
-    ///   the new slot; it never evicts itself.
-    /// - Overlap with other windows -> swap if there is room, else evict.
-    ///   When the requesting window is already tiled and every overlapping
-    ///   window fits into the footprint it vacates, they exchange places and
-    ///   nobody is untiled (TL -> occupied BR swaps the two windows;
-    ///   LeftHalf -> occupied TR swaps half and quad). Otherwise the
-    ///   overlapping windows are evicted: e.g. with all four quads tiled,
-    ///   TL -> RightHalf overlaps two windows while vacating one quad, so
-    ///   both are evicted instead of swapped. An untiled requester vacates
-    ///   nothing, so it always evicts.
+    /// - Request in a different layout than the active one -> reset: evict
+    ///   every tiled window, switch layouts, place the requester.
+    /// - Same layout, no overlap with other windows -> plain tile. A tiled
+    ///   window moves to the new slot; it never evicts itself.
+    /// - Same layout, overlap with other windows -> swap if there is room,
+    ///   else evict. When the requesting window is already tiled and every
+    ///   overlapping window fits into the footprint it vacates, they
+    ///   exchange places and nobody is untiled (TL -> occupied BR swaps the
+    ///   two windows; LeftHalf -> occupied TR swaps half and quad).
+    ///   Otherwise the overlapping windows are evicted: e.g. with all four
+    ///   quads tiled, TL -> RightHalf overlaps two windows while vacating
+    ///   one quad, so both are evicted instead of swapped. An untiled
+    ///   requester vacates nothing, so it always evicts.
     func plan(window: WindowID, into slot: Slot) -> TilePlan {
         if occupantBySlot[slot] == window { return .untile }
+        if !occupantBySlot.isEmpty, slot.layout != activeLayout {
+            return .switchLayout(evicting: tiledWindows.sorted())
+        }
         var blockers: [(slot: Slot, window: WindowID)] = []
         for (occupied, occupant) in occupantBySlot
         where occupant != window && occupied.overlaps(slot) {
@@ -236,7 +357,8 @@ struct TilingState: Equatable {
         if let old = self.slot(of: window),
             let relocation = Self.relocate(
                 blockers: blockers.map(\.window).sorted(),
-                within: old.quads.subtracting(slot.quads))
+                within: old.cells.subtracting(slot.cells),
+                layout: slot.layout)
         {
             var placements = relocation
             placements[window] = slot
@@ -245,26 +367,28 @@ struct TilingState: Equatable {
         return .tile(evicting: blockers.map(\.window).sorted())
     }
 
-    /// Assigns each blocker a distinct slot inside `free` (quads vacated by
-    /// the requesting window, minus its target), preferring larger slots so
-    /// halves stay halves when possible. Returns nil when there isn't enough
-    /// space to accommodate everyone.
-    private static func relocate(blockers: [WindowID], within free: Set<Quad>)
+    /// Assigns each blocker a distinct slot inside `free` (cells vacated by
+    /// the requesting window, minus its target), restricted to the target's
+    /// layout, preferring larger slots so halves stay halves when possible.
+    /// Returns nil when there isn't enough space to accommodate everyone.
+    private static func relocate(blockers: [WindowID], within free: Set<TileCell>, layout: LayoutKind)
         -> [WindowID: Slot]?
     {
-        let bySize = Slot.allCases.filter { $0.quads.isSubset(of: free) }.sorted {
-            if $0.quads.count != $1.quads.count { return $0.quads.count > $1.quads.count }
+        let bySize = Slot.allCases.filter {
+            $0.layout == layout && $0.cells.isSubset(of: free)
+        }.sorted {
+            if $0.cells.count != $1.cells.count { return $0.cells.count > $1.cells.count }
             return Slot.allCases.firstIndex(of: $0)! < Slot.allCases.firstIndex(of: $1)!
         }
         var assigned: [WindowID: Slot] = [:]
-        var used: Set<Quad> = []
+        var used: Set<TileCell> = []
         func search(_ index: Int) -> Bool {
             guard index < blockers.count else { return true }
-            for candidate in bySize where candidate.quads.isDisjoint(with: used) {
+            for candidate in bySize where candidate.cells.isDisjoint(with: used) {
                 assigned[blockers[index]] = candidate
-                used.formUnion(candidate.quads)
+                used.formUnion(candidate.cells)
                 if search(index + 1) { return true }
-                used.subtract(candidate.quads)
+                used.subtract(candidate.cells)
                 assigned[blockers[index]] = nil
             }
             return false

@@ -68,6 +68,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.autoenablesItems = false
 
         if controller.isTrusted {
+            let layoutItem = NSMenuItem(
+                title: "Layout: \(controller.activeLayout.title)", action: nil,
+                keyEquivalent: "")
+            layoutItem.isEnabled = false
+            menu.addItem(layoutItem)
+            menu.addItem(.separator())
             let tiled = controller.tiledWindowsInfo
             if tiled.isEmpty {
                 let item = NSMenuItem(title: "No tiled windows", action: nil, keyEquivalent: "")

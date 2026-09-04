@@ -2,15 +2,28 @@ import AppKit
 import Carbon.HIToolbox
 
 extension Slot {
+    /// Modifier set for this slot's hotkey: quarters use ⌥⇧, sixths add ⌘.
+    var modifiers: UInt32 {
+        switch layout {
+        case .quarters: UInt32(shiftKey | optionKey)
+        case .sixths: UInt32(shiftKey | optionKey | cmdKey)
+        }
+    }
+
     /// HIToolbox virtual keycode for this slot's hotkey.
     var keyCode: UInt32 {
         switch self {
-        case .topLeft: UInt32(kVK_ANSI_U)
-        case .topRight: UInt32(kVK_ANSI_O)
-        case .bottomLeft: UInt32(kVK_ANSI_M)
-        case .bottomRight: UInt32(kVK_ANSI_Period)
-        case .leftHalf: UInt32(kVK_ANSI_J)
-        case .rightHalf: UInt32(kVK_ANSI_L)
+        case .topLeft, .sixthTopLeft: UInt32(kVK_ANSI_U)
+        case .sixthTopMiddle: UInt32(kVK_ANSI_I)
+        case .topRight, .sixthTopRight: UInt32(kVK_ANSI_O)
+        case .bottomLeft, .sixthBottomLeft: UInt32(kVK_ANSI_M)
+        case .sixthBottomMiddle: UInt32(kVK_ANSI_Comma)
+        case .bottomRight, .sixthBottomRight: UInt32(kVK_ANSI_Period)
+        case .leftHalf, .sixthLeft: UInt32(kVK_ANSI_J)
+        case .sixthMiddle: UInt32(kVK_ANSI_K)
+        case .rightHalf, .sixthRight: UInt32(kVK_ANSI_L)
+        case .sixthsLeftTwoThirds: UInt32(kVK_ANSI_H)
+        case .sixthsRightTwoThirds: UInt32(kVK_ANSI_Semicolon)
         }
     }
 
@@ -56,12 +69,11 @@ final class HotkeyService {
     }
 
     private func registerHotkeys() {
-        let modifiers = UInt32(shiftKey | optionKey)
         for slot in Slot.allCases {
             var ref: EventHotKeyRef?
             let status = RegisterEventHotKey(
                 slot.keyCode,
-                modifiers,
+                slot.modifiers,
                 EventHotKeyID(signature: Self.signature, id: slot.hotkeyID),
                 GetApplicationEventTarget(),
                 0,

@@ -83,6 +83,12 @@ final class TilingController {
                 applyLayout(for: occupant)
             }
             dbg("swap win\(id) -> \(slot.rawValue) placements=\(placements)")
+        case .switchLayout(let evicting):
+            for evicted in evicting {
+                untile(window: evicted)
+            }
+            place(window: id, into: slot)
+            dbg("switchLayout win\(id) -> \(slot.rawValue) evicted=\(evicting)")
         case .tile(let evicting):
             for evicted in evicting {
                 untile(window: evicted)
@@ -365,6 +371,8 @@ final class TilingController {
         let slot: Slot
         let appName: String?
     }
+
+    var activeLayout: LayoutKind { state.activeLayout }
 
     var tiledWindowsInfo: [TiledWindowInfo] {
         state.occupants
