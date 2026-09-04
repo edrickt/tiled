@@ -448,6 +448,30 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(rightTwo.maxX, bounds.maxX, accuracy: 0.001)
     }
 
+    func testSixthsCornersCoverScreen() {
+        // All six corner sixths together must tile the screen exactly:
+        // contained in bounds, touching every edge, area preserved
+        // (no gaps, no overlaps).
+        let grid = GridLayout()
+        let corners: [Slot] = [
+            .sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+            .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight,
+        ]
+        let rects = corners.map { grid.rect(for: $0, in: bounds) }
+        for rect in rects {
+            XCTAssertGreaterThanOrEqual(rect.minX, bounds.minX - 0.001)
+            XCTAssertLessThanOrEqual(rect.maxX, bounds.maxX + 0.001)
+            XCTAssertGreaterThanOrEqual(rect.minY, bounds.minY - 0.001)
+            XCTAssertLessThanOrEqual(rect.maxY, bounds.maxY + 0.001)
+        }
+        XCTAssertEqual(rects.map(\.minX).min()!, bounds.minX, accuracy: 0.001)
+        XCTAssertEqual(rects.map(\.maxX).max()!, bounds.maxX, accuracy: 0.001)
+        XCTAssertEqual(rects.map(\.minY).min()!, bounds.minY, accuracy: 0.001)
+        XCTAssertEqual(rects.map(\.maxY).max()!, bounds.maxY, accuracy: 0.001)
+        let area = rects.reduce(CGFloat(0)) { $0 + $1.width * $1.height }
+        XCTAssertEqual(area, bounds.width * bounds.height, accuracy: 1)
+    }
+
     func testSixthsCornersPartitionTheirThird() {
         // The two corner sixths of each column stack exactly into its third.
         let grid = GridLayout()

@@ -833,6 +833,199 @@ final class TilingStateTests: XCTestCase {
             .tile(evicting: [a]))
     }
 
+    // MARK: Sixths session sequences (tiling, retiling, eviction chains)
+
+    /// Drives a sequence of (window, slot) requests through plan/commit
+    /// exactly like TilingController.handle does, then validates the end
+    /// state: one window per slot, no cell double-booked, committed state
+    /// matches the requester's slot. Returns the final state.
+    @discardableResult
+    private func drive(
+        _ requests: [(WindowID, Slot)],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> TilingState {
+        var state = TilingState()
+        for (window, slot) in requests {
+            switch state.plan(window: window, into: slot) {
+            case .untile:
+                state.remove(window: window)
+            case .swap(let placements):
+                state.commitSwaps(placements)
+            case .tile(let evicting), .switchLayout(let evicting):
+                for evicted in evicting { state.remove(window: evicted) }
+                state.commit(window: window, into: slot)
+            }
+            for (occupied, occupant) in state.occupants {
+                XCTAssertEqual(
+                    state.slot(of: occupant), occupied,
+                    "after win\(window) -> \(slot)", file: file, line: line)
+            }
+            var seen: Set<TileCell> = []
+            for (occupied, _) in state.occupants {
+                for cell in occupied.cells {
+                    XCTAssertFalse(
+                        seen.contains(cell),
+                        "after win\(window) -> \(slot): cell \(cell) double-booked",
+                        file: file, line: line)
+                    seen.insert(cell)
+                }
+            }
+        }
+        return state
+    }
+
+    func testSixthsFillRowThenRetile() {
+        // Fill the top row corner-by-corner with fresh windows, then move
+        // one of them to the other row: the vacated sixth frees up.
+        let end = drive([
+            (a, .sixthTopLeft), (b, .sixthTopMiddle), (c, .sixthTopRight),
+            (b, .sixthBottomMiddle),
+        ])
+        XCTAssertEqual(end.occupant(of: .sixthTopLeft), a)
+        XCTAssertEqual(end.occupant(of: .sixthBottomMiddle), b)
+        XCTAssertEqual(end.occupant(of: .sixthTopRight), c)
+        XCTAssertNil(end.occupant(of: .sixthTopMiddle))
+        XCTAssertEqual(end.activeLayout, .sixths)
+    }
+
+    func testSixthsThirdsFillThenTwoThirdsEvicts() {
+        // Fill all three thirds, then drop a two-thirds over them: both
+        // overlapped thirds are evicted and the third survives.
+        let d = 4
+        let end = drive([
+            (a, .sixthLeft), (b, .sixthMiddle), (c, .sixthRight),
+            (d, .sixthsLeftTwoThirds),
+        ])
+        XCTAssertEqual(end.occupant(of: .sixthsLeftTwoThirds), d)
+        XCTAssertEqual(end.occupant(of: .sixthRight), c)
+        XCTAssertNil(end.slot(of: a))
+        XCTAssertNil(end.slot(of: b))
+        XCTAssertEqual(end.tiledWindows.sorted(), [c, d])
+    }
+
+    func testSixthsRepeatedRetilingSameWindow() {
+        // One window bounced across sixths slots: it always ends up exactly
+        // where asked, never duplicated, never evicting needlessly.
+        let end = drive([
+            (a, .sixthLeft), (a, .sixthTopMiddle), (a, .sixthRight),
+            (a, .sixthsRightTwoThirds), (a, .sixthBottomLeft),
+        ])
+        XCTAssertEqual(end.occupants, [.sixthBottomLeft: a])
+        XCTAssertEqual(end.tiledWindows, [a])
+    }
+
+    func testSixthsSwapChain() {
+        // Left <-> Right is a clean swap; then Middle -> Left swaps the
+        // middle window into the left third against the swapped occupant.
+        let end = drive([
+            (a, .sixthLeft), (b, .sixthMiddle), (c, .sixthRight),
+            (a, .sixthRight),
+            (b, .sixthLeft),
+        ])
+        XCTAssertEqual(end.occupant(of: .sixthRight), a)
+        XCTAssertEqual(end.occupant(of: .sixthLeft), b)
+        XCTAssertEqual(end.occupant(of: .sixthMiddle), c)
+    }
+
+    func testSixthsToggleOffAndRefill() {
+        // Tiling the same slot twice untiles; the freed sixth is reusable.
+        let end = drive([
+            (a, .sixthTopLeft), (b, .sixthTopMiddle),
+            (a, .sixthTopLeft), // toggle a off
+            (c, .sixthTopLeft),
+        ])
+        XCTAssertEqual(end.occupant(of: .sixthTopLeft), c)
+        XCTAssertEqual(end.occupant(of: .sixthTopMiddle), b)
+        XCTAssertNil(end.slot(of: a))
+        XCTAssertEqual(end.activeLayout, .sixths)
+    }
+
+    func testSixthsToQuartersAndBack() {
+        // Full sixths session, reset to quarters, tile there, reset back:
+        // each switch leaves exactly the requester behind.
+        let end = drive([
+            (a, .sixthLeft), (b, .sixthMiddle), (c, .sixthRight),
+            (c, .topLeft), // reset to quarters
+            (a, .topRight),
+            (a, .sixthMiddle), // reset to sixths
+        ])
+        XCTAssertEqual(end.occupants, [.sixthMiddle: a])
+        XCTAssertEqual(end.activeLayout, .sixths)
+        XCTAssertNil(end.slot(of: b))
+        XCTAssertNil(end.slot(of: c))
+    }
+
+    func testSixthsCornerEvictionCascade() {
+        // Stack corners in one third, then cover the third: the stacked
+        // corners go, the neighbor third survives; retiling the freed
+        // corner works immediately.
+        let d = 4
+        let end = drive([
+            (a, .sixthTopLeft), (b, .sixthBottomLeft), (c, .sixthMiddle),
+            (d, .sixthLeft),
+            (a, .sixthTopRight),
+        ])
+        XCTAssertEqual(end.occupant(of: .sixthLeft), d)
+        XCTAssertEqual(end.occupant(of: .sixthMiddle), c)
+        XCTAssertEqual(end.occupant(of: .sixthTopRight), a)
+        XCTAssertNil(end.slot(of: b))
+    }
+
+    func testSixthsExhaustiveReachableStates() {
+        // BFS over short request sequences (up to 3 windows, sixths slots)
+        // asserting the no-ghost / no-overlap / active-layout invariants
+        // after EVERY step, not just at the end.
+        let windows = [a, b, c]
+        let targets: [Slot] = [
+            .sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+            .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight,
+            .sixthLeft, .sixthMiddle, .sixthRight,
+            .sixthsLeftTwoThirds, .sixthsRightTwoThirds,
+        ]
+        var queue: [(TilingState, Int)] = [(TilingState(), 0)]
+        var visited: Set<String> = []
+        var steps = 0
+        while !queue.isEmpty {
+            let (state, depth) = queue.removeFirst()
+            for window in windows {
+                for target in targets {
+                    var next = state
+                    switch next.plan(window: window, into: target) {
+                    case .untile:
+                        next.remove(window: window)
+                    case .swap(let placements):
+                        next.commitSwaps(placements)
+                    case .tile(let evicting), .switchLayout(let evicting):
+                        for evicted in evicting { next.remove(window: evicted) }
+                        next.commit(window: window, into: target)
+                    }
+                    steps += 1
+                    // Invariants after every single transition.
+                    XCTAssertEqual(
+                        Set(next.tiledWindows), Set(next.occupants.values),
+                        "win\(window) -> \(target)")
+                    var seen: Set<TileCell> = []
+                    for (slot, occupant) in next.occupants {
+                        XCTAssertEqual(next.slot(of: occupant), slot)
+                        XCTAssertEqual(slot.layout, next.activeLayout)
+                        for cell in slot.cells {
+                            XCTAssertFalse(seen.contains(cell), "win\(window) -> \(target)")
+                            seen.insert(cell)
+                        }
+                    }
+                    let key = next.occupants
+                        .map { "\($0.key.rawValue)=\($0.value)" }
+                        .sorted().joined(separator: ",")
+                    if depth < 2 && visited.insert(key).inserted {
+                        queue.append((next, depth + 1))
+                    }
+                }
+            }
+        }
+        XCTAssertGreaterThan(steps, 1000, "BFS explored too little")
+    }
+
     func testSwapWithoutRoomFallsBackToEviction() {
         // All four quads tiled; TL -> RightHalf overlaps two windows but
         // vacates one quad, so both are evicted instead of swapped.
