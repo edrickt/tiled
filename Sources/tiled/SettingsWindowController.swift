@@ -424,7 +424,7 @@ final class SettingsWindowController: NSWindowController {
         row.orientation = .horizontal
         row.spacing = 12
 
-        let label = NSTextField(labelWithString: slot.title)
+        let label = NSTextField(labelWithString: SlotPresentation.title(of: slot))
         label.font = .systemFont(ofSize: NSFont.systemFontSize)
         row.addArrangedSubview(label)
 
@@ -441,11 +441,11 @@ final class SettingsWindowController: NSWindowController {
         // and on silent tab-away cancel (no decision, no visual trace).
         button.onArmed = { [weak self] armedSlot in
             self?.announceRecorderState(
-                "Capturing a shortcut for \(armedSlot.title) — press a combo, or Esc to keep the old one.")
+                "Capturing a shortcut for \(SlotPresentation.title(of: armedSlot)) — press a combo, or Esc to keep the old one.")
         }
         button.onSilentCancel = { [weak self] cancelledSlot in
             self?.announceRecorderState(
-                "\(cancelledSlot.title) kept its old shortcut.")
+                "\(SlotPresentation.title(of: cancelledSlot)) kept its old shortcut.")
         }
         recorderButtons[slot] = button
         row.addArrangedSubview(button)
@@ -637,10 +637,10 @@ final class SettingsWindowController: NSWindowController {
                 // forever. Announced to VoiceOver, not just shown.
                 button.showBinding(hotkeyStore.binding(for: slot))
                 button.shake()
-                let owners = slots.map(\.title).joined(separator: ", ")
+                let owners = slots.map { SlotPresentation.title(of: $0) }.joined(separator: ", ")
                 let message =
                     "\(candidate.label ?? "That combo") is already used by \(owners) — " +
-                    "\(slot.title) kept its old shortcut."
+                    "\(SlotPresentation.title(of: slot)) kept its old shortcut."
                 showConflict(message)
                 NSLog("tiled: %@", message)
             }

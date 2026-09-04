@@ -143,15 +143,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Settings: 11 flat items exceed working memory at the moment
             // of action, so chunk them into corners, thirds, two-thirds.
             submenu.addItem(disabledItem("Sixths \u{2014} Corners"))
-            for slot in Slot.sixthsCorners {
+            for slot in SlotPresentation.sixthsCorners {
                 submenu.addItem(tileItem(for: slot))
             }
             submenu.addItem(disabledItem("Thirds"))
-            for slot in Slot.sixthsThirds {
+            for slot in SlotPresentation.sixthsThirds {
                 submenu.addItem(tileItem(for: slot))
             }
             submenu.addItem(disabledItem("Two-Thirds"))
-            for slot in Slot.sixthsTwoThirds {
+            for slot in SlotPresentation.sixthsTwoThirds {
                 submenu.addItem(tileItem(for: slot))
             }
             tile.submenu = submenu
@@ -275,7 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for slot in hotkeys?.failedSlots ?? [] {
             let label = hotkeyStore.binding(for: slot).label ?? "Disabled"
             warnings.append(
-                "\(label) is already used by another app — “\(slot.title)” has no hotkey.")
+                "\(label) is already used by another app — “\(SlotPresentation.title(of: slot))” has no hotkey.")
         }
         return warnings
     }
@@ -293,7 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func tileItem(for slot: Slot) -> NSMenuItem {
         let label = hotkeyStore.binding(for: slot).label
         let item = NSMenuItem(
-            title: label.map { "\(slot.title) — \($0)" } ?? slot.title,
+            title: label.map { "\(SlotPresentation.title(of: slot)) — \($0)" } ?? SlotPresentation.title(of: slot),
             action: #selector(tileSlot(_:)),
             keyEquivalent: "")
         item.target = self
@@ -305,9 +305,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func windowLine(for info: TilingController.TiledWindowInfo) -> String {
         let name = info.appName ?? "window"
         if let label = hotkeyStore.binding(for: info.slot).label {
-            return "\(info.slot.title) — \(name) (\(label))"
+            return "\(SlotPresentation.title(of: info.slot)) — \(name) (\(label))"
         }
-        return "\(info.slot.title) — \(name)"
+        return "\(SlotPresentation.title(of: info.slot)) — \(name)"
     }
 
     // MARK: Actions
@@ -418,8 +418,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 fallback: "No focused window.")
         case .alreadyTiled(let slot):
             announce(
-                "\(slot.title) — already there.",
-                fallback: "Already in \(slot.title).")
+                "\(SlotPresentation.title(of: slot)) — already there.",
+                fallback: "Already in \(SlotPresentation.title(of: slot)).")
         case .refused(let name):
             announce(
                 "\(name ?? "That window") couldn't be tiled — the app refused to resize it.",

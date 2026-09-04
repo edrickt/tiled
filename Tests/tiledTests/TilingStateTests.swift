@@ -219,17 +219,17 @@ final class TilingStateTests: XCTestCase {
     func testSlotPresentation() {
         XCTAssertEqual(Slot.allCases.count, 17)
         for slot in Slot.allCases {
-            XCTAssertFalse(slot.title.isEmpty)
+            XCTAssertFalse(SlotPresentation.title(of: slot).isEmpty)
             XCTAssertNotNil(HotkeyStore.defaultBinding(for: slot).label)
         }
-        XCTAssertEqual(Slot.topLeft.title, "Top Left")
-        XCTAssertEqual(Slot.leftHalf.title, "Left Half")
-        XCTAssertEqual(Slot.sixthTopLeft.title, "Top Left Sixth")
-        XCTAssertEqual(Slot.sixthLeft.title, "Left Third")
-        XCTAssertEqual(Slot.sixthMiddle.title, "Middle Third")
-        XCTAssertEqual(Slot.sixthRight.title, "Right Third")
-        XCTAssertEqual(Slot.sixthsLeftTwoThirds.title, "Left Two-Thirds")
-        XCTAssertEqual(Slot.sixthsRightTwoThirds.title, "Right Two-Thirds")
+        XCTAssertEqual(SlotPresentation.title(of: .topLeft), "Top Left")
+        XCTAssertEqual(SlotPresentation.title(of: .leftHalf), "Left Half")
+        XCTAssertEqual(SlotPresentation.title(of: .sixthTopLeft), "Top Left Sixth")
+        XCTAssertEqual(SlotPresentation.title(of: .sixthLeft), "Left Third")
+        XCTAssertEqual(SlotPresentation.title(of: .sixthMiddle), "Middle Third")
+        XCTAssertEqual(SlotPresentation.title(of: .sixthRight), "Right Third")
+        XCTAssertEqual(SlotPresentation.title(of: .sixthsLeftTwoThirds), "Left Two-Thirds")
+        XCTAssertEqual(SlotPresentation.title(of: .sixthsRightTwoThirds), "Right Two-Thirds")
         XCTAssertEqual(
             Set(Slot.allCases.map { HotkeyStore.defaultBinding(for: $0).label }).count,
             17) // default combos unique

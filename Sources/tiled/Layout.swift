@@ -86,46 +86,6 @@ enum Slot: String, CaseIterable {
     func overlaps(_ other: Slot) -> Bool {
         !cells.isDisjoint(with: other.cells)
     }
-
-    /// Sixths submenu groupings (corners / thirds / two-thirds): 11 flat
-    /// items exceed working memory at the moment of action, so the menu
-    /// chunks them under disabled sub-headers.
-    static var sixthsCorners: [Slot] {
-        [.sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
-         .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight]
-    }
-
-    static var sixthsThirds: [Slot] {
-        [.sixthLeft, .sixthMiddle, .sixthRight]
-    }
-
-    static var sixthsTwoThirds: [Slot] {
-        [.sixthsLeftTwoThirds, .sixthsRightTwoThirds]
-    }
-
-    // MARK: Presentation
-
-    var title: String {
-        switch self {
-        case .topLeft: "Top Left"
-        case .topRight: "Top Right"
-        case .bottomLeft: "Bottom Left"
-        case .bottomRight: "Bottom Right"
-        case .leftHalf: "Left Half"
-        case .rightHalf: "Right Half"
-        case .sixthTopLeft: "Top Left Sixth"
-        case .sixthTopMiddle: "Top Middle Sixth"
-        case .sixthTopRight: "Top Right Sixth"
-        case .sixthBottomLeft: "Bottom Left Sixth"
-        case .sixthBottomMiddle: "Bottom Middle Sixth"
-        case .sixthBottomRight: "Bottom Right Sixth"
-        case .sixthLeft: "Left Third"
-        case .sixthMiddle: "Middle Third"
-        case .sixthRight: "Right Third"
-        case .sixthsLeftTwoThirds: "Left Two-Thirds"
-        case .sixthsRightTwoThirds: "Right Two-Thirds"
-        }
-    }
 }
 
 /// An edge of a window's frame.

@@ -104,6 +104,51 @@ struct HotkeyBinding: Equatable {
     }
 }
 
+/// Display names and menu groupings for slots. Lives beside the hotkey
+/// model because nearly every consumer is hotkey UI (menu, Settings rows,
+/// announcements) — the one exception is the controller's two status
+/// lines, which read through this too so wording changes in one place.
+/// `Slot` itself keeps only geometry (cells, layout, overlap).
+enum SlotPresentation {
+    static func title(of slot: Slot) -> String {
+        switch slot {
+        case .topLeft: "Top Left"
+        case .topRight: "Top Right"
+        case .bottomLeft: "Bottom Left"
+        case .bottomRight: "Bottom Right"
+        case .leftHalf: "Left Half"
+        case .rightHalf: "Right Half"
+        case .sixthTopLeft: "Top Left Sixth"
+        case .sixthTopMiddle: "Top Middle Sixth"
+        case .sixthTopRight: "Top Right Sixth"
+        case .sixthBottomLeft: "Bottom Left Sixth"
+        case .sixthBottomMiddle: "Bottom Middle Sixth"
+        case .sixthBottomRight: "Bottom Right Sixth"
+        case .sixthLeft: "Left Third"
+        case .sixthMiddle: "Middle Third"
+        case .sixthRight: "Right Third"
+        case .sixthsLeftTwoThirds: "Left Two-Thirds"
+        case .sixthsRightTwoThirds: "Right Two-Thirds"
+        }
+    }
+
+    /// Sixths submenu groupings: 11 flat items exceed working memory at
+    /// the moment of action, so the menu chunks them under disabled
+    /// sub-headers mirroring these groups.
+    static var sixthsCorners: [Slot] {
+        [.sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+         .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight]
+    }
+
+    static var sixthsThirds: [Slot] {
+        [.sixthLeft, .sixthMiddle, .sixthRight]
+    }
+
+    static var sixthsTwoThirds: [Slot] {
+        [.sixthsLeftTwoThirds, .sixthsRightTwoThirds]
+    }
+}
+
 /// Persists per-slot hotkey bindings in UserDefaults. Missing entries fall
 /// back to the factory defaults (today's fixed ⌥⇧ / ⌥⇧⌘ set), so a fresh
 /// install behaves exactly like the current hardcoded build.

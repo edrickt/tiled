@@ -5,17 +5,31 @@ import AppKit
 /// identity, coordinate conversion, observation, and activation live
 /// behind the seam; this module owns only tiling decisions and records.
 ///
-/// Responsibilities:
-/// - Tiling/eviction per the decided rules (see TilingState).
-/// - Live drag resize (observe & compensate): AXObserver notifications on
-///   tiled windows -> detect which edge the user dragged -> move the
-///   corresponding grid splitter -> push new rects to the neighbor windows.
-///   Writes are bookkept in `expectedFrames` so our own echoes don't recurse.
+/// The live drag-resize loop lives in `DragTracker` (echo suppression,
+/// edge detection, splitter moves, apply coalescing); this module feeds
+/// it gateway callbacks and performs the writes it schedules.
 final class TilingController {
     private let gateway: WindowGateway
 
+    /// The drag-resize loop. Lazy so its context closures can capture
+    /// self: the tracker decides (echo, edges, splitters), this module
+    /// performs writes via `pushRects` and serves record reads.
+    private lazy var tracker: DragTracker = DragTracker(
+        context: DragTracker.Context(
+            slotOf: { [weak self] in self?.state.slot(of: $0) },
+            frameOf: { [weak self] in self?.frameForTracker($0) },
+            boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
+            occupants: { [weak self] in self?.state.occupants ?? [:] }),
+        apply: { [weak self] rects, excluding in
+            guard let self else { return 0 }
+            return self.pushRects(rects, excluding: excluding)
+        },
+        log: { [weak self] in self?.dbg($0) })
+
     private(set) var state = TilingState()
-    private(set) var grid = GridLayout()
+    /// Current grid. Source of truth lives in the tracker; this mirrors
+    /// it for tests and menus that read `controller.grid`.
+    var grid: GridLayout { tracker.grid }
 
     private struct Record {
         let handle: WindowHandle
@@ -24,29 +38,6 @@ final class TilingController {
 
     private var records: [WindowID: Record] = [:]
     private var nextID: WindowID = 1
-
-    /// Last frame we observed per tiled window (for edge-change detection).
-    private var lastKnownFrames: [WindowID: CGRect] = [:]
-    /// Frames we recently asked the gateway to set (echo suppression). Apps animate
-    /// AX frame writes, emitting notification streams that converge on the
-    /// requested frame; we swallow while converging and escape as soon as a
-    /// tick moves away from it (a real user grab).
-    private var expectedFrames: [WindowID: ExpectedWrite] = [:]
-
-    private var applyScheduled = false
-    private var applyExclusions: Set<WindowID> = []
-
-    private static let echoTolerance: CGFloat = 32
-    private static let staleWrite: TimeInterval = 3
-    private static let edgeMoveThreshold: CGFloat = 1
-
-    private struct ExpectedWrite {
-        let frame: CGRect
-        /// Last observed sum-of-edge-deltas from `frame`. Starts at infinity;
-        /// only a strictly increasing distance means a user took over.
-        var lastDistance: CGFloat
-        let date: Date
-    }
 
     /// Snapshot of windows evicted by the last layout switch, enabling a
     /// one-step undo ("Restore Evicted Windows"). Records are rebuilt from
@@ -231,8 +222,7 @@ final class TilingController {
             // The window refused the frame (some apps ignore AX resizes):
             // roll back occupancy so state and screen agree, and say so.
             state.remove(window: id)
-            lastKnownFrames[id] = nil
-            expectedFrames[id] = nil
+            tracker.forget(id)
             let name = appName(for: id) ?? "That window"
             lastTileError = "\(name) couldn't be tiled — the app refused to resize it."
             onFeedback?(.refused(windowName: name))
@@ -252,8 +242,7 @@ final class TilingController {
             restored = gateway.setFrame(record.handle, to: record.preTileFrame)
         }
         records[id] = nil
-        lastKnownFrames[id] = nil
-        expectedFrames[id] = nil
+        tracker.forget(id)
         state.remove(window: id)
         return restored
     }
@@ -285,52 +274,62 @@ final class TilingController {
     }
 
     /// Applies `id`'s slot rect on the screen the window currently lives on.
-    /// Returns whether the AX write succeeded (some windows refuse resizes).
+    /// Returns whether the gateway write succeeded (some windows refuse
+    /// resizes). The tracker bookkeeps the write for echo suppression.
     @discardableResult
     private func applyLayout(for id: WindowID) -> Bool {
         guard let record = records[id], let slot = state.slot(of: id) else { return false }
         let current = gateway.frame(of: record.handle) ?? record.preTileFrame
         let bounds = visibleBounds(for: current)
-        let target = grid.rect(for: slot, in: bounds)
-        markExpected(id, target)
-        lastKnownFrames[id] = target
+        let target = tracker.grid.rect(for: slot, in: bounds)
+        tracker.markExpected(id, target)
         let ok = gateway.setFrame(record.handle, to: target)
         dbg("applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) target=\(target) ok=\(ok)")
         return ok
     }
 
     /// Recomputes and pushes rects for all occupants (resize propagation).
+    /// The tracker computes rects under its grid; this module performs the
+    /// writes and reports refusals — the push half of the tracker's
+    /// decide/push split.
     private func applyAll(excluding excluded: Set<WindowID> = []) {
-        var failed = 0
-        for (slot, occupant) in state.occupants {
-            guard !excluded.contains(occupant), let record = records[occupant] else { continue }
-            let frame =
-                lastKnownFrames[occupant] ?? gateway.frame(of: record.handle)
-                ?? record.preTileFrame
-            let bounds = visibleBounds(for: frame)
-            let target = grid.rect(for: slot, in: bounds)
-            markExpected(occupant, target)
-            if !gateway.setFrame(record.handle, to: target) { failed += 1 }
-            dbg("applyAll win\(occupant) slot=\(slot.rawValue) target=\(target)")
+        var rects: [WindowID: CGRect] = [:]
+        for (_, occupant) in state.occupants {
+            guard !excluded.contains(occupant), records[occupant] != nil else { continue }
+            if let target = tracker.rect(for: occupant) {
+                rects[occupant] = target
+            }
         }
+        let failed = pushRects(rects, excluding: nil)
         if failed > 0 {
             lastTileError = Self.refusalMessage(count: failed)
         }
     }
 
-    /// Coalesces rapid resize notifications into one apply per runloop tick.
-    private func scheduleApply(excluding id: WindowID) {
-        applyExclusions.insert(id)
-        guard !applyScheduled else { return }
-        applyScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.applyScheduled = false
-            let excluded = self.applyExclusions
-            self.applyExclusions = []
-            self.applyAll(excluding: excluded)
-            self.onChange?()
+    /// Performs tracker-scheduled pushes: marks each write expected (echo
+    /// bookkeeping lives in the tracker) and writes via the gateway.
+    /// Returns the refusal count. `excluding` is informational — rects
+    /// never name the dragged window.
+    private func pushRects(_ rects: [WindowID: CGRect], excluding: WindowID?) -> Int {
+        var failed = 0
+        for (id, target) in rects {
+            guard let record = records[id] else { continue }
+            tracker.markExpected(id, target)
+            if !gateway.setFrame(record.handle, to: target) { failed += 1 }
+            dbg("push win\(id) target=\(target)")
         }
+        if failed > 0 {
+            lastTileError = Self.refusalMessage(count: failed)
+        }
+        onChange?()
+        return failed
+    }
+
+    /// Frame the tracker diffs against: the last pushed target when known,
+    /// else the live frame, else the pre-tile frame.
+    private func frameForTracker(_ id: WindowID) -> CGRect? {
+        guard let record = records[id] else { return nil }
+        return gateway.frame(of: record.handle) ?? record.preTileFrame
     }
 
     /// Pure screen-ownership rule, extracted for tests: index of the
@@ -384,14 +383,13 @@ final class TilingController {
         return id
     }
 
-    /// Drops records whose AX element is gone (window closed, app quit).
-    /// Called lazily before each hotkey; proper AXObserver-driven cleanup is
+    /// Drops records whose handle is gone (window closed, app quit).
+    /// Called lazily before each hotkey; proper gateway-driven cleanup is
     /// a later milestone.
     private func pruneDeadWindows() {
         for (id, record) in records where !gateway.isAlive(record.handle) {
             records[id] = nil
-            lastKnownFrames[id] = nil
-            expectedFrames[id] = nil
+            tracker.forget(id)
             state.remove(window: id)
         }
     }
@@ -410,7 +408,7 @@ final class TilingController {
 
     /// Snaps all splitters back to defaults and re-tiles everyone.
     func resetDividers() {
-        grid = GridLayout()
+        tracker.resetDividers()
         lastTileError = nil
         lastNotice = nil
         evictedSnapshot = nil
@@ -446,6 +444,7 @@ final class TilingController {
             } else {
                 state.remove(window: id)
                 records[id] = nil
+                tracker.forget(id)
             }
         }
         if restored > 0 {
@@ -459,121 +458,18 @@ final class TilingController {
 
     // MARK: Live resize (observe & compensate)
 
-    /// Registers the gateway's change handler: the gateway resolves element
-    /// identity and dedupes registrations behind the seam, so this module
-    /// only maps the callback back to its window id.
+    /// Registers the gateway's change handler and feeds callbacks to the
+    /// tracker. Element identity and dedupe live behind the seam; echo,
+    /// edges, splitters, and coalescing live in the tracker.
     private func observe(window id: WindowID) {
         guard let record = records[id] else { return }
         let handle = record.handle
         gateway.observe(handle) { [weak self] in
-            self?.handleWindowChange(handle: handle)
+            guard let self else { return }
+            guard let currentID = self.currentID(for: handle) else { return }
+            guard let frame = self.gateway.frame(of: handle) else { return }
+            self.tracker.handleChange(id: currentID, frame: frame)
         }
-    }
-
-    /// Gateway change callback: the gateway resolved element identity and
-    /// deduped registration behind the seam; this module maps the callback
-    /// back to its window id and diffs the new frame (echo suppression +
-    /// edge detection live here).
-    private func handleWindowChange(handle: WindowHandle) {
-        // Windows currently untiled are ignored: observation registrations
-        // outlive records, so resolve the id from live records only.
-        guard let id = currentID(for: handle) else { return }
-        guard let frame = gateway.frame(of: handle) else { return }
-        dbg("notif win\(id) frame=\(frame)")
-
-        // Echo suppression: our writes apply (often animated) as a stream of
-        // notifications converging on the requested frame. Swallow them; a
-        // tick that moves AWAY from the target means a real user drag took
-        // over, so we clear the entry and process it.
-        if var entry = expectedFrames[id] {
-            if framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
-                expectedFrames[id] = nil // write fully applied
-                lastKnownFrames[id] = frame
-                dbg("echo win\(id) consumed")
-                return
-            }
-            let distance = frameDistance(entry.frame, frame)
-            if distance > entry.lastDistance + 1 {
-                expectedFrames[id] = nil // user took over
-                dbg("echo win\(id) ESCAPE dist=\(distance) last=\(entry.lastDistance)")
-            } else if Date().timeIntervalSince(entry.date) > Self.staleWrite {
-                expectedFrames[id] = nil // write never applied; stop waiting
-                dbg("echo win\(id) stale")
-            } else {
-                entry.lastDistance = distance
-                expectedFrames[id] = entry
-                lastKnownFrames[id] = frame
-                dbg("echo win\(id) converging dist=\(distance)")
-                return
-            }
-        }
-
-        // Diff against the previous frame of ANY kind. Drags that change a
-        // window's origin arrive as Moved+Resized pairs with identical
-        // frames; comparing Resized against the paired Moved would silently
-        // drop every left/top/corner drag. Origin-only changes are title-bar
-        // moves: v1 leaves them off-grid until the next layout assertion.
-        let previous = lastKnownFrames[id]
-        lastKnownFrames[id] = frame
-        guard let previous, previous != frame else { return }
-        guard previous.size == frame.size else {
-            processResize(windowID: id, from: previous, to: frame)
-            return
-        }
-        dbg("move win\(id) ignored (origin-only change)")
-    }
-
-    /// Detects which edges moved, maps them to grid boundaries, updates the
-    /// splitters from the dragged window's *actual* frame, then pushes new
-    /// rects to the neighbors.
-    private func processResize(windowID id: WindowID, from old: CGRect, to new: CGRect) {
-        guard let slot = state.slot(of: id) else { return }
-        let bounds = visibleBounds(for: new)
-        let threshold = Self.edgeMoveThreshold
-
-        func moved(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) > threshold }
-
-        var changed = false
-        for edge in TileEdge.allCases {
-            let edgeMoved: Bool
-            let position: CGFloat
-            switch edge {
-            case .left:
-                edgeMoved = moved(new.minX, old.minX); position = new.minX
-            case .right:
-                edgeMoved = moved(new.maxX, old.maxX); position = new.maxX
-            case .top:
-                edgeMoved = moved(new.maxY, old.maxY); position = new.maxY
-            case .bottom:
-                edgeMoved = moved(new.minY, old.minY); position = new.minY
-            }
-            guard edgeMoved else { continue }
-            // The dragged window's own edge is the source of truth; skip it
-            // below so we never fight an in-progress native drag.
-            guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
-            if grid.update(boundary: boundary, toPosition: position, in: bounds) {
-                changed = true
-                dbg("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(grid)")
-            }
-        }
-        if changed {
-            scheduleApply(excluding: id)
-        }
-    }
-
-    private func framesClose(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
-        abs(a.minX - b.minX) <= tolerance && abs(a.maxX - b.maxX) <= tolerance
-            && abs(a.minY - b.minY) <= tolerance && abs(a.maxY - b.maxY) <= tolerance
-    }
-
-    /// Sum of per-edge deltas between two frames.
-    private func frameDistance(_ a: CGRect, _ b: CGRect) -> CGFloat {
-        abs(a.minX - b.minX) + abs(a.maxX - b.maxX)
-            + abs(a.minY - b.minY) + abs(a.maxY - b.maxY)
-    }
-
-    private func markExpected(_ id: WindowID, _ frame: CGRect) {
-        expectedFrames[id] = ExpectedWrite(frame: frame, lastDistance: .infinity, date: Date())
     }
 
     private func currentID(for handle: WindowHandle) -> WindowID? {
