@@ -52,7 +52,10 @@ enum Slot: String, CaseIterable {
         switch self {
         case .topLeft, .topRight, .bottomLeft, .bottomRight, .leftHalf, .rightHalf:
             .quarters
-        default:
+        case .sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+            .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight,
+            .sixthLeft, .sixthMiddle, .sixthRight,
+            .sixthsLeftTwoThirds, .sixthsRightTwoThirds:
             .sixths
         }
     }
@@ -211,8 +214,27 @@ struct GridLayout: Equatable {
             (.sixthBottomLeft, .top), (.sixthBottomMiddle, .top),
             (.sixthBottomRight, .top):
             return .sixthsRowSplit
-        default:
-            return nil // screen edges
+        // Screen edges are fixed (every remaining pair).
+        case (.topLeft, .left), (.topLeft, .top),
+            (.topRight, .right), (.topRight, .top),
+            (.bottomLeft, .left), (.bottomLeft, .bottom),
+            (.bottomRight, .right), (.bottomRight, .bottom),
+            (.leftHalf, .left), (.leftHalf, .top), (.leftHalf, .bottom),
+            (.rightHalf, .right), (.rightHalf, .top), (.rightHalf, .bottom),
+            (.sixthTopLeft, .left), (.sixthTopLeft, .top),
+            (.sixthTopMiddle, .top),
+            (.sixthTopRight, .right), (.sixthTopRight, .top),
+            (.sixthBottomLeft, .left), (.sixthBottomLeft, .bottom),
+            (.sixthBottomMiddle, .bottom),
+            (.sixthBottomRight, .right), (.sixthBottomRight, .bottom),
+            (.sixthLeft, .left), (.sixthLeft, .top), (.sixthLeft, .bottom),
+            (.sixthMiddle, .top), (.sixthMiddle, .bottom),
+            (.sixthRight, .right), (.sixthRight, .top), (.sixthRight, .bottom),
+            (.sixthsLeftTwoThirds, .left), (.sixthsLeftTwoThirds, .top),
+            (.sixthsLeftTwoThirds, .bottom),
+            (.sixthsRightTwoThirds, .right), (.sixthsRightTwoThirds, .top),
+            (.sixthsRightTwoThirds, .bottom):
+            return nil
         }
     }
 

@@ -228,6 +228,56 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(Set(Slot.allCases.map(\.hotkeyLabel)).count, 17) // labels unique
     }
 
+    func testHotkeyIDRoundTripsEverySlot() {
+        // Mirrors HotkeyService.Context: hotkeyID must be a unique dense
+        // 1-based index into allCases, and every id must resolve back to
+        // its slot. A duplicate or gap means a hotkey fires the wrong slot
+        // or nothing at all.
+        let ids = Slot.allCases.map(\.hotkeyID)
+        XCTAssertEqual(Set(ids).count, Slot.allCases.count, "duplicate hotkeyID")
+        XCTAssertEqual(Set(ids), Set(1...UInt32(Slot.allCases.count)), "hotkeyID gap")
+        var slotByID: [UInt32: Slot] = [:]
+        for slot in Slot.allCases {
+            slotByID[slot.hotkeyID] = slot
+        }
+        for slot in Slot.allCases {
+            XCTAssertEqual(
+                slotByID[slot.hotkeyID], slot, "\(slot.rawValue) does not round-trip")
+        }
+    }
+
+    func testSwitchLayoutEvictionListMatchesControllerBehavior() {
+        // The controller untile()s every window in plan's evicting list, so
+        // switchLayout's list must contain EVERY tiled window including the
+        // requester when tiled — otherwise a tiled window would survive a
+        // reset and leave two layouts on screen.
+        for layout in [[Slot.topLeft, Slot.bottomRight], [Slot.sixthLeft, Slot.sixthRight]] {
+            var state = TilingState()
+            var id = 1
+            for slot in layout {
+                state.commit(window: id, into: slot)
+                id += 1
+            }
+            let other: Slot = layout[0].layout == .quarters ? .sixthMiddle : .topLeft
+            for requester in [1, 2, 99] {
+                let plan = state.plan(window: requester, into: other)
+                guard case .switchLayout(let evicting) = plan else {
+                    XCTFail("win\(requester) -> \(other) did not reset")
+                    continue
+                }
+                let tiled = Set(state.tiledWindows)
+                XCTAssertEqual(
+                    Set(evicting), tiled,
+                    "win\(requester) -> \(other): evicting=\(evicting) tiled=\(tiled)")
+                var next = state
+                for evicted in evicting { next.remove(window: evicted) }
+                next.commit(window: requester, into: other)
+                XCTAssertEqual(next.occupants, [other: requester])
+                XCTAssertEqual(next.activeLayout, other.layout)
+            }
+        }
+    }
+
     func testHotkeys() {
         // Quarters keep the bare ⌥⇧ keys; sixths add ⌘ on the requested keys.
         let shiftOption = UInt32(shiftKey | optionKey)

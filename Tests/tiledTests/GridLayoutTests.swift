@@ -415,6 +415,42 @@ final class GridLayoutTests: XCTestCase {
             GridLayout.boundary(edge: .right, slot: .topLeft), .columnSplit)
     }
 
+    func testEveryBoundaryIsReachableFromSomeEdge() {
+        // Guards the reverse blind spot: a boundary nobody's edge maps to
+        // can never move via dragging (dead splitter). Every boundary must
+        // be reachable from at least one (slot, edge) pair.
+        var reachable: Set<GridBoundary> = []
+        for slot in Slot.allCases {
+            for edge in TileEdge.allCases {
+                if let boundary = GridLayout.boundary(edge: edge, slot: slot) {
+                    reachable.insert(boundary)
+                }
+            }
+        }
+        XCTAssertEqual(reachable, Set(GridBoundary.allCases))
+    }
+
+    func testBoundariesSplitBothLayouts() {
+        // Each layout must own at least one vertical and one horizontal
+        // draggable boundary, or that layout cannot be resized at all —
+        // the exact failure mode sixths shipped with.
+        let quarters: Set<GridBoundary> = [.columnSplit, .leftRowSplit, .rightRowSplit]
+        let sixths: Set<GridBoundary> = [.sixthsLeftSplit, .sixthsRightSplit, .sixthsRowSplit]
+        func reachable(in layout: LayoutKind) -> Set<GridBoundary> {
+            var found: Set<GridBoundary> = []
+            for slot in Slot.allCases where slot.layout == layout {
+                for edge in TileEdge.allCases {
+                    if let boundary = GridLayout.boundary(edge: edge, slot: slot) {
+                        found.insert(boundary)
+                    }
+                }
+            }
+            return found
+        }
+        XCTAssertEqual(reachable(in: .quarters), quarters)
+        XCTAssertEqual(reachable(in: .sixths), sixths)
+    }
+
     func testSixthsRects() {
         // Sixths are fixed fractions: thirds at 1/3 and 2/3, rows split at 1/2.
         let grid = GridLayout()
@@ -694,6 +730,43 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(grid.sixthsRowSplit, GridLayout.rowClamp.lowerBound, accuracy: 0.001)
         grid.update(boundary: .sixthsRowSplit, toPosition: bounds.maxY, in: bounds)
         XCTAssertEqual(grid.sixthsRowSplit, GridLayout.rowClamp.upperBound, accuracy: 0.001)
+    }
+
+    func testEachBoundaryMovesSomeRect() {
+        // End-to-end through position/update/rect: moving ANY boundary must
+        // change at least one slot's rect. A passing update() that moves no
+        // pixels is the same user-visible bug as an unmapped edge.
+        for boundary in GridBoundary.allCases {
+            var grid = GridLayout()
+            let before = Slot.allCases.map { grid.rect(for: $0, in: bounds) }
+            let center = grid.position(of: boundary, in: bounds)
+            XCTAssertTrue(
+                grid.update(boundary: boundary, toPosition: center + 60, in: bounds),
+                "\(boundary) did not move")
+            let after = Slot.allCases.map { grid.rect(for: $0, in: bounds) }
+            XCTAssertNotEqual(
+                before, after, "\(boundary) moved no slot rect")
+        }
+    }
+
+    func testEachBoundaryRoundTripsThroughPosition() {
+        // position(of:) and update(boundary:toPosition:) must agree: writing
+        // back a boundary's own position is a no-op (returns false), and a
+        // +60pt nudge shifts the reported position by ~60pt.
+        for boundary in GridBoundary.allCases {
+            var grid = GridLayout()
+            let center = grid.position(of: boundary, in: bounds)
+            XCTAssertFalse(
+                grid.update(boundary: boundary, toPosition: center, in: bounds),
+                "\(boundary) not idempotent")
+            XCTAssertTrue(
+                grid.update(boundary: boundary, toPosition: center + 60, in: bounds),
+                "\(boundary) ignored a 60pt drag")
+            // Sixths dividers clamp against each other, so read back loosely.
+            XCTAssertEqual(
+                grid.position(of: boundary, in: bounds), center + 60,
+                accuracy: 60, "\(boundary) position mismatch")
+        }
     }
 
     func testSixthsTilesStayFlushAfterDrag() {
