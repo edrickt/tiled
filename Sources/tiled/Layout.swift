@@ -37,6 +37,13 @@ enum TileCell: String, CaseIterable, Hashable {
 /// Sixths slots tile it as a 3x2 grid (corner/middle sixths) plus full-height
 /// thirds and two-thirds. Quads and sixths are both unions of `TileCell`s, so
 /// cross-layout overlap falls out of the same cell-set intersection.
+///
+/// Predictability contract: swapping assigns displaced windows in spatial
+/// reading order (top-to-bottom, left-to-right — `Slot.readingOrder`), so
+/// the same windows on screen always shuffle the same way regardless of
+/// tiling order. The largest fitting slot wins each assignment (halves
+/// stay halves), and anything that doesn't fit evicts instead of
+/// stranding — see `TilingState.plan(window:into:)`.
 enum Slot: String, CaseIterable {
     // Quarters
     case topLeft, topRight, bottomLeft, bottomRight
@@ -80,6 +87,23 @@ enum Slot: String, CaseIterable {
         case .sixthRight: [.col3Top, .col3Bottom]
         case .sixthsLeftTwoThirds: [.col0Top, .col1Top, .col2Top, .col0Bottom, .col1Bottom, .col2Bottom]
         case .sixthsRightTwoThirds: [.col1Top, .col2Top, .col3Top, .col1Bottom, .col2Bottom, .col3Bottom]
+        }
+    }
+
+    /// Split-aware reading order over `allCases`: the same spatial order
+    /// `relocate` assigns blockers in, extended to every slot so the
+    /// split-tile focus perch matches the shuffle: pieces of a split tile
+    /// sort exactly as the solver dealt them. Slots with identical
+    /// centroids (a half vs. its own pieces never co-occur post-swap, but
+    /// still need a total order) break ties by declaration order, so
+    /// `allCases` stays the canonical ordering the menus, hotkey ids, and
+    /// presentation already use.
+    static var readingOrderedCases: [Slot] {
+        allCases.sorted {
+            let a = $0.readingOrder, b = $1.readingOrder
+            if a.row != b.row { return a.row < b.row }
+            if a.column != b.column { return a.column < b.column }
+            return allCases.firstIndex(of: $0)! < allCases.firstIndex(of: $1)!
         }
     }
 

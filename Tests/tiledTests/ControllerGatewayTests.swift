@@ -243,12 +243,13 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(controller.state.slot(of: 1), .topRight)
         XCTAssertEqual(controller.state.slot(of: 2), .bottomRight)
         // No piece IS the old tile (RH holds no single heir), so the
-        // first-overlapping-piece rule applies in rawValue order —
-        // "bottomRight" sorts before "topRight", hence the BL heir.
-        // The pin is determinism, not which corner wins.
+        // first-overlapping-piece rule applies in reading order — the
+        // same spatial order the solver deals in, hence the TL heir now
+        // in top-right. The pin is determinism matching the shuffle,
+        // not which corner wins.
         XCTAssertEqual(
-            gateway.focusCalls.last, b,
-            "split tile: focus a deterministic piece, not the requester")
+            gateway.focusCalls.last, a,
+            "split tile: focus the solver's first piece, not the requester")
     }
 
     func testPlainTileIssuesNoFocusCall() {
