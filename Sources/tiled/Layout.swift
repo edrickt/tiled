@@ -86,6 +86,35 @@ enum Slot: String, CaseIterable {
     func overlaps(_ other: Slot) -> Bool {
         !cells.isDisjoint(with: other.cells)
     }
+
+    /// Reading order of this slot's centroid: top-to-bottom, then
+    /// left-to-right, in the shared 4x2 cell refinement both layouts are
+    /// built from. Strips run 0-3 left to right; the top row sorts before
+    /// the bottom row. Halves and two-thirds sort by their centroid, so
+    /// they interleave naturally with the quads and sixths around them.
+    /// The swap solver assigns blockers in this order, so the same
+    /// windows on screen always shuffle the same way — tiling order
+    /// (window ids) never affects the outcome, in either layout.
+    var readingOrder: (row: Int, column: Double) {
+        var columns: [Double] = []
+        var rows: [Int] = []
+        for cell in cells {
+            let name = cell.rawValue
+            let strip: Double
+            if name.hasPrefix("col0") { strip = 0 }
+            else if name.hasPrefix("col1") { strip = 1 }
+            else if name.hasPrefix("col2") { strip = 2 }
+            else { strip = 3 }
+            columns.append(strip)
+            rows.append(name.hasSuffix("Top") ? 0 : 1)
+        }
+        let meanColumn = columns.reduce(0, +) / Double(max(columns.count, 1))
+        // A slot straddling both rows (halves, thirds, two-thirds)
+        // belongs to neither row's flow: sort it before both, keeping
+        // pure top-row before bottom-row comparisons intact.
+        let row = rows.allSatisfy({ $0 == 0 }) ? 0 : rows.allSatisfy({ $0 == 1 }) ? 2 : 1
+        return (row, meanColumn)
+    }
 }
 
 /// An edge of a window's frame.
@@ -455,7 +484,11 @@ struct TilingState: Equatable {
         guard !blockers.isEmpty else { return .tile(evicting: []) }
         if let old = self.slot(of: window),
             let relocation = Self.relocate(
-                blockers: blockers.map(\.window).sorted(),
+                blockers: blockers.sorted {
+                    let a = $0.slot.readingOrder, b = $1.slot.readingOrder
+                    if a.row != b.row { return a.row < b.row }
+                    return a.column < b.column
+                },
                 within: old.cells.subtracting(slot.cells),
                 layout: slot.layout)
         {
@@ -470,7 +503,13 @@ struct TilingState: Equatable {
     /// the requesting window, minus its target), restricted to the target's
     /// layout, preferring larger slots so halves stay halves when possible.
     /// Returns nil when there isn't enough space to accommodate everyone.
-    private static func relocate(blockers: [WindowID], within free: Set<TileCell>, layout: LayoutKind)
+    ///
+    /// `blockers` arrive in spatial reading order (top-to-bottom,
+    /// left-to-right — see `Slot.readingOrder`): the search assigns in
+    /// that order, so the same windows on screen always shuffle the same
+    /// way. Tiling order — window ids — never affects the outcome: top
+    /// stays top, left stays left, in both layouts.
+    private static func relocate(blockers: [(slot: Slot, window: WindowID)], within free: Set<TileCell>, layout: LayoutKind)
         -> [WindowID: Slot]?
     {
         let bySize = Slot.allCases.filter {
@@ -484,11 +523,11 @@ struct TilingState: Equatable {
         func search(_ index: Int) -> Bool {
             guard index < blockers.count else { return true }
             for candidate in bySize where candidate.cells.isDisjoint(with: used) {
-                assigned[blockers[index]] = candidate
+                assigned[blockers[index].window] = candidate
                 used.formUnion(candidate.cells)
                 if search(index + 1) { return true }
                 used.subtract(candidate.cells)
-                assigned[blockers[index]] = nil
+                assigned[blockers[index].window] = nil
             }
             return false
         }

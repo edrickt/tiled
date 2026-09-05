@@ -197,6 +197,10 @@ final class TilingController {
             return
         }
         resetTransientState()
+        // The swap keeps focus on the original tile: capture the slot
+        // the requester is about to vacate now — after `execute` the
+        // state holds the heirs, not the history.
+        let vacated = state.slot(of: id)
 
         let result = executor.execute(
             decision: decision, requester: id, slot: slot,
@@ -214,14 +218,18 @@ final class TilingController {
         }
         let outcome = result.outcome
         if case .swap = decision, outcome.error == nil {
-            // A swap rewrites other windows after the requester: on a
-            // settle-late app that final write can steal focus, leaving
-            // the user typing into the displaced window. The requester
-            // was focused when it asked, so hand focus back to it —
-            // never to the window it displaced.
-            if let record = records[id] {
-                gateway.focus(record.handle)
-            }
+            // A swap vacates the requester's old slot: focus stays with
+            // the original tile, not the requester. Whoever inherits
+            // that slot takes focus, so a chained hotkey acts on the
+            // tile's new window with no manual refocus — tiling RH to
+            // TL leaves focus on the window that landed in RH, ready to
+            // swap onward to BL. This also re-asserts past a settle-late
+            // app stealing focus on the final rewrite. When the old slot
+            // has no single heir (blockers split it across pieces),
+            // focus takes the first overlapping piece in slot order —
+            // rawValue order, the same order the menus use, so the perch
+            // is deterministic.
+            focusSwapHeir(vacated: vacated)
         }
         if let feedback = outcome.feedback {
             onFeedback?(feedback)
@@ -606,6 +614,31 @@ final class TilingController {
     func focus(window id: WindowID) {
         guard let record = records[id] else { return }
         gateway.focus(record.handle)
+    }
+
+    /// Focus after a successful swap stays on the original tile: the heir
+    /// now sitting in the requester's vacated slot takes focus, so chained
+    /// hotkeys keep acting on that tile with no manual refocus. When the
+    /// vacated slot has no single heir (blockers split it across pieces),
+    /// focus takes the first overlapping piece in slot order — rawValue
+    /// order, the same order the menus use, so the perch is deterministic
+    /// instead of dictionary-ordered. Refused swaps never reach here (the
+    /// caller guards on `outcome.error == nil`): a window that refused its
+    /// write holds no slot, and activating it would be a surprise.
+    private func focusSwapHeir(vacated: Slot?) {
+        guard let vacated else { return }
+        if let heir = state.occupant(of: vacated), let record = records[heir] {
+            gateway.focus(record.handle)
+            return
+        }
+        // Split tile: no single heir. First overlapping piece in slot order wins.
+        let piece = state.occupants
+            .filter { $0.key.overlaps(vacated) }
+            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .first
+        if let heir = piece?.value, let record = records[heir] {
+            gateway.focus(record.handle)
+        }
     }
 
     /// Untiles one window, restoring its pre-tile frame.

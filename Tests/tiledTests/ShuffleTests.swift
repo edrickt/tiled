@@ -660,6 +660,81 @@ final class ShuffleTests: XCTestCase {
         XCTAssertGreaterThan(evictionsChecked, 50, "sweep exercised too few evictions: \(evictionsChecked)")
     }
 
+    // MARK: Spatial determinism
+
+    /// Transfers (`source slot -> dest slot`) for a placement dict,
+    /// so two states with the same visual layout but different window
+    /// ids can be compared: tiling order must never affect the shuffle.
+    private func transfers(
+        in state: TilingState, placements: [WindowID: Slot]
+    ) -> [Slot: Slot] {
+        var result: [Slot: Slot] = [:]
+        for (window, dest) in placements {
+            result[state.slot(of: window)!] = dest
+        }
+        return result
+    }
+
+    func testQuartersSplitIgnoresTilingOrder() {
+        // Same visual layout — TL + BL + RH — tiled in opposite orders.
+        // RH -> LH must split top-stays-top either way: the TL window
+        // takes TR, the BL window takes BR, no matter who was tiled first.
+        var early = TilingState()
+        early.commit(window: 1, into: .topLeft)
+        early.commit(window: 2, into: .bottomLeft)
+        early.commit(window: 3, into: .rightHalf)
+        var late = TilingState()
+        late.commit(window: 1, into: .rightHalf)
+        late.commit(window: 2, into: .bottomLeft)
+        late.commit(window: 3, into: .topLeft)
+        guard case .swap(let p1) = early.plan(window: 3, into: .leftHalf) else {
+            XCTFail("expected a swap, got \(early.plan(window: 3, into: .leftHalf))")
+            return
+        }
+        guard case .swap(let p2) = late.plan(window: 1, into: .leftHalf) else {
+            XCTFail("expected a swap, got \(late.plan(window: 1, into: .leftHalf))")
+            return
+        }
+        let expected: [Slot: Slot] = [
+            .rightHalf: .leftHalf, .topLeft: .topRight, .bottomLeft: .bottomRight,
+        ]
+        XCTAssertEqual(transfers(in: early, placements: p1), expected)
+        XCTAssertEqual(
+            transfers(in: late, placements: p2), expected,
+            "same windows on screen, different tiling order: top must stay top")
+    }
+
+    func testSixthsSplitIgnoresTilingOrder() {
+        // Sixths mirror: two left corners + right two-thirds, tiled in
+        // opposite orders. Right-two-thirds -> left third splits the
+        // corners into middle + right thirds, top stays leftmost.
+        var early = TilingState()
+        early.commit(window: 1, into: .sixthTopLeft)
+        early.commit(window: 2, into: .sixthBottomLeft)
+        early.commit(window: 3, into: .sixthsRightTwoThirds)
+        var late = TilingState()
+        late.commit(window: 1, into: .sixthsRightTwoThirds)
+        late.commit(window: 2, into: .sixthBottomLeft)
+        late.commit(window: 3, into: .sixthTopLeft)
+        guard case .swap(let p1) = early.plan(window: 3, into: .sixthLeft) else {
+            XCTFail("expected a swap, got \(early.plan(window: 3, into: .sixthLeft))")
+            return
+        }
+        guard case .swap(let p2) = late.plan(window: 1, into: .sixthLeft) else {
+            XCTFail("expected a swap, got \(late.plan(window: 1, into: .sixthLeft))")
+            return
+        }
+        let expected: [Slot: Slot] = [
+            .sixthsRightTwoThirds: .sixthLeft,
+            .sixthTopLeft: .sixthMiddle,
+            .sixthBottomLeft: .sixthRight,
+        ]
+        XCTAssertEqual(transfers(in: early, placements: p1), expected)
+        XCTAssertEqual(
+            transfers(in: late, placements: p2), expected,
+            "same sixths layout, different tiling order: top stays leftmost")
+    }
+
     // MARK: Deterministic fuzz walk
 
     /// Seeded PRNG (LCG): the walk is fully deterministic — same seed,

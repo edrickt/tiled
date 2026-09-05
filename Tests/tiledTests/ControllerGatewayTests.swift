@@ -181,11 +181,13 @@ final class ControllerGatewayTests: XCTestCase {
 
     // MARK: Swap focus
 
-    func testSwapKeepsFocusOnRequester() {
-        // The spec example: TL + BL tiled, right half tiled; tiling the
-        // right-half window into top left swaps it with the TL window.
-        // Focus must stay on the requester (the original-tile window),
-        // not end up on the displaced window the swap rewrote last.
+    func testSwapKeepsFocusOnOriginalTile() {
+        // TL + BL tiled, right half tiled; tiling the right-half window
+        // into top left swaps it with the TL window, which inherits the
+        // whole right half. Focus must stay on the original tile — the
+        // heir now in right half — not follow the requester to top left.
+        // Chaining then works with no manual refocus: the next hotkey
+        // acts on the heir still sitting in the original tile.
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = a
         controller.handle(slot: .topLeft)
@@ -203,8 +205,50 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(controller.state.slot(of: 3), .topLeft, "requester swapped in")
         XCTAssertEqual(controller.state.slot(of: 1), .rightHalf, "blocker relocated, not evicted")
         XCTAssertEqual(
-            gateway.focusCalls.last, c,
-            "swap rewrites other windows: refocus the requester, not the displaced window")
+            gateway.focusCalls.last, a,
+            "focus stays on the original tile: the heir now in right half")
+
+        // No manual refocus: the heir holds focus, so the next hotkey
+        // moves the original tile's current window again.
+        controller.handle(slot: .bottomLeft)
+
+        XCTAssertEqual(controller.state.slot(of: 1), .bottomLeft, "heir swapped onward")
+        XCTAssertEqual(controller.state.slot(of: 2), .rightHalf, "next heir inherits the tile")
+        XCTAssertEqual(controller.state.slot(of: 3), .topLeft, "first requester undisturbed")
+        XCTAssertEqual(
+            gateway.focusCalls.last, b,
+            "focus still on the original tile after the chained swap")
+    }
+
+    func testSwapSplitFocusesTopmostPiece() {
+        // RH -> LH splits the vacated right half between the two left
+        // quads (TR + BR): no single heir holds the old tile, so focus
+        // takes the first overlapping piece in slot order rather than
+        // following the requester.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .bottomLeft)
+        let c = gateway.addWindow(frame: CGRect(x: 0, y: 700, width: 800, height: 600))
+        gateway.focused = c
+        controller.handle(slot: .rightHalf)
+        XCTAssertEqual(controller.state.slot(of: 3), .rightHalf)
+
+        gateway.focused = c
+        controller.handle(slot: .leftHalf)
+
+        XCTAssertEqual(controller.state.slot(of: 3), .leftHalf)
+        XCTAssertEqual(controller.state.slot(of: 1), .topRight)
+        XCTAssertEqual(controller.state.slot(of: 2), .bottomRight)
+        // No piece IS the old tile (RH holds no single heir), so the
+        // first-overlapping-piece rule applies in rawValue order —
+        // "bottomRight" sorts before "topRight", hence the BL heir.
+        // The pin is determinism, not which corner wins.
+        XCTAssertEqual(
+            gateway.focusCalls.last, b,
+            "split tile: focus a deterministic piece, not the requester")
     }
 
     func testPlainTileIssuesNoFocusCall() {
