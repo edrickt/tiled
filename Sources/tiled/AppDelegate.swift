@@ -192,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let filled = Set(snapshot.filled)
         let image = NSImage(size: size, flipped: false) { _ in
             let margin: CGFloat = 1.5
-            let gap: CGFloat = 2
+            let gap: CGFloat = 1
             let rows: CGFloat = 2
             let cellW = (size.width - margin * 2 - gap * CGFloat(columns - 1)) / CGFloat(columns)
             let cellH = (size.height - margin * 2 - gap) / rows
@@ -206,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let rect = NSRect(x: x, y: y, width: cellW, height: cellH)
                 let path = NSBezierPath(
                     roundedRect: rect,
-                    xRadius: 1, yRadius: 1
+                    xRadius: 0, yRadius: 0
                 )
                 if filled.contains(cell) {
                     path.fill()
@@ -219,7 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let lineWidth: CGFloat = 1
                     let outline = NSBezierPath(
                         roundedRect: rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
-                        xRadius: 0.5, yRadius: 0.5
+                        xRadius: 0, yRadius: 0
                     )
                     outline.lineWidth = lineWidth
                     outline.stroke()
