@@ -16,6 +16,12 @@ import Foundation
 /// and is skipped on re-push so the tracker never fights an in-progress
 /// native drag. Writes are bookkept as expected frames so our own echoes
 /// don't recurse.
+///
+/// Title-bar drags (origin-only changes) are tracked separately from
+/// edge drags: moved ticks stream in, and when they go silent the drag
+/// ended — past the untile distance the window untiles where dropped
+/// (via the `onUntile` callback), otherwise it snaps back into its slot
+/// rect. A single far jump is never a hand drag, so it snaps back too.
 final class DragTracker {
     /// Reads live frames and resolves occupancy for the tracker.
     struct Context {
@@ -32,11 +38,24 @@ final class DragTracker {
     private(set) var grid = GridLayout()
     private let context: Context
     /// Pushes computed rects (excluding the dragged window); reports refusals.
-    private let apply: (_ rects: [WindowID: CGRect], _ excluding: WindowID) -> Int
+    private let apply: (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Int
+    /// Called when a title-bar drag ends past the untile distance: the
+    /// controller releases the slot and leaves the window where dropped.
+    private let onUntile: (WindowID) -> Void
     private let log: (String) -> Void
     private var lastKnownFrames: [WindowID: CGRect] = [:]
     /// Frames recently pushed (echo suppression).
     private var expectedFrames: [WindowID: ExpectedWrite] = [:]
+
+    /// In-progress title-bar drag for one window: frame at drag start,
+    /// latest frame, moved-tick count, and the pending drag-end canceller.
+    private struct DragState {
+        let startFrame: CGRect
+        var lastFrame: CGRect
+        var ticks = 0
+        var cancelDragEnd: (() -> Void)?
+    }
+    private var drags: [WindowID: DragState] = [:]
 
     private var applyScheduled = false
     private var pendingRects: [WindowID: CGRect] = [:]
@@ -45,6 +64,21 @@ final class DragTracker {
     private static let echoTolerance: CGFloat = 32
     private static let staleWrite: TimeInterval = 3
     private static let edgeMoveThreshold: CGFloat = 1
+    /// Origin drag distance past which a title-bar drag untiles the window.
+    private static let untileDragDistance: CGFloat = 100
+    /// Move silence after which a title-bar drag counts as finished.
+    private static let dragEndDebounce: TimeInterval = 0.4
+
+    /// Schedules the drag-end debounce; returns a canceller. Injectable
+    /// so tests fire drag ends manually instead of waiting on the runloop.
+    typealias DragEndScheduler = (_ fire: @escaping () -> Void) -> () -> Void
+
+    static let scheduleDragEndOnMain: DragEndScheduler = { fire in
+        let item = DispatchWorkItem(block: fire)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + DragTracker.dragEndDebounce, execute: item)
+        return { item.cancel() }
+    }
 
     private struct ExpectedWrite {
         let frame: CGRect
@@ -56,21 +90,29 @@ final class DragTracker {
 
     init(
         context: Context,
-        apply: @escaping (_ rects: [WindowID: CGRect], _ excluding: WindowID) -> Int,
+        apply: @escaping (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Int,
+        onUntile: @escaping (WindowID) -> Void = { _ in },
+        scheduleDragEnd: @escaping DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         log: @escaping (String) -> Void = { _ in }
     ) {
         self.context = context
         self.apply = apply
+        self.onUntile = onUntile
+        self.scheduleDragEnd = scheduleDragEnd
         self.log = log
     }
+
+    private let scheduleDragEnd: DragEndScheduler
 
     // MARK: Tracking
 
     /// Notes a rect we pushed, so its echo is swallowed, not mistaken for
-    /// a drag. Also seeds the last-known frame for edge diffing.
+    /// a drag. Also seeds the last-known frame for edge diffing. Any
+    /// in-progress drag on the window is dropped: its baseline is stale.
     func markExpected(_ id: WindowID, _ frame: CGRect) {
         expectedFrames[id] = ExpectedWrite(frame: frame, lastDistance: .infinity, date: context.now())
         lastKnownFrames[id] = frame
+        clearDrag(id)
     }
 
     /// Forgets a window: untile, restore, and prune paths call this so
@@ -78,6 +120,7 @@ final class DragTracker {
     func forget(_ id: WindowID) {
         lastKnownFrames[id] = nil
         expectedFrames[id] = nil
+        clearDrag(id)
     }
 
     /// Snaps all splitters back to defaults. Callers re-push occupants.
@@ -137,10 +180,60 @@ final class DragTracker {
         lastKnownFrames[id] = frame
         guard let previous, previous != frame else { return }
         guard previous.size == frame.size else {
+            clearDrag(id)
             processResize(windowID: id, from: previous, to: frame)
             return
         }
-        log("move win\(id) ignored (origin-only change)")
+        processMove(windowID: id, from: previous, to: frame)
+    }
+
+    // MARK: Drag-out untile
+
+    /// Tracks a title-bar drag: origin-only changes stream in as the user
+    /// moves the window. Each tick reschedules the drag-end debounce — so
+    /// a mid-drag pause longer than the debounce ends the drag early
+    /// (snapback or untile); continuing the drag re-tracks from the new
+    /// frame. Hand drags stream ticks, so this only bites on real pauses.
+    private func processMove(windowID id: WindowID, from previous: CGRect, to frame: CGRect) {
+        if drags[id] == nil {
+            drags[id] = DragState(startFrame: previous, lastFrame: frame)
+        }
+        drags[id]?.lastFrame = frame
+        drags[id]?.ticks += 1
+        log("move win\(id) dragging tick=\(drags[id]?.ticks ?? 0) frame=\(frame)")
+        drags[id]?.cancelDragEnd?()
+        drags[id]?.cancelDragEnd = scheduleDragEnd { [weak self] in
+            self?.endDrag(id: id)
+        }
+    }
+
+    /// A drag just ended (moved ticks went silent): untile past the
+    /// untile distance, snap back otherwise. A single far tick snaps
+    /// back too — hand drags stream, one-shot programmatic jumps don't.
+    /// (Residual exposure: a programmatic move that arrives as several
+    /// ticks and travels far enough untiles — accepted, since such moves
+    /// are rare and the window ends up untiled where it was put.)
+    private func endDrag(id: WindowID) {
+        guard let slot = context.slotOf(id), let drag = drags[id] else { return }
+        drags[id] = nil
+        let distance = hypot(
+            drag.lastFrame.origin.x - drag.startFrame.origin.x,
+            drag.lastFrame.origin.y - drag.startFrame.origin.y)
+        log("dragend win\(id) ticks=\(drag.ticks) distance=\(distance)")
+        guard distance > Self.untileDragDistance, drag.ticks >= 2 else {
+            let rect = grid.rect(for: slot, in: context.boundsOf(drag.lastFrame))
+            log("dragend win\(id) snapback -> \(rect)")
+            schedule(rects: [id: rect], excluding: nil)
+            return
+        }
+        log("dragend win\(id) untile")
+        onUntile(id)
+    }
+
+    /// Drops all drag state for `id`, cancelling any pending drag end.
+    private func clearDrag(_ id: WindowID) {
+        drags[id]?.cancelDragEnd?()
+        drags[id] = nil
     }
 
     /// Detects which edges moved, maps them to grid boundaries, updates the
@@ -223,9 +316,10 @@ final class DragTracker {
             for (id, rect) in rects {
                 self.markExpected(id, rect)
             }
-            if let excluding {
-                _ = self.apply(rects, excluding)
-            }
+            // `excluding` names a window whose frame is the drag's source
+            // of truth; nil is the snapback case (the dragged window itself
+            // is the only rect). Either way the rects must be pushed.
+            _ = self.apply(rects, excluding)
         }
     }
 

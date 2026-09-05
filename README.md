@@ -73,6 +73,10 @@ you pick a free one.
 - Use **Untile All** in the menu to restore every tiled window, or open a
   tiled window's submenu to focus it, untile just that window, or tile the
   focused window into its slot.
+- **Drag a tiled window by its title bar**: past ~100pt of drag it untiles
+  right where you dropped it (the drop is the placement — no pre-tile
+  restore); a shorter drag snaps back into its tile. A single far jump
+  (a programmatic move, not a hand drag) always snaps back.
 - Quarters and sixths are mutually exclusive on screen: requesting a slot in
   the other layout untiles every tiled window and switches layouts. The menu
   names the switch and how to undo it ("Switched to Sixths · 3 windows
@@ -129,7 +133,7 @@ Quitting tiled leaves your windows where they are.
 - [x] Sixths layout (3×2 grid, thirds, two-thirds)
 - [x] Visible failure states (hotkey conflicts, apps refusing resize)
 - [x] Display-change reassertion + automatic cleanup of closed windows
-- [ ] Drag-out-to-untile (drop inside tile = snap back, outside = untile)
+- [x] Drag-out (short drag snaps back, long drag untiles in place)
 - [ ] Owned overlay resize handles
 - [x] Remappable shortcuts
 - [ ] Gaps? (decided: no gaps for now)

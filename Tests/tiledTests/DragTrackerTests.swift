@@ -6,13 +6,17 @@ import XCTest
 /// calls. No controller, no AX — the loop tested where it lives.
 final class DragTrackerTests: XCTestCase {
     private var gateway: FakeWindowGateway!
-    private var pushed: [(rects: [WindowID: CGRect], excluding: WindowID)]!
+    private var pushed: [(rects: [WindowID: CGRect], excluding: WindowID?)]!
     private var tracker: DragTracker!
     private var slots: [WindowID: Slot]!
     private var handles: [WindowID: WindowHandle]!
     private var occupants: [Slot: WindowID]!
     /// Injectable clock backing the tracker's echo timestamps.
     private var now = Date()
+    /// Windows the tracker decided to untile via drag-out.
+    private var untiled: [WindowID]!
+    /// Drag-end fires captured from the injectable scheduler (latest wins).
+    private var dragEndFires: [() -> Void]!
 
     override func setUp() {
         super.setUp()
@@ -22,6 +26,8 @@ final class DragTrackerTests: XCTestCase {
         handles = [:]
         occupants = [:]
         now = Date()
+        untiled = []
+        dragEndFires = []
         tracker = DragTracker(
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.slots[$0] },
@@ -35,6 +41,11 @@ final class DragTrackerTests: XCTestCase {
             apply: { [weak self] rects, excluding in
                 self?.pushed.append((rects, excluding))
                 return 0
+            },
+            onUntile: { [weak self] in self?.untiled.append($0) },
+            scheduleDragEnd: { [weak self] fire in
+                self?.dragEndFires.append(fire)
+                return {}
             })
     }
 
@@ -89,7 +100,7 @@ final class DragTrackerTests: XCTestCase {
             "bottom edge at 440/500 clamps to the row minimum")
     }
 
-    func testOriginOnlyMoveIsIgnored() {
+    func testOriginOnlyMoveTracksDragWithoutMovingSplitter() {
         tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
         tracker.forget(1)
 
@@ -98,8 +109,11 @@ final class DragTrackerTests: XCTestCase {
         tracker.handleChange(id: 1, frame: CGRect(x: 50, y: 550, width: 840, height: 500))
         tracker.handleChange(id: 1, frame: CGRect(x: 100, y: 600, width: 840, height: 500))
 
+        // Drag tracking never touches the grid, and nothing pushes until
+        // the drag ends.
         XCTAssertEqual(tracker.grid, GridLayout())
         XCTAssertTrue(pushed.isEmpty)
+        XCTAssertFalse(dragEndFires.isEmpty, "move ticks schedule a drag end")
     }
 
     func testUntrackedWindowIsIgnored() {
@@ -128,6 +142,111 @@ final class DragTrackerTests: XCTestCase {
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 1.0)
+    }
+
+    // MARK: Drag-out untile
+
+    /// Streams a title-bar drag after clearing the echo entry: tick 1
+    /// seeds the diff baseline, ticks 2+ register as drag movement.
+    private func dragTicks(_ id: WindowID, size: CGSize, to origins: [(CGFloat, CGFloat)]) {
+        for (x, y) in origins {
+            tracker.handleChange(id: id, frame: CGRect(origin: CGPoint(x: x, y: y), size: size))
+        }
+    }
+
+    func testDragPastUntileDistanceFiresUntile() {
+        let size = CGSize(width: 840, height: 500)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 500), size: size))
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 500), (40, 540), (100, 600)])
+        dragEndFires.last?()
+
+        XCTAssertEqual(untiled, [1], "drag distance ~141pt crosses the untile distance")
+        XCTAssertTrue(pushed.isEmpty, "untile needs no snapback push")
+    }
+
+    func testShortDragSnapsBackIntoTile() {
+        let size = CGSize(width: 840, height: 500)
+        let tileRect = CGRect(origin: CGPoint(x: 0, y: 500), size: size)
+        tile(1, .topLeft, frame: tileRect)
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 500), (20, 520), (35, 535)])
+        dragEndFires.last?()
+
+        XCTAssertTrue(untiled.isEmpty, "~49pt of drag stays inside the tile")
+        // Identity boundsOf: the window's own frame is its screen, so the
+        // slot rect is the top-left quadrant of the dragged frame.
+        let snapRect = CGRect(x: 35, y: 785, width: size.width / 2, height: size.height / 2)
+        let expectation = XCTestExpectation(description: "snapback push")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.pushed.count, 1)
+            XCTAssertEqual(self.pushed.first?.rects[1], snapRect, "window pushed back to its slot rect")
+            XCTAssertNil(self.pushed.first?.excluding, "snapback pushes the dragged window itself")
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+
+    func testSingleFarJumpSnapsBackInsteadOfUntiling() {
+        let size = CGSize(width: 840, height: 500)
+        let tileRect = CGRect(origin: CGPoint(x: 0, y: 500), size: size)
+        tile(1, .topLeft, frame: tileRect)
+        tracker.forget(1)
+
+        // One far tick: a programmatic move, not a hand drag (hand drags
+        // stream). It must snap back, never untile.
+        dragTicks(1, size: size, to: [(0, 500), (400, 800)])
+        dragEndFires.last?()
+
+        XCTAssertTrue(untiled.isEmpty)
+        // Identity boundsOf: the slot rect is the top-left quadrant of the
+        // final (jumped) frame.
+        let snapRect = CGRect(x: 400, y: 1050, width: 420, height: 250)
+        let expectation = XCTestExpectation(description: "snapback push")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.pushed.count, 1)
+            XCTAssertEqual(self.pushed.first?.rects[1], snapRect)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+
+    func testResizeCancelsPendingDrag() {
+        let size = CGSize(width: 840, height: 500)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 500), size: size))
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 500), (30, 530)])
+        // The user switches to an edge drag: size changes mid-drag.
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 400, width: 840, height: 600))
+        dragEndFires.last?()
+
+        XCTAssertTrue(untiled.isEmpty, "the drag was abandoned for a resize")
+        let expectation = XCTestExpectation(description: "resize push")
+        DispatchQueue.main.async {
+            // Only the resize's neighbor reassert may appear; no snapback
+            // rect for the dragged window itself.
+            for push in self.pushed where push.rects[1] != nil {
+                XCTFail("unexpected snapback push for \(push.rects[1]!)")
+            }
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+
+    func testForgetClearsPendingDrag() {
+        let size = CGSize(width: 840, height: 500)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 500), size: size))
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 500), (400, 800)])
+        tracker.forget(1)
+        dragEndFires.last?()
+
+        XCTAssertTrue(untiled.isEmpty)
+        XCTAssertTrue(pushed.isEmpty)
     }
 
     // MARK: Lifecycle

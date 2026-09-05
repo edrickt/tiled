@@ -12,13 +12,22 @@ final class ControllerGatewayTests: XCTestCase {
     /// written to the fake, never absolute screen pixels.
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
+    /// Drag-end fires captured from the injectable scheduler (latest wins).
+    private var dragEndFires: [() -> Void] = []
 
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
+        dragEndFires = []
         // No runloop timer: tests drive pruneDeadWindows directly so a
-        // live 5-second timer can't fire mid-test.
-        controller = TilingController(gateway: gateway, pruneInterval: nil)
+        // live 5-second timer can't fire mid-test. Drag ends fire via the
+        // captured scheduler instead of the runloop.
+        controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            scheduleDragEnd: { [weak self] fire in
+                self?.dragEndFires.append(fire)
+                return {}
+            })
     }
 
     // MARK: Hotkey entry point
@@ -119,6 +128,55 @@ final class ControllerGatewayTests: XCTestCase {
         let bounds = screens[owner].visibleFrame
         let expectedSplit = (final.maxY - bounds.minY) / bounds.height
         XCTAssertEqual(self.controller.grid.leftRowSplit, expectedSplit, accuracy: 0.01)
+    }
+
+    // MARK: Drag-out untile
+
+    /// Tiles the window and streams a title-bar drag: an echo seed tick,
+    /// then `dx`/`dy` per drag tick (two ticks, like a streamed hand drag).
+    @discardableResult
+    private func tileAndDrag(
+        _ dx: CGFloat, _ dy: CGFloat
+    ) -> (handle: WindowHandle, tiledFrame: CGRect, finalFrame: CGRect) {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tiledFrame = gateway.frame(of: handle)!
+
+        gateway.simulateChange(handle, to: tiledFrame) // echo seed
+        var mid = tiledFrame
+        mid.origin.x += dx
+        mid.origin.y += dy
+        gateway.simulateChange(handle, to: mid)
+        var far = mid
+        far.origin.x += dx
+        far.origin.y += dy
+        gateway.simulateChange(handle, to: far)
+        dragEndFires.last?()
+        return (handle, tiledFrame, far)
+    }
+
+    func testDragPastUntileDistanceUntilesWhereDropped() {
+        let drag = tileAndDrag(60, 60) // net displacement ~170pt
+
+        XCTAssertNil(controller.state.slot(of: 1), "long drag releases the slot")
+        XCTAssertNil(controller.state.occupant(of: .topLeft))
+        XCTAssertEqual(
+            gateway.frame(of: drag.handle), drag.finalFrame,
+            "the untiled window stays where the user dropped it")
+    }
+
+    func testShortDragSnapsBackIntoTile() {
+        let drag = tileAndDrag(10, 10) // net displacement ~28pt
+        let expectation = XCTestExpectation(description: "snapback")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.controller.state.slot(of: 1), .topLeft, "still tiled")
+            XCTAssertEqual(
+                self.gateway.frame(of: drag.handle), drag.tiledFrame,
+                "the window snapped back to its slot rect")
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
     }
 
     // MARK: Ghost cleanup

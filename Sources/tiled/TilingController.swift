@@ -10,6 +10,9 @@ import AppKit
 /// it gateway callbacks and performs the writes it schedules.
 final class TilingController {
     private let gateway: WindowGateway
+    /// Drag-end debounce scheduler for the tracker's drag-out loop.
+    /// Injectable so tests fire drag ends without waiting on the runloop.
+    private let scheduleDragEnd: DragTracker.DragEndScheduler
     private lazy var executor = PlanExecutor(
         gateway: gateway, log: { [weak self] in self?.dbg($0) })
 
@@ -26,6 +29,8 @@ final class TilingController {
             guard let self else { return 0 }
             return self.pushRects(rects, excluding: excluding)
         },
+        onUntile: { [weak self] in self?.untileFromDrag($0) },
+        scheduleDragEnd: scheduleDragEnd,
         log: { [weak self] in self?.dbg($0) })
 
     private(set) var state = TilingState()
@@ -90,8 +95,13 @@ final class TilingController {
         }
     }
 
-    init(gateway: WindowGateway = LiveWindowGateway(), pruneInterval: TimeInterval? = 5.0) {
+    init(
+        gateway: WindowGateway = LiveWindowGateway(),
+        pruneInterval: TimeInterval? = 5.0,
+        scheduleDragEnd: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleDragEndOnMain
+    ) {
         self.gateway = gateway
+        self.scheduleDragEnd = scheduleDragEnd
         // Windows closed while tiled otherwise linger as ghosts until the
         // next hotkey; release their slots within seconds instead.
         // `pruneInterval == nil` schedules no runloop timer: tests pass nil
@@ -153,10 +163,7 @@ final class TilingController {
             onFeedback?(.alreadyTiled(slot: slot))
             return
         }
-        lastTileError = nil
-        lastNotice = nil
-        evictedSnapshot = nil
-        switchRequester = nil
+        resetTransientState()
 
         let result = executor.execute(
             decision: decision, requester: id, slot: slot,
@@ -220,8 +227,9 @@ final class TilingController {
 
     /// Performs tracker-scheduled pushes: marks each write expected (echo
     /// bookkeeping lives in the tracker) and writes via the gateway.
-    /// Returns the refusal count. `excluding` is informational — rects
-    /// never name the dragged window.
+    /// Returns the refusal count. `excluding` names the window whose frame
+    /// is the drag's source of truth; it is informational — snapback rects
+    /// DO name the (formerly) dragged window, with `excluding` nil.
     private func pushRects(_ rects: [WindowID: CGRect], excluding: WindowID?) -> Int {
         var failed = 0
         for (id, target) in rects {
@@ -315,14 +323,20 @@ final class TilingController {
         }
     }
 
-    // MARK: Bulk operations
-
-    func untileAll() {
-        pruneDeadWindows()
+    /// Clears one-step undo and error/notice state: every user-initiated
+    /// tiling action starts from a clean slate.
+    private func resetTransientState() {
         lastTileError = nil
         lastNotice = nil
         evictedSnapshot = nil
         switchRequester = nil
+    }
+
+    // MARK: Bulk operations
+
+    func untileAll() {
+        pruneDeadWindows()
+        resetTransientState()
         let failures = state.tiledWindows.compactMap { restoreOne($0) }
         reportRestoreFailures(failures)
         onChange?()
@@ -345,10 +359,7 @@ final class TilingController {
     /// Snaps all splitters back to defaults and re-tiles everyone.
     func resetDividers() {
         tracker.resetDividers()
-        lastTileError = nil
-        lastNotice = nil
-        evictedSnapshot = nil
-        switchRequester = nil
+        resetTransientState()
         applyAll()
         onChange?()
     }
@@ -427,13 +438,26 @@ final class TilingController {
     /// Untiles one window, restoring its pre-tile frame.
     func untile(window id: WindowID) {
         pruneDeadWindows()
-        lastTileError = nil
-        lastNotice = nil
-        evictedSnapshot = nil
-        switchRequester = nil
+        resetTransientState()
         if let failure = restoreOne(id) {
             reportRestoreFailures([failure])
         }
+        onChange?()
+    }
+
+    // MARK: Drag-out untile
+
+    /// The user dragged a tiled window past the untile distance and
+    /// dropped it: release the slot and leave the window where it was
+    /// dropped — no pre-tile restore, the drag IS the placement. (Short
+    /// drags snap back inside the tracker and never reach here.)
+    func untileFromDrag(_ id: WindowID) {
+        guard records[id] != nil else { return }
+        resetTransientState()
+        records[id] = nil
+        tracker.forget(id)
+        state.remove(window: id)
+        dbg("drag-untile win\(id)")
         onChange?()
     }
 

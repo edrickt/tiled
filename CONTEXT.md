@@ -24,6 +24,10 @@ _Avoid_: divider, separator, boundary (the code name is GridBoundary)
 Untiling a window to make room, restoring its pre-tile frame; what `plan` returns when a swap can't fit.
 _Avoid_: displacement, removal
 
+**Drag-out**:
+Untiling by dragging: a title-bar drag past the untile distance releases the slot and leaves the window where dropped — the drop is the placement, never a pre-tile restore. A shorter drag snaps back into the tile.
+_Avoid_: drag-to-untile, fling
+
 **Swap**:
 Exchanging places: overlapping windows move into the footprint the requester vacates, nobody untiled.
 _Avoid_: exchange, switch (which means layout switch)
