@@ -20,8 +20,8 @@ final class FakeWindowGateway: WindowGateway {
     private(set) var issued: [WindowHandle] = []
 
     var isTrusted = true
-    var promptResult = true
-    private(set) var promptCalls = 0
+
+    func registerAccessibilityInterest() {}
     /// Handles whose writes report success but never change the frame:
     /// the dominant real-world refusal shape (an app that ignores AX
     /// resizes while returning success).
@@ -79,12 +79,6 @@ final class FakeWindowGateway: WindowGateway {
 
     func appName(of handle: WindowHandle) -> String? {
         windows[handle]?.appName
-    }
-
-    @discardableResult
-    func promptIfUntrusted() -> Bool {
-        promptCalls += 1
-        return promptResult
     }
 
     // MARK: Test controls

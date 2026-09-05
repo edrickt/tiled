@@ -115,8 +115,13 @@ final class LiveWindowGateway: WindowGateway {
 
     var isTrusted: Bool { Self.isTrusted }
 
-    @discardableResult
-    func promptIfUntrusted() -> Bool { Self.promptIfUntrusted() }
+    func registerAccessibilityInterest() {
+        // Prompt:false — the explainer window asks in the product's own
+        // words; this call only puts tiled on the System Settings list
+        // so the toggle is findable when the user gets there.
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): false] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(opts)
+    }
 
     // MARK: Handle registry
 
@@ -157,14 +162,6 @@ final class LiveWindowGateway: WindowGateway {
 
     private static var isTrusted: Bool {
         AXIsProcessTrusted()
-    }
-
-    /// Prompts the user (System Settings > Accessibility) if not yet trusted.
-    /// Returns the current trust state.
-    @discardableResult
-    private static func promptIfUntrusted() -> Bool {
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-        return AXIsProcessTrustedWithOptions(opts)
     }
 
     // MARK: Focused window

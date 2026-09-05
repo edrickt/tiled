@@ -35,7 +35,8 @@ protocol WindowGateway: AnyObject {
     func appName(of handle: WindowHandle) -> String?
     /// Accessibility permission state (process-wide).
     var isTrusted: Bool { get }
-    /// Prompts in System Settings when untrusted; returns current state.
-    @discardableResult
-    func promptIfUntrusted() -> Bool
+    /// Registers the app with TCC's Accessibility list — no dialog. An
+    /// app that never issues this call may not appear in System
+    /// Settings' list at all, leaving only the manual "+" path. Idempotent.
+    func registerAccessibilityInterest()
 }

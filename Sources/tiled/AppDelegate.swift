@@ -9,6 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionTimer: Timer?
     private let settings = AppSettings()
     private var settingsController: SettingsWindowController?
+    /// The launch permission explainer. Closed automatically by the
+    /// permission poll the moment trust arrives.
+    private var permissionWindowController: PermissionWindowController?
     private var menuOpen = false
     /// Snapshot the current status menu was built from. Diffed on every
     /// refresh so the menu is rebuilt only when something it reads moved.
@@ -24,9 +27,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setupStatusItem()
         }
 
-        if gateway.promptIfUntrusted() {
+        if gateway.isTrusted {
             start()
         } else {
+            // Register with TCC first (no dialog): without this call the
+            // app may not appear in System Settings' list at all, and
+            // the button would open a pane that can't grant anything.
+            gateway.registerAccessibilityInterest()
+            // The product's own explainer with one explicit button,
+            // never the bare system prompt: the request arrives with the
+            // reason attached, and granting is a deliberate click.
+            showPermissionWindow()
             pollForPermission()
         }
         refreshMenu()
@@ -86,9 +97,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = mainMenu
     }
 
+    private func showPermissionWindow() {
+        let controller = PermissionWindowController()
+        controller.onOpenSettings = { [weak self] in
+            self?.openAccessibilitySettings(nil)
+        }
+        permissionWindowController = controller
+        controller.show()
+    }
+
     private func start(afterPermissionWait: Bool = false) {
         permissionTimer?.invalidate()
         permissionTimer = nil
+        // Trust arrived (or was already there): the explainer's job is
+        // done and it must not linger over the working app.
+        permissionWindowController?.close()
+        permissionWindowController = nil
         let service = HotkeyService(store: hotkeyStore)
         service.handler = { [weak self] slot in self?.controller.handle(slot: slot) }
         service.expandHandler = { [weak self] in self?.controller.handleExpandToggle() }
@@ -300,7 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             controller.isTrustedProvider = { [weak self] in self?.gateway.isTrusted ?? false }
             controller.onOpenAccessibilitySettings = { [weak self] in
-                self?.openAccessibilitySettings(NSMenuItem())
+                self?.openAccessibilitySettings(nil)
             }
             controller.onHotkeysChange = { [weak self] in
                 self?.hotkeys?.reload()
@@ -428,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.handle(slot: slot)
     }
 
-    @objc private func openAccessibilitySettings(_ sender: NSMenuItem) {
+    @objc private func openAccessibilitySettings(_ sender: Any?) {
         if let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         {
