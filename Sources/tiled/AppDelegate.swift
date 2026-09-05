@@ -10,6 +10,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = AppSettings()
     private var settingsController: SettingsWindowController?
     private var menuOpen = false
+    /// Snapshot the current status menu was built from. Diffed on every
+    /// refresh so the menu is rebuilt only when something it reads moved.
+    private var lastMenuSnapshot: MenuModel.Snapshot?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
@@ -59,7 +62,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About tiled", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(
+            withTitle: "About tiled",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        // HIG: Settings belongs in the app menu. The status menu keeps its
+        // own Settings… row for the icon-first path; this row makes ⌘, work
+        // whenever the app is active, not only with the status menu open.
+        let settingsItem = appMenu.addItem(
+            withTitle: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
+        settingsItem.target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide tiled", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
@@ -130,18 +141,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func refreshMenu() {
+    private func refreshMenu(force: Bool = false) {
         // Rebuilding the menu while it's open flickers or dismisses it;
         // the menuDidClose rebuild picks up whatever changed meanwhile.
         guard !menuOpen else { return }
-        statusItem?.menu = menu()
+        // Diff before building: drag-resize fires change callbacks every
+        // runloop tick, and the permission poll fires once a second, but
+        // the menu only cares about state, warnings, and window rows.
+        // Building an NSMenu with submenus on every tick is pure waste.
+        let snapshot = menuSnapshot()
+        if !force, snapshot == lastMenuSnapshot, statusItem?.menu != nil { return }
+        lastMenuSnapshot = snapshot
+        statusItem?.menu = menu(from: snapshot)
     }
 
     private func menu() -> NSMenu {
+        let snapshot = menuSnapshot()
+        lastMenuSnapshot = snapshot
+        return menu(from: snapshot)
+    }
+
+    private func menu(from snapshot: MenuModel.Snapshot) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
-        for model in MenuModel.items(snapshot: menuSnapshot(), binding: { hotkeyStore.binding(for: $0) }) {
+        for model in MenuModel.items(snapshot: snapshot, binding: { hotkeyStore.binding(for: $0) }) {
             menu.addItem(makeItem(model))
         }
         return menu
@@ -280,7 +304,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             controller.onHotkeysChange = { [weak self] in
                 self?.hotkeys?.reload()
-                self?.refreshMenu()
+                // Binding labels live in menu titles but not in the
+                // snapshot, so a label-only change would diff clean.
+                // Force past the diff on any binding edit.
+                self?.refreshMenu(force: true)
             }
             settingsController = controller
         }

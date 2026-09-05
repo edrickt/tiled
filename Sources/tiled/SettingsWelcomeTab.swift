@@ -24,22 +24,32 @@ final class WelcomeTab: NSObject {
         self.hotkeyStore = hotkeyStore
     }
 
+    /// Builds the tab inside a scroll view (same reasoning as General:
+    /// the window's minimum size and larger accessibility text both
+    /// exceed this content's height at times).
     func build(size: NSSize) -> NSView {
         let view = NSView(frame: NSRect(origin: .zero, size: size))
         view.autoresizingMask = [.width, .height]
 
-        let stack = NSStackView()
+        let scroll = NSScrollView(frame: view.bounds)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .noBorder
+
+        let stack = TopAnchoredStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 20, right: 24)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
+        scroll.documentView = stack
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: view.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            // No bottom constraint — see TopAnchoredStackView.
         ])
+        view.addSubview(scroll)
 
         let title = NSTextField(labelWithString: "Tile a window in one keypress")
         title.font = .boldSystemFont(ofSize: NSFont.systemFontSize + 2)

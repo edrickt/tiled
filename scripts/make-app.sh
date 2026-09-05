@@ -7,8 +7,15 @@ swift build -c release
 
 APP="build/Tiled.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/tiled "$APP/Contents/MacOS/tiled"
+
+# App icon: regenerate with scripts/make-icon.swift + iconutil if missing.
+if [ ! -f Resources/AppIcon.icns ]; then
+    swift scripts/make-icon.swift build/AppIcon.iconset
+    iconutil -c icns build/AppIcon.iconset -o Resources/AppIcon.icns
+fi
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -23,6 +30,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
     <key>CFBundleVersion</key><string>1</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
 </dict>
 </plist>
 EOF

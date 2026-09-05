@@ -69,6 +69,8 @@ final class SettingsWindowController: NSWindowController {
         window.title = "tiled"
         window.minSize = NSSize(width: 400, height: 300)
         window.center()
+        // HIG convention: a settings window reopens where it was left.
+        window.setFrameAutosaveName("TiledSettings")
         window.isReleasedWhenClosed = false
         return window
     }

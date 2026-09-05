@@ -82,16 +82,26 @@ final class RecorderButton: NSButton {
     /// the meaning on their own.
     func shake() {
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let original = frame.origin
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.05
-            for i in 0..<4 {
-                animator().setFrameOrigin(NSPoint(
-                    x: original.x + (i % 2 == 0 ? 6 : -6), y: original.y))
-            }
-        } completionHandler: { [weak self] in
-            self?.setFrameOrigin(original)
+        shakeStep(0, original: frame.origin)
+    }
+
+    /// One step of the shake, chained through sequential animation groups.
+    /// Four animator calls inside a single NSAnimationContext run
+    /// concurrently — they compose into one blur, not a left-right shake —
+    /// so each offset gets its own group and the next starts in the
+    /// previous group's completion handler.
+    private func shakeStep(_ index: Int, original: NSPoint) {
+        let offsets: [CGFloat] = [6, -6, 6, -6]
+        guard index < offsets.count else {
+            setFrameOrigin(original)
+            return
         }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.05
+            animator().setFrameOrigin(NSPoint(x: original.x + offsets[index], y: original.y))
+        }, completionHandler: { [weak self] in
+            self?.shakeStep(index + 1, original: original)
+        })
     }
 
     private func stopRecording() {

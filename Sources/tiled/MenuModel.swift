@@ -35,8 +35,11 @@ enum MenuModel {
     }
 
     /// Everything the menu structure reads, gathered from the controller,
-    /// hotkey service, and store in one immutable pass.
-    struct Snapshot {
+    /// hotkey service, and store in one immutable pass. Equatable so the
+    /// delegate can skip the NSMenu rebuild when nothing the menu reads
+    /// changed (frame pushes during drag-resize fire change callbacks
+    /// every tick; the menu only cares about state, warnings, rows).
+    struct Snapshot: Equatable {
         var isTrusted: Bool
         var warnings: [String]
         var notice: String?

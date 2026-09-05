@@ -31,22 +31,36 @@ final class GeneralTab: NSObject {
         self.settings = settings
     }
 
+    /// Builds the tab inside a scroll view: the window's own minimum
+    /// size (400×300) is smaller than this content, and larger
+    /// accessibility text grows it further — without scrolling the tail
+    /// clips silently.
     func build(size: NSSize) -> NSView {
         let view = NSView(frame: NSRect(origin: .zero, size: size))
         view.autoresizingMask = [.width, .height]
 
-        let stack = NSStackView()
+        let scroll = NSScrollView(frame: view.bounds)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .noBorder
+
+        let stack = TopAnchoredStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 20, right: 24)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
+        scroll.documentView = stack
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: view.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            // No bottom constraint: a bottom pin (even >=) forces the
+            // stack to stretch to the viewport and NSStackView's
+            // gravityAreas pins the last views to the bottom edge. The
+            // flipped document view keeps short content at the top.
         ])
+        view.addSubview(scroll)
 
         // Permission warning: first in the stack so an untrusted install
         // leads with the reason every hotkey press does nothing. Hidden

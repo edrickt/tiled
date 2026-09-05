@@ -38,7 +38,7 @@ final class ShortcutsTab: NSObject {
         scroll.hasVerticalScroller = true
         scroll.borderType = .noBorder
 
-        let stack = NSStackView()
+        let stack = TopAnchoredStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 4
@@ -96,6 +96,9 @@ final class ShortcutsTab: NSObject {
             stack.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
             stack.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            // No bottom constraint — a bottom pin (even >=) stretches the
+            // stack to the viewport and sinks the footer; the flipped
+            // document view keeps short content at the top instead.
         ])
         view.addSubview(scroll)
         return view
@@ -149,13 +152,19 @@ final class ShortcutsTab: NSObject {
         return row
     }
 
-    /// Section header row: disclosure triangle (collapse only) plus a
-    /// small Enable/Disable-all button with its scope in the title
-    /// ("Enable all 6"). Two controls, two jobs — the header never
+    /// Section header row: a borderless chevron + title button (collapse
+    /// only) plus a small Enable/Disable-all button with its scope in the
+    /// title ("Enable all 6"). Two controls, two jobs — the header never
     /// pretends to be the bulk toggle.
+    ///
+    /// (Not a .disclosure bezel: that cell refuses to draw its title on
+    /// current macOS — it renders a bare triangle no matter how the title
+    /// is set, and never exposes it to accessibility. A borderless button
+    /// with an SF Symbol chevron renders and reads reliably.)
     private func sectionHeader(for layout: LayoutKind) -> NSView {
         let name = layout == .quarters ? "Quarters" : "Sixths"
         let count = Slot.allCases.filter { $0.layout == layout }.count
+        let collapsed = collapsedSections.contains(layout)
         let row = NSStackView()
         row.orientation = .horizontal
         row.spacing = 8
@@ -163,25 +172,18 @@ final class ShortcutsTab: NSObject {
         let header = NSButton(
             title: "\(name) (\(count))",
             target: self, action: #selector(sectionToggled(_:)))
-        header.bezelStyle = .disclosure
-        header.setButtonType(.onOff)
-        // setButtonType clears the title: restore it after. Without
-        // this the header renders as a bare triangle (seen on hardware).
-        header.title = "\(name) (\(count))"
-        header.identifier = NSUserInterfaceItemIdentifier(layout.rawValue)
+        header.isBordered = false
+        header.setButtonType(.momentaryPushIn)
+        header.image = NSImage(
+            systemSymbolName: collapsed ? "chevron.right" : "chevron.down",
+            accessibilityDescription: nil)
+        header.imagePosition = .imageLeading
+        header.contentTintColor = .secondaryLabelColor
         header.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        header.state = collapsedSections.contains(layout) ? .off : .on
-        header.toolTip = collapsedSections.contains(layout)
+        header.identifier = NSUserInterfaceItemIdentifier(layout.rawValue)
+        header.toolTip = collapsed
             ? "Show \(name) shortcuts"
             : "Hide \(name) shortcuts"
-        // Disclosure + onOff buttons report a triangle-only intrinsic
-        // size (seen on hardware: 13pt frame, title set but clipped), so
-        // the stack would squeeze the label to nothing. Pin an explicit
-        // width measured from the title instead of fighting the cell.
-        let titleWidth = (header.title as NSString).size(withAttributes: [
-            .font: header.font ?? .systemFont(ofSize: NSFont.systemFontSize),
-        ]).width
-        header.widthAnchor.constraint(equalToConstant: titleWidth + 28).isActive = true
         row.addArrangedSubview(header)
 
         // Enable-all restores up to a whole section at once: name the
@@ -232,7 +234,8 @@ final class ShortcutsTab: NSObject {
                 hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: slot)
             }
         }
-        rebuildContent()
+        // The bulk button that triggered this lives in the old view.
+        rebuildContent(restoringFocusTo: "bulk-\(layout.rawValue)")
         onHotkeysChange?()
     }
 
@@ -244,12 +247,34 @@ final class ShortcutsTab: NSObject {
 
     /// Rebuilds the shortcuts content so collapse/bulk take effect
     /// immediately, and hands the fresh view to the shell.
-
-    private func rebuildContent() {
+    ///
+    /// `restoringFocusTo` names the identifier of the control that
+    /// triggered the rebuild (a section header or bulk button): the old
+    /// button is destroyed with the old view, so without restoration
+    /// focus falls to the window and keyboard/VoiceOver users are
+    /// stranded at the top of the tab. The replacement carries the same
+    /// identifier, so restoration is one lookup away.
+    private func rebuildContent(restoringFocusTo identifier: String? = nil) {
         reset()
         let view = build(size: buildSize, window: window)
         reload()
         onContentRebuilt?(view)
+        if let identifier, let window,
+           let replacement = Self.descendant(of: view, matching: identifier) {
+            window.makeFirstResponder(replacement)
+        }
+    }
+
+    /// Depth-first search for the button carrying `identifier` in the
+    /// rebuilt view.
+    private static func descendant(of view: NSView, matching id: String) -> NSButton? {
+        if let button = view as? NSButton, button.identifier?.rawValue == id {
+            return button
+        }
+        for subview in view.subviews {
+            if let hit = descendant(of: subview, matching: id) { return hit }
+        }
+        return nil
     }
 
     private func parkedKey(for slot: Slot) -> String {
@@ -290,14 +315,17 @@ final class ShortcutsTab: NSObject {
         guard let id = sender.identifier?.rawValue, let layout = LayoutKind(rawValue: id) else {
             return
         }
+        // The chevron is a momentary button: state lives in
+        // collapsedSections, and the rebuild draws the new chevron.
         var collapsed = collapsedSections
-        if sender.state == .on {
+        if collapsed.contains(layout) {
             collapsed.remove(layout)
         } else {
             collapsed.insert(layout)
         }
         collapsedSections = collapsed
-        rebuildContent()
+        // The header that triggered this lives in the old view.
+        rebuildContent(restoringFocusTo: layout.rawValue)
     }
 
     @objc private func recorderClicked(_ sender: RecorderButton) {
