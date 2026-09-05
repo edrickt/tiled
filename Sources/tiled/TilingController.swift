@@ -103,13 +103,12 @@ final class TilingController {
         /// surface whose promise is "never silently disagree" would be
         /// the one lie the app tells.
         case nothingToUndo
-        /// A tiling write was refused. `screen` pins the on-screen twin
-        /// to the display the requester lives on; the controller fills it
-        /// from the requester's live frame.
-        case refused(windowName: String?, screen: NSScreen?)
+        /// A tiling write was refused. The delegate announces it; there
+        /// is no on-screen panel — tiling feedback stays out of the way.
+        case refused(windowName: String?)
         /// A ⌥⇧⏎ expand write was refused: same shape as `.refused` but
         /// the announcement must not say “tiled”.
-        case expandRefused(windowName: String?, screen: NSScreen?)
+        case expandRefused(windowName: String?)
     }
 
     var onFeedback: ((Feedback) -> Void)?
@@ -359,9 +358,7 @@ final class TilingController {
     }
 
     /// The screen that owns `frame` (same fallback chain as
-    /// `visibleBounds`): largest overlap, then midpoint, then main. The
-    /// feedback layer uses this so the HUD appears where the workspace
-    /// changed, not always on the primary display.
+    /// `visibleBounds`): largest overlap, then midpoint, then main.
     func screen(for frame: CGRect) -> NSScreen? {
         let screens = NSScreen.screens
         if let index = Self.owningScreenIndex(frames: screens.map(\.frame), for: frame) {
@@ -528,18 +525,6 @@ final class TilingController {
         return state.slot(of: id)
     }
 
-    /// The display the focused window lives on, if any. Feedback about
-    /// repeated, focus-centric outcomes (no-ops, already-tiled, empty
-    /// undo) pins here — the refusal path already carries its own
-    /// screen, but these outcomes had nowhere to get one. Nil keeps the
-    /// historical main-screen behavior.
-    var focusedWindowScreen: NSScreen? {
-        guard let handle = gateway.focusedWindow(),
-              let frame = gateway.frame(of: handle)
-        else { return nil }
-        return screen(for: frame)
-    }
-
     /// Undoes the freshest destructive tiling action — a layout switch or
     /// an ordinary eviction. Both share one recovery path: the displaced
     /// windows return to their slots, the requester to its pre-tile frame.
@@ -620,10 +605,11 @@ final class TilingController {
     /// now sitting in the requester's vacated slot takes focus, so chained
     /// hotkeys keep acting on that tile with no manual refocus. When the
     /// vacated slot has no single heir (blockers split it across pieces),
-    /// focus takes the first overlapping piece in slot order — rawValue
-    /// order, the same order the menus use, so the perch is deterministic
-    /// instead of dictionary-ordered. Refused swaps never reach here (the
-    /// caller guards on `outcome.error == nil`): a window that refused its
+    /// focus takes the first overlapping piece in reading order —
+    /// `Slot.readingOrderedCases`, the same spatial order the solver deals
+    /// blockers in, so the perch matches the shuffle instead of
+    /// dictionary order. Refused swaps never reach here (the caller
+    /// guards on `outcome.error == nil`): a window that refused its
     /// write holds no slot, and activating it would be a surprise.
     private func focusSwapHeir(vacated: Slot?) {
         guard let vacated else { return }
@@ -631,10 +617,14 @@ final class TilingController {
             gateway.focus(record.handle)
             return
         }
-        // Split tile: no single heir. First overlapping piece in slot order wins.
+        // Split tile: no single heir. First overlapping piece in reading
+        // order wins — the same spatial order the solver dealt the pieces in.
         let piece = state.occupants
             .filter { $0.key.overlaps(vacated) }
-            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .sorted {
+                let order = Slot.readingOrderedCases
+                return order.firstIndex(of: $0.key)! < order.firstIndex(of: $1.key)!
+            }
             .first
         if let heir = piece?.value, let record = records[heir] {
             gateway.focus(record.handle)
@@ -684,8 +674,7 @@ final class TilingController {
             expanded[id] = current
             dbg("expand win\(id) -> \(target)")
         } else {
-            onFeedback?(.expandRefused(
-                windowName: appName(for: id), screen: screen(for: current)))
+            onFeedback?(.expandRefused(windowName: appName(for: id)))
         }
         onChange?()
     }
@@ -698,9 +687,7 @@ final class TilingController {
             retileExpanded(id)
         } else if records[id] != nil {
             if !writeExpandedFrame(id, to: saved) {
-                onFeedback?(.expandRefused(
-                    windowName: appName(for: id),
-                    screen: records[id].flatMap { screen(for: gateway.frame(of: $0.handle) ?? saved) }))
+                onFeedback?(.expandRefused(windowName: appName(for: id)))
             }
             dbg("collapse win\(id) -> saved \(saved)")
         }
@@ -716,8 +703,7 @@ final class TilingController {
         let bounds = visibleBounds(for: current)
         let target = tracker.grid.rect(for: slot, in: bounds)
         if !writeExpandedFrame(id, to: target) {
-            onFeedback?(.expandRefused(
-                windowName: appName(for: id), screen: screen(for: current)))
+            onFeedback?(.expandRefused(windowName: appName(for: id)))
         }
         dbg("retile expanded win\(id) -> \(slot.rawValue) target=\(target)")
     }

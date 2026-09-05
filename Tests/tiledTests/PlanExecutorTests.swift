@@ -190,9 +190,9 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertEqual(
             outcome.error, "TestApp couldn't be swapped — the app refused to resize it.")
         XCTAssertNotNil(outcome.feedback)
-        if case .refused(let name, _) = outcome.feedback {
+        if case .refused(let name) = outcome.feedback {
             // Same failure class as a tile refusal, same attribution: the
-            // HUD must name the app, never "That window" for a swap.
+            // announcement must name the app, never "That window" for a swap.
             XCTAssertEqual(name, "TestApp")
         } else {
             XCTFail("swap refusal must carry named feedback")

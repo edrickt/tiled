@@ -320,7 +320,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.refuseNextWrites(handle)
         controller.handle(slot: .topLeft)
         XCTAssertEqual(feedbacks.count, 1)
-        guard case .refused(let name, _) = feedbacks[0] else {
+        guard case .refused(let name) = feedbacks[0] else {
             return XCTFail("expected .refused, got \(feedbacks[0])")
         }
         XCTAssertEqual(name, "TestApp")

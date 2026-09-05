@@ -62,15 +62,11 @@ final class PlanExecutor {
     /// Copies are trivial (a handful of tiled windows). Record creation
     /// for pruned undo handles happens on the local copy via `nextID`,
     /// so it stays visible to the rest of the call.
-    /// - Parameter screenOf: resolves the display owning a live frame,
-    ///   so refusal feedback pins the HUD where the workspace changed.
-    ///   The controller passes its screen-for-frame lookup; tests pass a
-    ///   stub or nil (main-screen fallback).
     func execute(
         decision: TilePlan, requester id: WindowID, slot: Slot,
         state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID,
         tracker: DragTracker, boundsOf: (CGRect) -> CGRect,
-        observe: (WindowID) -> Void, screenOf: ((CGRect) -> NSScreen?)? = nil
+        observe: (WindowID) -> Void
     ) -> (outcome: Outcome, state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID) {
         var state = state
         var records = records
@@ -107,9 +103,7 @@ final class PlanExecutor {
                 }
                 let names = failed.compactMap { appName(for: $0, records: records) }
                 outcome.error = Self.swapRefusalMessage(names: names)
-                outcome.feedback = .refused(
-                    windowName: Self.swapRefusalName(names: names),
-                    screen: screenForAny(of: failed, records: records, screenOf: screenOf))
+                outcome.feedback = .refused(windowName: Self.swapRefusalName(names: names))
             }
             log("swap win\(id) -> \(slot.rawValue) placements=\(placements)")
             return (outcome, state, records, nextID)
@@ -323,8 +317,7 @@ final class PlanExecutor {
             log("place FAILED win\(id) -> \(slot.rawValue)")
             return (
                 "\(name) couldn't be tiled — the app refused to resize it.",
-                .refused(windowName: name, screen: screenForAny(
-                    of: [id], records: records, screenOf: nil)))
+                .refused(windowName: name))
         }
         log("place win\(id) -> \(slot.rawValue)")
         return (nil, nil)
@@ -421,29 +414,10 @@ final class PlanExecutor {
         }
     }
 
-    /// The HUD/announcement name for a swap refusal: the app when known,
+    /// The announcement name for a swap refusal: the app when known,
     /// never the tile path's "That window" fallback for a move that
     /// wasn't a tiling.
     private static func swapRefusalName(names: [String]) -> String? {
         names.first
-    }
-
-    /// The display owning any of `ids`' live frames, for feedback
-    /// pinning. Nil (main-screen fallback) when no frames or lookup
-    /// resolve: feedback must degrade, never fail.
-    private func screenForAny(
-        of ids: [WindowID], records: [WindowID: WindowRecord],
-        screenOf: ((CGRect) -> NSScreen?)?
-    ) -> NSScreen? {
-        guard let screenOf else { return nil }
-        for id in ids {
-            if let handle = records[id]?.handle,
-               let frame = gateway.frame(of: handle),
-               let screen = screenOf(frame)
-            {
-                return screen
-            }
-        }
-        return nil
     }
 }

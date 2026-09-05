@@ -34,73 +34,10 @@ final class RecorderButtonAccessibilityTests: XCTestCase {
     }
 }
 
-/// The failure HUD: shows feedback text on screen, replaces it on the next
-/// outcome, and dismisses itself — so sighted keyboard users get the same
-/// words VoiceOver users hear, at the moment of failure.
-final class FeedbackHUDTests: XCTestCase {
-    func testShowSetsCurrentText() {
-        let hud = FeedbackHUD()
-        hud.dismissDelay = 60 // never fires during the test
-        hud.show("Safari couldn't be tiled")
-        XCTAssertEqual(hud.currentText, "Safari couldn't be tiled")
-        hud.hide()
-        XCTAssertNil(hud.currentText)
-    }
-
-    func testShowReplacesTextInsteadOfStacking() {
-        let hud = FeedbackHUD()
-        hud.dismissDelay = 60
-        hud.show("first")
-        hud.show("second")
-        XCTAssertEqual(hud.currentText, "second")
-        hud.hide()
-    }
-
-    func testDismissTimerClearsCurrentText() {
-        let expectation = self.expectation(description: "HUD auto-dismisses")
-        let hud = FeedbackHUD()
-        hud.dismissDelay = 0.05
-        hud.show("brief")
-        XCTAssertEqual(hud.currentText, "brief")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            XCTAssertNil(hud.currentText)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 2)
-    }
-
-    func testStickyNoticeStaysUntilReplaced() {
-        let hud = FeedbackHUD()
-        hud.dismissDelay = 0.05
-        // Destructive outcomes persist past the toast window: a 2.5s
-        // toast is too small a window for "your workspace just moved."
-        hud.show("Safari went back to where it was.", sticky: true, stickySeconds: 60)
-        let expectation = self.expectation(description: "sticky HUD persists")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            XCTAssertEqual(hud.currentText, "Safari went back to where it was.")
-            // The next outcome replaces, never stacks.
-            hud.show("brief")
-            XCTAssertEqual(hud.currentText, "brief")
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 2)
-        hud.hide()
-    }
-
-    func testStickyNoticeStillExpires() {
-        // Reassurance that never leaves curdles into nagging: even
-        // sticky notices expire — late, not never.
-        let expectation = self.expectation(description: "sticky HUD expires")
-        let hud = FeedbackHUD()
-        hud.show("Safari went back to where it was.", sticky: true, stickySeconds: 0.05)
-        XCTAssertEqual(hud.currentText, "Safari went back to where it was.")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            XCTAssertNil(hud.currentText)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 2)
-    }
-}
+/// The failure HUD is gone: tiling feedback never pops a panel over the
+/// workspace. Haptic + VoiceOver announcement + menu state carry every
+/// outcome — so there is nothing here to test. This placeholder keeps the
+/// file (and its recorder tests below) intact.
 
 
 /// The Enable-all bulk path must never silently destroy combos recorded

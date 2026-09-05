@@ -214,11 +214,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshMenu(force: Bool = false) {
-        // Destructive outcomes surface on screen, not just in the menu:
-        // a hotkey user who never opens the status menu must still see
-        // what their last keypress did to the workspace. Notices are
-        // narrated once (tracked), then the menu carries them.
-        surfaceNoticeIfNew()
+        // Destructive outcomes stay in the menu (notice + undo row), not
+        // on screen: tiling feedback never pops a panel over the workspace.
         // Rebuilding the menu while it's open flickers or dismisses it;
         // the menuDidClose rebuild picks up whatever changed meanwhile.
         guard !menuOpen else { return }
@@ -250,27 +247,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// One immutable pass over the app state the menu reads.
-    /// Shows a fresh destructive-outcome notice (eviction, layout
-    /// switch) on the same on-screen channel as refusals. `lastNotice`
-    /// clears on every new action, so tracking the last shown text
-    /// surfaces each outcome exactly once — including repeats of the
-    /// same wording, which a naive equality guard would swallow.
-    /// Destructive notices are sticky: the panel stays until the next
-    /// outcome replaces it, because a 2.5s toast is too small a window
-    /// for "your workspace just moved."
-    private var lastShownNotice: String?
-
-    private func surfaceNoticeIfNew() {
-        guard let notice = controller.lastNotice else {
-            lastShownNotice = nil
-            return
-        }
-        guard notice != lastShownNotice else { return }
-        lastShownNotice = notice
-        announce(notice)
-        FeedbackHUD.shared.show(notice, sticky: true)
-    }
-
+    /// Fresh destructive-outcome notices (eviction, layout switch) live
+    /// in the menu beside the undo row that reverses them. `lastNotice`
+    /// clears on every new action; the menu carries each outcome until
+    /// the next one replaces it.
     private func menuSnapshot() -> MenuModel.Snapshot {
         let warnings = activeWarnings
         return MenuModel.Snapshot(
@@ -557,17 +537,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Subtle confirmation for ineffective hotkey presses: the safe no-op
-    /// stays silent in state and menu, but the hand gets a haptic,
+    /// stays silent in state and menu, but the hand gets a haptic and
     /// VoiceOver users get an announcement — pressing harder is never the
-    /// answer, and now the app says so — and sighted users get the same
-    /// words on screen (a haptic alone left them retrying in silence).
-    /// Screen routing: the controller knows the focused window's live
-    /// frame, so repeated feedback pins to the display the user is
-    /// looking at — not always main.
+    /// answer, and now the app says so. No on-screen panel: tiling
+    /// feedback stays out of the way; the menu carries the details.
     private func signalFeedback(_ feedback: TilingController.Feedback) {
         NSHapticFeedbackManager.defaultPerformer.perform(
             .generic, performanceTime: .default)
-        let screen = controller.focusedWindowScreen
         let text: String
         let noticeFallback: String?
         switch feedback {
@@ -580,23 +556,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .alreadyTiled(let slot):
             text = MenuText.alreadyTiledAnnouncement(slot: slot)
             noticeFallback = "Already in \(SlotPresentation.title(of: slot))."
-        case .refused(let name, let refusalScreen):
+        case .refused(let name):
             text = MenuText.refusedAnnouncement(windowName: name)
             noticeFallback = controller.lastTileError
-            FeedbackHUD.shared.show(text, on: refusalScreen ?? screen)
             announce(text, fallback: noticeFallback)
             refreshMenu()
             return
-        case .expandRefused(let name, let refusalScreen):
+        case .expandRefused(let name):
             text = MenuText.expandRefusedAnnouncement(windowName: name)
             noticeFallback = controller.lastTileError
-            FeedbackHUD.shared.show(text, on: refusalScreen ?? screen)
             announce(text, fallback: noticeFallback)
             refreshMenu()
             return
         }
         announce(text, fallback: noticeFallback)
-        FeedbackHUD.shared.show(text, on: screen)
         refreshMenu()
     }
 
