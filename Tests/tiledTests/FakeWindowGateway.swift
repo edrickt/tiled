@@ -38,6 +38,8 @@ final class FakeWindowGateway: WindowGateway {
 
     /// The fake has no focus model: tests declare the focused window.
     var focused: WindowHandle?
+    /// Focus requests issued, in order: tests assert post-swap refocus.
+    private(set) var focusCalls: [WindowHandle] = []
 
     // MARK: WindowGateway
 
@@ -74,6 +76,7 @@ final class FakeWindowGateway: WindowGateway {
     }
 
     func focus(_ handle: WindowHandle) {
+        focusCalls.append(handle)
         focused = handle
     }
 

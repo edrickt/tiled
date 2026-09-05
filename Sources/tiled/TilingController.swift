@@ -213,6 +213,16 @@ final class TilingController {
             forgetWindow(evicted)
         }
         let outcome = result.outcome
+        if case .swap = decision, outcome.error == nil {
+            // A swap rewrites other windows after the requester: on a
+            // settle-late app that final write can steal focus, leaving
+            // the user typing into the displaced window. The requester
+            // was focused when it asked, so hand focus back to it —
+            // never to the window it displaced.
+            if let record = records[id] {
+                gateway.focus(record.handle)
+            }
+        }
         if let feedback = outcome.feedback {
             onFeedback?(feedback)
         }

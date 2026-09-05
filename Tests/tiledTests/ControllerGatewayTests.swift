@@ -179,6 +179,46 @@ final class ControllerGatewayTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
+    // MARK: Swap focus
+
+    func testSwapKeepsFocusOnRequester() {
+        // The spec example: TL + BL tiled, right half tiled; tiling the
+        // right-half window into top left swaps it with the TL window.
+        // Focus must stay on the requester (the original-tile window),
+        // not end up on the displaced window the swap rewrote last.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .bottomLeft)
+        let c = gateway.addWindow(frame: CGRect(x: 0, y: 700, width: 800, height: 600))
+        gateway.focused = c
+        controller.handle(slot: .rightHalf)
+        XCTAssertEqual(controller.state.slot(of: 3), .rightHalf)
+
+        gateway.focused = c
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(controller.state.slot(of: 3), .topLeft, "requester swapped in")
+        XCTAssertEqual(controller.state.slot(of: 1), .rightHalf, "blocker relocated, not evicted")
+        XCTAssertEqual(
+            gateway.focusCalls.last, c,
+            "swap rewrites other windows: refocus the requester, not the displaced window")
+    }
+
+    func testPlainTileIssuesNoFocusCall() {
+        // Only the swap path refocuses: resizing the already-focused
+        // window never moves focus, so a plain tile must not activate.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        XCTAssertTrue(gateway.focusCalls.isEmpty, "plain tile must not refocus")
+    }
+
     // MARK: Ghost cleanup
 
     func testClosedWindowPrunesOnNextHandle() {
