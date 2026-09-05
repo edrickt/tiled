@@ -16,9 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Snapshot the current status menu was built from. Diffed on every
     /// refresh so the menu is rebuilt only when something it reads moved.
     private var lastMenuSnapshot: MenuModel.Snapshot?
-    /// Layout the status icon currently depicts, so it flips 2×2 ↔ 3×2
-    /// only when the layout actually changes.
-    private var lastIconLayout: LayoutKind?
+    /// What the status icon currently depicts — layout plus fill — so it
+    /// redraws when windows come and go within one layout, not just when
+    /// the layout itself flips 2×2 ↔ 3×2.
+    private var lastIconSnapshot: StatusIcon.Snapshot?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
@@ -154,19 +155,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = Self.statusIcon(for: controller.activeLayout)
-        lastIconLayout = controller.activeLayout
+        let snapshot = iconSnapshot()
+        item.button?.image = Self.statusIcon(snapshot)
+        lastIconSnapshot = snapshot
         item.menu = menu()
         statusItem = item
     }
 
-    /// The menu-bar glyph states the product's core idea: the current
-    /// layout's geometry. The stock square.grid.2x2 symbol can't express
-    /// the quarters/sixths duality and goes stale on a layout switch, so
-    /// draw a small template grid — 2×2 for quarters, 3×2 for sixths.
-    private static func statusIcon(for layout: LayoutKind) -> NSImage {
-        let columns = layout == .quarters ? 2 : 3
+    /// One immutable pass over the state the icon reads: the active
+    /// layout plus which icon cells are covered. Occupancy keyed by slot —
+    /// the pure input `StatusIcon Snapshot` needs — derives from the
+    /// controller's window rows; expanded windows keep their slot (an
+    /// expanded window still owns its tile), so they still light it.
+    private func iconSnapshot() -> StatusIcon.Snapshot {
+        var occupants: [Slot: WindowID] = [:]
+        for info in controller.tiledWindowsInfo {
+            occupants[info.slot] = info.id
+        }
+        return StatusIcon.snapshot(layout: controller.activeLayout, occupants: occupants)
+    }
+
+    /// The menu-bar glyph states the product's core idea twice over: the
+    /// current layout's geometry, and which of its slots are occupied. The
+    /// stock square.grid.2x2 symbol can't express the quarters/sixths
+    /// duality and goes stale on a layout switch, so draw a small template
+    /// grid — 2×2 for quarters, 3×2 for sixths — with each cell solid only
+    /// while a tiled window actually covers that spot, hollow otherwise.
+    /// An empty space reads as an empty frame; a full one reads solid.
+    private static func statusIcon(_ snapshot: StatusIcon.Snapshot) -> NSImage {
+        let cells = StatusIcon.cells(for: snapshot.layout)
+        let columns = snapshot.layout == .quarters ? 2 : 3
         let size = NSSize(width: 16, height: 12)
+        let filled = Set(snapshot.filled)
         let image = NSImage(size: size, flipped: false) { _ in
             let margin: CGFloat = 1
             let gap: CGFloat = 1.5
@@ -174,31 +194,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let cellW = (size.width - margin * 2 - gap * CGFloat(columns - 1)) / CGFloat(columns)
             let cellH = (size.height - margin * 2 - gap) / rows
             NSColor.black.setFill()
-            for col in 0..<columns {
-                for row in 0..<2 {
-                    let x = margin + CGFloat(col) * (cellW + gap)
-                    let y = margin + CGFloat(1 - row) * (cellH + gap)
-                    NSBezierPath(
-                        roundedRect: NSRect(x: x, y: y, width: cellW, height: cellH),
-                        xRadius: 1.5, yRadius: 1.5
-                    ).fill()
+            NSColor.black.setStroke()
+            for (index, cell) in cells.enumerated() {
+                let col = index % columns
+                let row = index / columns
+                let x = margin + CGFloat(col) * (cellW + gap)
+                let y = margin + CGFloat(1 - row) * (cellH + gap)
+                let rect = NSRect(x: x, y: y, width: cellW, height: cellH)
+                let path = NSBezierPath(
+                    roundedRect: rect,
+                    xRadius: 1.5, yRadius: 1.5
+                )
+                if filled.contains(cell) {
+                    path.fill()
+                } else {
+                    path.lineWidth = 1
+                    path.stroke()
                 }
             }
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "tiled — \(layout.title) layout"
+        image.accessibilityDescription = statusIconDescription(snapshot)
         return image
     }
 
-    /// Redraws the status icon when the active layout changed. Called from
-    /// refreshMenu, which fires on every layout switch.
+    /// VoiceOver line for the occupancy map: layout plus how many of its
+    /// slots are taken, so the state isn't sight-only.
+    private static func statusIconDescription(_ snapshot: StatusIcon.Snapshot) -> String {
+        let total = StatusIcon.cells(for: snapshot.layout).count
+        return "tiled \(snapshot.layout.title) layout, "
+            + "\(snapshot.filled.count) of \(total) slots occupied"
+    }
+
+    /// Redraws the status icon when its snapshot moved — a layout switch
+    /// or a window tiled/untiled within one layout. Called from
+    /// refreshMenu, which fires on every state change.
     private func updateStatusIcon() {
         guard let button = statusItem?.button else { return }
-        let layout = controller.activeLayout
-        guard lastIconLayout != layout || button.image == nil else { return }
-        button.image = Self.statusIcon(for: layout)
-        lastIconLayout = layout
+        let snapshot = iconSnapshot()
+        guard lastIconSnapshot != snapshot || button.image == nil else { return }
+        button.image = Self.statusIcon(snapshot)
+        lastIconSnapshot = snapshot
     }
 
     /// Toggles the menu-bar icon live when the Settings checkbox changes.
