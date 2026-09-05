@@ -33,9 +33,28 @@ final class DragTracker {
         /// fast-forward past the stale-write window without waiting on a
         /// real 3-second timeout.
         var now: () -> Date = Date.init
+        /// Screen owning a tiled window (its tiling space). Nil = legacy
+        /// single-space mode: the shared `grid` serves everyone, and all
+        /// per-screen paths fall back to it. The controller wires this to
+        /// its occupancy lookup; tests that never set it keep one grid.
+        var screenOf: (WindowID) -> ScreenID? = { _ in nil }
+        /// Occupants of one screen, for neighbor re-push. Nil falls back
+        /// to `occupants()`.
+        var occupantsOf: ((ScreenID) -> [Slot: WindowID])? = nil
     }
 
     private(set) var grid = GridLayout()
+    /// Per-screen splitter sets. Only populated when `screenOf` resolves:
+    /// each monitor drags its own dividers, so a resize on one display
+    /// never moves tiles on another.
+    private var grids: [ScreenID: GridLayout] = [:]
+
+    /// Splitter set for `screen` (defaults when untouched). Nil selects
+    /// the legacy shared grid.
+    func grid(for screen: ScreenID?) -> GridLayout {
+        guard let screen else { return grid }
+        return grids[screen] ?? GridLayout()
+    }
     private let context: Context
     /// Pushes computed rects (excluding the dragged window); reports refusals.
     private let apply: (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Int
@@ -135,6 +154,17 @@ final class DragTracker {
         clearDrag(id)
     }
 
+    /// Writes `updated` as `screen`'s splitter set (nil selects the
+    /// legacy shared grid). The diff against the previous frame's grid
+    /// decides the drag, mirroring the single-space read path.
+    func setGrid(_ updated: GridLayout, for screen: ScreenID?) {
+        if let screen {
+            grids[screen] = updated
+        } else {
+            grid = updated
+        }
+    }
+
     /// Snaps all splitters back to defaults. Callers re-push occupants.
     /// The displaced fractions come back as the return value, so the
     /// caller can park them as a one-step restore (see
@@ -148,17 +178,31 @@ final class DragTracker {
         return previous
     }
 
+    /// Snaps one screen's splitters back to defaults. Returns that
+    /// screen's displaced fractions as the caller's one-step restore.
+    @discardableResult
+    func resetDividers(for screen: ScreenID) -> GridLayout {
+        let previous = grid(for: screen)
+        grids[screen] = GridLayout()
+        return previous
+    }
+
     /// Restores splitter fractions parked by an earlier reset, re-pushed
     /// by the caller onto current occupants.
     func restoreDividers(_ saved: GridLayout) {
         grid = saved
     }
 
-    /// Rect for `id`'s slot under the current grid. Nil when the window has
-    /// no slot (untiled) or no readable frame.
+    /// Restores one screen's parked splitter fractions.
+    func restoreDividers(_ saved: GridLayout, for screen: ScreenID) {
+        grids[screen] = saved
+    }
+
+    /// Rect for `id`'s slot under its screen's grid. Nil when the window
+    /// has no slot (untiled) or no readable frame.
     func rect(for id: WindowID) -> CGRect? {
         guard let slot = context.slotOf(id), let frame = context.frameOf(id) else { return nil }
-        return grid.rect(for: slot, in: context.boundsOf(frame))
+        return grid(for: context.screenOf(id)).rect(for: slot, in: context.boundsOf(frame))
     }
 
     // MARK: Change entry point
@@ -247,7 +291,7 @@ final class DragTracker {
             drag.lastFrame.origin.y - drag.startFrame.origin.y)
         log("dragend win\(id) ticks=\(drag.ticks) distance=\(distance)")
         guard distance > Self.untileDragDistance, drag.ticks >= 2 else {
-            let rect = grid.rect(for: slot, in: context.boundsOf(drag.lastFrame))
+            let rect = grid(for: context.screenOf(id)).rect(for: slot, in: context.boundsOf(drag.lastFrame))
             log("dragend win\(id) snapback -> \(rect)")
             schedule(rects: [id: rect], excluding: nil)
             return
@@ -290,9 +334,11 @@ final class DragTracker {
             // The dragged window's own edge is the source of truth; skip it
             // below so we never fight an in-progress native drag.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
-            if grid.update(boundary: boundary, toPosition: position, in: bounds) {
+            var screenGrid = grid(for: context.screenOf(id))
+            if screenGrid.update(boundary: boundary, toPosition: position, in: bounds) {
+                setGrid(screenGrid, for: context.screenOf(id))
                 changed = true
-                log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(grid)")
+                log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(screenGrid)")
             }
         }
         if changed {
@@ -302,8 +348,8 @@ final class DragTracker {
 
     // MARK: Coalescing
 
-    /// Recomputes every occupant's rect under the current grid, except the
-    /// dragged window, and schedules one push per runloop tick.
+    /// Recomputes every occupant's rect under its screen's grid, except
+    /// the dragged window, and schedules one push per runloop tick.
     func reassertAll(occupants: [Slot: WindowID], excluding: WindowID? = nil) {
         var rects: [WindowID: CGRect] = [:]
         for (slot, occupant) in occupants {
@@ -314,7 +360,8 @@ final class DragTracker {
             if lastKnownFrames[occupant] == nil {
                 lastKnownFrames[occupant] = frame
             }
-            rects[occupant] = grid.rect(for: slot, in: context.boundsOf(frame))
+            rects[occupant] = grid(for: context.screenOf(occupant)).rect(
+                for: slot, in: context.boundsOf(frame))
         }
         schedule(rects: rects, excluding: excluding)
     }
@@ -322,6 +369,12 @@ final class DragTracker {
     private func scheduleApply(excluding id: WindowID) {
         // Neighbor rects are computed now, pushed on the next tick: the
         // dragged window keeps moving under the user's hand meanwhile.
+        // Only the dragged window's screen re-pushes: neighbors on other
+        // monitors keep their frames, so a resize never crosses displays.
+        if let screen = context.screenOf(id), let occupantsOf = context.occupantsOf {
+            reassertAll(occupants: occupantsOf(screen), excluding: id)
+            return
+        }
         reassertAll(occupants: context.occupants(), excluding: id)
     }
 

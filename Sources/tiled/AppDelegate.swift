@@ -167,9 +167,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the pure input `StatusIcon Snapshot` needs — derives from the
     /// controller's window rows; expanded windows keep their slot (an
     /// expanded window still owns its tile), so they still light it.
+    /// Multi-monitor: the focused display's space drives the glyph, so
+    /// the icon always depicts the layout the next hotkey acts on.
     private func iconSnapshot() -> StatusIcon.Snapshot {
         var occupants: [Slot: WindowID] = [:]
-        for info in controller.tiledWindowsInfo {
+        for info in controller.focusedTiledWindowsInfo {
             occupants[info.slot] = info.id
         }
         return StatusIcon.snapshot(layout: controller.activeLayout, occupants: occupants)
@@ -370,22 +372,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the next one replaces it.
     private func menuSnapshot() -> MenuModel.Snapshot {
         let warnings = activeWarnings
+        let rows = controller.tiledWindowsInfo
+        // Multi-monitor: group the manage list per display. The grouping
+        // key is the display name (or positional fallback); one section
+        // per display that has windows, in controller order. Single
+        // monitor (or no screen tags) renders the flat legacy list.
+        let grouped = Dictionary(grouping: rows, by: \.screenName)
+        let sections: [MenuModel.Snapshot.MonitorSection]
+        let orderedRows: [MenuModel.Snapshot.TiledWindow]
+        if grouped.count > 1 || (grouped.count == 1 && grouped.keys.first != nil) {
+            var built: [MenuModel.Snapshot.MonitorSection] = []
+            var ordered: [MenuModel.Snapshot.TiledWindow] = []
+            for row in rows {
+                if !built.contains(where: { $0.key == row.screenName }) {
+                    let count = rows.filter { $0.screenName == row.screenName }.count
+                    let layout = row.screen.flatMap(controller.activeLayout(on:)) ?? controller.activeLayout
+                    let display = row.screenName ?? "Display"
+                    let noun = count == 1 ? "1 tiled" : "\(count) tiled"
+                    built.append(.init(
+                        title: "\(display) — \(layout.title) · \(noun)",
+                        key: row.screenName))
+                }
+                ordered.append(.init(
+                    id: row.id, slot: row.slot, appName: row.appName,
+                    screenName: row.screenName))
+            }
+            sections = built
+            orderedRows = ordered
+        } else {
+            sections = []
+            orderedRows = rows.map {
+                .init(id: $0.id, slot: $0.slot, appName: $0.appName)
+            }
+        }
+        // Status line: one monitor reads as before; two read per
+        // display ("Display 1 — Quarters · 2 tiled + Display 2 — Sixths
+        // · 1 tiled") so the compass never hides a background monitor.
+        let statusLine: String
+        if sections.isEmpty {
+            statusLine = "Layout: \(controller.activeLayout.title) · \(rows.count) tiled"
+        } else {
+            statusLine = sections.map(\.title).joined(separator: " + ")
+        }
         return MenuModel.Snapshot(
             isTrusted: controller.isTrusted,
             warnings: warnings.hotkeyWarnings,
             notice: controller.lastNotice,
-            layoutTitle: controller.activeLayout.title,
+            layoutTitle: statusLine,
             activeLayout: controller.activeLayout,
             tileError: warnings.tileError,
             hasHotkeyWarnings: hasHotkeyWarnings,
             hasSplitterBackup: controller.hasSplitterBackup,
             hasFocusedWindow: gateway.isTrusted && gateway.focusedWindow() != nil,
             expandedSlot: controller.expandedFocusedSlot,
-            tiledWindows: controller.tiledWindowsInfo.map {
-                .init(id: $0.id, slot: $0.slot, appName: $0.appName)
-            },
+            tiledWindows: orderedRows,
             canUndoDisplacement: controller.canUndoDisplacement,
-            evictedCount: controller.evictedCount)
+            evictedCount: controller.evictedCount,
+            monitorSections: sections)
     }
 
 

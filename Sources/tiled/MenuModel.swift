@@ -50,6 +50,9 @@ enum MenuModel {
     /// delegate can skip the NSMenu rebuild when nothing the menu reads
     /// changed (frame pushes during drag-resize fire change callbacks
     /// every tick; the menu only cares about state, warnings, rows).
+    ///
+    /// `memberwise` keeps the existing 15-arg construction working:
+    /// `monitorSections` defaults to [] (single monitor, no headers).
     struct Snapshot: Equatable {
         var isTrusted: Bool
         var warnings: [String]
@@ -85,11 +88,24 @@ enum MenuModel {
         var tiledWindows: [TiledWindow]
         var canUndoDisplacement: Bool
         var evictedCount: Int
+        /// Per-monitor section headers for the tiled-windows list, in
+        /// menu order. Empty = single monitor (no headers rendered).
+        /// Defaulted so the existing 15-arg construction keeps working.
+        var monitorSections: [MonitorSection] = []
 
         struct TiledWindow: Equatable {
             var id: WindowID
             var slot: Slot
             var appName: String?
+            /// Display-line the window tiles on (menu grouping key).
+            var screenName: String? = nil
+        }
+
+        struct MonitorSection: Equatable {
+            /// Header title, e.g. "Display 1 — Quarters · 2 tiled".
+            var title: String
+            /// Grouping key matching `TiledWindow.screenName`.
+            var key: String?
         }
     }
 
@@ -210,8 +226,31 @@ enum MenuModel {
             // Empty state needs no row — the status line already
             // reports "0 tiled".
             if !snapshot.tiledWindows.isEmpty {
-                for window in snapshot.tiledWindows {
-                    items.append(windowItem(window, binding))
+                // Multi-monitor: group the manage list per display with a
+                // disabled header per section ("Display 1 — Quarters · 2
+                // tiled"). Single-monitor setups render the flat list.
+                if snapshot.monitorSections.isEmpty {
+                    for window in snapshot.tiledWindows {
+                        items.append(windowItem(window, binding))
+                    }
+                } else {
+                    var index = 0
+                    for section in snapshot.monitorSections {
+                        items.append(Item(
+                            title: section.title, isEnabled: false, isHeader: true))
+                        while index < snapshot.tiledWindows.count,
+                              snapshot.tiledWindows[index].screenName == section.key
+                        {
+                            items.append(windowItem(snapshot.tiledWindows[index], binding))
+                            index += 1
+                        }
+                    }
+                    // Defensive: windows whose section key mismatched
+                    // (stale snapshot) still render rather than vanish.
+                    while index < snapshot.tiledWindows.count {
+                        items.append(windowItem(snapshot.tiledWindows[index], binding))
+                        index += 1
+                    }
                 }
                 items.append(.separator())
                 if snapshot.canUndoDisplacement {

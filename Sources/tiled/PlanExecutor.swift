@@ -12,10 +12,15 @@ struct WindowRecord {
 
 /// A window evicted by a layout switch, enabling one-step undo.
 /// Records are rebuilt from live handles on undo; dead windows are skipped.
+/// `screen` tags the tiling space the window returns to: undo retiles
+/// per-monitor, so a restored window lands on the display it left.
 struct EvictedWindow {
     let handle: WindowHandle
     let slot: Slot
     let preTileFrame: CGRect
+    /// Nil = legacy single-space snapshots (pre-per-monitor), restored
+    /// into the requester's space.
+    var screen: ScreenID? = nil
 }
 
 /// Executes tiling plans: the branch interaction of tile / swap / switch
@@ -66,7 +71,8 @@ final class PlanExecutor {
         decision: TilePlan, requester id: WindowID, slot: Slot,
         state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID,
         tracker: DragTracker, boundsOf: (CGRect) -> CGRect,
-        observe: (WindowID) -> Void
+        observe: (WindowID) -> Void,
+        screenOf: (WindowID) -> ScreenID? = { _ in nil }
     ) -> (outcome: Outcome, state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID) {
         var state = state
         var records = records
@@ -114,7 +120,9 @@ final class PlanExecutor {
             // is vacated by the commit inside `place`.
             let evicted = decision.windowsToRestore(requester: id)
             let snapshot = evicted.compactMap { evictedID in
-                Self.snapshotEntry(for: evictedID, state: state, records: records, fallback: slot)
+                Self.snapshotEntry(
+                    for: evictedID, state: state, records: records, fallback: slot,
+                    screen: screenOf(evictedID))
             }
             let restoreFailures = restore(
                 evicted, state: &state, records: &records, tracker: tracker)
@@ -150,7 +158,9 @@ final class PlanExecutor {
             // naming after would degrade every eviction to a count.
             let evictedNames = evictionNames(evicted)
             let snapshot = evicted.compactMap { evictedID in
-                Self.snapshotEntry(for: evictedID, state: state, records: records, fallback: slot)
+                Self.snapshotEntry(
+                    for: evictedID, state: state, records: records, fallback: slot,
+                    screen: screenOf(evictedID))
             }
             let restoreFailures = restore(
                 decision.windowsToRestore(requester: id),
@@ -255,12 +265,12 @@ final class PlanExecutor {
     /// only the switch branch knows the requested slot.
     private static func snapshotEntry(
         for evictedID: WindowID, state: TilingState, records: [WindowID: WindowRecord],
-        fallback: Slot
+        fallback: Slot, screen: ScreenID? = nil
     ) -> EvictedWindow? {
         records[evictedID].map {
             EvictedWindow(
                 handle: $0.handle, slot: state.slot(of: evictedID) ?? fallback,
-                preTileFrame: $0.preTileFrame)
+                preTileFrame: $0.preTileFrame, screen: screen)
         }
     }
 

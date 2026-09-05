@@ -9,8 +9,12 @@ A named tile a window can occupy (Top Left, Left Third, …), defined by its set
 _Avoid_: tile, zone, region
 
 **Layout**:
-One of two mutually exclusive geometries: quarters (2×2 plus halves) or sixths (3×2 grid plus thirds and two-thirds).
+One of two mutually exclusive geometries per monitor: quarters (2×2 plus halves) or sixths (3×2 grid plus thirds and two-thirds). Each display runs its own.
 _Avoid_: mode, grid
+
+**Monitor space**:
+One display's independent tiling state: its occupancy, layout, splitters, undo chapters, and notices. Tiling acts on the requesting window's monitor; menus aggregate (the manage list groups per display).
+_Avoid_: screen (AppKit type), desktop
 
 **Cell**:
 An atomic unit of the shared 4×2 refinement both layouts are built from; overlap is cell-set intersection.

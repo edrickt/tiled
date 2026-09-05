@@ -91,8 +91,14 @@ you pick a free one.
   right where you dropped it (the drop is the placement — no pre-tile
   restore); a shorter drag snaps back into its tile. A single far jump
   (a programmatic move, not a hand drag) always snaps back.
-- Quarters and sixths are mutually exclusive on screen: requesting a slot in
-  the other layout untiles every tiled window and switches layouts. The menu
+- Each monitor tiles independently: every display runs its own layout,
+  occupancy, splitters, and undo history. Tiling, switching, swapping,
+  drag-resizing, and ⌃⌥⇧⌘Z on one monitor never disturb the other —
+  the same tile can even be occupied on both at once. The menu groups
+  tiled windows per display; Untile All and Reset Splitters act on the
+  focused monitor only.
+- Quarters and sixths are mutually exclusive per monitor: requesting a slot in
+  the other layout untiles every tiled window on that monitor and switches layouts. The menu
   names the switch and how to undo it ("Switched to Sixths · 3 windows
   untiled. Undo (⌃⌥⇧⌘Z) is one step, from anywhere. Safe to explore:
   destruction is always reversible.
@@ -105,8 +111,9 @@ you pick a free one.
 Drag any edge of a tiled window and the shared grid splitter moves with it;
 neighbors on the other side follow. Vertical and horizontal splitters are
 independent per column (quarters) or per third (sixths), so resizing one
-column never moves the other. **Reset Splitters** in the menu snaps all
-splitters back to even splits.
+column never moves the other — and independent per monitor, so dragging
+an edge on one display never moves tiles on another. **Reset Splitters**
+in the menu snaps the focused monitor's splitters back to even splits.
 
 ## Building & running
 

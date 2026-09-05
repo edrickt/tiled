@@ -292,6 +292,39 @@ final class MenuModelTests: XCTestCase {
             "Restore Previous Splitters")
     }
 
+    func testMultiMonitorWindowsGroupUnderDisplayHeaders() {
+        // Two displays tiled: the manage list groups per display under
+        // a disabled header per section, in controller order.
+        var snap = snapshot(tiledWindows: [
+            .init(id: 1, slot: .topLeft, appName: "Safari", screenName: "Display 1"),
+            .init(id: 2, slot: .topLeft, appName: "Mail", screenName: "Display 2"),
+        ])
+        snap.monitorSections = [
+            .init(title: "Display 1 — Quarters · 1 tiled", key: "Display 1"),
+            .init(title: "Display 2 — Sixths · 1 tiled", key: "Display 2"),
+        ]
+        let model = items(snap)
+        let headers = model.filter(\.isHeader).map(\.title)
+        XCTAssertTrue(headers.contains("Display 1 — Quarters · 1 tiled"))
+        XCTAssertTrue(headers.contains("Display 2 — Sixths · 1 tiled"))
+        // Rows follow their header in order: Safari under Display 1,
+        // Mail under Display 2.
+        let titles = model.map(\.title)
+        let first = titles.firstIndex(of: "Display 1 — Quarters · 1 tiled")!
+        let second = titles.firstIndex(of: "Display 2 — Sixths · 1 tiled")!
+        XCTAssertTrue(titles[first + 1].contains("Safari"))
+        XCTAssertTrue(titles[second + 1].contains("Mail"))
+    }
+
+    func testSingleMonitorKeepsTheFlatList() {
+        // No sections (legacy snapshot): no display headers, just rows.
+        let model = items(snapshot(tiledWindows: [
+            .init(id: 1, slot: .topLeft, appName: "Safari"),
+        ]))
+        XCTAssertFalse(model.contains { $0.isHeader && $0.title.contains("Display") })
+        XCTAssertTrue(model.contains { $0.title.contains("Safari") })
+    }
+
     func testEmptySpaceHasNoWindowListOrBulkActions() {
         let model = items(snapshot())
         XCTAssertFalse(model.contains { $0.action == .untileAll })
