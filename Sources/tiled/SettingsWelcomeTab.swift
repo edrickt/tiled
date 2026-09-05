@@ -72,7 +72,7 @@ final class WelcomeTab: NSObject {
         warningText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         permissionRow.addArrangedSubview(warningText)
         let grantButton = NSButton(
-            title: "Open Settings", target: self, action: #selector(grantPermissionTapped(_:)))
+            title: "Open Accessibility Settings", target: self, action: #selector(grantPermissionTapped(_:)))
         grantButton.bezelStyle = .rounded
         grantButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         permissionRow.addArrangedSubview(grantButton)

@@ -12,9 +12,16 @@ import AppKit
 final class ShortcutsTab: NSObject {
     private let hotkeyStore: HotkeyStore
     var onHotkeysChange: (() -> Void)?
+    /// Live Accessibility trust probe: with permission off every recorder
+    /// below is a dead end, so this tab leads with the same fix row the
+    /// other tabs show.
+    var isTrustedProvider: (() -> Bool)?
+    /// Opens the Accessibility permission pane.
+    var onOpenAccessibilitySettings: (() -> Void)?
 
     private var recorderButtons: [Slot: RecorderButton] = [:]
     private var conflictLabel: NSTextField!
+    private var permissionRow: NSStackView?
     private var resetButton: NSButton!
     private weak var window: NSWindow?
 
@@ -44,6 +51,31 @@ final class ShortcutsTab: NSObject {
         stack.spacing = 4
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 24, bottom: 16, right: 24)
         stack.translatesAutoresizingMaskIntoConstraints = false
+
+        // Permission warning leads the tab: with Accessibility off every
+        // recorder below is a dead button, and this is often the tab a
+        // troubleshooting user opens first. Same shape as General/Welcome.
+        let permissionRow = NSStackView()
+        permissionRow.orientation = .horizontal
+        permissionRow.spacing = 12
+        permissionRow.alignment = .firstBaseline
+        let warningText = NSTextField(wrappingLabelWithString:
+            "tiled can't see or move windows — Accessibility permission is off.")
+        warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        warningText.textColor = .labelColor
+        warningText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        permissionRow.addArrangedSubview(warningText)
+        let grantButton = NSButton(
+            title: "Open Accessibility Settings", target: self,
+            action: #selector(grantPermissionTapped(_:)))
+        grantButton.bezelStyle = .rounded
+        grantButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        permissionRow.addArrangedSubview(grantButton)
+        permissionRow.isHidden = isTrustedProvider?() ?? true
+        stack.addArrangedSubview(permissionRow)
+        permissionRow.trailingAnchor.constraint(
+            equalTo: stack.trailingAnchor, constant: -24).isActive = true
+        self.permissionRow = permissionRow
 
         // Conflict line sits above the sections so a clash while Sixths
         // is collapsed never renders below the fold. Hidden until needed.
@@ -106,10 +138,13 @@ final class ShortcutsTab: NSObject {
 
     /// Refreshes every recorder label from the store (called on show and
     /// after any change, so rows always reflect persisted bindings).
+    /// Also re-probes trust, so the permission row tracks reality every
+    /// time the tab is shown or its content is rebuilt.
     func reload() {
         for (slot, button) in recorderButtons {
             button.showBinding(hotkeyStore.binding(for: slot))
         }
+        permissionRow?.isHidden = isTrustedProvider?() ?? true
         clearConflict()
     }
 
@@ -408,6 +443,10 @@ final class ShortcutsTab: NSObject {
     private func clearConflict() {
         conflictLabel?.stringValue = ""
         conflictLabel?.isHidden = true
+    }
+
+    @objc private func grantPermissionTapped(_ sender: NSButton) {
+        onOpenAccessibilitySettings?()
     }
 
     @objc private func resetShortcuts(_ sender: NSButton) {

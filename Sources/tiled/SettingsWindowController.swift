@@ -23,6 +23,7 @@ final class SettingsWindowController: NSWindowController {
         didSet {
             generalTab.isTrustedProvider = isTrustedProvider
             welcomeTab.isTrustedProvider = isTrustedProvider
+            shortcutsTab.isTrustedProvider = isTrustedProvider
         }
     }
     /// Opens the Accessibility permission pane.
@@ -30,6 +31,7 @@ final class SettingsWindowController: NSWindowController {
         didSet {
             generalTab.onOpenAccessibilitySettings = onOpenAccessibilitySettings
             welcomeTab.onOpenAccessibilitySettings = onOpenAccessibilitySettings
+            shortcutsTab.onOpenAccessibilitySettings = onOpenAccessibilitySettings
         }
     }
     /// Called when the user toggles "Hide menu bar icon" so the delegate
