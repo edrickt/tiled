@@ -208,8 +208,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if filled.contains(cell) {
                     path.fill()
                 } else {
-                    path.lineWidth = 1
-                    path.stroke()
+                    // A stroke centers on its path, so an unstroked-size
+                    // rect would bleed half the line width outside on every
+                    // side and read larger than its filled siblings. Inset
+                    // by half the width (and shrink the radius to match) so
+                    // the outer edge lands exactly on the filled rect.
+                    let lineWidth: CGFloat = 1
+                    let outline = NSBezierPath(
+                        roundedRect: rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
+                        xRadius: 1, yRadius: 1
+                    )
+                    outline.lineWidth = lineWidth
+                    outline.stroke()
                 }
             }
             return true
