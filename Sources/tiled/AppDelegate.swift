@@ -206,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let rect = NSRect(x: x, y: y, width: cellW, height: cellH)
                 let path = NSBezierPath(
                     roundedRect: rect,
-                    xRadius: 2, yRadius: 2
+                    xRadius: 1, yRadius: 1
                 )
                 if filled.contains(cell) {
                     path.fill()
@@ -219,7 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let lineWidth: CGFloat = 1
                     let outline = NSBezierPath(
                         roundedRect: rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
-                        xRadius: 1.5, yRadius: 1.5
+                        xRadius: 0.5, yRadius: 0.5
                     )
                     outline.lineWidth = lineWidth
                     outline.stroke()
