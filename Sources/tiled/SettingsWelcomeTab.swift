@@ -136,6 +136,14 @@ final class WelcomeTab: NSObject {
         onDismiss?()
     }
 
+    /// Re-probes trust for an already-built Welcome view; the shell's
+    /// permission poll calls this when trust may have flipped while the
+    /// window sits open. The row's visibility was set at build time;
+    /// without this it would go stale until the next rebuild.
+    func refreshPermissionState() {
+        permissionRow?.isHidden = isTrustedProvider?() ?? true
+    }
+
     @objc private func grantPermissionTapped(_ sender: NSButton) {
         onOpenAccessibilitySettings?()
     }

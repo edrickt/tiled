@@ -23,6 +23,10 @@ final class GeneralTab: NSObject {
     private var launchAtLoginCheckbox: NSButton!
     private var hideIconCheckbox: NSButton!
     private var permissionRow: NSStackView!
+    private var loginFailureLabel: NSTextField!
+    /// Last probed trust state, so a visible permission-row flip can be
+    /// announced instead of being a silent layout jump.
+    private var lastKnownTrusted: Bool?
 
     /// First control, for the shell's initial-focus placement.
     var firstControl: NSButton? { launchAtLoginCheckbox }
@@ -99,6 +103,15 @@ final class GeneralTab: NSObject {
         launchAtLoginCheckbox.toolTip = "Start tiled automatically when you log in."
         stack.addArrangedSubview(launchAtLoginCheckbox)
 
+        // Inline failure explanation: when SMAppService throws (e.g. a
+        // raw `swift run` binary), the checkbox reverts — this label says
+        // why, so the toggle never silently "doesn't work".
+        loginFailureLabel = NSTextField(wrappingLabelWithString: "")
+        loginFailureLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        loginFailureLabel.textColor = .secondaryLabelColor
+        loginFailureLabel.isHidden = true
+        stack.addArrangedSubview(loginFailureLabel)
+
         hideIconCheckbox = NSButton(
             checkboxWithTitle: "Hide menu bar icon",
             target: self, action: #selector(hideIconToggled(_:)))
@@ -147,7 +160,30 @@ final class GeneralTab: NSObject {
     func loadValues() {
         launchAtLoginCheckbox?.state = currentLaunchAtLogin ? .on : .off
         hideIconCheckbox?.state = settings.hideMenuBarIcon ? .on : .off
-        permissionRow?.isHidden = isTrustedProvider?() ?? true
+        refreshPermissionState()
+    }
+
+    /// Re-probes trust so the permission row tracks reality without
+    /// waiting for the next show(); the shell's permission poll calls
+    /// this when trust may have flipped.
+    func refreshPermissionState() {
+        let trusted = isTrustedProvider?() ?? true
+        permissionRow?.isHidden = trusted
+        // Only a visible-state flip is announced; the first probe just
+        // sets the baseline. Post against the row itself — announcements
+        // for non-visible elements are dropped by the system anyway.
+        if let previous = lastKnownTrusted, previous != trusted, let row = permissionRow {
+            NSAccessibility.post(
+                element: row,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: trusted
+                        ? "Accessibility permission granted — tiled can see and move windows now."
+                        : "tiled can't see or move windows — Accessibility permission is off.",
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                ])
+        }
+        lastKnownTrusted = trusted
     }
 
     @objc private func grantPermissionTapped(_ sender: NSButton) {
@@ -170,11 +206,16 @@ final class GeneralTab: NSObject {
             } else {
                 try SMAppService.mainApp.unregister()
             }
+            loginFailureLabel.isHidden = true
         } catch {
             // SMAppService can fail outside a properly bundled app (e.g. a
-            // raw `swift run` binary); say so and revert the checkbox.
+            // raw `swift run` binary); say why inline, not only in the log.
             NSLog("tiled: Launch at Login %@ failed: %@", enable ? "enable" : "disable", "\(error)")
             sender.state = enable ? .off : .on
+            loginFailureLabel.stringValue =
+                "Launch at Login couldn't be \(enable ? "enabled" : "disabled") — " +
+                "tiled must be running as an installed app bundle for it to work."
+            loginFailureLabel.isHidden = false
         }
     }
 

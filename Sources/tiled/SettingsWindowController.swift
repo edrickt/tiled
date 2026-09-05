@@ -87,7 +87,7 @@ final class SettingsWindowController: NSWindowController {
         shortcutsTab.reload()
         selectTab(tab)
         window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateAsFrontmost()
         focusInitialControl(for: tab)
     }
 
@@ -187,7 +187,7 @@ final class SettingsWindowController: NSWindowController {
             shortcutsTab.reload()
             selectTab(.welcome)
             window?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activateAsFrontmost()
             focusInitialControl(for: .welcome)
             return
         }
@@ -239,5 +239,24 @@ final class SettingsWindowController: NSWindowController {
 
     private func loadValues() {
         generalTab.loadValues()
+    }
+
+    /// The delegate's permission poll calls this when Accessibility
+    /// trust may have flipped, so open windows re-probe immediately
+    /// instead of showing a stale warning (or hiding a needed one)
+    /// until the next show().
+    func permissionStateDidChange() {
+        welcomeTab.refreshPermissionState()
+        generalTab.refreshPermissionState()
+        shortcutsTab.refreshPermissionState()
+    }
+
+    /// Keeps the Shortcuts tab's rebuild size current during live
+    /// resize; without this, a collapse/bulk rebuild after resizing
+    /// would use the size captured at build time.
+    func windowDidResize(_ notification: Notification) {
+        if let size = window?.contentView?.bounds.size {
+            shortcutsTab.buildSize = size
+        }
     }
 }

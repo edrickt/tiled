@@ -124,6 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Welcome once instead of leaving them at the menu.
         if afterPermissionWait, !settings.didDismissWelcome {
             showSettings(selecting: .welcome)
+        } else {
+            // An already-open Settings window must re-probe now: its
+            // permission rows are only refreshed on show() otherwise.
+            settingsController?.permissionStateDidChange()
         }
     }
 

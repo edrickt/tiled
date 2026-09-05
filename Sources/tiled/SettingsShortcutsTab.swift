@@ -24,6 +24,9 @@ final class ShortcutsTab: NSObject {
     private var permissionRow: NSStackView?
     private var resetButton: NSButton!
     private weak var window: NSWindow?
+    /// Last probed trust state, so a visible permission-row flip can be
+    /// announced instead of being a silent layout jump.
+    private var lastKnownTrusted: Bool?
 
     /// First visible recorder in slot order, for initial-focus placement.
     /// Top Left may not exist when Quarters is collapsed.
@@ -116,7 +119,7 @@ final class ShortcutsTab: NSObject {
         resetButton.bezelStyle = .rounded
         footer.addArrangedSubview(resetButton)
         let hint = NSTextField(wrappingLabelWithString:
-            "Click a shortcut, press a new combo. Click again or Esc keeps the old one, ⌫ disables. " +
+            "Click a shortcut, press a new combo. Click again, Space, or Esc keeps the old one, ⌫ disables. " +
             "A clash keeps your old combo and names its owner above.")
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -144,8 +147,26 @@ final class ShortcutsTab: NSObject {
         for (slot, button) in recorderButtons {
             button.showBinding(hotkeyStore.binding(for: slot))
         }
-        permissionRow?.isHidden = isTrustedProvider?() ?? true
+        refreshPermissionState()
         clearConflict()
+    }
+
+    /// Re-probes trust without touching recorder labels or a visible
+    /// conflict line; the shell's permission poll calls this when trust
+    /// may have flipped while the window sits open.
+    func refreshPermissionState() {
+        let trusted = isTrustedProvider?() ?? true
+        permissionRow?.isHidden = trusted
+        // Only a visible-state flip is announced; the first probe just
+        // sets the baseline. Announcements against a non-visible element
+        // are dropped by the system anyway.
+        if let previous = lastKnownTrusted, previous != trusted {
+            announce(
+                trusted
+                    ? "Accessibility permission granted — tiled can see and move windows now."
+                    : "tiled can't see or move windows — Accessibility permission is off.")
+        }
+        lastKnownTrusted = trusted
     }
 
     /// Drops all rows; the shell calls this before rebuilding the tab view
@@ -175,11 +196,11 @@ final class ShortcutsTab: NSObject {
         // mouse path sees. Fires on arm (the monitor starts listening)
         // and on silent tab-away cancel (no decision, no visual trace).
         button.onArmed = { [weak self] armedSlot in
-            self?.announceRecorderState(
+            self?.announce(
                 "Capturing a shortcut for \(SlotPresentation.title(of: armedSlot)) — press a combo, or Esc to keep the old one.")
         }
         button.onSilentCancel = { [weak self] cancelledSlot in
-            self?.announceRecorderState(
+            self?.announce(
                 "\(SlotPresentation.title(of: cancelledSlot)) kept its old shortcut.")
         }
         recorderButtons[slot] = button
@@ -212,6 +233,9 @@ final class ShortcutsTab: NSObject {
         header.image = NSImage(
             systemSymbolName: collapsed ? "chevron.right" : "chevron.down",
             accessibilityDescription: nil)
+        // The chevron glyph carries the collapsed/expanded state only
+        // visually; the value is what VoiceOver reads after the title.
+        header.setAccessibilityValue(collapsed ? "collapsed" : "expanded")
         header.imagePosition = .imageLeading
         header.contentTintColor = .secondaryLabelColor
         header.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
@@ -417,12 +441,12 @@ final class ShortcutsTab: NSObject {
     }
 
     /// VoiceOver announcement for recorder state changes (arm, silent
-    /// cancel). Posted against the conflict line's view — the Shortcuts
-    /// tab's live region — consistent with duplicate announcements.
-    /// Silently skipped when the window is hidden (announcements against
-    /// a non-visible element are dropped by the system anyway, but the
-    /// guard keeps the intent explicit).
-    private func announceRecorderState(_ message: String) {
+    /// cancel) and permission transitions. Posted against the conflict
+    /// line's view — the Shortcuts tab's live region — consistent with
+    /// duplicate announcements. Silently skipped when the window is
+    /// hidden (announcements against a non-visible element are dropped
+    /// by the system anyway, but the guard keeps the intent explicit).
+    private func announce(_ message: String) {
         guard window?.isVisible == true, let label = conflictLabel else { return }
         NSAccessibility.post(
             element: label,

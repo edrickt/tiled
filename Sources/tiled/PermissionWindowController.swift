@@ -79,7 +79,7 @@ final class PermissionWindowController: NSWindowController {
     /// front and center, not behind the user's work.
     func show() {
         window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activateAsFrontmost()
         window?.makeFirstResponder(openSettingsButton)
     }
 

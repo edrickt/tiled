@@ -119,7 +119,7 @@ final class HotkeyRecorderTests: XCTestCase {
 
     func testBareNavigationKeysPassThroughWhileArmed() {
         let codes = [
-            kVK_Tab, kVK_Return,
+            kVK_Tab, kVK_Return, kVK_Space,
             kVK_UpArrow, kVK_DownArrow, kVK_LeftArrow, kVK_RightArrow,
             kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown,
         ]

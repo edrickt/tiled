@@ -81,8 +81,10 @@ final class RecorderButton: NSButton {
     /// is skipped — the VoiceOver announcement and preserved binding carry
     /// the meaning on their own.
     func shake() {
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        shakeStep(0, original: frame.origin)
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let container = superview
+        else { return }
+        shakeStep(0, original: frame.origin, container: container)
     }
 
     /// One step of the shake, chained through sequential animation groups.
@@ -90,8 +92,14 @@ final class RecorderButton: NSButton {
     /// concurrently — they compose into one blur, not a left-right shake —
     /// so each offset gets its own group and the next starts in the
     /// previous group's completion handler.
-    private func shakeStep(_ index: Int, original: NSPoint) {
+    ///
+    /// `container` pins the shake to the superview it started in: if a
+    /// concurrent layout pass replaces the view (rebuild, window close)
+    /// mid-shake, the remaining steps stop instead of dragging the button
+    /// back to a captured origin the layout no longer agrees with.
+    private func shakeStep(_ index: Int, original: NSPoint, container: NSView) {
         let offsets: [CGFloat] = [6, -6, 6, -6]
+        guard superview === container else { return }
         guard index < offsets.count else {
             setFrameOrigin(original)
             return
@@ -100,7 +108,7 @@ final class RecorderButton: NSButton {
             context.duration = 0.05
             animator().setFrameOrigin(NSPoint(x: original.x + offsets[index], y: original.y))
         }, completionHandler: { [weak self] in
-            self?.shakeStep(index + 1, original: original)
+            self?.shakeStep(index + 1, original: original, container: container)
         })
     }
 
