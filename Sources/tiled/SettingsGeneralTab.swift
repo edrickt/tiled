@@ -13,6 +13,10 @@ final class GeneralTab: NSObject {
     /// Reopens the Welcome tab (the General tab's "Show tiled Guide"
     /// button). The shell owns tab switching.
     var onShowGuide: (() -> Void)?
+    /// Live probe of the Settings fallback hotkey, so the hide-icon
+    /// confirm can name a recovery that is actually registered — never a
+    /// dead combo while removing the last visible handle to the app.
+    var isSettingsHotkeyRegisteredProvider: (() -> Bool)?
     /// Live Accessibility trust probe, injected by the shell: with the
     /// menu-bar icon hidden this tab is the app's only visible surface,
     /// so permission loss must be legible here.
@@ -98,7 +102,7 @@ final class GeneralTab: NSObject {
             equalTo: stack.trailingAnchor, constant: -24).isActive = true
 
         launchAtLoginCheckbox = NSButton(
-            checkboxWithTitle: "Launch at Login",
+            checkboxWithTitle: "Launch at login",
             target: self, action: #selector(launchAtLoginToggled(_:)))
         launchAtLoginCheckbox.toolTip = "Start tiled automatically when you log in."
         stack.addArrangedSubview(launchAtLoginCheckbox)
@@ -148,7 +152,7 @@ final class GeneralTab: NSObject {
 
         let hint = NSTextField(wrappingLabelWithString:
             "When the icon is hidden, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere " +
-            "or relaunch tiled to get back here — Settings opens automatically. " +
+            "or quit and reopen tiled to get back here — Settings opens automatically. " +
             "Hiding asks first, so this never happens by accident.")
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -213,7 +217,7 @@ final class GeneralTab: NSObject {
             NSLog("tiled: Launch at Login %@ failed: %@", enable ? "enable" : "disable", "\(error)")
             sender.state = enable ? .off : .on
             loginFailureLabel.stringValue =
-                "Launch at Login couldn't be \(enable ? "enabled" : "disabled") — " +
+                "Launch at login couldn't be \(enable ? "enabled" : "disabled") — " +
                 "tiled must be running as an installed app bundle for it to work."
             loginFailureLabel.isHidden = false
         }
@@ -223,12 +227,21 @@ final class GeneralTab: NSObject {
         let hidden = sender.state == .on
         if hidden {
             // Hiding removes the only visible handle to the app (including
-            // Quit), so confirm with the recovery path named on the button.
+            // Quit), so confirm with a recovery path that is actually
+            // registered: if the Settings fallback hotkey lost to another
+            // app, the dialog must not promise ⌃⌥⇧⌘, — it names the
+            // relaunch path instead.
+            let settingsHotkeyAlive = isSettingsHotkeyRegisteredProvider?() ?? true
+            let recovery = settingsHotkeyAlive
+                ? "To get back, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere "
+                    + "or quit and reopen tiled — Settings opens automatically."
+                : "To get back, quit and reopen tiled — Settings opens automatically. "
+                    + "(The \u{2303}\u{2325}\u{21E7}\u{2318}, fallback is "
+                    + "already used by another app.)"
             let alert = NSAlert()
             alert.messageText = "Hide the menu bar icon?"
             alert.informativeText =
-                "The icon disappears immediately. To get back, press \u{2303}\u{2325}\u{21E7}\u{2318}, " +
-                "anywhere or relaunch tiled — Settings opens automatically."
+                "The icon disappears immediately. \(recovery)"
             alert.addButton(withTitle: "Hide Icon")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else {

@@ -508,7 +508,9 @@ struct TilingState: Equatable {
     }
 
     /// Commit a planned placement. Evicted windows must already be removed
-    /// via `remove(window:)`.
+    /// via `remove(window:)`. Claiming an occupied slot evicts its
+    /// occupant from state (the gateway write decides the truth on
+    /// screen; callers roll back on refusal, as `place` does).
     mutating func commit(window: WindowID, into slot: Slot) {
         for s in Slot.allCases where occupantBySlot[s] == window {
             occupantBySlot[s] = nil

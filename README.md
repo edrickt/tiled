@@ -38,6 +38,7 @@ under **Tile Focused Window** in the menu bar menu.
 | ⌥⇧⌘H   | Left two-thirds    |
 | ⌥⇧⌘;   | Right two-thirds   |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
+| ⌃⌥⇧⌘Z   | Undo the last displacement — layout switch or eviction (works from anywhere) |
 
 ### Expand — ⌥⇧⏎
 
@@ -93,19 +94,19 @@ you pick a free one.
 - Quarters and sixths are mutually exclusive on screen: requesting a slot in
   the other layout untiles every tiled window and switches layouts. The menu
   names the switch and how to undo it ("Switched to Sixths · 3 windows
-  untiled. Undo: Restore 3 Evicted Windows") — undo is one step (⌘Z).
-  Safe to explore: destruction is always reversible.
+  untiled. Undo (⌃⌥⇧⌘Z) is one step, from anywhere. Safe to explore:
+  destruction is always reversible.
 - Some apps refuse programmatic resizing. When that happens the window is
   left alone and the menu says which app refused — state and screen never
   silently disagree.
 
 ## Live resizing
 
-Drag any edge of a tiled window and the shared grid divider moves with it;
-neighbors on the other side follow. Vertical and horizontal dividers are
+Drag any edge of a tiled window and the shared grid splitter moves with it;
+neighbors on the other side follow. Vertical and horizontal splitters are
 independent per column (quarters) or per third (sixths), so resizing one
-column never moves the other. **Reset Dividers** in the menu snaps all
-dividers back to even splits.
+column never moves the other. **Reset Splitters** in the menu snaps all
+splitters back to even splits.
 
 ## Building & running
 

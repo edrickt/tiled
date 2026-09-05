@@ -23,6 +23,13 @@ final class RecorderButton: NSButton {
         super.init(frame: .zero)
         bezelStyle = .rounded
         setButtonType(.momentaryPushIn)
+        // The slot's row label is a separate static text with no
+        // association to this button: without the next line a VoiceOver
+        // user tabbing the Shortcuts tab hears seventeen anonymous
+        // buttons ("⌥⇧U, button" or worse, "Disabled, button"). The
+        // button names its slot; the binding is the value.
+        setAccessibilityLabel("\(SlotPresentation.title(of: slot)) shortcut")
+        setAccessibilityValue("disabled")
     }
 
     @available(*, unavailable)
@@ -42,6 +49,7 @@ final class RecorderButton: NSButton {
         stopRecording()
         lastBinding = binding
         title = binding.label ?? "Disabled"
+        setAccessibilityValue(binding.label ?? "disabled")
     }
 
     /// Arms the recorder; `completion` fires exactly once with the first
@@ -51,6 +59,7 @@ final class RecorderButton: NSButton {
         isRecording = true
         self.completion = completion
         title = "Press shortcut…"
+        setAccessibilityValue("recording")
         // The armed state is otherwise visual-only: the title change is
         // not announced, and a VoiceOver user gets no cue that the next
         // keypress will be captured (Esc cancels). The controller posts
@@ -129,6 +138,7 @@ final class RecorderButton: NSButton {
         completion = nil
         if let lastBinding {
             title = lastBinding.label ?? "Disabled"
+            setAccessibilityValue(lastBinding.label ?? "disabled")
         }
         // Tabbing away mid-record disarms with no decision and no visual
         // trace — say so, so the state change is never silent.

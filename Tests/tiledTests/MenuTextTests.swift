@@ -7,19 +7,39 @@ import XCTest
 final class MenuTextTests: XCTestCase {
     // MARK: Titles
 
-    func testUndoSwitchTitleSingularAndPlural() {
-        XCTAssertEqual(MenuText.undoSwitchTitle(evictedCount: 1), "Restore 1 Evicted Window")
-        XCTAssertEqual(MenuText.undoSwitchTitle(evictedCount: 2), "Restore 2 Evicted Windows")
+    func testUndoDisplacementTitleSingularAndPlural() {
+        XCTAssertEqual(MenuText.undoDisplacementTitle(evictedCount: 1), "Restore 1 Evicted Window")
+        XCTAssertEqual(MenuText.undoDisplacementTitle(evictedCount: 2), "Restore 2 Evicted Windows")
     }
 
     func testUntileAllTitleSingularAndPlural() {
         XCTAssertEqual(MenuText.untileAllTitle(count: 1), "Untile 1 Window")
-        XCTAssertEqual(MenuText.untileAllTitle(count: 3), "Untile All 3 Windows")
+        XCTAssertEqual(MenuText.untileAllTitle(count: 3), "Untile 3 Windows")
     }
 
     func testExpandItemTitleWithAndWithoutLabel() {
         XCTAssertEqual(MenuText.expandItemTitle(label: "⌥⇧⏎"), "Expand to Fill Screen — ⌥⇧⏎")
         XCTAssertEqual(MenuText.expandItemTitle(label: nil), "Expand to Fill Screen")
+    }
+
+    func testExpandItemTitleNamesTheReturnSlotWhenExpanded() {
+        // A toggle with no visible state leaves the user guessing: when a
+        // window is expanded the row says where the toggle goes back.
+        XCTAssertEqual(
+            MenuText.expandItemTitle(label: "⌥⇧⏎", expandedSlot: .topLeft),
+            "Return to Top Left — ⌥⇧⏎")
+        XCTAssertEqual(
+            MenuText.expandItemTitle(label: "⌥⇧⏎", expandedSlot: nil),
+            "Expand to Fill Screen — ⌥⇧⏎")
+    }
+
+    func testWarningSummaryTitleSingularAndPlural() {
+        XCTAssertEqual(
+            MenuText.warningSummaryTitle(count: 1),
+            "⚠ 1 shortcut problem — other apps own it")
+        XCTAssertEqual(
+            MenuText.warningSummaryTitle(count: 3),
+            "⚠ 3 shortcut problems — other apps own them")
     }
 
     // MARK: Warnings
@@ -28,7 +48,7 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.settingsHotkeyWarning(),
             "The Settings shortcut (⌃⌥⇧⌘,) is already used by another app — "
-                + "relaunch tiled to get back to Settings while hidden.")
+                + "quit and reopen tiled to get back to Settings while hidden.")
     }
 
     func testHotkeyFailureWarningNamesLabelAndSlot() {
@@ -37,17 +57,24 @@ final class MenuTextTests: XCTestCase {
             "⌥⇧U is already used by another app — “Top Left” has no hotkey.")
     }
 
-    func testHotkeyFailureWarningFallsBackToDisabled() {
+    func testHotkeyFailureWarningFallsBackToSlotNameWithoutSelfContradiction() {
         XCTAssertEqual(
             MenuText.hotkeyFailureWarning(label: nil, slot: .sixthLeft),
-            "Disabled is already used by another app — “Left Third” has no hotkey.")
+            "The shortcut for “Left Third” is already used by another app — it has no hotkey.")
+    }
+
+    func testUndoHotkeyWarningNamesComboAndMenuRecovery() {
+        XCTAssertEqual(
+            MenuText.undoHotkeyWarning(),
+            "The undo shortcut (⌃⌥⇧⌘Z) is already used by another app — "
+                + "undo the last displacement from the tiled menu instead.")
     }
 
     func testExpandHotkeyWarningNamesComboAndRecovery() {
         XCTAssertEqual(
             MenuText.expandHotkeyWarning(),
             "The expand shortcut (⌥⇧⏎) is already used by another app — "
-                + "relaunch tiled to try registering it again.")
+                + "quit and reopen tiled to try registering it again.")
     }
 
     // MARK: Menu rows
@@ -78,6 +105,9 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.noFocusedWindowAnnouncement(),
             "No focused window — click a window first.")
+        XCTAssertEqual(
+            MenuText.nothingToUndoAnnouncement(),
+            "Nothing to undo — a later change replaced it.")
         XCTAssertEqual(
             MenuText.alreadyTiledAnnouncement(slot: .topRight),
             "Top Right — already there.")

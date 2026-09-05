@@ -112,6 +112,34 @@ final class PlanExecutorTests: XCTestCase {
             "eviction writes the pre-tile frame back to the window")
     }
 
+    func testPlainTileEvictionNoticesAndSnapshotsForUndo() {
+        let a = addWindow()
+        state.commit(window: a, into: .topLeft)
+        let b = addWindow()
+
+        let outcome = commit(run(.tile(evicting: [a]), requester: b, slot: .topLeft))
+
+        // Ordinary eviction gets the same narrative as a layout switch:
+        // a notice naming the displaced app (not a count), plus the
+        // shared one-step undo.
+        XCTAssertEqual(
+            outcome.notice,
+            "TestApp went back to where it was. "
+                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
+        XCTAssertNotNil(outcome.snapshot, "the eviction is undoable like a switch")
+        XCTAssertEqual(outcome.snapshot?.first?.slot, .topLeft)
+        XCTAssertEqual(outcome.requester, b)
+    }
+
+    func testPlainTileWithoutEvictionHasNoNoticeOrSnapshot() {
+        let b = addWindow()
+
+        let outcome = commit(run(.tile(evicting: []), requester: b, slot: .topLeft))
+
+        XCTAssertNil(outcome.notice, "nothing was displaced, nothing to narrate")
+        XCTAssertNil(outcome.snapshot)
+    }
+
     // MARK: Notice copy
 
     func testSwitchNoticeNamesLayoutCountAndUndoOffer() {
@@ -126,7 +154,7 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertEqual(
             outcome.notice,
             "Switched to Sixths \u{00B7} 1 window untiled. "
-                + "Undo: Restore 1 Evicted Window.")
+                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
     }
 
     // MARK: Swap
@@ -148,7 +176,7 @@ final class PlanExecutorTests: XCTestCase {
 
     // MARK: Swap refusals
 
-    func testSwapRefusalReportsAndKeepsCommittedState() {
+    func testSwapRefusalRollsBackOccupancySoStateAndScreenAgree() {
         let a = addWindow()
         let b = addWindow()
         state.commit(window: a, into: .topLeft)
@@ -160,12 +188,19 @@ final class PlanExecutorTests: XCTestCase {
             requester: a, slot: .topRight))
 
         XCTAssertEqual(
-            outcome.error, "Couldn't move that window — the app refused to resize it.")
+            outcome.error, "TestApp couldn't be swapped — the app refused to resize it.")
         XCTAssertNotNil(outcome.feedback)
-        // Swap commits state before writing: a refused write leaves state
-        // and screen disagreeing (pinned so a future transactional swap
-        // must update this test deliberately).
-        XCTAssertEqual(state.slot(of: a), .topRight)
+        if case .refused(let name, _) = outcome.feedback {
+            // Same failure class as a tile refusal, same attribution: the
+            // HUD must name the app, never "That window" for a swap.
+            XCTAssertEqual(name, "TestApp")
+        } else {
+            XCTFail("swap refusal must carry named feedback")
+        }
+        // The refused write rolls back occupancy (unlike the old
+        // commit-then-report behavior): the menu must never claim a window
+        // sits in a slot its frame doesn't occupy. The moved partner holds.
+        XCTAssertNil(state.slot(of: a), "the refused window is untiled, not phantom")
         XCTAssertEqual(state.slot(of: b), .topLeft)
     }
 
@@ -230,7 +265,7 @@ final class PlanExecutorTests: XCTestCase {
         records = newRecords
         nextID = newNextID
 
-        XCTAssertEqual(notice, "Undid layout switch \u{00B7} 1 window restored.")
+        XCTAssertEqual(notice, "Undid displacement \u{00B7} 1 window restored.")
         XCTAssertNil(error)
         XCTAssertEqual(state.occupant(of: .topLeft).flatMap { records[$0]?.handle }, handles[a],
             "evicted window returns to its slot (under a fresh id — its record was pruned at switch)")
@@ -273,7 +308,7 @@ final class PlanExecutorTests: XCTestCase {
             requester: a, slot: .topRight))
 
         XCTAssertEqual(
-            outcome.error, "Couldn't move 2 windows — an app refused to resize.")
+            outcome.error, "TestApp and 1 more couldn't be swapped — an app refused to resize.")
     }
 
     func testUndoPluralNotice() {
@@ -295,7 +330,7 @@ final class PlanExecutorTests: XCTestCase {
             state: state, records: records, nextID: nextID, tracker: tracker,
             boundsOf: { $0 }, observe: { _ in })
 
-        XCTAssertEqual(result.notice, "Undid layout switch \u{00B7} 2 windows restored.")
+        XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 2 windows restored.")
     }
 
     func testUndoRetileRefusalDropsTheWindow() {

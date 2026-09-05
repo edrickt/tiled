@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -35,6 +36,10 @@ final class PlanExecutor {
         var feedback: TilingController.Feedback?
         var notice: String?
         var error: String?
+        /// One-step undo for any destructive plan: the windows displaced to
+        /// make room, rebuilt from live handles on undo. Layout switches
+        /// and ordinary evictions share one recovery path — the more
+        /// frequent, silent eviction is exactly the case that needs it.
         var snapshot: [EvictedWindow]?
         var requester: WindowID?
     }
@@ -57,31 +62,54 @@ final class PlanExecutor {
     /// Copies are trivial (a handful of tiled windows). Record creation
     /// for pruned undo handles happens on the local copy via `nextID`,
     /// so it stays visible to the rest of the call.
+    /// - Parameter screenOf: resolves the display owning a live frame,
+    ///   so refusal feedback pins the HUD where the workspace changed.
+    ///   The controller passes its screen-for-frame lookup; tests pass a
+    ///   stub or nil (main-screen fallback).
     func execute(
         decision: TilePlan, requester id: WindowID, slot: Slot,
         state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID,
         tracker: DragTracker, boundsOf: (CGRect) -> CGRect,
-        observe: (WindowID) -> Void
+        observe: (WindowID) -> Void, screenOf: ((CGRect) -> NSScreen?)? = nil
     ) -> (outcome: Outcome, state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID) {
         var state = state
         var records = records
         var nextID = nextID
+        // The eviction notice names the displaced app when known: the
+        // user's first question after a surprise eviction is "where did
+        // Safari go?" — a count answers bookkeeping, not memory. One
+        // named app reads alone; more read as first-plus-count.
+        let evictionNames = { [self] (evicted: [WindowID]) in
+            evicted.compactMap { appName(for: $0, records: records) }
+        }
         switch decision {
         case .noop:
             return (Outcome(), state, records, nextID) // unreachable: callers guard noop first
         case .swap(let placements):
             state.commitSwaps(placements)
-            var failed = 0
+            var failed: [WindowID] = []
             for occupant in placements.keys {
                 if !applyLayout(
                     for: occupant, state: state, records: records,
                     tracker: tracker, boundsOf: boundsOf)
-                { failed += 1 }
+                { failed.append(occupant) }
             }
             var outcome = Outcome()
-            if failed > 0 {
-                outcome.error = Self.refusalMessage(count: failed)
-                outcome.feedback = .refused(windowName: nil)
+            if !failed.isEmpty {
+                // Roll back occupancy for the windows that refused the
+                // write: like `place`, the swap must never leave state and
+                // screen disagreeing. The menu then reports the failed
+                // windows untiled (their pre-tile positions hold), not
+                // sitting in slots their frames don't occupy.
+                for occupant in failed {
+                    state.remove(window: occupant)
+                    tracker.forget(occupant)
+                }
+                let names = failed.compactMap { appName(for: $0, records: records) }
+                outcome.error = Self.swapRefusalMessage(names: names)
+                outcome.feedback = .refused(
+                    windowName: Self.swapRefusalName(names: names),
+                    screen: screenForAny(of: failed, records: records, screenOf: screenOf))
             }
             log("swap win\(id) -> \(slot.rawValue) placements=\(placements)")
             return (outcome, state, records, nextID)
@@ -92,11 +120,7 @@ final class PlanExecutor {
             // is vacated by the commit inside `place`.
             let evicted = decision.windowsToRestore(requester: id)
             let snapshot = evicted.compactMap { evictedID in
-                records[evictedID].map {
-                    EvictedWindow(
-                        handle: $0.handle, slot: state.slot(of: evictedID) ?? slot,
-                        preTileFrame: $0.preTileFrame)
-                }
+                Self.snapshotEntry(for: evictedID, state: state, records: records, fallback: slot)
             }
             let restoreFailures = restore(
                 evicted, state: &state, records: &records, tracker: tracker)
@@ -109,9 +133,13 @@ final class PlanExecutor {
                 reportRestoreFailures(restoreFailures, error: &outcome.error)
             } else if placeResult.error == nil, restoreFailures.isEmpty, !evicted.isEmpty {
                 let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
+                // Narrate the event AND the recovery: the notice is the
+                // hotkey user's only record of a mass-untile, and the
+                // undo row may sit below the fold. One sentence, one
+                // cue — no menu-title splicing, just the combo.
                 outcome.notice =
                     "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. " +
-                    "Undo: Restore \(noun == "1 window" ? "1 Evicted Window" : "\(evicted.count) Evicted Windows")."
+                    "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
                 outcome.snapshot = snapshot
                 outcome.requester = id
             } else {
@@ -122,6 +150,14 @@ final class PlanExecutor {
             log("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
             return (outcome, state, records, nextID)
         case .tile:
+            let evicted = decision.windowsToRestore(requester: id)
+            // Names resolve BEFORE the restore deletes the records:
+            // `restoreWindow` nils each record as it frees the slot, so
+            // naming after would degrade every eviction to a count.
+            let evictedNames = evictionNames(evicted)
+            let snapshot = evicted.compactMap { evictedID in
+                Self.snapshotEntry(for: evictedID, state: state, records: records, fallback: slot)
+            }
             let restoreFailures = restore(
                 decision.windowsToRestore(requester: id),
                 state: &state, records: &records, tracker: tracker)
@@ -132,6 +168,15 @@ final class PlanExecutor {
             outcome.error = placeResult.error
             outcome.feedback = placeResult.feedback
             reportRestoreFailures(restoreFailures, error: &outcome.error)
+            if placeResult.error == nil, restoreFailures.isEmpty, !evicted.isEmpty {
+                // Ordinary eviction gets the same narrative as a layout
+                // switch: a notice naming the displaced app plus the shared
+                // one-step undo. The switch was never special — it was
+                // just the first destruction anyone bothered to narrate.
+                outcome.snapshot = snapshot
+                outcome.requester = id
+                outcome.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
+            }
             return (outcome, state, records, nextID)
         }
     }
@@ -172,7 +217,20 @@ final class PlanExecutor {
             records[id] = record
             state.commit(window: id, into: entry.slot)
             observe(id)
-            if applyLayout(
+            // The frame may already be correct (e.g. an untile-all chapter
+            // whose windows still sit at their pre-tile frames, or a
+            // settle frame the gateway applied late): skip the write and
+            // count it restored. Rewriting an identical frame is not just
+            // wasteful — on a settling window it re-arms echo tracking
+            // and risks a phantom drag-out.
+            if let record = records[id],
+               let slot = state.slot(of: id),
+               let current = gateway.frame(of: record.handle),
+               current == tracker.grid.rect(for: slot, in: boundsOf(current))
+            {
+                log("undo SKIP-WRITE win\(id) already placed")
+                restored += 1
+            } else if applyLayout(
                 for: id, state: state, records: records,
                 tracker: tracker, boundsOf: boundsOf)
             {
@@ -185,12 +243,55 @@ final class PlanExecutor {
         }
         if restored > 0 {
             let noun = restored == 1 ? "1 window" : "\(restored) windows"
-            return ("Undid layout switch \u{00B7} \(noun) restored.", nil, state, records, nextID)
+            // The undo itself must not push a new chapter: restoration is
+            // the consumption of history, not a new destruction. (The
+            // controller pops before calling, so the only way a push
+            // could happen here is a nested execute — which never does.)
+            return ("Undid displacement \u{00B7} \(noun) restored.", nil, state, records, nextID)
         }
         return (nil, "Couldn't restore the evicted windows.", state, records, nextID)
     }
 
-    // MARK: Placement
+    // MARK: Eviction narrative
+
+    /// One snapshot entry per displaced window, captured before the
+    /// restore deletes its record: the handle to find it again, the slot
+    /// to return it to, the frame it held before tiling. `fallback` is
+    /// the slot to use when occupancy is already gone by capture time —
+    /// only the switch branch knows the requested slot.
+    private static func snapshotEntry(
+        for evictedID: WindowID, state: TilingState, records: [WindowID: WindowRecord],
+        fallback: Slot
+    ) -> EvictedWindow? {
+        records[evictedID].map {
+            EvictedWindow(
+                handle: $0.handle, slot: state.slot(of: evictedID) ?? fallback,
+                preTileFrame: $0.preTileFrame)
+        }
+    }
+
+    /// The eviction notice: names the displaced app when known ("where
+    /// did Safari go?" beats "1 window moved"), plus the shared
+    /// one-step undo with its global reach. Falls back to the real
+    /// evicted count when the gateway names nothing — never a hardcoded
+    /// "1 window" for N unnamed windows.
+    private static func evictionNotice(names: [String], count: Int) -> String {
+        let head: String
+        switch names.count {
+        case 0:
+            head = count == 1
+                ? "1 window went back to where it was."
+                : "\(count) windows went back to where they were."
+        case 1:
+            head = "\(names[0]) went back to where it was."
+        case 2:
+            head = "\(names[0]) and \(names[1]) went back to where they were."
+        default:
+            head = "\(names[0]) and \(names.count - 1) more went back to where they were."
+        }
+        let pronoun = names.count <= 1 && count <= 1 ? "it" : "them"
+        return head + " Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+    }
 
     /// Places `id` into `slot`. Returns the refusal (error + feedback)
     /// when the gateway write fails; nil error means placed.
@@ -222,7 +323,8 @@ final class PlanExecutor {
             log("place FAILED win\(id) -> \(slot.rawValue)")
             return (
                 "\(name) couldn't be tiled — the app refused to resize it.",
-                .refused(windowName: name))
+                .refused(windowName: name, screen: screenForAny(
+                    of: [id], records: records, screenOf: nil)))
         }
         log("place win\(id) -> \(slot.rawValue)")
         return (nil, nil)
@@ -302,5 +404,46 @@ final class PlanExecutor {
         count == 1
             ? "Couldn't move that window — the app refused to resize it."
             : "Couldn't move \(count) windows — an app refused to resize."
+    }
+
+    /// Swap refusals name the app like the tile path does: same failure
+    /// class, same attribution. One named window reads alone; more read
+    /// as the first name plus a count.
+    private static func swapRefusalMessage(names: [String]) -> String {
+        switch names.count {
+        case 0:
+            return "Couldn't move that window — the app refused to resize it."
+        case 1:
+            return "\(names[0]) couldn't be swapped — the app refused to resize it."
+        default:
+            return "\(names[0]) and \(names.count - 1) more couldn't be swapped — "
+                + "an app refused to resize."
+        }
+    }
+
+    /// The HUD/announcement name for a swap refusal: the app when known,
+    /// never the tile path's "That window" fallback for a move that
+    /// wasn't a tiling.
+    private static func swapRefusalName(names: [String]) -> String? {
+        names.first
+    }
+
+    /// The display owning any of `ids`' live frames, for feedback
+    /// pinning. Nil (main-screen fallback) when no frames or lookup
+    /// resolve: feedback must degrade, never fail.
+    private func screenForAny(
+        of ids: [WindowID], records: [WindowID: WindowRecord],
+        screenOf: ((CGRect) -> NSScreen?)?
+    ) -> NSScreen? {
+        guard let screenOf else { return nil }
+        for id in ids {
+            if let handle = records[id]?.handle,
+               let frame = gateway.frame(of: handle),
+               let screen = screenOf(frame)
+            {
+                return screen
+            }
+        }
+        return nil
     }
 }

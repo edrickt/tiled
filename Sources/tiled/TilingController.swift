@@ -44,19 +44,26 @@ final class TilingController {
     private var records: [WindowID: WindowRecord] = [:]
     private var nextID: WindowID = 1
 
-    /// Snapshot of windows evicted by the last layout switch, enabling a
-    /// one-step undo ("Restore Evicted Windows"). `EvictedWindow` lives
-    /// in PlanExecutor.swift; the snapshot is filled from `Outcome`.
-    /// Cleared by any new tiling action, bulk op, or use — exactly one
-    /// undo step exists.
-    private var evictedSnapshot: [EvictedWindow]?
-    private var switchRequester: WindowID?
+    /// Snapshot of the last displacement(s), enabling a one-step undo.
+    /// Each entry is a full recovery unit: the snapshot plus the requester
+    /// to restore alongside it (a switch restores its requester; an
+    /// ordinary eviction retiles its own). Newest last. The global undo
+    /// consumes from the tail, so the freshest destruction is always the
+    /// one that returns — no silent invalidation, ever.
+    private var undoStack: [(snapshot: [EvictedWindow], requester: WindowID?)] = []
+    /// Depth cap: enough history to survive a tile-tile-realize rhythm
+    /// without growing unbounded in a hotkey-heavy session.
+    private static let undoDepth = 5
+    /// Splitter fractions parked by the last Reset Splitters, enabling a
+    /// one-step restore. Memory-only, like the displacement undo: drag
+    /// positions are per-session craft.
+    private var splitterBackup: GridLayout?
 
-    /// Whether a layout-switch undo is available (menu item visibility).
-    var canUndoSwitch: Bool { evictedSnapshot?.isEmpty == false }
+    /// Whether a displacement undo is available (menu item visibility).
+    var canUndoDisplacement: Bool { !undoStack.isEmpty }
 
     /// Count for the undo menu title (0 when unavailable).
-    var evictedCount: Int { evictedSnapshot?.count ?? 0 }
+    var evictedCount: Int { undoStack.last?.snapshot.count ?? 0 }
 
     /// Last layout-switch notice (shown in the status menu). A cross-layout
     /// hotkey untiles every other tiled window; the notice always carries
@@ -91,10 +98,18 @@ final class TilingController {
     enum Feedback {
         case noFocusedWindow
         case alreadyTiled(slot: Slot)
-        case refused(windowName: String?)
+        /// The undo key was pressed with an empty stack: no destruction
+        /// to reverse. Say so on every channel — a silent no-op from the
+        /// surface whose promise is "never silently disagree" would be
+        /// the one lie the app tells.
+        case nothingToUndo
+        /// A tiling write was refused. `screen` pins the on-screen twin
+        /// to the display the requester lives on; the controller fills it
+        /// from the requester's live frame.
+        case refused(windowName: String?, screen: NSScreen?)
         /// A ⌥⇧⏎ expand write was refused: same shape as `.refused` but
         /// the announcement must not say “tiled”.
-        case expandRefused(windowName: String?)
+        case expandRefused(windowName: String?, screen: NSScreen?)
     }
 
     var onFeedback: ((Feedback) -> Void)?
@@ -205,9 +220,20 @@ final class TilingController {
         if let error = outcome.error {
             lastTileError = error
         }
-        evictedSnapshot = outcome.snapshot
-        switchRequester = outcome.requester
+        pushUndo(snapshot: outcome.snapshot, requester: outcome.requester)
         onChange?()
+    }
+
+    /// Records a destructive outcome on the undo stack: keeps the
+    /// freshest `undoDepth` recoveries, dropping the oldest. A new tiling
+    /// action pushes; it never silently invalidates — depth, not
+    /// amnesia, bounds the history.
+    private func pushUndo(snapshot: [EvictedWindow]?, requester: WindowID?) {
+        guard let snapshot, !snapshot.isEmpty else { return }
+        undoStack.append((snapshot: snapshot, requester: requester))
+        if undoStack.count > Self.undoDepth {
+            undoStack.removeFirst(undoStack.count - Self.undoDepth)
+        }
     }
 
     // MARK: Placement (delegated)
@@ -215,17 +241,22 @@ final class TilingController {
     /// Single-window restore shared by `untile` and `untileAll`: restores
     /// the pre-tile frame, releases the slot, and reports refusal so the
     /// caller can name the window instead of leaving a stray behind.
-    private func restoreOne(_ id: WindowID) -> String? {
+    /// Returns the pre-tile frame it restored to (nil when there was
+    /// nothing to restore), so bulk callers can snapshot it for undo —
+    /// the record is cleared here and unreadable afterwards.
+    private func restoreOne(_ id: WindowID) -> (failure: String?, restoredFrame: CGRect?) {
         // Capture the display name before the record is cleared, so a
         // refused restore can name the window instead of saying "A window".
         let name = appName(for: id) ?? "A window"
         var restored = true
+        var restoredFrame: CGRect?
         if let record = records[id], record.preTileFrame != .zero {
+            restoredFrame = record.preTileFrame
             restored = gateway.setFrame(record.handle, to: record.preTileFrame)
         }
         forgetWindow(id)
-        if restored { return nil }
-        return name
+        if restored { return (nil, restoredFrame) }
+        return (name, nil)
     }
 
     /// Recomputes and pushes rects for all occupants (resize propagation).
@@ -269,9 +300,13 @@ final class TilingController {
     }
 
     /// Frame the tracker diffs against: the last pushed target when known,
-    /// else the live frame, else the pre-tile frame.
+    /// else the live frame, else the pre-tile frame. Prefers the pushed
+    /// target so a settle frame (the gateway applying our own write a
+    /// tick late) can never read as a user drag — echo suppression
+    /// compares against this, and it must be our intent, not the echo.
     private func frameForTracker(_ id: WindowID) -> CGRect? {
         guard let record = records[id] else { return nil }
+        if let pushed = tracker.lastPushedTarget(for: id) { return pushed }
         return gateway.frame(of: record.handle) ?? record.preTileFrame
     }
 
@@ -302,15 +337,23 @@ final class TilingController {
     /// midpoint screen, then main — so off-screen or inter-Space windows
     /// still tile somewhere sane instead of using raw frame coordinates.
     private func visibleBounds(for frame: CGRect) -> CGRect {
+        screen(for: frame)?.visibleFrame ?? NSScreen.main?.visibleFrame ?? frame
+    }
+
+    /// The screen that owns `frame` (same fallback chain as
+    /// `visibleBounds`): largest overlap, then midpoint, then main. The
+    /// feedback layer uses this so the HUD appears where the workspace
+    /// changed, not always on the primary display.
+    func screen(for frame: CGRect) -> NSScreen? {
         let screens = NSScreen.screens
         if let index = Self.owningScreenIndex(frames: screens.map(\.frame), for: frame) {
-            return screens[index].visibleFrame
+            return screens[index]
         }
         if let index = Self.midpointScreenIndex(frames: screens.map(\.frame), for: frame) {
-            return screens[index].visibleFrame
+            return screens[index]
         }
         dbg("no screen overlaps \(frame); falling back to main")
-        return NSScreen.main?.visibleFrame ?? frame
+        return NSScreen.main
     }
 
     /// Pure screen-fallback rule, extracted for tests: index of the screen
@@ -344,13 +387,14 @@ final class TilingController {
         }
     }
 
-    /// Clears one-step undo and error/notice state: every user-initiated
-    /// tiling action starts from a clean slate.
+    /// Clears error/notice state: every user-initiated tiling action
+    /// starts from a clean slate. The undo stack is NOT cleared here —
+    /// history survives new actions up to `undoDepth`. Only a successful
+    /// undo consumes its entry, and bulk destructive ops (untile all)
+    /// start a new chapter.
     private func resetTransientState() {
         lastTileError = nil
         lastNotice = nil
-        evictedSnapshot = nil
-        switchRequester = nil
     }
 
     // MARK: Bulk operations
@@ -358,8 +402,58 @@ final class TilingController {
     func untileAll() {
         pruneDeadWindows()
         resetTransientState()
-        let failures = state.tiledWindows.compactMap { restoreOne($0) }
+        // Untile-all starts its own undo chapter: the chapter lists each
+        // dissolved (slot, pre-tile frame) pair, and undo re-applies the
+        // slot rect on top of the restored frame — the window visibly
+        // returns to the arrangement, not just to its pre-tile frame.
+        // No modal: the sticky notice + ⌃⌥⇧⌘Z are the safety.
+        let chapter = state.occupants
+        if !chapter.isEmpty {
+            undoStack.append((snapshot: [], requester: nil))
+            if undoStack.count > Self.undoDepth {
+                undoStack.removeFirst(undoStack.count - Self.undoDepth)
+            }
+            let noun = chapter.count == 1 ? "1 window" : "\(chapter.count) windows"
+            lastNotice = "Untiled \(noun). Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+            // Prime the tracker's intent for the slot rects the undo will
+            // write: the live frames are pre-tile settle frames, and the
+            // diff must measure against where we're going, not where the
+            // restore just put us. Without this the undo's own writes
+            // read as a user drag and the grid moves under them.
+            for (slot, id) in chapter {
+                if let record = records[id] {
+                    let target = tracker.grid.rect(
+                        for: slot, in: visibleBounds(for: record.preTileFrame))
+                    tracker.markExpected(id, target)
+                }
+            }
+        }
+        // Handles first: restoreOne clears each record, so resolve every
+        // handle while the registry still knows them.
+        var handles: [WindowID: WindowHandle] = [:]
+        for id in state.tiledWindows {
+            if let record = records[id] { handles[id] = record.handle }
+        }
+        let failures = state.tiledWindows.compactMap { restoreOne($0).failure }
         reportRestoreFailures(failures)
+        // Rebuild the chapter from the frames untile-all just restored:
+        // each window now sits at its pre-tile frame with no record, so
+        // re-observe it there and pair it with its dissolved slot. The
+        // undo then retiles the live window back into place.
+        if !chapter.isEmpty {
+            var snapshot: [EvictedWindow] = []
+            for (slot, id) in chapter {
+                guard let handle = handles[id],
+                      let frame = gateway.frame(of: handle)
+                else { continue }
+                let fresh: WindowID = nextID
+                nextID += 1
+                records[fresh] = WindowRecord(handle: handle, preTileFrame: frame)
+                observe(window: fresh)
+                snapshot.append(EvictedWindow(handle: handle, slot: slot, preTileFrame: frame))
+            }
+            undoStack[undoStack.count - 1] = (snapshot: snapshot, requester: nil)
+        }
         onChange?()
     }
 
@@ -377,27 +471,75 @@ final class TilingController {
         }
     }
 
-    /// Snaps all splitters back to defaults and re-tiles everyone.
+    /// Snaps all splitters back to defaults and re-tiles everyone. The
+    /// displaced fractions are kept as a one-step restore — same pattern
+    /// as the shortcuts reset backup — so the app's "destruction is
+    /// always reversible" ethic holds for drag positions too.
     func resetDividers() {
-        tracker.resetDividers()
+        splitterBackup = tracker.resetDividers()
         resetTransientState()
         applyAll()
         onChange?()
     }
 
-    /// Undoes the last layout switch via the executor: the requester is
-    /// restored and every surviving evicted window returns to its slot.
-    /// One step only — using it (or any new action) clears it.
-    func undoLayoutSwitch() {
-        guard let snapshot = evictedSnapshot, !snapshot.isEmpty else { return }
+    /// Restores the splitter fractions parked by the last reset, or false
+    /// when there is no backup (fresh install, or already restored once).
+    @discardableResult
+    func restoreSplitters() -> Bool {
+        guard let backup = splitterBackup else { return false }
+        tracker.restoreDividers(backup)
+        splitterBackup = nil
+        resetTransientState()
+        lastNotice = "Splitters restored to their pre-reset positions."
+        applyAll()
+        onChange?()
+        return true
+    }
+
+    /// Whether a splitter backup is parked: drives the menu row title
+    /// ("Reset Splitters" vs "Restore Previous Splitters").
+    var hasSplitterBackup: Bool { splitterBackup != nil }
+
+    /// The slot the focused window would return to if it is currently
+    /// expanded — nil otherwise. Drives the expand row's stateful title:
+    /// the toggle must show its state, not just its combo.
+    var expandedFocusedSlot: Slot? {
+        guard let handle = gateway.focusedWindow() else { return nil }
+        let id = windowID(for: handle)
+        guard expanded[id] != nil else { return nil }
+        return state.slot(of: id)
+    }
+
+    /// The display the focused window lives on, if any. Feedback about
+    /// repeated, focus-centric outcomes (no-ops, already-tiled, empty
+    /// undo) pins here — the refusal path already carries its own
+    /// screen, but these outcomes had nowhere to get one. Nil keeps the
+    /// historical main-screen behavior.
+    var focusedWindowScreen: NSScreen? {
+        guard let handle = gateway.focusedWindow(),
+              let frame = gateway.frame(of: handle)
+        else { return nil }
+        return screen(for: frame)
+    }
+
+    /// Undoes the freshest destructive tiling action — a layout switch or
+    /// an ordinary eviction. Both share one recovery path: the displaced
+    /// windows return to their slots, the requester to its pre-tile frame.
+    /// Consumes the entry it restores, so repeated ⌃⌥⇧⌘Z walks back
+    /// through history up to `undoDepth` — the stack, not amnesia, bounds
+    /// the past.
+    func undoLastDisplacement() {
+        guard let entry = undoStack.popLast() else {
+            // Expired or empty: the promise needs an answer, not silence
+            // (see the undo-expiry feedback below).
+            onFeedback?(.nothingToUndo)
+            return
+        }
         pruneDeadWindows()
         lastTileError = nil
         lastNotice = nil
-        evictedSnapshot = nil
-        let requester = switchRequester
-        switchRequester = nil
         let result = executor.undo(
-            snapshot: snapshot, requester: requester,
+            snapshot: entry.snapshot, requester: entry.requester,
             state: state, records: records, nextID: nextID, tracker: tracker,
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
             observe: { [weak self] in self?.observe(window: $0) })
@@ -460,7 +602,7 @@ final class TilingController {
     func untile(window id: WindowID) {
         pruneDeadWindows()
         resetTransientState()
-        if let failure = restoreOne(id) {
+        if let failure = restoreOne(id).failure {
             reportRestoreFailures([failure])
         }
         onChange?()
@@ -499,7 +641,8 @@ final class TilingController {
             expanded[id] = current
             dbg("expand win\(id) -> \(target)")
         } else {
-            onFeedback?(.expandRefused(windowName: appName(for: id)))
+            onFeedback?(.expandRefused(
+                windowName: appName(for: id), screen: screen(for: current)))
         }
         onChange?()
     }
@@ -512,7 +655,9 @@ final class TilingController {
             retileExpanded(id)
         } else if records[id] != nil {
             if !writeExpandedFrame(id, to: saved) {
-                onFeedback?(.expandRefused(windowName: appName(for: id)))
+                onFeedback?(.expandRefused(
+                    windowName: appName(for: id),
+                    screen: records[id].flatMap { screen(for: gateway.frame(of: $0.handle) ?? saved) }))
             }
             dbg("collapse win\(id) -> saved \(saved)")
         }
@@ -528,7 +673,8 @@ final class TilingController {
         let bounds = visibleBounds(for: current)
         let target = tracker.grid.rect(for: slot, in: bounds)
         if !writeExpandedFrame(id, to: target) {
-            onFeedback?(.expandRefused(windowName: appName(for: id)))
+            onFeedback?(.expandRefused(
+                windowName: appName(for: id), screen: screen(for: current)))
         }
         dbg("retile expanded win\(id) -> \(slot.rawValue) target=\(target)")
     }

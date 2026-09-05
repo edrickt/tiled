@@ -42,6 +42,21 @@ final class SettingsWindowController: NSWindowController {
     var onHotkeysChange: (() -> Void)? {
         didSet { shortcutsTab.onHotkeysChange = onHotkeysChange }
     }
+    /// Slots whose global hotkey lost registration (owned by another app),
+    /// forwarded to the Shortcuts tab so a cross-app failure surfaces
+    /// beside the recorder that accepted the combo, not only in the menu.
+    var failedSlotsProvider: (() -> [Slot])? {
+        didSet { shortcutsTab.failedSlotsProvider = failedSlotsProvider }
+    }
+    /// Whether the Settings fallback hotkey (⌃⌥⇧⌘,) is currently
+    /// registered, forwarded to General so the hide-icon confirm never
+    /// promises a dead recovery combo.
+    var isSettingsHotkeyRegisteredProvider: (() -> Bool)? {
+        didSet {
+            generalTab.isSettingsHotkeyRegisteredProvider =
+                isSettingsHotkeyRegisteredProvider
+        }
+    }
 
     init(settings: AppSettings, hotkeyStore: HotkeyStore = HotkeyStore()) {
         self.settings = settings

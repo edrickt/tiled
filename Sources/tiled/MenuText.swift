@@ -6,20 +6,36 @@ enum MenuText {
     // MARK: Menu titles
 
     /// Undo title names what returns: the evicted windows.
-    static func undoSwitchTitle(evictedCount: Int) -> String {
+    static func undoDisplacementTitle(evictedCount: Int) -> String {
         evictedCount == 1
             ? "Restore 1 Evicted Window" : "Restore \(evictedCount) Evicted Windows"
     }
 
     /// Bulk-action title names the consequence: restoring every window.
+    /// Singular and plural stay symmetric ("Untile 1 Window" / "Untile 3 Windows").
     static func untileAllTitle(count: Int) -> String {
-        count == 1 ? "Untile 1 Window" : "Untile All \(count) Windows"
+        count == 1 ? "Untile 1 Window" : "Untile \(count) Windows"
     }
 
     /// The expand toggle's menu row; the combo is fixed, so the label is
-    /// always present in practice.
-    static func expandItemTitle(label: String?) -> String {
-        label.map { "Expand to Fill Screen — \($0)" } ?? "Expand to Fill Screen"
+    /// always present in practice. `expandedSlot` names the slot an
+    /// expanded focused window returns to: when a window is expanded the
+    /// row says where the toggle goes back — a stateless toggle would
+    /// leave the user guessing what "expand" means right now.
+    static func expandItemTitle(label: String?, expandedSlot: Slot? = nil) -> String {
+        let combo = label.map { " — \($0)" } ?? ""
+        guard let expandedSlot else { return "Expand to Fill Screen\(combo)" }
+        return "Return to \(SlotPresentation.title(of: expandedSlot))\(combo)"
+    }
+
+    /// Collapses N warnings into one summary row: the menu's first
+    /// screenful is the everyday surface, not a troubleshooting essay.
+    /// The count carries the severity; "Open Shortcuts…" carries the
+    /// door; the full sentences already live in the Shortcuts tab.
+    static func warningSummaryTitle(count: Int) -> String {
+        count == 1
+            ? "⚠ 1 shortcut problem — other apps own it"
+            : "⚠ \(count) shortcut problems — other apps own them"
     }
 
     // MARK: Warnings
@@ -27,20 +43,31 @@ enum MenuText {
     /// The fallback Settings combo lost registration (owned by another app).
     static func settingsHotkeyWarning() -> String {
         "The Settings shortcut (\u{2303}\u{2325}\u{21E7}\u{2318},) is already used "
-            + "by another app — relaunch tiled to get back to Settings while hidden."
+            + "by another app — quit and reopen tiled to get back to Settings while hidden."
     }
 
     /// A slot's global hotkey lost registration. `label` nil means the slot
-    /// has no readable binding; the warning names the slot either way.
+    /// has no readable binding; the warning names the slot either way,
+    /// without the self-contradicting “Disabled is already used” reading.
     static func hotkeyFailureWarning(label: String?, slot: Slot) -> String {
-        "\(label ?? "Disabled") is already used by another app — "
-            + "“\(SlotPresentation.title(of: slot))” has no hotkey."
+        let title = SlotPresentation.title(of: slot)
+        guard let label else {
+            return "The shortcut for “\(title)” is already used by another app — it has no hotkey."
+        }
+        return "\(label) is already used by another app — “\(title)” has no hotkey."
     }
 
     /// The fixed expand combo lost registration (owned by another app).
     static func expandHotkeyWarning() -> String {
         "The expand shortcut (⌥⇧⏎) is already used by another app — "
-            + "relaunch tiled to try registering it again."
+            + "quit and reopen tiled to try registering it again."
+    }
+
+    /// The fixed undo combo lost registration (owned by another app). The
+    /// menu row still works, so the recovery is named, not a relaunch.
+    static func undoHotkeyWarning() -> String {
+        "The undo shortcut (⌃⌥⇧⌘Z) is already used by another app — "
+            + "undo the last displacement from the tiled menu instead."
     }
 
     // MARK: Menu rows
@@ -66,6 +93,14 @@ enum MenuText {
 
     static func noFocusedWindowAnnouncement() -> String {
         "No focused window — click a window first."
+    }
+
+    /// Pressing undo with an empty stack: no destruction to reverse.
+    /// Names the expiry honestly instead of staying silent — the one
+    /// surface whose promise is "never silently disagree" must answer
+    /// its own keypress.
+    static func nothingToUndoAnnouncement() -> String {
+        "Nothing to undo — a later change replaced it."
     }
 
     static func alreadyTiledAnnouncement(slot: Slot) -> String {

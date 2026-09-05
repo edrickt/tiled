@@ -132,6 +132,17 @@ enum SlotPresentation {
         }
     }
 
+    /// Quarters submenu groupings: 6 flat items under one header push the
+    /// chunking limit, so the menu splits them the same way sixths are
+    /// chunked — quads first, then the two halves.
+    static var quartersQuads: [Slot] {
+        [.topLeft, .topRight, .bottomLeft, .bottomRight]
+    }
+
+    static var quartersHalves: [Slot] {
+        [.leftHalf, .rightHalf]
+    }
+
     /// Sixths submenu groupings: 11 flat items exceed working memory at
     /// the moment of action, so the menu chunks them under disabled
     /// sub-headers mirroring these groups.

@@ -3,7 +3,7 @@ import XCTest
 @testable import tiled
 
 /// Controller-level bulk operations and bookkeeping: untile / untileAll /
-/// resetDividers / undoLayoutSwitch driven through `TilingController` with
+/// resetDividers / undoLastDisplacement driven through `TilingController` with
 /// the fake gateway. Pins the side effects the pure-state tests can't see —
 /// restored frames, the one-step undo lifecycle, feedback callbacks, and
 /// notice clearing.
@@ -94,7 +94,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         // frame), b lands in the sixths slot.
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
-        XCTAssertTrue(controller.canUndoSwitch)
+        XCTAssertTrue(controller.canUndoDisplacement)
         XCTAssertEqual(controller.evictedCount, 1)
         XCTAssertNotNil(controller.lastNotice)
         XCTAssertEqual(controller.state.slot(of: 2), .sixthLeft)
@@ -102,7 +102,7 @@ final class ControllerBulkOperationTests: XCTestCase {
             gateway.frame(of: a), aOriginal,
             "eviction restores the pre-tile frame immediately")
 
-        controller.undoLayoutSwitch()
+        controller.undoLastDisplacement()
 
         // The evicted window returns to its slot under a fresh id (its
         // record was pruned at switch); the requester is untiled with its
@@ -116,7 +116,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(
             gateway.frame(of: b), bOriginal,
             "undo restores the requester's pre-tile frame")
-        XCTAssertFalse(controller.canUndoSwitch)
+        XCTAssertFalse(controller.canUndoDisplacement)
         XCTAssertEqual(controller.evictedCount, 0)
     }
 
@@ -130,16 +130,16 @@ final class ControllerBulkOperationTests: XCTestCase {
         // Requester b switches; a is evicted and offers undo.
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
-        XCTAssertTrue(controller.canUndoSwitch)
+        XCTAssertTrue(controller.canUndoDisplacement)
 
-        controller.undoLayoutSwitch()
-        XCTAssertFalse(controller.canUndoSwitch)
+        controller.undoLastDisplacement()
+        XCTAssertFalse(controller.canUndoDisplacement)
 
-        controller.undoLayoutSwitch()
+        controller.undoLastDisplacement()
         XCTAssertEqual(controller.state.tiledWindows.count, 1, "second undo is a no-op")
     }
 
-    func testNewSwitchReplacesTheUndoSnapshot() {
+    func testNewSwitchPushesHistoryInsteadOfReplacingIt() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
@@ -149,28 +149,46 @@ final class ControllerBulkOperationTests: XCTestCase {
         // Cross-layout switch #1: a is evicted (undo names a).
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
-        XCTAssertTrue(controller.canUndoSwitch)
+        XCTAssertTrue(controller.canUndoDisplacement)
         XCTAssertEqual(controller.evictedCount, 1)
 
-        // Switch #2 back to quarters: b is evicted (undo now names b). The
-        // old undo is gone — exactly one step exists at any time.
+        // Switch #2 back to quarters: b is evicted. The old undo is NOT
+        // gone — history stacks, newest last.
         let c = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 400, height: 300))
         gateway.focused = c
         controller.handle(slot: .bottomRight)
-        XCTAssertTrue(controller.canUndoSwitch, "the new switch offers its own undo")
+        XCTAssertTrue(controller.canUndoDisplacement, "the new switch offers its own undo")
         XCTAssertEqual(controller.evictedCount, 1)
         XCTAssertEqual(
             controller.lastNotice,
             "Switched to Quarters \u{00B7} 1 window untiled. "
-                + "Undo: Restore 1 Evicted Window.")
+                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
 
-        controller.undoLayoutSwitch()
+        controller.undoLastDisplacement()
         XCTAssertEqual(controller.state.slot(of: 3), nil, "requester c is untiled by undo")
         XCTAssertNotNil(
             controller.state.occupant(of: .sixthLeft),
             "undo #2 returns b — not a — to its slot")
         XCTAssertNil(controller.state.occupant(of: .topLeft))
         XCTAssertEqual(controller.state.tiledWindows.count, 1)
+
+        // Walking back again returns a to its slot: depth, not amnesia.
+        controller.undoLastDisplacement()
+        XCTAssertNotNil(
+            controller.state.occupant(of: .topLeft),
+            "undo #1 returns a to its slot")
+        XCTAssertFalse(controller.canUndoDisplacement, "history exhausted")
+    }
+
+    func testEmptyUndoStackAnswersInsteadOfSilence() {
+        addFocusedWindow()
+        XCTAssertFalse(controller.canUndoDisplacement)
+        feedbacks.removeAll()
+        controller.undoLastDisplacement()
+        XCTAssertEqual(feedbacks.count, 1, "an empty undo still answers")
+        guard case .nothingToUndo = feedbacks[0] else {
+            return XCTFail("expected .nothingToUndo, got \(feedbacks[0])")
+        }
     }
 
     func testSwitchingAloneOffersNoUndo() {
@@ -184,7 +202,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         XCTAssertEqual(controller.state.slot(of: 1), .sixthLeft)
         XCTAssertNil(controller.lastNotice)
-        XCTAssertFalse(controller.canUndoSwitch)
+        XCTAssertFalse(controller.canUndoDisplacement)
         XCTAssertEqual(controller.evictedCount, 0)
     }
 
@@ -199,13 +217,13 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         // The user closes the switched window before undoing.
         gateway.kill(b)
-        controller.undoLayoutSwitch()
+        controller.undoLastDisplacement()
 
         XCTAssertEqual(controller.state.tiledWindows.count, 1)
         XCTAssertNotNil(controller.state.occupant(of: .topLeft),
             "the evictee still returns to its slot")
         XCTAssertNil(controller.state.occupant(of: .sixthLeft))
-        XCTAssertEqual(controller.lastNotice, "Undid layout switch \u{00B7} 1 window restored.")
+        XCTAssertEqual(controller.lastNotice, "Undid displacement \u{00B7} 1 window restored.")
     }
 
     func testUndoAfterEvicteeDied() {
@@ -218,13 +236,13 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .sixthLeft)
 
         gateway.kill(a)
-        controller.undoLayoutSwitch()
+        controller.undoLastDisplacement()
 
         XCTAssertEqual(
             controller.lastTileError, "Couldn't restore the evicted windows.")
         XCTAssertTrue(controller.state.occupants.isEmpty,
             "requester untiled by undo; dead evictee skipped")
-        XCTAssertFalse(controller.canUndoSwitch)
+        XCTAssertFalse(controller.canUndoDisplacement)
     }
 
     func testPreTileFrameSurvivesLayoutSwitches() {
@@ -247,22 +265,32 @@ final class ControllerBulkOperationTests: XCTestCase {
             "untile restores the original pre-tile frame, not a tile rect")
     }
 
-    func testNonSwitchActionClearsTheUndoOffer() {
+    func testUntileAllStartsItsOwnUndoChapter() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
         controller.handle(slot: .topRight)
-        gateway.focused = b
-        controller.handle(slot: .sixthLeft)
-        XCTAssertTrue(controller.canUndoSwitch)
-        XCTAssertNotNil(controller.lastNotice)
 
-        // A bulk op (or any non-switch action) consumes the undo offer.
+        // Untile-all starts its own undo chapter: the bulk dissolve is
+        // itself undoable (the notice + ⌃⌥⇧⌘Z carry it). Both windows are
+        // tiled, so the chapter covers both.
         controller.untileAll()
-        XCTAssertFalse(controller.canUndoSwitch)
-        XCTAssertEqual(controller.evictedCount, 0)
-        XCTAssertNil(controller.lastNotice)
+        XCTAssertTrue(controller.canUndoDisplacement, "untile-all is itself undoable")
+        XCTAssertEqual(controller.evictedCount, 2)
+        XCTAssertEqual(controller.lastNotice, "Untiled 2 windows. Press ⌃⌥⇧⌘Z to undo.")
+        controller.undoLastDisplacement()
+        // Undo re-tiles each dissolved window into its slot (under fresh
+        // ids — untile-all cleared the records, so the executor reissues
+        // them, exactly as it does for pruned undo handles). The
+        // arrangement returns, and the chapter is consumed.
+        XCTAssertNotNil(
+            controller.state.occupant(of: .topLeft),
+            "undo re-tiles the dissolved window into its slot")
+        XCTAssertNotNil(
+            controller.state.occupant(of: .topRight),
+            "both dissolved windows return under fresh ids")
+        XCTAssertFalse(controller.canUndoDisplacement, "the chapter is consumed")
     }
 
     // MARK: Feedback
@@ -292,7 +320,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.refuseNextWrites(handle)
         controller.handle(slot: .topLeft)
         XCTAssertEqual(feedbacks.count, 1)
-        guard case .refused(let name) = feedbacks[0] else {
+        guard case .refused(let name, _) = feedbacks[0] else {
             return XCTFail("expected .refused, got \(feedbacks[0])")
         }
         XCTAssertEqual(name, "TestApp")
@@ -415,6 +443,17 @@ final class ControllerBulkOperationTests: XCTestCase {
             gateway.frame(of: a), expectedRect(.topLeft, for: a),
             "reset re-tiles occupants at the default grid")
         XCTAssertNil(controller.lastTileError)
+        // One destructive action, one receipt: the reset parks the
+        // displaced fractions for a one-step restore.
+        XCTAssertTrue(controller.hasSplitterBackup, "reset keeps receipts")
+        XCTAssertTrue(controller.restoreSplitters(), "the backup restores")
+        XCTAssertNotEqual(
+            controller.grid.columnSplit, 0.5, accuracy: 0.001,
+            "restore returns the dragged splitter")
+        XCTAssertFalse(
+            controller.hasSplitterBackup, "restoring consumes the backup")
+        XCTAssertFalse(
+            controller.restoreSplitters(), "no backup left: second restore is a no-op")
     }
 
     func testResetDividersReportsRefusals() {

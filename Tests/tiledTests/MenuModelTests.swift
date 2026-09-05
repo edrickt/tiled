@@ -13,8 +13,14 @@ final class MenuModelTests: XCTestCase {
         warnings: [String] = [],
         notice: String? = nil,
         layoutTitle: String = "Quarters",
+        activeLayout: LayoutKind = .quarters,
+        tileError: String? = nil,
+        hasHotkeyWarnings: Bool = false,
+        hasFocusedWindow: Bool = true,
+        hasSplitterBackup: Bool = false,
+        expandedSlot: Slot? = nil,
         tiledWindows: [MenuModel.Snapshot.TiledWindow] = [],
-        canUndoSwitch: Bool = false,
+        canUndoDisplacement: Bool = false,
         evictedCount: Int = 0
     ) -> MenuModel.Snapshot {
         MenuModel.Snapshot(
@@ -22,8 +28,14 @@ final class MenuModelTests: XCTestCase {
             warnings: warnings,
             notice: notice,
             layoutTitle: layoutTitle,
+            activeLayout: activeLayout,
+            tileError: tileError,
+            hasHotkeyWarnings: hasHotkeyWarnings,
+            hasSplitterBackup: hasSplitterBackup,
+            hasFocusedWindow: hasFocusedWindow,
+            expandedSlot: expandedSlot,
             tiledWindows: tiledWindows,
-            canUndoSwitch: canUndoSwitch,
+            canUndoDisplacement: canUndoDisplacement,
             evictedCount: evictedCount)
     }
 
@@ -40,24 +52,85 @@ final class MenuModelTests: XCTestCase {
 
     // MARK: Status block
 
-    func testWarningsTakePrecedenceOverNoticeAndStatusLine() {
+    func testWarningsCollapseToOneSummaryRow() {
         let model = items(snapshot(
             warnings: ["⌥⇧U is already used by another app"],
-            notice: "Switched to Sixths · 1 window untiled."))
-        XCTAssertEqual(model.first?.title, "⌥⇧U is already used by another app")
+            notice: "Switched to Sixths · 1 window untiled.",
+            hasHotkeyWarnings: true))
+        // One summary row, not one row per warning: the menu's first
+        // screenful is the everyday surface, not a troubleshooting essay.
+        XCTAssertEqual(model.first?.title, "⚠ 1 shortcut problem — other apps own it")
         XCTAssertFalse(model.first!.isEnabled)
-        XCTAssertFalse(
-            model.contains { $0.title.hasPrefix("Layout:") },
-            "warnings replace the status line entirely")
-        XCTAssertFalse(
+        // The compass survives trouble: the summary rides above the status line.
+        XCTAssertTrue(
+            model.contains { $0.title == "Layout: Quarters · 0 tiled" },
+            "warnings never erase the layout/count line")
+        // The latest outcome narrates even while warnings persist: a
+        // lingering hotkey failure must not erase the record of what the
+        // workspace just did. Warnings diagnose; the notice narrates.
+        XCTAssertTrue(
             model.contains { $0.title == "Switched to Sixths · 1 window untiled." },
-            "a real error wins over a notice")
+            "notices render below warnings, never suppressed by them")
     }
 
-    func testMultipleWarningsRenderOneRowEach() {
-        let model = items(snapshot(warnings: ["a", "b"]))
-        XCTAssertEqual(model.prefix(2).map(\.title), ["a", "b"])
-        XCTAssertTrue(model.prefix(2).allSatisfy { !$0.isEnabled })
+    func testTileErrorRendersVerbatimNeverAsAShortcutProblem() {
+        // A tiling refusal is NOT a shortcut problem: it renders verbatim
+        // as its own row, never squashed under the shortcut summary.
+        let refused = items(snapshot(tileError: "Safari couldn't be tiled"))
+        XCTAssertEqual(refused.first?.title, "Safari couldn't be tiled")
+        XCTAssertFalse(refused.first!.isEnabled)
+        XCTAssertFalse(refused.contains { $0.action == .openShortcuts })
+
+        // Both kinds at once: two failure kinds, two rows, each named.
+        let model = items(snapshot(
+            warnings: ["⌥⇧U is already used by another app"],
+            tileError: "Safari couldn't be tiled",
+            hasHotkeyWarnings: true))
+        XCTAssertEqual(model[0].title, "Safari couldn't be tiled")
+        XCTAssertEqual(model[1].title, "⚠ 1 shortcut problem — other apps own it")
+        XCTAssertEqual(model[2].title, "Open Shortcuts…")
+    }
+
+    func testWarningSummaryCounts() {
+        XCTAssertEqual(
+            MenuText.warningSummaryTitle(count: 1),
+            "⚠ 1 shortcut problem — other apps own it")
+        XCTAssertEqual(
+            MenuText.warningSummaryTitle(count: 3),
+            "⚠ 3 shortcut problems — other apps own them")
+    }
+
+    func testExpandRowReflectsExpandedState() {
+        // Stateless toggle: the row reads the same expanded or not.
+        let plain = items(snapshot())
+        XCTAssertEqual(
+            plain.first { $0.action == .toggleExpand }?.title,
+            "Expand to Fill Screen — ⌥⇧⏎")
+        // Stateful toggle: with an expanded focused window the row says
+        // where the toggle goes back — no guessing what it does now.
+        let expanded = items(snapshot(expandedSlot: .leftHalf))
+        XCTAssertEqual(
+            expanded.first { $0.action == .toggleExpand }?.title,
+            "Return to Left Half — ⌥⇧⏎")
+    }
+
+    func testHotkeyWarningsGrowAnOpenShortcutsRow() {
+        let model = items(snapshot(
+            warnings: ["⌥⇧U is already used by another app — “Top Left” has no hotkey."],
+            hasHotkeyWarnings: true))
+        let warnings = model.prefix(2).map(\.title)
+        XCTAssertEqual(warnings[0], "⚠ 1 shortcut problem — other apps own it")
+        // A disabled row can't fix itself: the actionable row follows,
+        // opening exactly the tab that can rebind it.
+        XCTAssertEqual(warnings[1], "Open Shortcuts…")
+        XCTAssertEqual(model[1].action, .openShortcuts)
+        XCTAssertTrue(model[1].isEnabled)
+    }
+
+    func testCollapsedWarningsKeepSingleRowForMany() {
+        let model = items(snapshot(warnings: ["a", "b", "c"]))
+        XCTAssertEqual(model.prefix(1).map(\.title), ["⚠ 3 shortcut problems — other apps own them"])
+        XCTAssertTrue(model.prefix(1).allSatisfy { !$0.isEnabled })
     }
 
     func testNoticeAndStatusLineWhenTrusted() {
@@ -76,24 +149,46 @@ final class MenuModelTests: XCTestCase {
 
     // MARK: Tile submenu
 
-    func testTileSubmenuGroupsAllSeventeenSlots() {
-        let tile = tileSubmenu(items(snapshot()))!
-        let children = tile.children!
-        // Headers and separators interleaved with slot items in order.
-        let headers = children.filter(\.isHeader).map(\.title)
-        XCTAssertEqual(headers, ["Quarters", "Sixths — Corners", "Thirds", "Two-Thirds"])
-        let slotOrder = children.compactMap {
+    func testTileSubmenuListsOnlyTheActiveLayoutPlusASwitchRow() {
+        // Quarters on screen: quads + halves + one row to Sixths.
+        let quarters = tileSubmenu(items(snapshot(activeLayout: .quarters)))!
+        let qChildren = quarters.children!
+        let qHeaders = qChildren.filter(\.isHeader).map(\.title)
+        XCTAssertEqual(qHeaders, ["Quarters — Quads", "Halves"])
+        let qSlots = qChildren.compactMap {
             if case .tileSlot(let slot)? = $0.action { return slot }
             return nil
         }
-        XCTAssertEqual(slotOrder.count, Slot.allCases.count, "every slot gets a row")
+        XCTAssertEqual(qSlots, SlotPresentation.quartersQuads + SlotPresentation.quartersHalves)
+        let qSwitch = qChildren.first { $0.action == .switchToSixths }
+        XCTAssertEqual(qSwitch?.title, "Switch to Sixths (focused window → Top Left Sixth)")
+        XCTAssertTrue(qSwitch?.isEnabled == true, "focused window in the test harness")
+
+        // No focused window: the switch row disables and states its
+        // precondition instead of no-op-ing on click.
+        let unfocused = items(snapshot(activeLayout: .quarters, hasFocusedWindow: false))
+        let uTile = tileSubmenu(unfocused)!
+        let uSwitch = uTile.children!.first { $0.action == .switchToSixths }
+        XCTAssertEqual(uSwitch?.isEnabled, false)
         XCTAssertEqual(
-            slotOrder,
-            Slot.allCases.filter { $0.layout == .quarters }
-                + SlotPresentation.sixthsCorners
+            uSwitch?.disabledReason, "Needs a focused window — click a window first.")
+
+        // Sixths on screen: corners + thirds + two-thirds + one row back.
+        let sixths = tileSubmenu(items(snapshot(activeLayout: .sixths)))!
+        let sChildren = sixths.children!
+        let sHeaders = sChildren.filter(\.isHeader).map(\.title)
+        XCTAssertEqual(sHeaders, ["Sixths — Corners", "Thirds", "Two-Thirds"])
+        let sSlots = sChildren.compactMap {
+            if case .tileSlot(let slot)? = $0.action { return slot }
+            return nil
+        }
+        XCTAssertEqual(
+            sSlots,
+            SlotPresentation.sixthsCorners
                 + SlotPresentation.sixthsThirds
                 + SlotPresentation.sixthsTwoThirds)
-        XCTAssertEqual(children.filter(\.isSeparator).count, 1)
+        let sSwitch = sChildren.first { $0.action == .switchToQuarters }
+        XCTAssertEqual(sSwitch?.title, "Switch to Quarters (focused window → Top Left)")
     }
 
     // MARK: Expand item
@@ -113,10 +208,12 @@ final class MenuModelTests: XCTestCase {
         XCTAssertFalse(items(snapshot(isTrusted: false)).contains { $0.action == .toggleExpand })
     }
 
+    /// The tile submenu lists the active layout only, so the custom-label
+    /// test forces sixths (the disabled slot under test is a sixth).
     func testTileItemsCarryLiveLabelsFromTheStore() {
-        let model = MenuModel.items(snapshot: snapshot()) { slot in
+        let model = MenuModel.items(snapshot: snapshot(activeLayout: .sixths)) { slot in
             switch slot {
-            case .topLeft:
+            case .sixthTopLeft:
                 return HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_Q))
             case .sixthRight:
                 return HotkeyBinding(modifiers: 0, keyCode: nil) // disabled slot
@@ -125,9 +222,9 @@ final class MenuModelTests: XCTestCase {
             }
         }
         let tile = model.first { $0.title == "Tile Focused Window" }!
-        let topLeft = tile.children!.first { $0.title.contains("Top Left") }!
-        XCTAssertEqual(topLeft.title, "Top Left — ⌥Q")
-        XCTAssertEqual(topLeft.action, .tileSlot(.topLeft))
+        let topLeft = tile.children!.first { $0.title.contains("Top Left Sixth") }!
+        XCTAssertEqual(topLeft.title, "Top Left Sixth — ⌥Q")
+        XCTAssertEqual(topLeft.action, .tileSlot(.sixthTopLeft))
         // A disabled slot (nil label) still renders, without a combo.
         let disabled = tile.children!.first { $0.title.contains("Right Third") }!
         XCTAssertEqual(disabled.title, "Right Third")
@@ -164,18 +261,35 @@ final class MenuModelTests: XCTestCase {
                 .init(id: 1, slot: .topLeft, appName: nil),
                 .init(id: 2, slot: .topRight, appName: nil),
             ],
-            canUndoSwitch: true, evictedCount: 2))
+            canUndoDisplacement: true, evictedCount: 2))
         let undo = withUndo.first { $0.action == .undoSwitch }
-        XCTAssertEqual(undo?.title, "Restore 2 Evicted Windows")
-        XCTAssertEqual(undo?.keyEquivalent, "z")
+        XCTAssertEqual(undo?.title, "Restore 2 Evicted Windows — \u{2303}\u{2325}\u{21E7}\u{2318}Z")
+        XCTAssertEqual(undo?.keyEquivalent, "", "the true combo lives in the title, not a ⌘Z glyph")
 
         let withoutUndo = items(snapshot(
             tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)],
-            canUndoSwitch: false))
+            canUndoDisplacement: false))
         XCTAssertFalse(withoutUndo.contains { $0.action == .undoSwitch })
         // Bulk actions still exist without undo.
         XCTAssertTrue(withoutUndo.contains { $0.action == .untileAll })
         XCTAssertTrue(withoutUndo.contains { $0.action == .resetDividers })
+        let reset = withoutUndo.first { $0.action == .resetDividers }
+        XCTAssertEqual(reset?.title, "Reset Splitters")
+    }
+
+    func testSplitterBackupFlipsTheManageRow() {
+        let plain = items(snapshot(tiledWindows: [
+            .init(id: 1, slot: .topLeft, appName: nil),
+        ]))
+        XCTAssertEqual(
+            plain.first { $0.action == .resetDividers }?.title, "Reset Splitters")
+        let backedUp = items(snapshot(
+            hasSplitterBackup: true,
+            tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)]))
+        // One destructive action, one receipt: the row becomes its own undo.
+        XCTAssertEqual(
+            backedUp.first { $0.action == .resetDividers }?.title,
+            "Restore Previous Splitters")
     }
 
     func testEmptySpaceHasNoWindowListOrBulkActions() {

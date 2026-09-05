@@ -9,6 +9,12 @@ enum MenuModel {
     enum Action: Equatable {
         case tileSlot(Slot)
         case toggleExpand
+        /// Layout-switch rows: collapsed replacement for the inactive
+        /// layout's whole section. Tiling the focused window into the
+        /// destination's top-left performs the switch through the engine's
+        /// own mutual-exclusion rule, with the usual undo notice.
+        case switchToQuarters
+        case switchToSixths
         case untileWindow(WindowID)
         case focusWindow(WindowID)
         case tileHere(Slot)
@@ -19,6 +25,7 @@ enum MenuModel {
         case showSettings
         case openAccessibilitySettings
         case quit
+        case openShortcuts
     }
 
     struct Item: Equatable {
@@ -30,6 +37,10 @@ enum MenuModel {
         var action: Action?
         var isSeparator = false
         var children: [Item]?
+        /// Why a non-header item is disabled, in menu-title words (shown
+        /// when enabled would be a lie: the precondition isn't met).
+        /// Rendered by AppDelegate as the item's tooltip.
+        var disabledReason: String?
 
         static func separator() -> Item { Item(title: "", isSeparator: true) }
     }
@@ -44,8 +55,35 @@ enum MenuModel {
         var warnings: [String]
         var notice: String?
         var layoutTitle: String
+        /// The layout currently on screen. The tile submenu lists only
+        /// the *active* layout's slots; the inactive one collapses to a
+        /// single switch row. Switching is destructive (it untiles
+        /// everything) and rare, while the current layout's slots are
+        /// the everyday decision set — one submenu, one layout's worth
+        /// of scanning.
+        var activeLayout: LayoutKind
+        /// A one-off tiling refusal (an app that wouldn't resize), kept
+        /// separate from hotkey failures: rendering a refusal under a
+        /// "shortcut problem" summary would misdiagnose it and point
+        /// the user at the wrong subsystem.
+        var tileError: String?
+        /// True when any warning names a lost global-hotkey registration
+        /// (fixed combos or slots), as opposed to a one-off tiling error.
+        /// Those rows get an actionable follow-up, not just prose.
+        var hasHotkeyWarnings: Bool
+        /// Whether a splitter backup is parked: the manage row reads
+        /// "Restore Previous Splitters" instead of "Reset Splitters".
+        var hasSplitterBackup: Bool
+        /// Whether a window is focused right now. The collapsed switch
+        /// rows need one to tile: disabled (with their reason stated)
+        /// when nothing is focused, never a silent no-op.
+        var hasFocusedWindow: Bool
+        /// The slot an expanded focused window would return to, if any.
+        /// Drives the expand row's stateful title: a toggle with no
+        /// visible state leaves the user guessing what it does right now.
+        var expandedSlot: Slot?
         var tiledWindows: [TiledWindow]
-        var canUndoSwitch: Bool
+        var canUndoDisplacement: Bool
         var evictedCount: Int
 
         struct TiledWindow: Equatable {
@@ -63,15 +101,44 @@ enum MenuModel {
     ) -> [Item] {
         var items: [Item] = []
 
-        // 1. Status: warnings if any, else notice + layout/count. The
-        // count line doubles as the empty state: "0 tiled" reads as a
-        // status, so no separate "No tiled windows" row that would
-        // contradict an undo notice above it.
-        if !snapshot.warnings.isEmpty {
-            for warning in snapshot.warnings {
-                items.append(Item(title: warning, isEnabled: false))
+        // 1. Status: warnings never displace the compass, and the latest
+        // outcome narrates even while warnings persist. The layout/count
+        // line doubles as the empty state ("0 tiled" reads as a status, so
+        // no separate "No tiled windows" row that would contradict an undo
+        // notice above it) and always renders while trusted — trouble is
+        // exactly when the user needs it.
+        if snapshot.isTrusted {
+            // A tiling refusal renders verbatim as its own row — never
+            // folded into the shortcut summary. Squashing "Safari
+            // couldn't be tiled" under "shortcut problem" would
+            // misdiagnose it and point the user at the wrong subsystem.
+            if let tileError = snapshot.tileError {
+                items.append(Item(title: tileError, isEnabled: false))
             }
-        } else if snapshot.isTrusted {
+            // Hotkey failures collapse to one summary row with the count: full
+            // sentences used to stack here (a tiling error + fixed-combo
+            // failures + N slot failures), turning the menu's first
+            // screenful into a troubleshooting essay. The summary keeps
+            // its severity glyph and its door ("Open Shortcuts…"); the
+            // full sentences live in the Shortcuts tab, where there is
+            // room to fix them.
+            if !snapshot.warnings.isEmpty {
+                items.append(Item(
+                    title: MenuText.warningSummaryTitle(count: snapshot.warnings.count),
+                    isEnabled: false))
+            }
+            if snapshot.hasHotkeyWarnings {
+                // A disabled row can't fix itself: offer the door. The
+                // hotkey surface lives in Settings → Shortcuts, so the
+                // row after a failure opens exactly that tab — the one
+                // surface a hotkey-first user can act on.
+                items.append(Item(title: "Open Shortcuts…", action: .openShortcuts))
+            }
+            // The latest outcome narrates below the warnings, never
+            // suppressed by them: a lingering hotkey failure must not
+            // permanently erase the record of what the workspace just did.
+            // Warnings diagnose; the notice narrates; the status line
+            // orients — three jobs, three rows, in that order.
             if let notice = snapshot.notice {
                 items.append(Item(title: notice, isEnabled: false))
             }
@@ -83,29 +150,60 @@ enum MenuModel {
 
         // 2. Act + 3. Manage.
         if snapshot.isTrusted {
-            var tileChildren: [Item] = [Item(title: "Quarters", isEnabled: false, isHeader: true)]
-            for slot in Slot.allCases where slot.layout == .quarters {
-                tileChildren.append(tileItem(slot, binding))
-            }
-            tileChildren.append(.separator())
-            // Sixths sub-groups mirror the thirds/two-thirds naming in
-            // Settings: 11 flat items exceed working memory at the moment
-            // of action, so chunk them into corners, thirds, two-thirds.
-            tileChildren.append(Item(title: "Sixths \u{2014} Corners", isEnabled: false, isHeader: true))
-            for slot in SlotPresentation.sixthsCorners {
-                tileChildren.append(tileItem(slot, binding))
-            }
-            tileChildren.append(Item(title: "Thirds", isEnabled: false, isHeader: true))
-            for slot in SlotPresentation.sixthsThirds {
-                tileChildren.append(tileItem(slot, binding))
-            }
-            tileChildren.append(Item(title: "Two-Thirds", isEnabled: false, isHeader: true))
-            for slot in SlotPresentation.sixthsTwoThirds {
-                tileChildren.append(tileItem(slot, binding))
+            var tileChildren: [Item] = []
+            if snapshot.activeLayout == .quarters {
+                // The everyday decision set: quads + halves, never the
+                // sixths 11. The inactive layout is one switch row, not
+                // a section.
+                tileChildren.append(Item(title: "Quarters — Quads", isEnabled: false, isHeader: true))
+                for slot in SlotPresentation.quartersQuads {
+                    tileChildren.append(tileItem(slot, binding))
+                }
+                tileChildren.append(Item(title: "Halves", isEnabled: false, isHeader: true))
+                for slot in SlotPresentation.quartersHalves {
+                    tileChildren.append(tileItem(slot, binding))
+                }
+                tileChildren.append(.separator())
+                // Honest switch row: enabled only with a focused window to
+                // tile, and titled for what it does — the focused window
+                // moves into the destination's top-left as the switch
+                // happens. The disabled form names its own precondition, so
+                // the row never reads as broken. (The "…" stays off: no
+                // dialog follows; the row acts immediately when ready.)
+                tileChildren.append(Item(
+                    title: "Switch to Sixths (focused window → Top Left Sixth)",
+                    isEnabled: snapshot.hasFocusedWindow,
+                    action: .switchToSixths,
+                    disabledReason: snapshot.hasFocusedWindow
+                        ? nil : "Needs a focused window — click a window first."))            } else {
+                // Sixths sub-groups mirror the thirds/two-thirds naming in
+                // Settings: 11 flat items exceed working memory at the moment
+                // of action, so chunk them into corners, thirds, two-thirds.
+                tileChildren.append(Item(title: "Sixths \u{2014} Corners", isEnabled: false, isHeader: true))
+                for slot in SlotPresentation.sixthsCorners {
+                    tileChildren.append(tileItem(slot, binding))
+                }
+                tileChildren.append(Item(title: "Thirds", isEnabled: false, isHeader: true))
+                for slot in SlotPresentation.sixthsThirds {
+                    tileChildren.append(tileItem(slot, binding))
+                }
+                tileChildren.append(Item(title: "Two-Thirds", isEnabled: false, isHeader: true))
+                for slot in SlotPresentation.sixthsTwoThirds {
+                    tileChildren.append(tileItem(slot, binding))
+                }
+                tileChildren.append(.separator())
+                tileChildren.append(Item(
+                    title: "Switch to Quarters (focused window → Top Left)",
+                    isEnabled: snapshot.hasFocusedWindow,
+                    action: .switchToQuarters,
+                    disabledReason: snapshot.hasFocusedWindow
+                        ? nil : "Needs a focused window — click a window first."))
             }
             items.append(Item(title: "Tile Focused Window", children: tileChildren))
             items.append(Item(
-                title: MenuText.expandItemTitle(label: HotkeyService.expandBinding.label),
+                title: MenuText.expandItemTitle(
+                    label: HotkeyService.expandBinding.label,
+                    expandedSlot: snapshot.expandedSlot),
                 action: .toggleExpand))
             items.append(.separator())
 
@@ -116,16 +214,23 @@ enum MenuModel {
                     items.append(windowItem(window, binding))
                 }
                 items.append(.separator())
-                if snapshot.canUndoSwitch {
+                if snapshot.canUndoDisplacement {
+                    // The combo lives in the title, not a key equivalent: the
+                    // global undo is ⌃⌥⇧⌘Z from anywhere, and a ⌘Z glyph here
+                    // would teach a combo that only works with this menu open
+                    // (and undoes in the wrong app everywhere else).
                     items.append(Item(
-                        title: MenuText.undoSwitchTitle(evictedCount: snapshot.evictedCount),
-                        keyEquivalent: "z",
+                        title: MenuText.undoDisplacementTitle(evictedCount: snapshot.evictedCount)
+                            + " — \u{2303}\u{2325}\u{21E7}\u{2318}Z",
                         action: .undoSwitch))
                 }
                 items.append(Item(
                     title: MenuText.untileAllTitle(count: snapshot.tiledWindows.count),
                     action: .untileAll))
-                items.append(Item(title: "Reset Dividers", action: .resetDividers))
+                items.append(Item(
+                    title: snapshot.hasSplitterBackup
+                        ? "Restore Previous Splitters" : "Reset Splitters",
+                    action: .resetDividers))
             }
         } else {
             items.append(Item(title: "Waiting for Accessibility permission…", isEnabled: false))

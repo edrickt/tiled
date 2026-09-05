@@ -108,11 +108,44 @@ final class WelcomeTab: NSObject {
         preview.setAccessibilityLabel("Preview: Top Left covers the top-left quarter")
         stack.addArrangedSubview(preview)
 
-        let sixthsPreview = NSTextField(wrappingLabelWithString:
-            "Sixths work the same way: three columns instead of two.")
-        sixthsPreview.textColor = .secondaryLabelColor
-        sixthsPreview.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        // Sixths preview: the same drawn-from-geometry honesty as the
+        // quarters grid above, in a 3-column shape so "three columns
+        // instead of two" is a picture, not a sentence the reader must
+        // imagine. The middle third is lit because it's the slot that
+        // only exists in sixths.
+        let sixthsPreview = SlotPreviewView(
+            highlighted: [.sixthMiddle], trackColor: .tertiaryLabelColor,
+            displayColumns: 3)
+        sixthsPreview.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            sixthsPreview.widthAnchor.constraint(equalToConstant: 160),
+            sixthsPreview.heightAnchor.constraint(equalToConstant: 100),
+        ])
+        sixthsPreview.setAccessibilityElement(true)
+        sixthsPreview.setAccessibilityRole(.image)
+        sixthsPreview.setAccessibilityLabel(
+            "Preview: Sixths split the screen into three columns — the middle third covers the center column")
         stack.addArrangedSubview(sixthsPreview)
+
+        let sixthsLabel = NSTextField(wrappingLabelWithString:
+            "Sixths work the same way: three columns instead of two. Hold ⌥⇧⌘ with the sixths keys — " +
+            "the full list lives in Settings → Shortcuts.")
+        sixthsLabel.textColor = .secondaryLabelColor
+        sixthsLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        stack.addArrangedSubview(sixthsLabel)
+
+        // The two behaviors that look like bugs on first encounter, stated
+        // where the user can meet them before they happen: drag-out's
+        // snap-back ("my window snapped back!") and Expand's
+        // cover-don't-release semantics ("did it break my layout?"). One
+        // sentence each — the README holds the full rules.
+        let behaviorNote = NSTextField(wrappingLabelWithString:
+            "Drag a tiled window far and it comes untiled where you drop it — " +
+            "a short drag snaps back into its tile. ⌥⇧⏎ expands a window " +
+            "without releasing its slot; press it again to return.")
+        behaviorNote.textColor = .secondaryLabelColor
+        behaviorNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        stack.addArrangedSubview(behaviorNote)
 
         let dismiss = NSButton(
             title: "Got it — show General next time",

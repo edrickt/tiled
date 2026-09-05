@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Snapshot the current status menu was built from. Diffed on every
     /// refresh so the menu is rebuilt only when something it reads moved.
     private var lastMenuSnapshot: MenuModel.Snapshot?
+    /// Layout the status icon currently depicts, so it flips 2×2 ↔ 3×2
+    /// only when the layout actually changes.
+    private var lastIconLayout: LayoutKind?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
@@ -117,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         service.handler = { [weak self] slot in self?.controller.handle(slot: slot) }
         service.expandHandler = { [weak self] in self?.controller.handleExpandToggle() }
         service.settingsHandler = { [weak self] in self?.showSettings(nil) }
+        service.undoHandler = { [weak self] in self?.performUndoSwitch() }
         hotkeys = service
         refreshMenu()
         // Permission-grant teaching moment: the user waited at the
@@ -150,11 +154,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(
-            systemSymbolName: "square.grid.2x2",
-            accessibilityDescription: "tiled")
+        item.button?.image = Self.statusIcon(for: controller.activeLayout)
+        lastIconLayout = controller.activeLayout
         item.menu = menu()
         statusItem = item
+    }
+
+    /// The menu-bar glyph states the product's core idea: the current
+    /// layout's geometry. The stock square.grid.2x2 symbol can't express
+    /// the quarters/sixths duality and goes stale on a layout switch, so
+    /// draw a small template grid — 2×2 for quarters, 3×2 for sixths.
+    private static func statusIcon(for layout: LayoutKind) -> NSImage {
+        let columns = layout == .quarters ? 2 : 3
+        let size = NSSize(width: 16, height: 12)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let margin: CGFloat = 1
+            let gap: CGFloat = 1.5
+            let rows: CGFloat = 2
+            let cellW = (size.width - margin * 2 - gap * CGFloat(columns - 1)) / CGFloat(columns)
+            let cellH = (size.height - margin * 2 - gap) / rows
+            NSColor.black.setFill()
+            for col in 0..<columns {
+                for row in 0..<2 {
+                    let x = margin + CGFloat(col) * (cellW + gap)
+                    let y = margin + CGFloat(1 - row) * (cellH + gap)
+                    NSBezierPath(
+                        roundedRect: NSRect(x: x, y: y, width: cellW, height: cellH),
+                        xRadius: 1.5, yRadius: 1.5
+                    ).fill()
+                }
+            }
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "tiled — \(layout.title) layout"
+        return image
+    }
+
+    /// Redraws the status icon when the active layout changed. Called from
+    /// refreshMenu, which fires on every layout switch.
+    private func updateStatusIcon() {
+        guard let button = statusItem?.button else { return }
+        let layout = controller.activeLayout
+        guard lastIconLayout != layout || button.image == nil else { return }
+        button.image = Self.statusIcon(for: layout)
+        lastIconLayout = layout
     }
 
     /// Toggles the menu-bar icon live when the Settings checkbox changes.
@@ -170,6 +214,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshMenu(force: Bool = false) {
+        // Destructive outcomes surface on screen, not just in the menu:
+        // a hotkey user who never opens the status menu must still see
+        // what their last keypress did to the workspace. Notices are
+        // narrated once (tracked), then the menu carries them.
+        surfaceNoticeIfNew()
         // Rebuilding the menu while it's open flickers or dismisses it;
         // the menuDidClose rebuild picks up whatever changed meanwhile.
         guard !menuOpen else { return }
@@ -181,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !force, snapshot == lastMenuSnapshot, statusItem?.menu != nil { return }
         lastMenuSnapshot = snapshot
         statusItem?.menu = menu(from: snapshot)
+        updateStatusIcon()
     }
 
     private func menu() -> NSMenu {
@@ -200,18 +250,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// One immutable pass over the app state the menu reads.
+    /// Shows a fresh destructive-outcome notice (eviction, layout
+    /// switch) on the same on-screen channel as refusals. `lastNotice`
+    /// clears on every new action, so tracking the last shown text
+    /// surfaces each outcome exactly once — including repeats of the
+    /// same wording, which a naive equality guard would swallow.
+    /// Destructive notices are sticky: the panel stays until the next
+    /// outcome replaces it, because a 2.5s toast is too small a window
+    /// for "your workspace just moved."
+    private var lastShownNotice: String?
+
+    private func surfaceNoticeIfNew() {
+        guard let notice = controller.lastNotice else {
+            lastShownNotice = nil
+            return
+        }
+        guard notice != lastShownNotice else { return }
+        lastShownNotice = notice
+        announce(notice)
+        FeedbackHUD.shared.show(notice, sticky: true)
+    }
+
     private func menuSnapshot() -> MenuModel.Snapshot {
-        MenuModel.Snapshot(
+        let warnings = activeWarnings
+        return MenuModel.Snapshot(
             isTrusted: controller.isTrusted,
-            warnings: activeWarnings,
+            warnings: warnings.hotkeyWarnings,
             notice: controller.lastNotice,
             layoutTitle: controller.activeLayout.title,
+            activeLayout: controller.activeLayout,
+            tileError: warnings.tileError,
+            hasHotkeyWarnings: hasHotkeyWarnings,
+            hasSplitterBackup: controller.hasSplitterBackup,
+            hasFocusedWindow: gateway.isTrusted && gateway.focusedWindow() != nil,
+            expandedSlot: controller.expandedFocusedSlot,
             tiledWindows: controller.tiledWindowsInfo.map {
                 .init(id: $0.id, slot: $0.slot, appName: $0.appName)
             },
-            canUndoSwitch: controller.canUndoSwitch,
+            canUndoDisplacement: controller.canUndoDisplacement,
             evictedCount: controller.evictedCount)
     }
+
 
     /// Maps one model item onto NSMenuItem: selectors, represented
     /// objects, key equivalents, and submenus, recursively.
@@ -220,11 +299,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSMenuItem(
             title: model.title, action: nil, keyEquivalent: model.keyEquivalent)
         item.isEnabled = model.isEnabled
+        if let reason = model.disabledReason, !model.isEnabled {
+            item.toolTip = reason
+            // Tooltips are hover-only: keyboard and VoiceOver users never
+            // reach them. The reason is the whole point of the disabled
+            // row ("the row never reads as broken"), so expose it where
+            // assistive tech looks. Both channels, one string.
+            item.setAccessibilityHelp(reason)
+        }
         if let action = model.action {
             switch action {
             case .tileSlot(let slot):
                 item.action = #selector(tileSlot(_:))
                 item.representedObject = slot.rawValue
+            case .switchToQuarters:
+                item.action = #selector(switchToQuarters(_:))
+            case .switchToSixths:
+                item.action = #selector(switchToSixths(_:))
             case .toggleExpand:
                 item.action = #selector(expandFocusedWindow(_:))
             case .untileWindow(let id):
@@ -248,6 +339,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.action = #selector(showSettings(_:))
             case .openAccessibilitySettings:
                 item.action = #selector(openAccessibilitySettings(_:))
+            case .openShortcuts:
+                item.action = #selector(openShortcuts(_:))
             case .quit:
                 item.action = #selector(NSApplication.terminate(_:))
             }
@@ -269,8 +362,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Undo title names what returns: the evicted windows.
-    private var undoSwitchTitle: String {
-        MenuText.undoSwitchTitle(evictedCount: controller.evictedCount)
+    private var undoDisplacementTitle: String {
+        MenuText.undoDisplacementTitle(evictedCount: controller.evictedCount)
     }
 
     /// Bulk-action title names the consequence: restoring every window.
@@ -278,28 +371,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MenuText.untileAllTitle(count: controller.tiledWindowsInfo.count)
     }
 
-    /// User-visible problems: the last tiling failure, plus any hotkeys
-    /// owned by another app. Failures are reported here, never only logged.
+    /// User-visible problems, split by kind: the last tiling failure
+    /// (a refusal narrative, rendered verbatim) versus hotkey
+    /// registration losses (counted into the summary row with their
+    /// Open Shortcuts door). Mixing the two misdiagnosed refusals as
+    /// shortcut problems — the menu's headline row pointed users at the
+    /// wrong subsystem. Failures are reported here, never only logged.
     /// Labels come from the store so they reflect custom bindings.
-    private var activeWarnings: [String] {
-        var warnings: [String] = []
-        if let error = controller.lastTileError {
-            warnings.append(error)
-        }
+    private var activeWarnings: (tileError: String?, hotkeyWarnings: [String]) {
+        var hotkeyWarnings: [String] = []
         if hotkeys?.settingsHotkeyFailed == true {
-            warnings.append(MenuText.settingsHotkeyWarning())
+            hotkeyWarnings.append(MenuText.settingsHotkeyWarning())
+        }
+        if hotkeys?.undoHotkeyFailed == true {
+            hotkeyWarnings.append(MenuText.undoHotkeyWarning())
         }
         if hotkeys?.expandHotkeyFailed == true {
-            warnings.append(MenuText.expandHotkeyWarning())
+            hotkeyWarnings.append(MenuText.expandHotkeyWarning())
         }
         for slot in hotkeys?.failedSlots ?? [] {
             let label = hotkeyStore.binding(for: slot).label
-            warnings.append(MenuText.hotkeyFailureWarning(label: label, slot: slot))
+            hotkeyWarnings.append(MenuText.hotkeyFailureWarning(label: label, slot: slot))
         }
-        return warnings
+        return (tileError: controller.lastTileError, hotkeyWarnings: hotkeyWarnings)
     }
 
     // MARK: Actions
+
+    @objc private func openShortcuts(_ sender: Any?) {
+        showSettings(selecting: .shortcuts)
+    }
 
     @objc private func showSettings(_ sender: Any?) {
         showSettings(selecting: nil)
@@ -337,8 +438,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Force past the diff on any binding edit.
                 self?.refreshMenu(force: true)
             }
+            // The Shortcuts tab surfaces cross-app registration failures
+            // beside the recorder that accepted the combo, not only in
+            // the status menu.
+            controller.failedSlotsProvider = { [weak self] in
+                self?.hotkeys?.failedSlots ?? []
+            }
+            // General's hide-icon confirm names a recovery combo only when
+            // it is actually registered — never a dead promise while
+            // removing the last visible handle to the app.
+            controller.isSettingsHotkeyRegisteredProvider = { [weak self] in
+                guard let hotkeys = self?.hotkeys else { return false }
+                return !hotkeys.settingsHotkeyFailed
+            }
             settingsController = controller
         }
+    }
+
+    /// True when at least one global hotkey lost registration: the menu
+    /// then pairs its warnings with an "Open Shortcuts…" action row.
+    private var hasHotkeyWarnings: Bool {
+        hotkeys?.settingsHotkeyFailed == true
+            || hotkeys?.expandHotkeyFailed == true
+            || hotkeys?.undoHotkeyFailed == true
+            || !(hotkeys?.failedSlots ?? []).isEmpty
     }
 
     @objc private func showGuide(_ sender: Any?) {
@@ -353,28 +476,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.handle(slot: slot)
     }
 
+    /// Collapsed layout-switch rows: honest about focus. With a focused
+    /// window this tiles into the destination's top-left, performing the
+    /// switch through the engine's mutual-exclusion rule (identical to
+    /// pressing that layout's own hotkey — same undo notice, same
+    /// reversibility). With no focused window the row is disabled, not a
+    /// no-op: a menu row must not promise a switch it cannot perform.
+    @objc private func switchToQuarters(_ sender: Any?) {
+        controller.handle(slot: .topLeft)
+    }
+
+    @objc private func switchToSixths(_ sender: Any?) {
+        controller.handle(slot: .sixthTopLeft)
+    }
+
     @objc private func expandFocusedWindow(_ sender: Any?) {
         controller.handleExpandToggle()
     }
 
     @objc private func untileAll(_ sender: NSMenuItem) {
-        guard confirmBulkAction(
-            message: "Untile every tiled window?",
-            detail: "Each window returns to where it was before tiling.",
-            button: untileAllTitle)
-        else { return }
+        // No modal: Untile All restores every window to its pre-tile
+        // frame, and the eviction-undo snapshot behind it makes the
+        // whole operation one ⌃⌥⇧⌘Z from reversal. The sticky notice +
+        // undo row ARE the safety — a modal here would tax the daily
+        // user for protection the design already provides structurally.
         controller.untileAll()
         announce("All tiled windows restored.", fallback: "All tiled windows restored.")
     }
 
     @objc private func resetDividers(_ sender: NSMenuItem) {
+        // Two actions in sequence, like Reset Shortcuts: a reversible
+        // reset first (fractions parked), then a restore of the backup.
+        if controller.hasSplitterBackup {
+            controller.restoreSplitters()
+            announce(
+                "Splitters restored to their pre-reset positions.",
+                fallback: "Splitters restored to their pre-reset positions.")
+            return
+        }
         guard confirmBulkAction(
-            message: "Reset every divider to even splits?",
-            detail: "Custom drag positions in both layouts are lost.",
-            button: "Reset Dividers")
+            message: "Reset every splitter to even splits?",
+            detail: "Custom drag positions in both layouts are replaced. "
+                + "Your current positions are kept — use Restore Previous Splitters to get them back.",
+            button: "Reset Splitters")
         else { return }
         controller.resetDividers()
-        announce("Dividers reset to even splits.", fallback: "Dividers reset to even splits.")
+        announce("Splitters reset to even splits.", fallback: "Splitters reset to even splits.")
     }
 
     /// Confirms a destructive bulk action with the consequence in the
@@ -390,12 +537,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// VoiceOver announcement for actions whose feedback is otherwise
     /// visual-only (menu titles, shakes, status lines). Posts against the
-    /// status-item button when present (mainMenu is nil for LSUIElement
-    /// agents); falls back to the alert fallback text via the notice line.
+    /// status-item button when present; the Settings window when the icon
+    /// is hidden (the one configuration where the menu isn't a glance
+    /// away and spoken feedback matters most); logs only when neither
+    /// exists. The state change is never visual-only — and never
+    /// announcement-less, either.
     private func announce(_ text: String, fallback noticeText: String? = nil) {
-        if let button = statusItem?.button {
+        let element: Any? =
+            statusItem?.button ?? settingsController?.window ?? NSApp
+        if let element {
             NSAccessibility.post(
-                element: button,
+                element: element,
                 notification: .announcementRequested,
                 userInfo: [.announcement: text,
                            .priority: NSAccessibilityPriorityLevel.high.rawValue])
@@ -405,35 +557,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Subtle confirmation for ineffective hotkey presses: the safe no-op
-    /// stays silent in state and menu, but the hand gets a haptic and
+    /// stays silent in state and menu, but the hand gets a haptic,
     /// VoiceOver users get an announcement — pressing harder is never the
-    /// answer, and now the app says so.
+    /// answer, and now the app says so — and sighted users get the same
+    /// words on screen (a haptic alone left them retrying in silence).
+    /// Screen routing: the controller knows the focused window's live
+    /// frame, so repeated feedback pins to the display the user is
+    /// looking at — not always main.
     private func signalFeedback(_ feedback: TilingController.Feedback) {
         NSHapticFeedbackManager.defaultPerformer.perform(
             .generic, performanceTime: .default)
+        let screen = controller.focusedWindowScreen
+        let text: String
+        let noticeFallback: String?
         switch feedback {
         case .noFocusedWindow:
-            announce(
-                MenuText.noFocusedWindowAnnouncement(),
-                fallback: "No focused window.")
+            text = MenuText.noFocusedWindowAnnouncement()
+            noticeFallback = "No focused window."
+        case .nothingToUndo:
+            text = MenuText.nothingToUndoAnnouncement()
+            noticeFallback = "Nothing to undo."
         case .alreadyTiled(let slot):
-            announce(
-                MenuText.alreadyTiledAnnouncement(slot: slot),
-                fallback: "Already in \(SlotPresentation.title(of: slot)).")
-        case .refused(let name):
-            announce(
-                MenuText.refusedAnnouncement(windowName: name),
-                fallback: controller.lastTileError)
-        case .expandRefused(let name):
-            announce(
-                MenuText.expandRefusedAnnouncement(windowName: name),
-                fallback: controller.lastTileError)
+            text = MenuText.alreadyTiledAnnouncement(slot: slot)
+            noticeFallback = "Already in \(SlotPresentation.title(of: slot))."
+        case .refused(let name, let refusalScreen):
+            text = MenuText.refusedAnnouncement(windowName: name)
+            noticeFallback = controller.lastTileError
+            FeedbackHUD.shared.show(text, on: refusalScreen ?? screen)
+            announce(text, fallback: noticeFallback)
+            refreshMenu()
+            return
+        case .expandRefused(let name, let refusalScreen):
+            text = MenuText.expandRefusedAnnouncement(windowName: name)
+            noticeFallback = controller.lastTileError
+            FeedbackHUD.shared.show(text, on: refusalScreen ?? screen)
+            announce(text, fallback: noticeFallback)
+            refreshMenu()
+            return
         }
+        announce(text, fallback: noticeFallback)
+        FeedbackHUD.shared.show(text, on: screen)
         refreshMenu()
     }
 
     @objc private func undoSwitch(_ sender: NSMenuItem) {
-        controller.undoLayoutSwitch()
+        performUndoSwitch()
+    }
+
+    /// The global ⌃⌥⇧⌘Z combo and the menu's ⌘Z row share one path: the
+    /// switch is triggered by global hotkeys while other apps are
+    /// frontmost, so the undo works from anywhere, not only with the
+    /// status menu open.
+    private func performUndoSwitch() {
+        controller.undoLastDisplacement()
         announce("Evicted windows restored.", fallback: "Evicted windows restored.")
     }
 

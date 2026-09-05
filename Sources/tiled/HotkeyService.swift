@@ -56,10 +56,18 @@ final class HotkeyService {
     static let settingsModifiers = UInt32(controlKey | optionKey | shiftKey | cmdKey)
     static let settingsKeyCode = UInt32(kVK_ANSI_Comma)
 
+    /// Reserved Carbon id for the global undo hotkey (⌃⌥⇧⌘Z). Same
+    /// over-modified pattern as the Settings fallback so it collides with
+    /// nothing; 997 never collides with slot ids, 998, or 999.
+    static let undoHotkeyID: UInt32 = 997
+    static let undoModifiers = UInt32(controlKey | optionKey | shiftKey | cmdKey)
+    static let undoKeyCode = UInt32(kVK_ANSI_Z)
+
     private final class Context {
         var handler: ((Slot) -> Void)?
         var expandHandler: (() -> Void)?
         var settingsHandler: (() -> Void)?
+        var undoHandler: (() -> Void)?
         let slotByID: [UInt32: Slot]
 
         init() {
@@ -110,6 +118,18 @@ final class HotkeyService {
     /// Whether the fallback combo registered (false = owned by another app).
     private(set) var settingsHotkeyFailed = false
 
+    /// Fired by the fixed ⌃⌥⇧⌘Z combo: undoes the last layout switch from
+    /// anywhere. The switch is triggered by global hotkeys while other apps
+    /// are frontmost, so the undo must be global too — a menu-open ⌘Z
+    /// would undo in the wrong app.
+    var undoHandler: (() -> Void)? {
+        get { context.undoHandler }
+        set { context.undoHandler = newValue }
+    }
+
+    /// Whether the undo combo registered (false = owned by another app).
+    private(set) var undoHotkeyFailed = false
+
     init(store: HotkeyStore = HotkeyStore()) {
         self.store = store
         Self.installEventHandler(with: context)
@@ -132,6 +152,7 @@ final class HotkeyService {
         failedSlots = []
         settingsHotkeyFailed = false
         expandHotkeyFailed = false
+        undoHotkeyFailed = false
         var expandRef: EventHotKeyRef?
         if RegisterEventHotKey(
             Self.expandKeyCode,
@@ -159,6 +180,20 @@ final class HotkeyService {
         } else {
             settingsHotkeyFailed = true
             NSLog("tiled: failed to register settings fallback hotkey")
+        }
+        var undoRef: EventHotKeyRef?
+        if RegisterEventHotKey(
+            Self.undoKeyCode,
+            Self.undoModifiers,
+            EventHotKeyID(signature: Self.signature, id: Self.undoHotkeyID),
+            GetApplicationEventTarget(),
+            0,
+            &undoRef) == noErr
+        {
+            hotKeyRefs.append(undoRef)
+        } else {
+            undoHotkeyFailed = true
+            NSLog("tiled: failed to register undo hotkey")
         }
         for slot in Slot.allCases {
             let binding = store.binding(for: slot)
@@ -214,6 +249,10 @@ final class HotkeyService {
         }
         if hotKeyID.id == HotkeyService.settingsHotkeyID {
             DispatchQueue.main.async { context.settingsHandler?() }
+            return noErr
+        }
+        if hotKeyID.id == HotkeyService.undoHotkeyID {
+            DispatchQueue.main.async { context.undoHandler?() }
             return noErr
         }
         guard let slot = context.slotByID[hotKeyID.id] else { return OSStatus(eventNotHandledErr) }

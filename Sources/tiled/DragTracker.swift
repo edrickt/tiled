@@ -115,8 +115,20 @@ final class DragTracker {
         clearDrag(id)
     }
 
+    /// Last rect pushed for `id` (via `markExpected`), if any: our
+    /// intent for the window, as opposed to whatever the gateway last
+    /// reported. Lets diffing prefer intent over echoes.
+    func lastPushedTarget(for id: WindowID) -> CGRect? {
+        expectedFrames[id]?.frame
+    }
+
     /// Forgets a window: untile, restore, and prune paths call this so
     /// stale echo entries never swallow a future drag on a recycled id.
+    /// Push targets are intentionally kept: undo chapters replay writes
+    /// for ids whose frames were restored out from under them, and the
+    /// intent (last pushed target) must survive the record clearing.
+    /// Fresh `markExpected` calls overwrite; only recycled ids could
+    /// collide, and those re-mark on their first new write.
     func forget(_ id: WindowID) {
         lastKnownFrames[id] = nil
         expectedFrames[id] = nil
@@ -124,8 +136,22 @@ final class DragTracker {
     }
 
     /// Snaps all splitters back to defaults. Callers re-push occupants.
-    func resetDividers() {
+    /// The displaced fractions come back as the return value, so the
+    /// caller can park them as a one-step restore (see
+    /// TilingController.resetDividers): nothing else in the app knows the
+    /// live fractions, and a bare reset would be the one destruction the
+    /// app performs without keeping receipts.
+    @discardableResult
+    func resetDividers() -> GridLayout {
+        let previous = grid
         grid = GridLayout()
+        return previous
+    }
+
+    /// Restores splitter fractions parked by an earlier reset, re-pushed
+    /// by the caller onto current occupants.
+    func restoreDividers(_ saved: GridLayout) {
+        grid = saved
     }
 
     /// Rect for `id`'s slot under the current grid. Nil when the window has
