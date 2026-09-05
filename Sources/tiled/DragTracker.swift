@@ -67,7 +67,7 @@ final class DragTracker {
     /// Origin drag distance past which a title-bar drag untiles the window.
     private static let untileDragDistance: CGFloat = 100
     /// Move silence after which a title-bar drag counts as finished.
-    private static let dragEndDebounce: TimeInterval = 0.4
+    private static let dragEndDebounce: TimeInterval = 1
 
     /// Schedules the drag-end debounce; returns a canceller. Injectable
     /// so tests fire drag ends manually instead of waiting on the runloop.
