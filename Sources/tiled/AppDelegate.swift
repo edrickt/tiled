@@ -185,11 +185,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func statusIcon(_ snapshot: StatusIcon.Snapshot) -> NSImage {
         let cells = StatusIcon.cells(for: snapshot.layout)
         let columns = snapshot.layout == .quarters ? 2 : 3
-        let size = NSSize(width: 16, height: 12)
+        // One shared canvas for both layouts: with a variable-length
+        // status item, per-layout widths would shove neighboring icons
+        // sideways on every layout switch.
+        let size = NSSize(width: 22, height: 16)
         let filled = Set(snapshot.filled)
         let image = NSImage(size: size, flipped: false) { _ in
-            let margin: CGFloat = 1
-            let gap: CGFloat = 1.5
+            let margin: CGFloat = 1.5
+            let gap: CGFloat = 2
             let rows: CGFloat = 2
             let cellW = (size.width - margin * 2 - gap * CGFloat(columns - 1)) / CGFloat(columns)
             let cellH = (size.height - margin * 2 - gap) / rows
@@ -203,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let rect = NSRect(x: x, y: y, width: cellW, height: cellH)
                 let path = NSBezierPath(
                     roundedRect: rect,
-                    xRadius: 1.5, yRadius: 1.5
+                    xRadius: 2, yRadius: 2
                 )
                 if filled.contains(cell) {
                     path.fill()
@@ -216,7 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let lineWidth: CGFloat = 1
                     let outline = NSBezierPath(
                         roundedRect: rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
-                        xRadius: 1, yRadius: 1
+                        xRadius: 1.5, yRadius: 1.5
                     )
                     outline.lineWidth = lineWidth
                     outline.stroke()
