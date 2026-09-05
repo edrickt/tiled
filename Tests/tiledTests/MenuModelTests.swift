@@ -96,6 +96,23 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(children.filter(\.isSeparator).count, 1)
     }
 
+    // MARK: Expand item
+
+    func testExpandItemSitsBetweenTileSubmenuAndWindowRows() {
+        let model = items(snapshot(tiledWindows: [
+            .init(id: 1, slot: .topLeft, appName: "Safari"),
+        ]))
+        let expandIndex = model.firstIndex { $0.action == .toggleExpand }
+        XCTAssertNotNil(expandIndex)
+        XCTAssertEqual(model[expandIndex!].title, "Expand to Fill Screen — ⌥⇧⏎")
+        let tileIndex = model.firstIndex { $0.title == "Tile Focused Window" }!
+        XCTAssertEqual(expandIndex, tileIndex + 1, "the expand row follows the tile submenu")
+    }
+
+    func testExpandItemHiddenWhenUntrusted() {
+        XCTAssertFalse(items(snapshot(isTrusted: false)).contains { $0.action == .toggleExpand })
+    }
+
     func testTileItemsCarryLiveLabelsFromTheStore() {
         let model = MenuModel.items(snapshot: snapshot()) { slot in
             switch slot {

@@ -24,6 +24,10 @@ _Avoid_: divider, separator, boundary (the code name is GridBoundary)
 Untiling a window to make room, restoring its pre-tile frame; what `plan` returns when a swap can't fit.
 _Avoid_: displacement, removal
 
+**Expand**:
+Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it. The tracker ignores expanded windows.
+_Avoid_: maximize, zoom, fullscreen
+
 **Drag-out**:
 Untiling by dragging: a title-bar drag past the untile distance releases the slot and leaves the window where dropped — the drop is the placement, never a pre-tile restore. A shorter drag snaps back into the tile.
 _Avoid_: drag-to-untile, fling

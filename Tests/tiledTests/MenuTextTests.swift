@@ -17,6 +17,11 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(MenuText.untileAllTitle(count: 3), "Untile All 3 Windows")
     }
 
+    func testExpandItemTitleWithAndWithoutLabel() {
+        XCTAssertEqual(MenuText.expandItemTitle(label: "⌥⇧⏎"), "Expand to Fill Screen — ⌥⇧⏎")
+        XCTAssertEqual(MenuText.expandItemTitle(label: nil), "Expand to Fill Screen")
+    }
+
     // MARK: Warnings
 
     func testSettingsHotkeyWarningNamesComboAndRecovery() {
@@ -36,6 +41,13 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.hotkeyFailureWarning(label: nil, slot: .sixthLeft),
             "Disabled is already used by another app — “Left Third” has no hotkey.")
+    }
+
+    func testExpandHotkeyWarningNamesComboAndRecovery() {
+        XCTAssertEqual(
+            MenuText.expandHotkeyWarning(),
+            "The expand shortcut (⌥⇧⏎) is already used by another app — "
+                + "relaunch tiled to try registering it again.")
     }
 
     // MARK: Menu rows
@@ -65,7 +77,7 @@ final class MenuTextTests: XCTestCase {
     func testAnnouncements() {
         XCTAssertEqual(
             MenuText.noFocusedWindowAnnouncement(),
-            "No focused window — click a window first, then tile.")
+            "No focused window — click a window first.")
         XCTAssertEqual(
             MenuText.alreadyTiledAnnouncement(slot: .topRight),
             "Top Right — already there.")
@@ -75,5 +87,11 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.refusedAnnouncement(windowName: nil),
             "That window couldn't be tiled — the app refused to resize it.")
+        XCTAssertEqual(
+            MenuText.expandRefusedAnnouncement(windowName: "Safari"),
+            "Safari couldn't be expanded — the app refused to resize it.")
+        XCTAssertEqual(
+            MenuText.expandRefusedAnnouncement(windowName: nil),
+            "That window couldn't be expanded — the app refused to resize it.")
     }
 }

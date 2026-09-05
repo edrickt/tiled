@@ -8,6 +8,7 @@ enum MenuModel {
     /// case to its @objc selector and representedObject.
     enum Action: Equatable {
         case tileSlot(Slot)
+        case toggleExpand
         case untileWindow(WindowID)
         case focusWindow(WindowID)
         case tileHere(Slot)
@@ -100,6 +101,9 @@ enum MenuModel {
                 tileChildren.append(tileItem(slot, binding))
             }
             items.append(Item(title: "Tile Focused Window", children: tileChildren))
+            items.append(Item(
+                title: MenuText.expandItemTitle(label: HotkeyService.expandBinding.label),
+                action: .toggleExpand))
             items.append(.separator())
 
             // Empty state needs no row — the status line already

@@ -20,6 +20,18 @@ final class HotkeyServiceTests: XCTestCase {
         XCTAssertLessThan(UInt32(Slot.allCases.count), HotkeyService.settingsHotkeyID)
     }
 
+    func testExpandComboIsOptionShiftReturn() {
+        // Sits beside the quarters ⌥⇧ set but on Return, which no slot uses.
+        XCTAssertEqual(HotkeyService.expandModifiers, UInt32(shiftKey | optionKey))
+        XCTAssertEqual(HotkeyService.expandKeyCode, UInt32(kVK_Return))
+        XCTAssertEqual(HotkeyService.expandBinding.label, "⌥⇧⏎")
+    }
+
+    func testExpandHotkeyIDCannotCollideWithSlotOrSettingsIDs() {
+        XCTAssertLessThan(UInt32(Slot.allCases.count), HotkeyService.expandHotkeyID)
+        XCTAssertLessThan(HotkeyService.expandHotkeyID, HotkeyService.settingsHotkeyID)
+    }
+
     func testSlotHotkeyIDsAreUniqueAndSequential() {
         // Stable ids for Carbon events: every slot gets one, none repeat.
         let ids = Slot.allCases.map(\.hotkeyID)

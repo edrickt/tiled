@@ -16,6 +16,12 @@ enum MenuText {
         count == 1 ? "Untile 1 Window" : "Untile All \(count) Windows"
     }
 
+    /// The expand toggle's menu row; the combo is fixed, so the label is
+    /// always present in practice.
+    static func expandItemTitle(label: String?) -> String {
+        label.map { "Expand to Fill Screen — \($0)" } ?? "Expand to Fill Screen"
+    }
+
     // MARK: Warnings
 
     /// The fallback Settings combo lost registration (owned by another app).
@@ -29,6 +35,12 @@ enum MenuText {
     static func hotkeyFailureWarning(label: String?, slot: Slot) -> String {
         "\(label ?? "Disabled") is already used by another app — "
             + "“\(SlotPresentation.title(of: slot))” has no hotkey."
+    }
+
+    /// The fixed expand combo lost registration (owned by another app).
+    static func expandHotkeyWarning() -> String {
+        "The expand shortcut (⌥⇧⏎) is already used by another app — "
+            + "relaunch tiled to try registering it again."
     }
 
     // MARK: Menu rows
@@ -53,7 +65,7 @@ enum MenuText {
     // MARK: Feedback announcements (haptic + VoiceOver text)
 
     static func noFocusedWindowAnnouncement() -> String {
-        "No focused window — click a window first, then tile."
+        "No focused window — click a window first."
     }
 
     static func alreadyTiledAnnouncement(slot: Slot) -> String {
@@ -62,5 +74,11 @@ enum MenuText {
 
     static func refusedAnnouncement(windowName: String?) -> String {
         "\(windowName ?? "That window") couldn't be tiled — the app refused to resize it."
+    }
+
+    /// A ⌥⇧⏎ expand write was refused. Mirrors `refusedAnnouncement` but
+    /// names the expand, not a tiling.
+    static func expandRefusedAnnouncement(windowName: String?) -> String {
+        "\(windowName ?? "That window") couldn't be expanded — the app refused to resize it."
     }
 }

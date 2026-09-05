@@ -80,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionTimer = nil
         let service = HotkeyService(store: hotkeyStore)
         service.handler = { [weak self] slot in self?.controller.handle(slot: slot) }
+        service.expandHandler = { [weak self] in self?.controller.handleExpandToggle() }
         service.settingsHandler = { [weak self] in self?.showSettings(nil) }
         hotkeys = service
         refreshMenu()
@@ -172,6 +173,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .tileSlot(let slot):
                 item.action = #selector(tileSlot(_:))
                 item.representedObject = slot.rawValue
+            case .toggleExpand:
+                item.action = #selector(expandFocusedWindow(_:))
             case .untileWindow(let id):
                 item.action = #selector(untileTiledWindow(_:))
                 item.representedObject = id
@@ -234,6 +237,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if hotkeys?.settingsHotkeyFailed == true {
             warnings.append(MenuText.settingsHotkeyWarning())
         }
+        if hotkeys?.expandHotkeyFailed == true {
+            warnings.append(MenuText.expandHotkeyWarning())
+        }
         for slot in hotkeys?.failedSlots ?? [] {
             let label = hotkeyStore.binding(for: slot).label
             warnings.append(MenuText.hotkeyFailureWarning(label: label, slot: slot))
@@ -290,6 +296,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let slot = Slot(rawValue: raw)
         else { return }
         controller.handle(slot: slot)
+    }
+
+    @objc private func expandFocusedWindow(_ sender: Any?) {
+        controller.handleExpandToggle()
     }
 
     @objc private func untileAll(_ sender: NSMenuItem) {
@@ -358,6 +368,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .refused(let name):
             announce(
                 MenuText.refusedAnnouncement(windowName: name),
+                fallback: controller.lastTileError)
+        case .expandRefused(let name):
+            announce(
+                MenuText.expandRefusedAnnouncement(windowName: name),
                 fallback: controller.lastTileError)
         }
         refreshMenu()

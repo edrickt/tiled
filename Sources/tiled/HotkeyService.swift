@@ -36,6 +36,18 @@ extension Slot {
 /// Registers the global ⌥⇧ hotkeys via Carbon's RegisterEventHotKey
 /// (still the most reliable global hotkey mechanism on macOS).
 final class HotkeyService {
+    /// Reserved Carbon id for the fixed expand toggle hotkey (⌥⇧⏎).
+    /// Slot ids occupy 1...allCases.count and the Settings fallback id is
+    /// 999, so 998 can never collide.
+    static let expandHotkeyID: UInt32 = 998
+    /// The expand combo: ⌥⇧⏎, fixed — slot shortcuts are remappable, this
+    /// one rides beside them like the Settings fallback.
+    static let expandModifiers = UInt32(shiftKey | optionKey)
+    static let expandKeyCode = UInt32(kVK_Return)
+
+    /// The fixed expand binding, for menu labels and registration.
+    static let expandBinding = HotkeyBinding(modifiers: expandModifiers, keyCode: expandKeyCode)
+
     /// Reserved Carbon id for the Settings fallback hotkey (⌃⌥⇧⌘,).
     /// Slot ids occupy 1...allCases.count, so this can never collide.
     static let settingsHotkeyID: UInt32 = 999
@@ -46,6 +58,7 @@ final class HotkeyService {
 
     private final class Context {
         var handler: ((Slot) -> Void)?
+        var expandHandler: (() -> Void)?
         var settingsHandler: (() -> Void)?
         let slotByID: [UInt32: Slot]
 
@@ -76,6 +89,16 @@ final class HotkeyService {
         get { context.handler }
         set { context.handler = newValue }
     }
+
+    /// Fired by the fixed ⌥⇧⏎ combo: toggles the focused window between
+    /// expanded (fills the screen) and its previous tile.
+    var expandHandler: (() -> Void)? {
+        get { context.expandHandler }
+        set { context.expandHandler = newValue }
+    }
+
+    /// Whether the expand combo registered (false = owned by another app).
+    private(set) var expandHotkeyFailed = false
 
     /// Fired by the ⌃⌥⇧⌘, fallback combo: opens Settings even when the
     /// menu-bar icon is hidden (the icon is otherwise the only handle).
@@ -108,6 +131,21 @@ final class HotkeyService {
     private func registerHotkeys() {
         failedSlots = []
         settingsHotkeyFailed = false
+        expandHotkeyFailed = false
+        var expandRef: EventHotKeyRef?
+        if RegisterEventHotKey(
+            Self.expandKeyCode,
+            Self.expandModifiers,
+            EventHotKeyID(signature: Self.signature, id: Self.expandHotkeyID),
+            GetApplicationEventTarget(),
+            0,
+            &expandRef) == noErr
+        {
+            hotKeyRefs.append(expandRef)
+        } else {
+            expandHotkeyFailed = true
+            NSLog("tiled: failed to register expand hotkey")
+        }
         var settingsRef: EventHotKeyRef?
         if RegisterEventHotKey(
             Self.settingsKeyCode,
@@ -170,6 +208,10 @@ final class HotkeyService {
             &hotKeyID)
         guard status == noErr else { return status }
         let context = Unmanaged<Context>.fromOpaque(userData!).takeUnretainedValue()
+        if hotKeyID.id == HotkeyService.expandHotkeyID {
+            DispatchQueue.main.async { context.expandHandler?() }
+            return noErr
+        }
         if hotKeyID.id == HotkeyService.settingsHotkeyID {
             DispatchQueue.main.async { context.settingsHandler?() }
             return noErr

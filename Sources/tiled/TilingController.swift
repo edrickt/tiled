@@ -21,10 +21,10 @@ final class TilingController {
     /// performs writes via `pushRects` and serves record reads.
     private lazy var tracker: DragTracker = DragTracker(
         context: DragTracker.Context(
-            slotOf: { [weak self] in self?.state.slot(of: $0) },
+            slotOf: { [weak self] in self?.trackedSlot(of: $0) },
             frameOf: { [weak self] in self?.frameForTracker($0) },
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
-            occupants: { [weak self] in self?.state.occupants ?? [:] }),
+            occupants: { [weak self] in self?.trackedOccupants ?? [:] }),
         apply: { [weak self] rects, excluding in
             guard let self else { return 0 }
             return self.pushRects(rects, excluding: excluding)
@@ -69,6 +69,15 @@ final class TilingController {
     /// Cleared on the next tiling attempt.
     private(set) var lastTileError: String?
 
+    /// Windows expanded over the layout by the ⌥⇧⏎ toggle, keyed by id,
+    /// holding the frame to restore for windows that had no slot when
+    /// expanded (tiled windows retile into their slot instead, so their
+    /// entry is unused). Expanded windows keep their slot in `state` —
+    /// expanding acts like focusing: it covers the layout without erasing
+    /// it — but the tracker reads them as untiled (`trackedSlot`), so
+    /// echoes of the expand write and hand drags of the covering window
+    /// never mutate splitters or trigger drag-out untile.
+    private var expanded: [WindowID: CGRect] = [:]
     private var pruneTimer: Timer?
     private var screenObserver: NSObjectProtocol?
 
@@ -83,6 +92,9 @@ final class TilingController {
         case noFocusedWindow
         case alreadyTiled(slot: Slot)
         case refused(windowName: String?)
+        /// A ⌥⇧⏎ expand write was refused: same shape as `.refused` but
+        /// the announcement must not say “tiled”.
+        case expandRefused(windowName: String?)
     }
 
     var onFeedback: ((Feedback) -> Void)?
@@ -154,6 +166,12 @@ final class TilingController {
             return
         }
         let id = windowID(for: handle)
+        // An expanded window getting a slot hotkey comes back to earth
+        // first: its own slot becomes the strict no-op below; a different
+        // slot retiles from the collapsed state.
+        if expanded[id] != nil {
+            collapseExpanded(id)
+        }
         let decision = state.plan(window: id, into: slot)
         guard decision != .noop else {
             // Already in that tile: a strict no-op — no state, error, or
@@ -174,6 +192,11 @@ final class TilingController {
         state = result.state
         records = result.records
         nextID = result.nextID
+        // Evicted windows were restored by the executor: expansion died
+        // with the pre-tile frame write that restored them.
+        for evicted in decision.windowsToRestore(requester: id) {
+            forgetWindow(evicted)
+        }
         let outcome = result.outcome
         if let feedback = outcome.feedback {
             onFeedback?(feedback)
@@ -200,9 +223,7 @@ final class TilingController {
         if let record = records[id], record.preTileFrame != .zero {
             restored = gateway.setFrame(record.handle, to: record.preTileFrame)
         }
-        records[id] = nil
-        tracker.forget(id)
-        state.remove(window: id)
+        forgetWindow(id)
         if restored { return nil }
         return name
     }
@@ -214,7 +235,9 @@ final class TilingController {
     private func applyAll(excluding excluded: Set<WindowID> = []) {
         var rects: [WindowID: CGRect] = [:]
         for (_, occupant) in state.occupants {
-            guard !excluded.contains(occupant), records[occupant] != nil else { continue }
+            guard !excluded.contains(occupant), records[occupant] != nil,
+                expanded[occupant] == nil
+            else { continue }
             if let target = tracker.rect(for: occupant) {
                 rects[occupant] = target
             }
@@ -317,9 +340,7 @@ final class TilingController {
     /// tests can drive ghost cleanup without waiting on the runloop.
     func pruneDeadWindows() {
         for (id, record) in records where !gateway.isAlive(record.handle) {
-            records[id] = nil
-            tracker.forget(id)
-            state.remove(window: id)
+            forgetWindow(id)
         }
     }
 
@@ -445,6 +466,96 @@ final class TilingController {
         onChange?()
     }
 
+    // MARK: Expand toggle (⌥⇧⏎)
+
+    /// Expands the focused window to fill its screen; pressing again
+    /// retiles it to its previous tile (or restores its previous frame
+    /// when it wasn't tiled). Layout state is untouched: a tiled window
+    /// keeps its slot while expanded, exactly like focusing it.
+    func handleExpandToggle() {
+        pruneDeadWindows()
+        guard let handle = gateway.focusedWindow() else {
+            dbg("no focused window for expand toggle")
+            onFeedback?(.noFocusedWindow)
+            return
+        }
+        let id = windowID(for: handle)
+        if expanded[id] != nil {
+            collapseExpanded(id)
+        } else {
+            expand(id)
+        }
+    }
+
+    private func expand(_ id: WindowID) {
+        guard let record = records[id] else { return }
+        let current = gateway.frame(of: record.handle) ?? record.preTileFrame
+        // No readable frame anywhere: there is no sane screen to expand
+        // onto, so refuse to guess (visibleBounds would fall back to main).
+        guard current != .zero else { return }
+        let target = visibleBounds(for: current)
+        resetTransientState()
+        if writeExpandedFrame(id, to: target) {
+            expanded[id] = current
+            dbg("expand win\(id) -> \(target)")
+        } else {
+            onFeedback?(.expandRefused(windowName: appName(for: id)))
+        }
+        onChange?()
+    }
+
+    private func collapseExpanded(_ id: WindowID) {
+        guard let saved = expanded[id] else { return }
+        expanded[id] = nil
+        resetTransientState()
+        if state.slot(of: id) != nil {
+            retileExpanded(id)
+        } else if records[id] != nil {
+            if !writeExpandedFrame(id, to: saved) {
+                onFeedback?(.expandRefused(windowName: appName(for: id)))
+            }
+            dbg("collapse win\(id) -> saved \(saved)")
+        }
+        onChange?()
+    }
+
+    /// Re-applies an expanded window's slot rect after collapse. Uses the
+    /// tracker grid directly, not plan execution: the window never left
+    /// its slot, so there is nothing to restore or evict.
+    private func retileExpanded(_ id: WindowID) {
+        guard let record = records[id], let slot = state.slot(of: id) else { return }
+        let current = gateway.frame(of: record.handle) ?? record.preTileFrame
+        let bounds = visibleBounds(for: current)
+        let target = tracker.grid.rect(for: slot, in: bounds)
+        if !writeExpandedFrame(id, to: target) {
+            onFeedback?(.expandRefused(windowName: appName(for: id)))
+        }
+        dbg("retile expanded win\(id) -> \(slot.rawValue) target=\(target)")
+    }
+
+    /// One expected frame write via the gateway — the shared shape of the
+    /// expand, collapse, and retile writes. On refusal, records the
+    /// standard error line and returns false so the caller can add the
+    /// feedback of its own.
+    private func writeExpandedFrame(_ id: WindowID, to target: CGRect) -> Bool {
+        guard let record = records[id] else { return false }
+        tracker.markExpected(id, target)
+        if gateway.setFrame(record.handle, to: target) { return true }
+        lastTileError = Self.refusalMessage(count: 1)
+        return false
+    }
+
+    /// Slot a window presents to the tracker: expanded windows read as
+    /// untiled, so the tracker never diff-resizes them into splitter
+    /// moves or drags them out.
+    private func trackedSlot(of id: WindowID) -> Slot? {
+        expanded[id] == nil ? state.slot(of: id) : nil
+    }
+
+    private var trackedOccupants: [Slot: WindowID] {
+        state.occupants.filter { expanded[$0.value] == nil }
+    }
+
     // MARK: Drag-out untile
 
     /// The user dragged a tiled window past the untile distance and
@@ -454,15 +565,23 @@ final class TilingController {
     func untileFromDrag(_ id: WindowID) {
         guard records[id] != nil else { return }
         resetTransientState()
-        records[id] = nil
-        tracker.forget(id)
-        state.remove(window: id)
+        forgetWindow(id)
         dbg("drag-untile win\(id)")
         onChange?()
     }
 
     private func appName(for id: WindowID) -> String? {
         records[id].flatMap { gateway.appName(of: $0.handle) }
+    }
+
+    /// Releases a window's records, tracker entries, occupancy, and any
+    /// expansion. Callers handle any frame writes first — this only
+    /// forgets. Shared by untile, drag-out untile, prune, and eviction.
+    private func forgetWindow(_ id: WindowID) {
+        records[id] = nil
+        tracker.forget(id)
+        state.remove(window: id)
+        expanded[id] = nil
     }
 
     private static func refusalMessage(count: Int) -> String {

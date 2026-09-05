@@ -39,6 +39,19 @@ under **Tile Focused Window** in the menu bar menu.
 | ⌥⇧⌘;   | Right two-thirds   |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
 
+### Expand — ⌥⇧⏎
+
+| Key  | Action                                                        |
+|------|---------------------------------------------------------------|
+| ⌥⇧⏎  | Expand the focused window to fill the screen (not fullscreen mode) |
+
+Press ⌥⇧⏎ again and the window returns to its previous tile — or its
+previous frame, if it wasn't tiled. The layout is never erased: a tiled
+window keeps its slot while expanded (the expanded window just covers the
+others, like focusing does), and tiling a neighbor into a free tile leaves
+the expanded window alone. This shortcut is fixed — the slot shortcuts
+below are the remappable ones.
+
 First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
 to tile it top-left, and you're going — with a miniature preview showing
 what Top Left covers. Dismiss the guide once; reopen it anytime from the menu bar menu → tiled Guide.
