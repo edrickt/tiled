@@ -67,12 +67,16 @@ final class GeneralTab: NSObject {
         // when trusted (loadValues toggles it).
         permissionRow = NSStackView()
         permissionRow.orientation = .horizontal
-        permissionRow.spacing = 8
+        permissionRow.spacing = 12
         permissionRow.alignment = .firstBaseline
         let warningText = NSTextField(wrappingLabelWithString:
             "tiled can't see or move windows — Accessibility permission is off.")
         warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warningText.textColor = .labelColor
+        // The label wraps; the button never shrinks. Without this the
+        // row's single-line intrinsic width overflows the inset area and
+        // shoves the button against the window edge.
+        warningText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         permissionRow.addArrangedSubview(warningText)
         let grantButton = NSButton(
             title: "Open Settings", target: self, action: #selector(grantPermissionTapped(_:)))
@@ -81,6 +85,13 @@ final class GeneralTab: NSObject {
         permissionRow.addArrangedSubview(grantButton)
         permissionRow.isHidden = true
         stack.addArrangedSubview(permissionRow)
+        // Cap the row to the inset content width (leading comes from the
+        // stack's .leading alignment): the button holds the 24pt inset at
+        // any window width instead of riding on the label's intrinsic
+        // single-line width. Activated after the row joins the stack —
+        // constraints need a common ancestor.
+        permissionRow.trailingAnchor.constraint(
+            equalTo: stack.trailingAnchor, constant: -24).isActive = true
 
         launchAtLoginCheckbox = NSButton(
             checkboxWithTitle: "Launch at Login",
@@ -105,7 +116,7 @@ final class GeneralTab: NSObject {
 
         let guideRow = NSStackView()
         guideRow.orientation = .horizontal
-        guideRow.spacing = 8
+        guideRow.spacing = 12
         let guideText = NSTextField(wrappingLabelWithString:
             "Replay the three-step introduction with the tile preview.")
         guideText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -117,6 +128,10 @@ final class GeneralTab: NSObject {
         guideButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         guideRow.addArrangedSubview(guideButton)
         stack.addArrangedSubview(guideRow)
+        // Same cap as the permission row: button holds the inset.
+        guideText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        guideRow.trailingAnchor.constraint(
+            equalTo: stack.trailingAnchor, constant: -24).isActive = true
 
         let hint = NSTextField(wrappingLabelWithString:
             "When the icon is hidden, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere " +

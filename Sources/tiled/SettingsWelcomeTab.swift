@@ -60,12 +60,16 @@ final class WelcomeTab: NSObject {
         // focused window), so lead with the fix, not a broken promise.
         permissionRow = NSStackView()
         permissionRow.orientation = .horizontal
-        permissionRow.spacing = 8
+        permissionRow.spacing = 12
         permissionRow.alignment = .firstBaseline
         let warningText = NSTextField(wrappingLabelWithString:
             "tiled can't see or move windows — Accessibility permission is off.")
         warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warningText.textColor = .labelColor
+        // Label wraps, button never shrinks — and the row is capped to
+        // the inset width below, so the button holds the 24pt inset at
+        // any window width (see GeneralTab for the same pattern).
+        warningText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         permissionRow.addArrangedSubview(warningText)
         let grantButton = NSButton(
             title: "Open Settings", target: self, action: #selector(grantPermissionTapped(_:)))
@@ -74,6 +78,8 @@ final class WelcomeTab: NSObject {
         permissionRow.addArrangedSubview(grantButton)
         permissionRow.isHidden = isTrustedProvider?() ?? true
         stack.addArrangedSubview(permissionRow)
+        permissionRow.trailingAnchor.constraint(
+            equalTo: stack.trailingAnchor, constant: -24).isActive = true
 
         let topLeft = hotkeyStore.binding(for: .topLeft).label ?? "\u{2325}\u{21E7}U"
         let steps = NSTextField(wrappingLabelWithString:
