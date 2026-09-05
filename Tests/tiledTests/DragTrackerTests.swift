@@ -11,6 +11,8 @@ final class DragTrackerTests: XCTestCase {
     private var slots: [WindowID: Slot]!
     private var handles: [WindowID: WindowHandle]!
     private var occupants: [Slot: WindowID]!
+    /// Injectable clock backing the tracker's echo timestamps.
+    private var now = Date()
 
     override func setUp() {
         super.setUp()
@@ -19,6 +21,7 @@ final class DragTrackerTests: XCTestCase {
         slots = [:]
         handles = [:]
         occupants = [:]
+        now = Date()
         tracker = DragTracker(
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.slots[$0] },
@@ -27,7 +30,8 @@ final class DragTrackerTests: XCTestCase {
                     return self?.gateway.frame(of: handle)
                 },
                 boundsOf: { $0 },
-                occupants: { [weak self] in self?.occupants ?? [:] }),
+                occupants: { [weak self] in self?.occupants ?? [:] },
+                now: { [weak self] in self?.now ?? Date() }),
             apply: { [weak self] rects, excluding in
                 self?.pushed.append((rects, excluding))
                 return 0
@@ -119,6 +123,40 @@ final class DragTrackerTests: XCTestCase {
         // No crash, no push, no splitter move for a forgotten window.
         tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         XCTAssertTrue(pushed.isEmpty)
+    }
+
+    // MARK: Stale writes
+
+    func testStaleWriteStopsWaitingAndProcessesLaterTicks() {
+        tile(1, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
+        tile(2, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+
+        // An animated write that converges slowly: each tick moves toward
+        // the expected frame (so it is never an escape) but stays far
+        // enough away that it is never within echo tolerance either.
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 0, width: 840, height: 300))
+        XCTAssertTrue(pushed.isEmpty) // distance 200, converging
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 0, width: 840, height: 320))
+        XCTAssertTrue(pushed.isEmpty, "still inside the stale window: swallowed") // distance 180
+        XCTAssertEqual(tracker.grid, GridLayout())
+
+        // Past the stale window, the next non-escaping tick is processed:
+        // the echo entry clears and the resize moves the row splitter.
+        now += TimeInterval(4)
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 0, width: 840, height: 330))
+        // distance 170: not an escape, but the 4s-old entry is stale.
+
+        XCTAssertEqual(
+            tracker.grid.leftRowSplit, 0.8, accuracy: 0.001,
+            "stale entry cleared; 330/330 clamps to the row-split maximum")
+        let expectation = XCTestExpectation(description: "coalesced apply after stale")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.pushed.count, 1)
+            XCTAssertNotNil(self.pushed.first?.rects[2], "neighbor re-pushed")
+            XCTAssertNil(self.pushed.first?.rects[1], "dragged window excluded")
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
     }
 
     func testResetDividersRestoresDefaults() {

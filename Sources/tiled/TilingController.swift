@@ -90,23 +90,30 @@ final class TilingController {
         }
     }
 
-    init(gateway: WindowGateway = LiveWindowGateway()) {
+    init(gateway: WindowGateway = LiveWindowGateway(), pruneInterval: TimeInterval? = 5.0) {
         self.gateway = gateway
         // Windows closed while tiled otherwise linger as ghosts until the
         // next hotkey; release their slots within seconds instead.
-        let prune = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) {
-            [weak self] _ in
-            guard let self else { return }
-            let before = self.state.tiledWindows.count
-            self.pruneDeadWindows()
-            if self.state.tiledWindows.count != before {
-                self.onChange?()
+        // `pruneInterval == nil` schedules no runloop timer: tests pass nil
+        // so no live timer races a test run, and drive `pruneDeadWindows`
+        // directly instead.
+        if let pruneInterval {
+            let prune = Timer.scheduledTimer(withTimeInterval: pruneInterval, repeats: true) {
+                [weak self] _ in
+                guard let self else { return }
+                let before = self.state.tiledWindows.count
+                self.pruneDeadWindows()
+                if self.state.tiledWindows.count != before {
+                    self.onChange?()
+                }
             }
+            // Fire in event-tracking modes too, so a long-open menu doesn't
+            // stall cleanup; the menu rebuild is suppressed while open anyway.
+            RunLoop.main.add(prune, forMode: .common)
+            pruneTimer = prune
+        } else {
+            pruneTimer = nil
         }
-        // Fire in event-tracking modes too, so a long-open menu doesn't
-        // stall cleanup; the menu rebuild is suppressed while open anyway.
-        RunLoop.main.add(prune, forMode: .common)
-        pruneTimer = prune
         // Reassert the layout when displays change (unplug, rearrange,
         // resolution): splitter fractions stay valid, pixels don't.
         screenObserver = NotificationCenter.default.addObserver(
@@ -286,9 +293,9 @@ final class TilingController {
     }
 
     /// Drops records whose handle is gone (window closed, app quit).
-    /// Called lazily before each hotkey; proper gateway-driven cleanup is
-    /// a later milestone.
-    private func pruneDeadWindows() {
+    /// Called lazily before each hotkey and by the prune timer; internal so
+    /// tests can drive ghost cleanup without waiting on the runloop.
+    func pruneDeadWindows() {
         for (id, record) in records where !gateway.isAlive(record.handle) {
             records[id] = nil
             tracker.forget(id)

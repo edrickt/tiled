@@ -135,4 +135,41 @@ final class HotkeyBindingTests: XCTestCase {
             store.duplicates(of: HotkeyBinding(modifiers: 0, keyCode: nil), ignoring: .topLeft)
                 .isEmpty)
     }
+
+    // MARK: Corrupt stored data
+
+    func testCorruptEntryFallsBackToDefaults() {
+        let name = suiteName // capture once: the property regenerates per access
+        UserDefaults(suiteName: name)!.set(
+            ["modifiers": "not-a-number"], forKey: "hotkey.topLeft")
+
+        XCTAssertEqual(
+            HotkeyStore(defaults: UserDefaults(suiteName: name)!).binding(for: .topLeft),
+            HotkeyStore.defaultBinding(for: .topLeft),
+            "a malformed plist entry degrades to the factory default, not a crash")
+    }
+
+    func testPartialEntryFallsBackToDefaults() {
+        let name = suiteName
+        UserDefaults(suiteName: name)!.set(
+            ["modifiers": 42], forKey: "hotkey.topLeft") // keyCode missing
+
+        XCTAssertEqual(
+            HotkeyStore(defaults: UserDefaults(suiteName: name)!).binding(for: .topLeft),
+            HotkeyStore.defaultBinding(for: .topLeft))
+    }
+
+    func testStoredNegativeKeyCodeMeansDisabled() {
+        let name = suiteName
+        UserDefaults(suiteName: name)!.set(
+            ["modifiers": Int(optionKey), "keyCode": -1], forKey: "hotkey.topLeft")
+
+        let store = HotkeyStore(defaults: UserDefaults(suiteName: name)!)
+        let binding = store.binding(for: .topLeft)
+        XCTAssertFalse(binding.isEnabled)
+        XCTAssertNil(binding.label)
+        // A stored disabled binding never collides with a real combo.
+        XCTAssertTrue(store.duplicates(
+            of: HotkeyStore.defaultBinding(for: .topLeft), ignoring: .topRight).isEmpty)
+    }
 }

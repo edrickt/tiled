@@ -23,6 +23,10 @@ final class DragTracker {
         var frameOf: (WindowID) -> CGRect?
         var boundsOf: (CGRect) -> CGRect
         var occupants: () -> [Slot: WindowID]
+        /// Clock for echo-bookkeeping timestamps. Injectable so tests can
+        /// fast-forward past the stale-write window without waiting on a
+        /// real 3-second timeout.
+        var now: () -> Date = Date.init
     }
 
     private(set) var grid = GridLayout()
@@ -65,7 +69,7 @@ final class DragTracker {
     /// Notes a rect we pushed, so its echo is swallowed, not mistaken for
     /// a drag. Also seeds the last-known frame for edge diffing.
     func markExpected(_ id: WindowID, _ frame: CGRect) {
-        expectedFrames[id] = ExpectedWrite(frame: frame, lastDistance: .infinity, date: Date())
+        expectedFrames[id] = ExpectedWrite(frame: frame, lastDistance: .infinity, date: context.now())
         lastKnownFrames[id] = frame
     }
 
@@ -112,7 +116,7 @@ final class DragTracker {
             if distance > entry.lastDistance + 1 {
                 expectedFrames[id] = nil // user took over
                 log("echo win\(id) ESCAPE dist=\(distance) last=\(entry.lastDistance)")
-            } else if Date().timeIntervalSince(entry.date) > Self.staleWrite {
+            } else if context.now().timeIntervalSince(entry.date) > Self.staleWrite {
                 expectedFrames[id] = nil // write never applied; stop waiting
                 log("echo win\(id) stale")
             } else {

@@ -219,11 +219,7 @@ final class LiveWindowGateway: WindowGateway {
             let size = readSize(element, sizeAttribute)
         else { return nil }
         let primaryTop = NSScreen.screens.first?.frame.maxY ?? (axOrigin.y + size.height)
-        return CGRect(
-            x: axOrigin.x,
-            y: primaryTop - axOrigin.y - size.height,
-            width: size.width,
-            height: size.height)
+        return appKitFrame(axOrigin: axOrigin, size: size, primaryTop: primaryTop)
     }
 
     /// Sets position and size. `nsFrame` uses AppKit global coordinates
@@ -236,9 +232,10 @@ final class LiveWindowGateway: WindowGateway {
     /// top-left (always inside the visible frame) never clamps.
     @discardableResult
     private static func setFrame(_ element: AXUIElement, to nsFrame: CGRect) -> Bool {
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? nsFrame.maxY
         guard
             let sizeValue = sizeValue(CGSize(width: nsFrame.width, height: nsFrame.height)),
-            let positionValue = pointValue(axTopLeft(of: nsFrame))
+            let positionValue = pointValue(axTopLeft(of: nsFrame, primaryTop: primaryTop))
         else { return false }
 
         let positionOK = AXUIElementSetAttributeValue(
@@ -248,11 +245,26 @@ final class LiveWindowGateway: WindowGateway {
         return sizeOK && positionOK
     }
 
-    /// Converts an AppKit global frame (bottom-left origin) to the AX top-left
-    /// point. AX y coordinates count down from the top of the primary screen.
-    private static func axTopLeft(of nsFrame: CGRect) -> CGPoint {
-        let primaryTop = NSScreen.screens.first?.frame.maxY ?? nsFrame.maxY
-        return CGPoint(x: nsFrame.minX, y: primaryTop - nsFrame.maxY)
+    // MARK: Geometry (pure conversions, unit-tested without AX)
+
+    /// AppKit global frame (bottom-left origin) for an AX top-left origin
+    /// and size. `primaryTop` is the primary screen's top edge in AppKit
+    /// coordinates; AX y counts down from that top. Pure so the subtle
+    /// y-flip is testable without AX elements or attached displays.
+    static func appKitFrame(
+        axOrigin: CGPoint, size: CGSize, primaryTop: CGFloat
+    ) -> CGRect {
+        CGRect(
+            x: axOrigin.x,
+            y: primaryTop - axOrigin.y - size.height,
+            width: size.width,
+            height: size.height)
+    }
+
+    /// AX top-left point (top-left-origin global coordinates) for an AppKit
+    /// global frame. `primaryTop` as in `appKitFrame(axOrigin:size:primaryTop:)`.
+    static func axTopLeft(of nsFrame: CGRect, primaryTop: CGFloat) -> CGPoint {
+        CGPoint(x: nsFrame.minX, y: primaryTop - nsFrame.maxY)
     }
 
     // MARK: AXValue plumbing

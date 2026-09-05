@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import tiled
 
@@ -15,7 +16,9 @@ final class ControllerGatewayTests: XCTestCase {
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
-        controller = TilingController(gateway: gateway)
+        // No runloop timer: tests drive pruneDeadWindows directly so a
+        // live 5-second timer can't fire mid-test.
+        controller = TilingController(gateway: gateway, pruneInterval: nil)
     }
 
     // MARK: Hotkey entry point
@@ -104,11 +107,18 @@ final class ControllerGatewayTests: XCTestCase {
         }
         wait(for: [expectation], timeout: 1.0)
         // A real screen exists in the test process, so the grid runs in
-        // real visible-frame coordinates: the dragged top edge (509.5 -
-        // 70 = 439.5 in a 1019pt-tall visible frame) lands the left row
-        // split near 0.43. That pins the full path honestly; pure
-        // splitter math belongs to GridLayoutTests.
-        XCTAssertEqual(self.controller.grid.leftRowSplit, 439.5 / 1019.0, accuracy: 0.01)
+        // real visible-frame coordinates: the expectation is derived from
+        // the screen that owns the dragged window, not from one author's
+        // display height. The dragged top edge ended 70pt above its pre-drag
+        // position (a swallowed 10pt echo, then a 60pt escape), so the row
+        // split must equal (final top edge - bounds.minY) / height.
+        // Pure splitter math belongs to GridLayoutTests.
+        let final = gateway.frame(of: bottom)!
+        let screens = NSScreen.screens
+        let owner = TilingController.owningScreenIndex(frames: screens.map(\.frame), for: final) ?? 0
+        let bounds = screens[owner].visibleFrame
+        let expectedSplit = (final.maxY - bounds.minY) / bounds.height
+        XCTAssertEqual(self.controller.grid.leftRowSplit, expectedSplit, accuracy: 0.01)
     }
 
     // MARK: Ghost cleanup

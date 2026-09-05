@@ -277,14 +277,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Undo title names what returns: the evicted windows.
     private var undoSwitchTitle: String {
-        let count = controller.evictedCount
-        return count == 1 ? "Restore 1 Evicted Window" : "Restore \(count) Evicted Windows"
+        MenuText.undoSwitchTitle(evictedCount: controller.evictedCount)
     }
 
     /// Bulk-action title names the consequence: restoring every window.
     private var untileAllTitle: String {
-        let count = controller.tiledWindowsInfo.count
-        return count == 1 ? "Untile 1 Window" : "Untile All \(count) Windows"
+        MenuText.untileAllTitle(count: controller.tiledWindowsInfo.count)
     }
 
     /// User-visible problems: the last tiling failure, plus any hotkeys
@@ -296,14 +294,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             warnings.append(error)
         }
         if hotkeys?.settingsHotkeyFailed == true {
-            warnings.append(
-                "The Settings shortcut (\u{2303}\u{2325}\u{21E7}\u{2318},) is already used " +
-                "by another app — relaunch tiled to get back to Settings while hidden.")
+            warnings.append(MenuText.settingsHotkeyWarning())
         }
         for slot in hotkeys?.failedSlots ?? [] {
-            let label = hotkeyStore.binding(for: slot).label ?? "Disabled"
-            warnings.append(
-                "\(label) is already used by another app — “\(SlotPresentation.title(of: slot))” has no hotkey.")
+            let label = hotkeyStore.binding(for: slot).label
+            warnings.append(MenuText.hotkeyFailureWarning(label: label, slot: slot))
         }
         return warnings
     }
@@ -321,7 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func tileItem(for slot: Slot) -> NSMenuItem {
         let label = hotkeyStore.binding(for: slot).label
         let item = NSMenuItem(
-            title: label.map { "\(SlotPresentation.title(of: slot)) — \($0)" } ?? SlotPresentation.title(of: slot),
+            title: MenuText.tileItemTitle(slot: slot, label: label),
             action: #selector(tileSlot(_:)),
             keyEquivalent: "")
         item.target = self
@@ -331,11 +326,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// One line of the tiled-windows list: slot, app, and live combo.
     private func windowLine(for info: TilingController.TiledWindowInfo) -> String {
-        let name = info.appName ?? "window"
-        if let label = hotkeyStore.binding(for: info.slot).label {
-            return "\(SlotPresentation.title(of: info.slot)) — \(name) (\(label))"
-        }
-        return "\(SlotPresentation.title(of: info.slot)) — \(name)"
+        MenuText.windowLine(
+            slot: info.slot, appName: info.appName,
+            label: hotkeyStore.binding(for: info.slot).label)
     }
 
     // MARK: Actions
@@ -446,15 +439,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch feedback {
         case .noFocusedWindow:
             announce(
-                "No focused window — click a window first, then tile.",
+                MenuText.noFocusedWindowAnnouncement(),
                 fallback: "No focused window.")
         case .alreadyTiled(let slot):
             announce(
-                "\(SlotPresentation.title(of: slot)) — already there.",
+                MenuText.alreadyTiledAnnouncement(slot: slot),
                 fallback: "Already in \(SlotPresentation.title(of: slot)).")
         case .refused(let name):
             announce(
-                "\(name ?? "That window") couldn't be tiled — the app refused to resize it.",
+                MenuText.refusedAnnouncement(windowName: name),
                 fallback: controller.lastTileError)
         }
         refreshMenu()
