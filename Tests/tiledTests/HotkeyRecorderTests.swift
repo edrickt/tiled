@@ -8,13 +8,13 @@ import XCTest
 final class HotkeyRecorderTests: XCTestCase {
     private func keyDown(
         keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [],
-        characters: String = ""
+        characters: String = "", isARepeat: Bool = false
     ) -> NSEvent {
         NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: modifiers,
             timestamp: 0, windowNumber: 0, context: nil,
             characters: characters, charactersIgnoringModifiers: characters,
-            isARepeat: false, keyCode: keyCode)!
+            isARepeat: isARepeat, keyCode: keyCode)!
     }
 
     // MARK: Cancel / clear
@@ -107,5 +107,46 @@ final class HotkeyRecorderTests: XCTestCase {
             characters: "", charactersIgnoringModifiers: "",
             isARepeat: false, keyCode: UInt16(kVK_ANSI_U))!
         XCTAssertNil(HotkeyRecorder.outcome(for: keyUp))
+    }
+
+    func testAutoRepeatIsIgnored() {
+        // Holding a valid combo must not retrigger the recorder.
+        XCTAssertNil(HotkeyRecorder.outcome(for: keyDown(
+            keyCode: UInt16(kVK_ANSI_U), modifiers: [.option, .shift], isARepeat: true)))
+    }
+
+    // MARK: Pass-through (keyboard accessibility while armed)
+
+    func testBareNavigationKeysPassThroughWhileArmed() {
+        let codes = [
+            kVK_Tab, kVK_Return,
+            kVK_UpArrow, kVK_DownArrow, kVK_LeftArrow, kVK_RightArrow,
+            kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown,
+        ]
+        for code in codes {
+            XCTAssertTrue(
+                HotkeyRecorder.shouldPassThrough(keyDown(keyCode: UInt16(code))),
+                "bare keyCode \(code) must reach the responder chain")
+        }
+    }
+
+    func testModifiedNavigationKeysDoNotPassThrough() {
+        // ⌥Tab is a potential binding, not navigation.
+        XCTAssertFalse(HotkeyRecorder.shouldPassThrough(
+            keyDown(keyCode: UInt16(kVK_Tab), modifiers: [.option])))
+    }
+
+    func testBareNonNavigationKeysDoNotPassThrough() {
+        XCTAssertFalse(HotkeyRecorder.shouldPassThrough(
+            keyDown(keyCode: UInt16(kVK_ANSI_U))))
+    }
+
+    func testNonKeyDownEventsNeverPassThrough() {
+        let keyUp = NSEvent.keyEvent(
+            with: .keyUp, location: .zero, modifierFlags: [],
+            timestamp: 0, windowNumber: 0, context: nil,
+            characters: "", charactersIgnoringModifiers: "",
+            isARepeat: false, keyCode: UInt16(kVK_Tab))!
+        XCTAssertFalse(HotkeyRecorder.shouldPassThrough(keyUp))
     }
 }

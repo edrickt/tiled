@@ -227,11 +227,15 @@ struct GridLayout: Equatable {
     }
 
     /// Moves a boundary to an absolute screen-space position (clamped).
-    /// Returns true if the value changed meaningfully.
+    /// Returns true if the value changed meaningfully. Refuses degenerate
+    /// bounds or non-finite positions: a zero-size frame would divide by
+    /// zero and poison a splitter with ±inf/NaN, corrupting every rect
+    /// derived from it afterwards.
     @discardableResult
     mutating func update(
         boundary: GridBoundary, toPosition position: CGFloat, in bounds: CGRect
     ) -> Bool {
+        guard bounds.width > 0, bounds.height > 0, position.isFinite else { return false }
         switch boundary {
         case .columnSplit:
             let clamped = min(

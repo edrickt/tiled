@@ -236,6 +236,93 @@ final class PlanExecutorTests: XCTestCase {
             "evicted window returns to its slot (under a fresh id — its record was pruned at switch)")
     }
 
+    func testUndoSkipsDeadHandlesAndReports() {
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        let outcome = commit(run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
+        guard let snapshot = outcome.snapshot else {
+            return XCTFail("switch should snapshot")
+        }
+        XCTAssertEqual(snapshot.count, 1, "requester moves, not evicted")
+        gateway.kill(handles[a]!)
+
+        let result = executor.undo(
+            snapshot: snapshot, requester: outcome.requester,
+            state: state, records: records, nextID: nextID, tracker: tracker,
+            boundsOf: { $0 }, observe: { _ in })
+
+        XCTAssertNil(result.notice)
+        XCTAssertEqual(result.error, "Couldn't restore the evicted windows.")
+        XCTAssertTrue(result.state.occupants.isEmpty,
+            "dead evictee skipped; requester restored (untiled)")
+    }
+
+    func testSwapRefusalPluralMessage() {
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        gateway.refuseNextWrites(handles[a]!)
+        gateway.refuseNextWrites(handles[b]!)
+
+        let outcome = commit(run(
+            .swap(placements: [a: .topRight, b: .topLeft]),
+            requester: a, slot: .topRight))
+
+        XCTAssertEqual(
+            outcome.error, "Couldn't move 2 windows — an app refused to resize.")
+    }
+
+    func testUndoPluralNotice() {
+        let a = addWindow()
+        let b = addWindow()
+        let c = addWindow()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+
+        let outcome = commit(run(
+            .switchLayout(evicting: [a, b, c]), requester: c, slot: .sixthLeft))
+        guard let snapshot = outcome.snapshot else {
+            return XCTFail("switch should snapshot")
+        }
+        XCTAssertEqual(snapshot.count, 2)
+
+        let result = executor.undo(
+            snapshot: snapshot, requester: outcome.requester,
+            state: state, records: records, nextID: nextID, tracker: tracker,
+            boundsOf: { $0 }, observe: { _ in })
+
+        XCTAssertEqual(result.notice, "Undid layout switch \u{00B7} 2 windows restored.")
+    }
+
+    func testUndoRetileRefusalDropsTheWindow() {
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        let outcome = commit(run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
+        guard let snapshot = outcome.snapshot else {
+            return XCTFail("switch should snapshot")
+        }
+        gateway.refuseNextWrites(handles[a]!)
+
+        let result = executor.undo(
+            snapshot: snapshot, requester: outcome.requester,
+            state: state, records: records, nextID: nextID, tracker: tracker,
+            boundsOf: { $0 }, observe: { _ in })
+
+        XCTAssertEqual(result.error, "Couldn't restore the evicted windows.")
+        XCTAssertTrue(result.state.occupants.isEmpty,
+            "a refused re-tile releases the slot so state and screen agree")
+        XCTAssertFalse(
+            result.records.values.contains { $0.handle == handles[a] },
+            "the refused window's fresh record is dropped, not left dangling")
+    }
+
     func testUndoRetilesEvictedUnderCurrentGrid() {
         let a = addWindow()
         let b = addWindow()

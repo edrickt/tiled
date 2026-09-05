@@ -72,6 +72,23 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertNotEqual(tracker.grid.leftRowSplit, 0.5)
     }
 
+    func testCornerDragMovesTwoBoundariesInOneChange() {
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+
+        // Echo tick first (swallowed), then a corner drag: the right edge
+        // moves +60 (columnSplit) and the bottom edge -60 (leftRowSplit)
+        // in a single change — both boundaries must update.
+        var echo = CGRect(x: 0, y: 500, width: 840, height: 500)
+        echo.size.width += 10
+        tracker.handleChange(id: 1, frame: echo)
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 440, width: 900, height: 500))
+
+        XCTAssertEqual(tracker.grid.columnSplit, 0.85, accuracy: 0.001,
+            "right edge at 900/900 clamps to the column maximum")
+        XCTAssertEqual(tracker.grid.leftRowSplit, 0.2, accuracy: 0.001,
+            "bottom edge at 440/500 clamps to the row minimum")
+    }
+
     func testOriginOnlyMoveIsIgnored() {
         tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
         tracker.forget(1)
@@ -169,5 +186,29 @@ final class DragTrackerTests: XCTestCase {
 
         tracker.resetDividers()
         XCTAssertEqual(tracker.grid, GridLayout())
+    }
+
+    // MARK: Reassert baseline seeding
+
+    func testReassertSeedsBaselineSoTheFirstDragDiffsCorrectly() {
+        // Occupant 1 was never marked expected (e.g. it re-appeared under
+        // a fresh id after an undo): reassertAll must seed its diff
+        // baseline, or the first drag after the reassert is dropped.
+        occupants[.bottomLeft] = 1
+        slots[1] = .bottomLeft
+        handles[1] = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 840, height: 500))
+
+        // Without a baseline, a first change has nothing to diff against.
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 0, width: 840, height: 440))
+        XCTAssertEqual(tracker.grid, GridLayout(), "no baseline: change dropped")
+
+        // Restore/prune paths forget the window; the reassert that follows
+        // must seed a fresh baseline from the live frame.
+        tracker.forget(1)
+        tracker.reassertAll(occupants: occupants)
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 0, width: 840, height: 440))
+        XCTAssertEqual(
+            tracker.grid.leftRowSplit, 0.8, accuracy: 0.001,
+            "baseline seeded by reassert; 440/440 clamps to the row maximum")
     }
 }

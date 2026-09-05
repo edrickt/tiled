@@ -117,4 +117,27 @@ final class ScreenOwnershipTests: XCTestCase {
     func testEmptyFramesYieldNil() {
         XCTAssertNil(TilingController.owningScreenIndex(frames: [], for: Self.left))
     }
+
+    // MARK: Midpoint fallback rule
+
+    func testMidpointOffScreenYieldsNilForMainFallback() {
+        // Below both displays: no screen contains the midpoint, so the
+        // caller falls back to the main screen.
+        let frame = CGRect(x: 2000, y: 2000, width: 200, height: 200)
+        XCTAssertNil(
+            TilingController.midpointScreenIndex(frames: [Self.left, Self.right], for: frame))
+    }
+
+    func testMidpointOnScreenResolvesBeforeMainFallback() {
+        // Frame entirely within the right screen's x-range but at a y both
+        // share; midpoint containment picks the right screen (index 1).
+        let frame = CGRect(x: 2000, y: 100, width: 100, height: 100)
+        XCTAssertEqual(
+            TilingController.midpointScreenIndex(frames: [Self.left, Self.right], for: frame), 1)
+    }
+
+    func testMidpointRuleOverEmptyFramesYieldsNil() {
+        XCTAssertNil(
+            TilingController.midpointScreenIndex(frames: [], for: Self.left))
+    }
 }

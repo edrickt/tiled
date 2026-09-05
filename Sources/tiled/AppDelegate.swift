@@ -140,138 +140,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
-
-        // 1. Status: notices and warnings if any, else layout + tiled count.
-        let warnings = activeWarnings
-        if !warnings.isEmpty {
-            for warning in warnings {
-                menu.addItem(disabledItem(warning))
-            }
-        } else if controller.isTrusted {
-            if let notice = controller.lastNotice {
-                menu.addItem(disabledItem(notice))
-            }
-            let count = controller.tiledWindowsInfo.count
-            // The count line doubles as the empty state: "0 tiled" reads
-            // as a status, so no separate "No tiled windows" row that
-            // would contradict an undo notice above it.
-            menu.addItem(disabledItem(
-                "Layout: \(controller.activeLayout.title) · \(count) tiled"))
+        for model in MenuModel.items(snapshot: menuSnapshot(), binding: { hotkeyStore.binding(for: $0) }) {
+            menu.addItem(makeItem(model))
         }
-        menu.addItem(.separator())
-
-        if controller.isTrusted {
-            // 2. Act: tile the focused window.
-            let tile = NSMenuItem(title: "Tile Focused Window", action: nil, keyEquivalent: "")
-            let submenu = NSMenu()
-            submenu.autoenablesItems = false
-            submenu.addItem(disabledItem("Quarters"))
-            for slot in Slot.allCases where slot.layout == .quarters {
-                submenu.addItem(tileItem(for: slot))
-            }
-            submenu.addItem(.separator())
-            // Sixths sub-groups mirror the thirds/two-thirds naming in
-            // Settings: 11 flat items exceed working memory at the moment
-            // of action, so chunk them into corners, thirds, two-thirds.
-            submenu.addItem(disabledItem("Sixths \u{2014} Corners"))
-            for slot in SlotPresentation.sixthsCorners {
-                submenu.addItem(tileItem(for: slot))
-            }
-            submenu.addItem(disabledItem("Thirds"))
-            for slot in SlotPresentation.sixthsThirds {
-                submenu.addItem(tileItem(for: slot))
-            }
-            submenu.addItem(disabledItem("Two-Thirds"))
-            for slot in SlotPresentation.sixthsTwoThirds {
-                submenu.addItem(tileItem(for: slot))
-            }
-            tile.submenu = submenu
-            menu.addItem(tile)
-            menu.addItem(.separator())
-
-            // 3. Manage: the tiled windows plus bulk actions. Empty state
-            // needs no row — the status line already reports "0 tiled".
-            let tiled = controller.tiledWindowsInfo
-            if !tiled.isEmpty {
-                for info in tiled {
-                    menu.addItem(windowItem(for: info))
-                }
-                menu.addItem(.separator())
-                if controller.canUndoSwitch {
-                    let undo = NSMenuItem(
-                        title: undoSwitchTitle,
-                        action: #selector(undoSwitch(_:)), keyEquivalent: "z")
-                    undo.target = self
-                    menu.addItem(undo)
-                }
-                let untile = NSMenuItem(
-                    title: untileAllTitle, action: #selector(untileAll(_:)), keyEquivalent: "")
-                untile.target = self
-                menu.addItem(untile)
-                let reset = NSMenuItem(
-                    title: "Reset Dividers", action: #selector(resetDividers(_:)),
-                    keyEquivalent: "")
-                reset.target = self
-                menu.addItem(reset)
-            }
-        } else {
-            let item = NSMenuItem(
-                title: "Waiting for Accessibility permission…", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-            let settings = NSMenuItem(
-                title: "Open System Settings", action: #selector(openAccessibilitySettings(_:)),
-                keyEquivalent: "")
-            settings.target = self
-            menu.addItem(settings)
-        }
-
-        // 4. App.
-        menu.addItem(.separator())
-        let help = NSMenuItem(
-            title: "tiled Guide", action: #selector(showGuide(_:)),
-            keyEquivalent: "")
-        help.target = self
-        menu.addItem(help)
-        let settingsItem = NSMenuItem(
-            title: "Settings…", action: #selector(showSettings(_:)),
-            keyEquivalent: ",")
-        settingsItem.target = self
-        menu.addItem(settingsItem)
-        let quit = NSMenuItem(
-            title: "Quit tiled", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        menu.addItem(quit)
         return menu
     }
 
-    /// One row of the tiled-windows list: a submenu wearing the window's
-    /// back. The row itself doesn't act (no click-focus surprise); the
-    /// submenu leads with the distinctive action so opening it pays off.
-    private func windowItem(for info: TilingController.TiledWindowInfo) -> NSMenuItem {
+    /// One immutable pass over the app state the menu reads.
+    private func menuSnapshot() -> MenuModel.Snapshot {
+        MenuModel.Snapshot(
+            isTrusted: controller.isTrusted,
+            warnings: activeWarnings,
+            notice: controller.lastNotice,
+            layoutTitle: controller.activeLayout.title,
+            tiledWindows: controller.tiledWindowsInfo.map {
+                .init(id: $0.id, slot: $0.slot, appName: $0.appName)
+            },
+            canUndoSwitch: controller.canUndoSwitch,
+            evictedCount: controller.evictedCount)
+    }
+
+    /// Maps one model item onto NSMenuItem: selectors, represented
+    /// objects, key equivalents, and submenus, recursively.
+    private func makeItem(_ model: MenuModel.Item) -> NSMenuItem {
+        if model.isSeparator { return .separator() }
         let item = NSMenuItem(
-            title: windowLine(for: info),
-            action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        submenu.autoenablesItems = false
-        let untile = NSMenuItem(
-            title: "Untile This Window",
-            action: #selector(untileTiledWindow(_:)), keyEquivalent: "")
-        untile.target = self
-        untile.representedObject = info.id
-        submenu.addItem(untile)
-        let focus = NSMenuItem(
-            title: "Focus \(info.appName ?? "Window")",
-            action: #selector(focusTiledWindow(_:)), keyEquivalent: "")
-        focus.target = self
-        focus.representedObject = info.id
-        submenu.addItem(focus)
-        let move = NSMenuItem(
-            title: "Tile Focused Window Here",
-            action: #selector(tileFocusedHere(_:)), keyEquivalent: "")
-        move.target = self
-        move.representedObject = info.slot.rawValue
-        submenu.addItem(move)
-        item.submenu = submenu
+            title: model.title, action: nil, keyEquivalent: model.keyEquivalent)
+        item.isEnabled = model.isEnabled
+        if let action = model.action {
+            switch action {
+            case .tileSlot(let slot):
+                item.action = #selector(tileSlot(_:))
+                item.representedObject = slot.rawValue
+            case .untileWindow(let id):
+                item.action = #selector(untileTiledWindow(_:))
+                item.representedObject = id
+            case .focusWindow(let id):
+                item.action = #selector(focusTiledWindow(_:))
+                item.representedObject = id
+            case .tileHere(let slot):
+                item.action = #selector(tileFocusedHere(_:))
+                item.representedObject = slot.rawValue
+            case .undoSwitch:
+                item.action = #selector(undoSwitch(_:))
+            case .untileAll:
+                item.action = #selector(untileAll(_:))
+            case .resetDividers:
+                item.action = #selector(resetDividers(_:))
+            case .showGuide:
+                item.action = #selector(showGuide(_:))
+            case .showSettings:
+                item.action = #selector(showSettings(_:))
+            case .openAccessibilitySettings:
+                item.action = #selector(openAccessibilitySettings(_:))
+            case .quit:
+                item.action = #selector(NSApplication.terminate(_:))
+            }
+            // Quit rides the responder chain like the app menu's Quit;
+            // everything else targets this delegate.
+            if action != .quit {
+                item.target = self
+            }
+        }
+        if let children = model.children {
+            let submenu = NSMenu()
+            submenu.autoenablesItems = false
+            for child in children {
+                submenu.addItem(makeItem(child))
+            }
+            item.submenu = submenu
+        }
         return item
     }
 
@@ -301,34 +239,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             warnings.append(MenuText.hotkeyFailureWarning(label: label, slot: slot))
         }
         return warnings
-    }
-
-    private func disabledItem(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
-    }
-
-    /// One clickable equivalent per global hotkey. The shortcut itself stays
-    /// in the title text rather than a key equivalent: firing both would
-    /// tile-then-untile in one keypress. Labels come from the store so
-    /// custom bindings show live; disabled slots show no combo.
-    private func tileItem(for slot: Slot) -> NSMenuItem {
-        let label = hotkeyStore.binding(for: slot).label
-        let item = NSMenuItem(
-            title: MenuText.tileItemTitle(slot: slot, label: label),
-            action: #selector(tileSlot(_:)),
-            keyEquivalent: "")
-        item.target = self
-        item.representedObject = slot.rawValue
-        return item
-    }
-
-    /// One line of the tiled-windows list: slot, app, and live combo.
-    private func windowLine(for info: TilingController.TiledWindowInfo) -> String {
-        MenuText.windowLine(
-            slot: info.slot, appName: info.appName,
-            label: hotkeyStore.binding(for: info.slot).label)
     }
 
     // MARK: Actions

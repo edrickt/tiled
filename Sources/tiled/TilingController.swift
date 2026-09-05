@@ -186,6 +186,9 @@ final class TilingController {
     /// the pre-tile frame, releases the slot, and reports refusal so the
     /// caller can name the window instead of leaving a stray behind.
     private func restoreOne(_ id: WindowID) -> String? {
+        // Capture the display name before the record is cleared, so a
+        // refused restore can name the window instead of saying "A window".
+        let name = appName(for: id) ?? "A window"
         var restored = true
         if let record = records[id], record.preTileFrame != .zero {
             restored = gateway.setFrame(record.handle, to: record.preTileFrame)
@@ -194,7 +197,7 @@ final class TilingController {
         tracker.forget(id)
         state.remove(window: id)
         if restored { return nil }
-        return appName(for: id) ?? "A window"
+        return name
     }
 
     /// Recomputes and pushes rects for all occupants (resize propagation).
@@ -272,12 +275,21 @@ final class TilingController {
         if let index = Self.owningScreenIndex(frames: screens.map(\.frame), for: frame) {
             return screens[index].visibleFrame
         }
-        let point = CGPoint(x: frame.midX, y: frame.midY)
-        if let containing = screens.first(where: { $0.frame.contains(point) }) {
-            return containing.visibleFrame
+        if let index = Self.midpointScreenIndex(frames: screens.map(\.frame), for: frame) {
+            return screens[index].visibleFrame
         }
         dbg("no screen overlaps \(frame); falling back to main")
         return NSScreen.main?.visibleFrame ?? frame
+    }
+
+    /// Pure screen-fallback rule, extracted for tests: index of the screen
+    /// containing the frame's midpoint, used when no screen shows a
+    /// majority share (off-screen or inter-Space windows still tile
+    /// somewhere sane). nil when no screen contains the midpoint; the
+    /// caller falls back to the main screen.
+    static func midpointScreenIndex(frames: [CGRect], for frame: CGRect) -> Int? {
+        let point = CGPoint(x: frame.midX, y: frame.midY)
+        return frames.firstIndex { $0.contains(point) }
     }
 
     // MARK: Registry

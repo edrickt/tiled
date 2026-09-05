@@ -906,6 +906,28 @@ final class GridLayoutTests: XCTestCase {
             CGRect(x: 960, y: 0, width: 960, height: 540))
     }
 
+    // MARK: Degenerate geometry
+
+    func testUpdateRefusesDegenerateBoundsAndNonFinitePositions() {
+        var grid = GridLayout()
+        let degenerate = CGRect(x: 100, y: 50, width: 0, height: 0)
+
+        // (position - minX) / 0 would poison a splitter with NaN (zero
+        // numerator) or ±inf (nonzero); either corrupts every rect
+        // derived from the grid afterwards. The guard refuses both.
+        XCTAssertFalse(grid.update(boundary: .columnSplit, toPosition: 100, in: degenerate))
+        XCTAssertFalse(grid.update(boundary: .leftRowSplit, toPosition: 150, in: degenerate))
+        XCTAssertFalse(grid.update(boundary: .sixthsLeftSplit, toPosition: 120, in: degenerate))
+        XCTAssertFalse(
+            grid.update(boundary: .columnSplit, toPosition: CGFloat.nan, in: bounds))
+        XCTAssertFalse(
+            grid.update(boundary: .columnSplit, toPosition: CGFloat.infinity, in: bounds))
+
+        XCTAssertEqual(grid, GridLayout(), "grid untouched by refused updates")
+        XCTAssertFalse(grid.columnSplit.isNaN)
+        XCTAssertFalse(grid.columnSplit.isInfinite)
+    }
+
     func testRectsWithNegativeOriginBounds() {
         // Secondary monitors left of the main screen have negative origins;
         // rects must track the origin, not assume (0, 0).

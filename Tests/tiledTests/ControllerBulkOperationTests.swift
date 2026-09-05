@@ -173,6 +173,80 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(controller.state.tiledWindows.count, 1)
     }
 
+    func testSwitchingAloneOffersNoUndo() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        // The requester moves; nobody is evicted, so there is nothing to
+        // undo and nothing to announce.
+        gateway.focused = a
+        controller.handle(slot: .sixthLeft)
+
+        XCTAssertEqual(controller.state.slot(of: 1), .sixthLeft)
+        XCTAssertNil(controller.lastNotice)
+        XCTAssertFalse(controller.canUndoSwitch)
+        XCTAssertEqual(controller.evictedCount, 0)
+    }
+
+    func testUndoAfterRequesterDied() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+        gateway.focused = b
+        controller.handle(slot: .sixthLeft)
+
+        // The user closes the switched window before undoing.
+        gateway.kill(b)
+        controller.undoLayoutSwitch()
+
+        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+        XCTAssertNotNil(controller.state.occupant(of: .topLeft),
+            "the evictee still returns to its slot")
+        XCTAssertNil(controller.state.occupant(of: .sixthLeft))
+        XCTAssertEqual(controller.lastNotice, "Undid layout switch \u{00B7} 1 window restored.")
+    }
+
+    func testUndoAfterEvicteeDied() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+        gateway.focused = b
+        controller.handle(slot: .sixthLeft)
+
+        gateway.kill(a)
+        controller.undoLayoutSwitch()
+
+        XCTAssertEqual(
+            controller.lastTileError, "Couldn't restore the evicted windows.")
+        XCTAssertTrue(controller.state.occupants.isEmpty,
+            "requester untiled by undo; dead evictee skipped")
+        XCTAssertFalse(controller.canUndoSwitch)
+    }
+
+    func testPreTileFrameSurvivesLayoutSwitches() {
+        let handle = addFocusedWindow(frame: CGRect(x: 21, y: 43, width: 510, height: 320))
+        let original = gateway.frame(of: handle)!
+        controller.handle(slot: .topLeft)
+
+        // The window itself switches layouts twice (it is always the
+        // requester, never evicted): its record — and pre-tile frame —
+        // must survive untouched, so untile returns it to where it started.
+        gateway.focused = handle
+        controller.handle(slot: .sixthLeft)
+        gateway.focused = handle
+        controller.handle(slot: .rightHalf)
+        XCTAssertEqual(controller.state.slot(of: 1), .rightHalf)
+
+        controller.untile(window: 1)
+        XCTAssertEqual(
+            gateway.frame(of: handle), original,
+            "untile restores the original pre-tile frame, not a tile rect")
+    }
+
     func testNonSwitchActionClearsTheUndoOffer() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)
@@ -224,6 +298,102 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(name, "TestApp")
     }
 
+    func testUntileWithRefusedRestoreReportsTheWindow() {
+        let handle = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        gateway.refuseNextWrites(handle)
+
+        controller.untile(window: 1)
+
+        XCTAssertEqual(
+            controller.lastTileError,
+            "Couldn't restore \u{201C}TestApp\u{201D} — it may still be sitting in its old tile.")
+        XCTAssertNil(controller.state.slot(of: 1),
+            "slot released even though the frame restore was refused")
+    }
+
+    func testUntileAllWithRefusedRestoresReportsPlural() {
+        addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+        gateway.refuseNextWrites(gateway.issued[0])
+        gateway.refuseNextWrites(gateway.issued[1])
+
+        controller.untileAll()
+
+        XCTAssertEqual(
+            controller.lastTileError,
+            "Couldn't restore 2 windows — they may still be sitting in their old tiles.")
+        XCTAssertTrue(controller.state.occupants.isEmpty)
+    }
+
+    func testNoopHotkeyPreservesNotices() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+        gateway.focused = b
+        controller.handle(slot: .sixthLeft)
+        XCTAssertNotNil(controller.lastNotice)
+
+        // Strict no-op: no state, error, or menu side effects — the
+        // already-tiled feedback fires, but the notice survives untouched.
+        gateway.focused = b
+        controller.handle(slot: .sixthLeft)
+
+        XCTAssertNotNil(controller.lastNotice, "no-op must not clear the notice")
+        XCTAssertEqual(feedbacks.count, 1)
+        guard case .alreadyTiled = feedbacks[0] else {
+            return XCTFail("expected .alreadyTiled, got \(feedbacks[0])")
+        }
+    }
+
+    func testFocusBringsWindowForwardAndIgnoresUnknownIDs() {
+        addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+        gateway.focused = nil
+
+        controller.focus(window: 2)
+        XCTAssertEqual(gateway.focused, b)
+
+        controller.focus(window: 99)
+        XCTAssertEqual(gateway.focused, b, "unknown id changes nothing")
+    }
+
+    func testSilentlyIgnoringAppTilesStatefully() {
+        let handle = addFocusedWindow()
+        let original = gateway.frame(of: handle)!
+        gateway.silentIgnore.insert(handle)
+
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft,
+            "the gateway reported success, so occupancy commits")
+        XCTAssertNil(controller.lastTileError, "no refusal — the write 'succeeded'")
+        XCTAssertTrue(feedbacks.isEmpty)
+        XCTAssertEqual(gateway.frame(of: handle), original,
+            "the app ignored the resize; screen and state disagree until the next assertion")
+    }
+
+    func testTiledWindowsInfoIsSortedBySlot() {
+        // Tile in reverse slot order; presentation must sort by rawValue.
+        addFocusedWindow()
+        controller.handle(slot: .topRight)
+        let b = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        gateway.focused = b
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(
+            controller.tiledWindowsInfo.map(\.slot),
+            [.topLeft, .topRight])
+    }
+
     // MARK: Reset dividers
 
     func testResetDividersRestoresDefaultsAndRetiles() {
@@ -247,6 +417,30 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertNil(controller.lastTileError)
     }
 
+    func testResetDividersReportsRefusals() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+        // Move the splitter so reset has real writes to perform.
+        var echo = gateway.frame(of: a)!
+        echo.size.width -= 10
+        gateway.simulateChange(a, to: echo)
+        var dragged = gateway.frame(of: a)!
+        dragged.size.width -= 60
+        gateway.simulateChange(a, to: dragged)
+        XCTAssertNotEqual(controller.grid.columnSplit, 0.5)
+
+        gateway.refuseNextWrites(a)
+        controller.resetDividers()
+
+        XCTAssertEqual(
+            controller.lastTileError,
+            "Couldn't move that window — the app refused to resize it.",
+            "the re-assertion refusal surfaces, never silence")
+    }
+
     // MARK: Ghost cleanup & screen changes
 
     func testPruneDropsDeadWindows() {
@@ -258,6 +452,28 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.pruneDeadWindows()
 
         XCTAssertTrue(controller.state.occupants.isEmpty)
+    }
+
+    func testPruneTimerFiresAndReleasesSlots() {
+        // The real 5-second timer, shrunk: the wiring (fire → prune →
+        // onChange when the count changed) is what the nil-interval tests
+        // bypass by driving pruneDeadWindows directly.
+        let gateway = FakeWindowGateway()
+        var changes = 0
+        let timed = TilingController(gateway: gateway, pruneInterval: 0.05)
+        timed.onChange = { changes += 1 }
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        timed.handle(slot: .topLeft)
+        XCTAssertEqual(timed.state.tiledWindows.count, 1)
+
+        gateway.kill(handle)
+        let waited = XCTestExpectation(description: "prune timer fired")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { waited.fulfill() }
+        wait(for: [waited], timeout: 1.0)
+
+        XCTAssertTrue(timed.state.occupants.isEmpty, "the timer pruned the ghost")
+        XCTAssertGreaterThan(changes, 1, "prune announced the change for a menu refresh")
     }
 
     func testScreenChangeReassertsLayout() {

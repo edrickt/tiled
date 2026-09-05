@@ -41,6 +41,40 @@ final class HotkeyBindingTests: XCTestCase {
         }
     }
 
+    func testUnknownKeyCodeFallsBackToHex() {
+        // A binding never renders blank, whatever the keycode.
+        XCTAssertEqual(
+            HotkeyBinding(modifiers: UInt32(optionKey), keyCode: 0xCA).label, "⌥0xCA")
+    }
+
+    func testLabelForFunctionKeys() {
+        XCTAssertEqual(HotkeyBinding(modifiers: 0, keyCode: UInt32(kVK_F5)).label, "F5")
+        XCTAssertEqual(HotkeyBinding(modifiers: UInt32(cmdKey), keyCode: UInt32(kVK_F12)).label, "⌘F12")
+    }
+
+    func testLabelForSpecialKeys() {
+        XCTAssertEqual(HotkeyBinding(modifiers: 0, keyCode: UInt32(kVK_Space)).label, "Space")
+        XCTAssertEqual(HotkeyBinding(modifiers: 0, keyCode: UInt32(kVK_Tab)).label, "Tab")
+        XCTAssertEqual(HotkeyBinding(modifiers: 0, keyCode: UInt32(kVK_Return)).label, "⏎")
+        XCTAssertEqual(HotkeyBinding(modifiers: 0, keyCode: UInt32(kVK_Escape)).label, "⎋")
+        XCTAssertEqual(HotkeyBinding(modifiers: 0, keyCode: UInt32(kVK_Delete)).label, "⌫")
+    }
+
+    func testLabelForRemainingPunctuation() {
+        let cases: [(UInt32, String)] = [
+            (UInt32(kVK_ANSI_Minus), "-"), (UInt32(kVK_ANSI_Equal), "="),
+            (UInt32(kVK_ANSI_LeftBracket), "["), (UInt32(kVK_ANSI_RightBracket), "]"),
+            (UInt32(kVK_ANSI_Backslash), "\\"), (UInt32(kVK_ANSI_Quote), "'"),
+            (UInt32(kVK_ANSI_Period), "."), (UInt32(kVK_ANSI_Slash), "/"),
+            (UInt32(kVK_ANSI_Grave), "`"),
+        ]
+        for (code, expected) in cases {
+            XCTAssertEqual(
+                HotkeyBinding(modifiers: UInt32(optionKey), keyCode: code).label,
+                "⌥\(expected)", "keyCode \(code)")
+        }
+    }
+
     // MARK: Labels
 
     func testLabelOrdersModifiersControlOptionShiftCommand() {

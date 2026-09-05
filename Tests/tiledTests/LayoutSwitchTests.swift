@@ -17,8 +17,9 @@ final class LayoutSwitchTests: XCTestCase {
     }
 
     /// Representative occupancy shapes per layout: singles of every size
-    /// class, pairs, full grids, and mixed compositions.
-    private static var quartersConfigs: [[Slot]] {
+    /// class, pairs, full grids, and mixed compositions. Internal so
+    /// MatrixCrossCheckTests can replay them through the real controller.
+    static var quartersConfigs: [[Slot]] {
         [
             [.topLeft],
             [.bottomRight],
@@ -34,7 +35,7 @@ final class LayoutSwitchTests: XCTestCase {
         ]
     }
 
-    private static var sixthsConfigs: [[Slot]] {
+    static var sixthsConfigs: [[Slot]] {
         [
             [.sixthTopLeft], // single corner (1 cell)
             [.sixthTopMiddle], // single middle (2 cells)
