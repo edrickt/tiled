@@ -17,6 +17,21 @@ final class SettingsWindowController: NSWindowController {
     private let shortcutsTab: ShortcutsTab
     private var tabView: NSTabView!
 
+    /// Live Accessibility trust probe, forwarded to both teaching tabs
+    /// so the permission warning tracks reality on every build.
+    var isTrustedProvider: (() -> Bool)? {
+        didSet {
+            generalTab.isTrustedProvider = isTrustedProvider
+            welcomeTab.isTrustedProvider = isTrustedProvider
+        }
+    }
+    /// Opens the Accessibility permission pane.
+    var onOpenAccessibilitySettings: (() -> Void)? {
+        didSet {
+            generalTab.onOpenAccessibilitySettings = onOpenAccessibilitySettings
+            welcomeTab.onOpenAccessibilitySettings = onOpenAccessibilitySettings
+        }
+    }
     /// Called when the user toggles "Hide menu bar icon" so the delegate
     /// can remove/restore the status item immediately.
     var onHideIconChange: ((Bool) -> Void)?
@@ -35,6 +50,9 @@ final class SettingsWindowController: NSWindowController {
         welcomeTab.onDismiss = { [weak self] in self?.dismissWelcome() }
         generalTab.onHideIconChange = { [weak self] in self?.onHideIconChange?($0) }
         generalTab.onShowGuide = { [weak self] in self?.showWelcomeAgain() }
+        welcomeTab.onOpenAccessibilitySettings = { [weak self] in
+            self?.onOpenAccessibilitySettings?()
+        }
         shortcutsTab.onHotkeysChange = { [weak self] in self?.onHotkeysChange?() }
         shortcutsTab.onContentRebuilt = { [weak self] view in
             self?.replaceShortcutsView(view)

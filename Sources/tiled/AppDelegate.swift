@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuOpen = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupMainMenu()
         controller.onChange = { [weak self] in self?.refreshMenu() }
         controller.onFeedback = { [weak self] feedback in
             DispatchQueue.main.async { self?.signalFeedback(feedback) }
@@ -46,6 +47,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // rearrange the user's workspace on the way out.
 
     // MARK: Permission
+
+    /// Keyboard equivalents for the accessory app: LSUIElement apps have
+    /// no visible menu bar, but NSApp.mainMenu key equivalents work
+    /// whenever the app is active — without this, ⌘Q/⌘W are dead while
+    /// Settings has focus (the status item's Quit only applies while
+    /// that menu is open).
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        let appItem = NSMenuItem()
+        mainMenu.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About tiled", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide tiled", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit tiled", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+
+        let windowItem = NSMenuItem()
+        mainMenu.addItem(windowItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowItem.submenu = windowMenu
+
+        NSApp.mainMenu = mainMenu
+    }
 
     private func start(afterPermissionWait: Bool = false) {
         permissionTimer?.invalidate()
@@ -336,6 +364,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 settings: settings, hotkeyStore: hotkeyStore)
             controller.onHideIconChange = { [weak self] hidden in
                 self?.setIconHidden(hidden)
+            }
+            controller.isTrustedProvider = { [weak self] in self?.gateway.isTrusted ?? false }
+            controller.onOpenAccessibilitySettings = { [weak self] in
+                self?.openAccessibilitySettings(NSMenuItem())
             }
             controller.onHotkeysChange = { [weak self] in
                 self?.hotkeys?.reload()

@@ -9,10 +9,16 @@ final class WelcomeTab: NSObject {
     /// Fired by the dismiss button. The shell removes the tab, lands on
     /// General, and persists the dismissal.
     var onDismiss: (() -> Void)?
+    /// Live Accessibility trust probe: the three steps below are exactly
+    /// what an untrusted install cannot do, so the warning leads the tab.
+    var isTrustedProvider: (() -> Bool)?
+    /// Opens the Accessibility permission pane.
+    var onOpenAccessibilitySettings: (() -> Void)?
 
     /// The dismiss button of the last built view, for initial-focus
     /// placement on open.
     private(set) var dismissButton: NSButton?
+    private var permissionRow: NSStackView!
 
     init(hotkeyStore: HotkeyStore) {
         self.hotkeyStore = hotkeyStore
@@ -38,6 +44,26 @@ final class WelcomeTab: NSObject {
         let title = NSTextField(labelWithString: "Tile a window in one keypress")
         title.font = .boldSystemFont(ofSize: NSFont.systemFontSize + 2)
         stack.addArrangedSubview(title)
+
+        // Permission warning, before the steps: an untrusted install
+        // cannot do step 1 ("click any window" works, but tiled sees no
+        // focused window), so lead with the fix, not a broken promise.
+        permissionRow = NSStackView()
+        permissionRow.orientation = .horizontal
+        permissionRow.spacing = 8
+        permissionRow.alignment = .firstBaseline
+        let warningText = NSTextField(wrappingLabelWithString:
+            "tiled can't see or move windows — Accessibility permission is off.")
+        warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        warningText.textColor = .labelColor
+        permissionRow.addArrangedSubview(warningText)
+        let grantButton = NSButton(
+            title: "Open Settings", target: self, action: #selector(grantPermissionTapped(_:)))
+        grantButton.bezelStyle = .rounded
+        grantButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        permissionRow.addArrangedSubview(grantButton)
+        permissionRow.isHidden = isTrustedProvider?() ?? true
+        stack.addArrangedSubview(permissionRow)
 
         let topLeft = hotkeyStore.binding(for: .topLeft).label ?? "\u{2325}\u{21E7}U"
         let steps = NSTextField(wrappingLabelWithString:
@@ -92,5 +118,9 @@ final class WelcomeTab: NSObject {
 
     @objc private func dismissTapped(_ sender: NSButton) {
         onDismiss?()
+    }
+
+    @objc private func grantPermissionTapped(_ sender: NSButton) {
+        onOpenAccessibilitySettings?()
     }
 }

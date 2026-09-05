@@ -13,9 +13,16 @@ final class GeneralTab: NSObject {
     /// Reopens the Welcome tab (the General tab's "Show tiled Guide"
     /// button). The shell owns tab switching.
     var onShowGuide: (() -> Void)?
+    /// Live Accessibility trust probe, injected by the shell: with the
+    /// menu-bar icon hidden this tab is the app's only visible surface,
+    /// so permission loss must be legible here.
+    var isTrustedProvider: (() -> Bool)?
+    /// Opens the Accessibility permission pane.
+    var onOpenAccessibilitySettings: (() -> Void)?
 
     private var launchAtLoginCheckbox: NSButton!
     private var hideIconCheckbox: NSButton!
+    private var permissionRow: NSStackView!
 
     /// First control, for the shell's initial-focus placement.
     var firstControl: NSButton? { launchAtLoginCheckbox }
@@ -40,6 +47,26 @@ final class GeneralTab: NSObject {
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             stack.topAnchor.constraint(equalTo: view.topAnchor),
         ])
+
+        // Permission warning: first in the stack so an untrusted install
+        // leads with the reason every hotkey press does nothing. Hidden
+        // when trusted (loadValues toggles it).
+        permissionRow = NSStackView()
+        permissionRow.orientation = .horizontal
+        permissionRow.spacing = 8
+        permissionRow.alignment = .firstBaseline
+        let warningText = NSTextField(wrappingLabelWithString:
+            "tiled can't see or move windows — Accessibility permission is off.")
+        warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        warningText.textColor = .labelColor
+        permissionRow.addArrangedSubview(warningText)
+        let grantButton = NSButton(
+            title: "Open Settings", target: self, action: #selector(grantPermissionTapped(_:)))
+        grantButton.bezelStyle = .rounded
+        grantButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        permissionRow.addArrangedSubview(grantButton)
+        permissionRow.isHidden = true
+        stack.addArrangedSubview(permissionRow)
 
         launchAtLoginCheckbox = NSButton(
             checkboxWithTitle: "Launch at Login",
@@ -91,6 +118,11 @@ final class GeneralTab: NSObject {
     func loadValues() {
         launchAtLoginCheckbox?.state = currentLaunchAtLogin ? .on : .off
         hideIconCheckbox?.state = settings.hideMenuBarIcon ? .on : .off
+        permissionRow?.isHidden = isTrustedProvider?() ?? true
+    }
+
+    @objc private func grantPermissionTapped(_ sender: NSButton) {
+        onOpenAccessibilitySettings?()
     }
 
     private var currentLaunchAtLogin: Bool {
