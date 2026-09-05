@@ -193,23 +193,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let image = NSImage(size: size, flipped: false) { _ in
             let margin: CGFloat = 1.5
             let gap: CGFloat = 1
-            let rows: CGFloat = 2
+            let rowCount = 2
             let cellW = (size.width - margin * 2 - gap * CGFloat(columns - 1)) / CGFloat(columns)
-            let cellH = (size.height - margin * 2 - gap) / rows
+            let cellH = (size.height - margin * 2 - gap) / CGFloat(rowCount)
             NSColor.black.setFill()
             NSColor.black.setStroke()
+            // One rounded frame subdivided: only each corner cell's outer
+            // corner rounds (the top-left cell's top-left corner, and so
+            // on); every inner edge stays square. Middle-column cells in
+            // sixths touch no outer corner and stay fully square.
+            let cornerRadius: CGFloat = 2.5
             for (index, cell) in cells.enumerated() {
                 let col = index % columns
                 let row = index / columns
                 let x = margin + CGFloat(col) * (cellW + gap)
                 let y = margin + CGFloat(1 - row) * (cellH + gap)
                 let rect = NSRect(x: x, y: y, width: cellW, height: cellH)
-                let path = NSBezierPath(
-                    roundedRect: rect,
-                    xRadius: 0, yRadius: 0
-                )
+                var corners: Set<IconCorner> = []
+                if col == 0, row == 0 { corners.insert(.topLeft) }
+                if col == columns - 1, row == 0 { corners.insert(.topRight) }
+                if col == 0, row == rowCount - 1 { corners.insert(.bottomLeft) }
+                if col == columns - 1, row == rowCount - 1 { corners.insert(.bottomRight) }
                 if filled.contains(cell) {
-                    path.fill()
+                    Self.cellPath(
+                        rect: rect, roundedCorners: corners, radius: cornerRadius
+                    ).fill()
                 } else {
                     // A stroke centers on its path, so an unstroked-size
                     // rect would bleed half the line width outside on every
@@ -217,9 +225,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // by half the width (and shrink the radius to match) so
                     // the outer edge lands exactly on the filled rect.
                     let lineWidth: CGFloat = 1
-                    let outline = NSBezierPath(
-                        roundedRect: rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
-                        xRadius: 0, yRadius: 0
+                    let outline = Self.cellPath(
+                        rect: rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
+                        roundedCorners: corners,
+                        radius: cornerRadius - lineWidth / 2
                     )
                     outline.lineWidth = lineWidth
                     outline.stroke()
@@ -230,6 +239,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         image.isTemplate = true
         image.accessibilityDescription = statusIconDescription(snapshot)
         return image
+    }
+
+    /// Which outer corner(s) of a status-icon cell round. Inner edges
+    /// always stay square so the grid reads as one subdivided frame.
+    private enum IconCorner: Hashable {
+        case topLeft, topRight, bottomLeft, bottomRight
+    }
+
+    /// Cell outline with only the given outer corners rounded. A zero
+    /// radius (or no corners) is a plain rect.
+    private static func cellPath(
+        rect: NSRect, roundedCorners: Set<IconCorner>, radius: CGFloat
+    ) -> NSBezierPath {
+        guard radius > 0, !roundedCorners.isEmpty else {
+            return NSBezierPath(rect: rect)
+        }
+        let minX = rect.minX, minY = rect.minY, maxX = rect.maxX, maxY = rect.maxY
+        let path = NSBezierPath()
+        // Start just past the top-left corner and walk clockwise.
+        if roundedCorners.contains(.topLeft) {
+            path.move(to: NSPoint(x: minX + radius, y: maxY))
+        } else {
+            path.move(to: NSPoint(x: minX, y: maxY))
+        }
+        if roundedCorners.contains(.topRight) {
+            path.line(to: NSPoint(x: maxX - radius, y: maxY))
+            path.appendArc(
+                withCenter: NSPoint(x: maxX - radius, y: maxY - radius),
+                radius: radius, startAngle: 90, endAngle: 0)
+        } else {
+            path.line(to: NSPoint(x: maxX, y: maxY))
+        }
+        if roundedCorners.contains(.bottomRight) {
+            path.line(to: NSPoint(x: maxX, y: minY + radius))
+            path.appendArc(
+                withCenter: NSPoint(x: maxX - radius, y: minY + radius),
+                radius: radius, startAngle: 0, endAngle: 270)
+        } else {
+            path.line(to: NSPoint(x: maxX, y: minY))
+        }
+        if roundedCorners.contains(.bottomLeft) {
+            path.line(to: NSPoint(x: minX + radius, y: minY))
+            path.appendArc(
+                withCenter: NSPoint(x: minX + radius, y: minY + radius),
+                radius: radius, startAngle: 270, endAngle: 180)
+        } else {
+            path.line(to: NSPoint(x: minX, y: minY))
+        }
+        if roundedCorners.contains(.topLeft) {
+            path.line(to: NSPoint(x: minX, y: maxY - radius))
+            path.appendArc(
+                withCenter: NSPoint(x: minX + radius, y: maxY - radius),
+                radius: radius, startAngle: 180, endAngle: 90)
+        } else {
+            path.line(to: NSPoint(x: minX, y: maxY))
+        }
+        path.close()
+        return path
     }
 
     /// VoiceOver line for the occupancy map: layout plus how many of its
