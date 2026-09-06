@@ -208,6 +208,33 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: handles[b]!), bOriginal)
     }
 
+    func testSwapPartnerSilentlyIgnoringCommitsWithoutError() {
+        // The dominant real-world refusal shape: the gateway reports
+        // success but the app never moves. The executor trusts the
+        // write result, so the exchange commits with no error — state
+        // and screen disagree until the next assertion re-pushes. Pinned
+        // here so the gap is visible: detecting it needs a post-write
+        // frame read-back the executor deliberately skips (an extra AX
+        // round-trip per window per swap).
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        let bOriginal = gateway.frame(of: handles[b]!)
+        gateway.silentIgnore.insert(handles[b]!)
+
+        let outcome = commit(run(
+            .swap(placements: [a: .topRight, b: .topLeft]),
+            requester: a, slot: .topRight))
+
+        XCTAssertNil(outcome.error, "the write 'succeeded'")
+        XCTAssertEqual(state.slot(of: a), .topRight)
+        XCTAssertEqual(state.slot(of: b), .topLeft)
+        XCTAssertEqual(
+            gateway.frame(of: handles[b]!), bOriginal,
+            "the partner never moved; screen and state disagree")
+    }
+
     // MARK: Switch
 
     func testSwitchSnapshotsEvictedAndNotices() {

@@ -323,6 +323,44 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
     }
 
+    func testPerScreenBulkActionsBypassFocus() {
+        // The on-screen overloads act on the named monitor directly:
+        // focus stays wherever it is, and the untouched display keeps
+        // its tiles, splitters, and undo history.
+        tileOnLeft()
+        controller.handle(slot: .topLeft)
+        tileOnRight()
+        controller.handle(slot: .topLeft)
+        let leftHandle = gateway.issued[0]
+        let rightHandle = gateway.issued[1]
+        for handle in [leftHandle, rightHandle] {
+            var echo = gateway.frame(of: handle)!
+            echo.size.width -= 10
+            gateway.simulateChange(handle, to: echo)
+            var dragged = gateway.frame(of: handle)!
+            dragged.size.width -= 60
+            gateway.simulateChange(handle, to: dragged)
+        }
+        XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
+        XCTAssertNotEqual(controller.grid(on: rightID).columnSplit, 0.5)
+
+        // Focus stays right; everything below names the left screen.
+        gateway.focused = rightHandle
+        controller.untileAll(on: leftID)
+        XCTAssertNil(controller.occupant(of: .topLeft, on: leftID))
+        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
+        controller.undoLastDisplacement(on: leftID)
+        XCTAssertNotNil(controller.occupant(of: .topLeft, on: leftID))
+        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
+
+        controller.resetDividers(on: leftID)
+        XCTAssertEqual(controller.grid(on: leftID), GridLayout())
+        XCTAssertNotEqual(controller.grid(on: rightID).columnSplit, 0.5)
+        XCTAssertTrue(controller.restoreSplitters(on: leftID))
+        XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
+        XCTAssertFalse(controller.restoreSplitters(on: leftID))
+    }
+
     func testClosedWindowOnOneMonitorLeavesTheOtherAlone() {
         let leftHandle = tileOnLeft()
         controller.handle(slot: .topLeft)

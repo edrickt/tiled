@@ -84,6 +84,32 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(gateway.observedHandles(), [handle])
     }
 
+    func testRetilingKeepsASingleObservation() {
+        // Every placement re-registers (place calls observe unconditionally).
+        // The gateway must collapse that to one live handler per window —
+        // the fake overwrites like the live gateway's dedupe, so a second
+        // registration replaces instead of stacking, and callbacks still
+        // reach the tracker (a drag after the retile moves the splitter).
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        controller.handle(slot: .topRight)
+        controller.handle(slot: .bottomLeft)
+
+        XCTAssertEqual(gateway.observedHandles(), [handle])
+        // An echo-converging tick first (swallowed, like the retile's own
+        // animated write), then an escape the echo logic treats as a drag.
+        var echo = gateway.frame(of: handle)!
+        echo.size.width -= 10
+        gateway.simulateChange(handle, to: echo)
+        var moved = gateway.frame(of: handle)!
+        moved.size.width -= 60
+        gateway.simulateChange(handle, to: moved)
+        XCTAssertNotEqual(
+            controller.grid.columnSplit, 0.5,
+            "the surviving handler still routes drags after two retiles")
+    }
+
     func testUserDragMovesSplitterAndNeighbors() {
         // Tile two left-column quads, then drag the shared row edge down:
         // the splitter follows the dragged window's actual frame, and the
@@ -164,6 +190,30 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(
             gateway.frame(of: drag.handle), drag.finalFrame,
             "the untiled window stays where the user dropped it")
+    }
+
+    func testPruneDuringDragDropsTheDragWithoutUntiling() {
+        // A title-bar drag is in flight (ticks streamed, drag-end
+        // pending) when the window dies: pruning releases the slot and
+        // clears the tracker's drag state, so the late drag-end finds
+        // no slot and fires no untile — and nothing crashes.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tiledFrame = gateway.frame(of: handle)!
+        gateway.simulateChange(handle, to: tiledFrame) // echo seed
+        var mid = tiledFrame
+        mid.origin.x += 60
+        mid.origin.y += 60
+        gateway.simulateChange(handle, to: mid)
+        XCTAssertFalse(dragEndFires.isEmpty, "a drag is in flight")
+
+        gateway.kill(handle)
+        controller.pruneDeadWindows()
+        XCTAssertNil(controller.state.slot(of: 1), "prune released the slot")
+        dragEndFires.last?()
+        XCTAssertNil(controller.state.slot(of: 1))
+        XCTAssertTrue(controller.state.occupants.isEmpty)
     }
 
     func testShortDragSnapsBackIntoTile() {
