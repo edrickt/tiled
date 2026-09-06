@@ -783,9 +783,6 @@ final class TilingStateTests: XCTestCase {
                         XCTAssertEqual(
                             Set(state.tiledWindows), before,
                             "swap \(requester) -> \(target) lost a window")
-                    case .switchLayout:
-                        XCTFail("same-layout pair \(requester) -> \(target) reset")
-                        continue
                     }
                     // Invariants after every commit path: no ghost windows,
                     // no cell double-booked, committed state matches the plan.

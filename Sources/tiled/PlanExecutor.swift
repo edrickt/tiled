@@ -83,7 +83,6 @@ final class PlanExecutor {
     ) -> (outcome: Outcome, state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID) {
         var state = state
         var records = records
-        var nextID = nextID
         // The eviction notice names the displaced app when known: the
         // user's first question after a surprise eviction is "where did
         // Safari go?" — a count answers bookkeeping, not memory. One
@@ -104,11 +103,13 @@ final class PlanExecutor {
             // refused window's frame never vacated it) or a half-moved
             // shuffle behind. State stays untouched on refusal: the
             // windows keep their old slots, matching their old frames.
-            let order = Slot.readingOrderedCases
+            // `readingPrecedes` orders slots spatially, so the write
+            // sequence walks the exchange in reading order with no
+            // per-window index lookup: the comparator reads rank
+            // straight off the slot.
             let ordered = placements.sorted { a, b in
-                let ia = order.firstIndex(of: a.value)!
-                let ib = order.firstIndex(of: b.value)!
-                return ia != ib ? ia < ib : a.key < b.key
+                if a.value != b.value { return Slot.readingPrecedes(a.value, b.value) }
+                return a.key < b.key
             }
             var preSwapFrames: [WindowID: CGRect] = [:]
             for (window, _) in ordered {
@@ -129,14 +130,17 @@ final class PlanExecutor {
             if !failed.isEmpty {
                 // Call the whole exchange off: restore every pre-swap
                 // frame (the refused window's is a no-op write; partners
-                // that already moved return to where they were). Echo
-                // bookkeeping follows the restored frames — nobody is
-                // forgotten, everyone is still tiled at their old slot.
-                for (window, frame) in preSwapFrames {
+                // that already moved return to where they were), in the
+                // same reading order as the writes so the rollback itself
+                // is deterministic. Echo bookkeeping follows the restored
+                // frames — nobody is forgotten, everyone is still tiled
+                // at their old slot.
+                for (window, _) in ordered {
+                    guard let frame = preSwapFrames[window],
+                        let record = records[window]
+                    else { continue }
                     tracker.markExpected(window, frame)
-                    if let record = records[window] {
-                        _ = gateway.setFrame(record.handle, to: frame)
-                    }
+                    _ = gateway.setFrame(record.handle, to: frame)
                 }
                 let names = failed.compactMap { appName(for: $0, records: records) }
                 outcome.error = Self.swapRefusalMessage(names: names)
@@ -327,7 +331,6 @@ final class PlanExecutor {
         default:
             head = "\(names[0]) and \(names.count - 1) more went back to where they were."
         }
-        let pronoun = names.count <= 1 && count <= 1 ? "it" : "them"
         return head + " Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
     }
 

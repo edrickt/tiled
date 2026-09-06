@@ -709,6 +709,6 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertEqual(
             plan.windowsToRestore(requester: requester), [ids[1]],
             "only the OTHER window restores; the requester moves")
-        XCTAssertFalse(evicting.contains(requester) == false, "plan names all, filter excludes")
+        XCTAssertTrue(evicting.contains(requester), "the plan names every tiled window, requester included")
     }
 }

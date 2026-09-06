@@ -222,7 +222,7 @@ final class TilingController {
         if expanded[id] != nil {
             collapseExpanded(id)
         }
-        var current = spaceState(for: screen)
+        let current = spaceState(for: screen)
         let decision = current.plan(window: id, into: slot)
         guard decision != .noop else {
             // Already in that tile: a strict no-op — no state, error, or
@@ -879,7 +879,7 @@ final class TilingController {
 
     /// Focus after a successful shuffle lands on the survivor now covering
     /// the vacated slot: its exact heir when one exists, else the first
-    /// overlapping piece in reading order — `Slot.readingOrderedCases`, the
+    /// overlapping piece in reading order — `Slot.readingPrecedes`, the
     /// same spatial order the solver deals pieces in, so the perch matches
     /// the shuffle. Shared by swaps (the requester's old slot: chained
     /// hotkeys keep acting on that tile with no manual refocus — this also

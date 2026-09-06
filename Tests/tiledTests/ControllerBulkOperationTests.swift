@@ -180,6 +180,33 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertFalse(controller.canUndoDisplacement, "history exhausted")
     }
 
+    func testUndoHistoryIsBoundedByDepthNotAmnesia() {
+        // Seven destructive switches; the stack keeps the freshest five
+        // and drops the two oldest. Walking back five times consumes
+        // everything — the sixth undo answers instead of reaching further.
+        var handles: [WindowHandle] = []
+        for i in 0..<7 {
+            let handle = gateway.addWindow(
+                frame: CGRect(x: i * 10, y: i * 10, width: 500, height: 400))
+            handles.append(handle)
+            gateway.focused = handle
+            controller.handle(slot: i.isMultiple(of: 2) ? .topLeft : .sixthLeft)
+        }
+        XCTAssertTrue(controller.canUndoDisplacement)
+        for _ in 0..<5 {
+            controller.undoLastDisplacement()
+        }
+        XCTAssertFalse(
+            controller.canUndoDisplacement,
+            "five undos exhaust the depth-5 history")
+        feedbacks.removeAll()
+        controller.undoLastDisplacement()
+        XCTAssertEqual(feedbacks.count, 1, "the sixth undo answers, not silence")
+        guard case .nothingToUndo = feedbacks[0] else {
+            return XCTFail("expected .nothingToUndo, got \(feedbacks[0])")
+        }
+    }
+
     func testEmptyUndoStackAnswersInsteadOfSilence() {
         addFocusedWindow()
         XCTAssertFalse(controller.canUndoDisplacement)

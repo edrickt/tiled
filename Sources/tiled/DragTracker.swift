@@ -89,12 +89,7 @@ final class DragTracker {
     /// landing the splitter on its absolute position — only the untile
     /// distance, measured from the first escaped tick, can read short).
     private static let settleWindow: TimeInterval = 1
-    /// Post-converge settle window: macOS animation tails run ~0.2-0.5s,
-    /// so 1s swallows them with margin while barely extending the blind
-    /// prefix on a drag-out that starts the instant a write lands (a real
-    /// drag escapes the moment it leaves the tolerance radius anyway,
-    /// landing the splitter on its absolute position — only the untile
-    /// distance, measured from the first escaped tick, can read short).
+    /// Minimum edge travel that counts as a drag (below this is jitter).
     private static let edgeMoveThreshold: CGFloat = 1
     /// Origin drag distance past which a title-bar drag untiles the window.
     private static let untileDragDistance: CGFloat = 100
@@ -397,9 +392,10 @@ final class DragTracker {
             // The dragged window's own edge is the source of truth; skip it
             // below so we never fight an in-progress native drag.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
-            var screenGrid = grid(for: context.screenOf(id))
+            let screen = context.screenOf(id)
+            var screenGrid = grid(for: screen)
             if screenGrid.update(boundary: boundary, toPosition: position, in: bounds) {
-                setGrid(screenGrid, for: context.screenOf(id))
+                setGrid(screenGrid, for: screen)
                 changed = true
                 log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(screenGrid)")
             }

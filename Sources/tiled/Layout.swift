@@ -155,9 +155,6 @@ enum Slot: String, CaseIterable {
     /// All slots in reading order: the same spatial order the solver
     /// deals pieces in, extended to every slot so the split-tile focus
     /// perch matches the shuffle.
-    static var readingOrderedCases: [Slot] {
-        allCases.sorted { readingPrecedes($0, $1) }
-    }
 }
 
 /// An edge of a window's frame.
@@ -600,7 +597,7 @@ struct TilingState: Equatable {
                 used.formUnion(candidate.cells)
                 if search(index + 1) { return true }
                 used.subtract(candidate.cells)
-                assigned[movers[index].window] = nil
+                assigned.removeValue(forKey: movers[index].window)
             }
             return false
         }
