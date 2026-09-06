@@ -627,40 +627,30 @@ struct TilingState: Equatable {
     }
 
     /// Decides what happens after `window` is evicted from `slot`: the
-    /// survivors sharing a vertical strip with the vacated slot expand to
-    /// cover the freed cells exactly (e.g. evicting Top Left grows Bottom
-    /// Left into Left Half) — column-local, like the tile reflow, and
-    /// exact-or-empty: a hole nobody can fill stays a hole, and other
-    /// columns never move. Returns placements for the survivors, or empty
-    /// when the vacated slot's occupant mismatches, nobody shares the
-    /// column, or no exact cover exists.
+    /// first adjacent survivor whose cells plus the hole form exactly one
+    /// slot expands into it — vertically (evicting Top Left grows Bottom
+    /// Left into Left Half) or horizontally (evicting the left third grows
+    /// the middle third into the left two-thirds). One merge at most can
+    /// ever apply: every merge swallows the whole hole, so two would
+    /// overlap; reading order picks deterministically. Exact-or-empty: a
+    /// hole no neighbor merges into exactly stays a hole, and everyone
+    /// else never moves. Returns the one placement, or empty when the
+    /// vacated slot's occupant mismatches or nothing merges.
     func reflowAfterEvict(window: WindowID, from slot: Slot) -> [WindowID: Slot] {
         guard occupantBySlot[slot] == window else { return [:] }
-        let strips = Self.strips(of: slot)
         let mates = Self.readingOrdered(
             occupantBySlot
-                .filter {
-                    $0.value != window && $0.key.layout == slot.layout
-                        && !Self.strips(of: $0.key).isDisjoint(with: strips)
-                }
+                .filter { $0.value != window && $0.key.layout == slot.layout }
                 .map { (slot: $0.key, window: $0.value) })
-        guard !mates.isEmpty else { return [:] }
-        let freed = slot.cells.union(mates.flatMap { $0.slot.cells })
-        return Self.relocate(movers: mates, within: freed, layout: slot.layout, exact: true)
-            ?? [:]
-    }
-
-    /// Vertical strips a slot spans (0-3, left to right): the column axis
-    /// the evict reflow stays inside. Parsed from the cell names, like
-    /// `Slot.readingOrder` does.
-    private static func strips(of slot: Slot) -> Set<Int> {
-        Set(slot.cells.map {
-            let name = $0.rawValue
-            if name.hasPrefix("col0") { return 0 }
-            if name.hasPrefix("col1") { return 1 }
-            if name.hasPrefix("col2") { return 2 }
-            return 3
-        })
+        for mate in mates {
+            let union = mate.slot.cells.union(slot.cells)
+            if let grown = Slot.allCases.first(where: {
+                $0.layout == slot.layout && $0.cells == union
+            }) {
+                return [mate.window: grown]
+            }
+        }
+        return [:]
     }
 
     /// Commit a multi-window exchange. Removals happen before placements so

@@ -75,12 +75,49 @@ final class EvictReflowTests: XCTestCase {
             [b: .sixthLeft])
     }
 
-    func testEvictSixthsMiddleThirdLeavesHole() {
+    func testEvictSixthsMiddleGrowsLeftThirdSideways() {
+        // The mirror of the left-third evict: the middle hole merges
+        // leftwards, so the left third becomes the left two-thirds and
+        // the right third never moves.
         var state = TilingState()
         state.commit(window: a, into: .sixthLeft)
         state.commit(window: b, into: .sixthMiddle)
         state.commit(window: c, into: .sixthRight)
-        XCTAssertEqual(state.reflowAfterEvict(window: b, from: .sixthMiddle), [:])
+        XCTAssertEqual(
+            state.reflowAfterEvict(window: b, from: .sixthMiddle),
+            [a: .sixthsLeftTwoThirds])
+    }
+
+    func testEvictLeftThirdGrowsMiddleThirdSideways() {
+        var state = TilingState()
+        state.commit(window: a, into: .sixthLeft)
+        state.commit(window: b, into: .sixthMiddle)
+        state.commit(window: c, into: .sixthRight)
+        XCTAssertEqual(
+            state.reflowAfterEvict(window: a, from: .sixthLeft),
+            [b: .sixthsLeftTwoThirds])
+    }
+
+    func testEvictTopLeftGrowsOnlyTheMergeableMate() {
+        // Bottom-left merges up into the left half; top-right can't —
+        // the full top row is no slot — so it stays put and its hole stays.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        state.commit(window: c, into: .bottomLeft)
+        state.commit(window: d, into: .bottomRight)
+        XCTAssertEqual(
+            state.reflowAfterEvict(window: a, from: .topLeft),
+            [c: .leftHalf])
+    }
+
+    func testEvictLeavesHoleWhenNoAdjacentMergeExists() {
+        // Left two-thirds + right third tiled; evicting the two-thirds
+        // frees 6 cells no single adjacent survivor merges into exactly.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthsLeftTwoThirds)
+        state.commit(window: b, into: .sixthRight)
+        XCTAssertEqual(state.reflowAfterEvict(window: a, from: .sixthsLeftTwoThirds), [:])
     }
 
     // MARK: Controller behavior (through the fake gateway)

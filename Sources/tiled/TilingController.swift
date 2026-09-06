@@ -890,11 +890,12 @@ final class TilingController {
     }
 
     /// Evicts the focused window (⌥⇧⌫): restores its pre-tile frame and
-    /// grows the surviving column-mates into the freed cells when they
-    /// cover them exactly — deleting a tile never leaves slack its
-    /// neighbors could have taken. Untiled focused windows and failed
-    /// focuses are safe no-ops with the standard feedback; like `untile`,
-    /// eviction keeps no undo chapter (the restoration IS the frame).
+    /// grows the adjacent survivor into the freed cells when they form
+    /// exactly one slot together — vertically or horizontally — so
+    /// deleting a tile never leaves slack its neighbor could have taken.
+    /// Untiled focused windows and failed focuses are safe no-ops with
+    /// the standard feedback; like `untile`, eviction keeps no undo
+    /// chapter (the restoration IS the frame).
     func handleEvict() {
         pruneDeadWindows()
         guard let handle = gateway.focusedWindow() else {

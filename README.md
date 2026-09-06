@@ -60,10 +60,12 @@ below are the remappable ones.
 | ⌥⇧⌫  | Evict the focused window: untile it and let its column-mates expand |
 
 Evicting restores the focused window to its pre-tile frame and grows the
-surviving windows that shared its column into the freed space — evict Top
-Left with Bottom Left tiled and Bottom Left becomes Left Half. Windows in
-other columns never move, and a gap nobody can fill exactly stays a gap.
-Like Expand, this shortcut is fixed.
+adjacent survivor into the freed space when the two form exactly one slot
+together — vertically or horizontally. Evict Top Left with Bottom Left
+tiled and Bottom Left becomes Left Half; evict the left third with the
+middle third tiled and the middle third becomes the left two-thirds.
+Windows that merge into no exact slot never move, and a gap nobody can
+fill exactly stays a gap. Like Expand, this shortcut is fixed.
 
 First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
 to tile it top-left, and you're going — with a miniature preview showing
