@@ -2,7 +2,7 @@
 ///
 /// The status icon is a live occupancy map, not just a layout badge: each
 /// icon cell renders solid only while a tiled window actually covers that
-/// spot, hollow otherwise. Quarters draws its four quads; sixths draws its
+/// spot, dimmed solid otherwise. Quarters draws its four quads; sixths draws its
 /// six corners. Larger slots light every icon cell they cover (a half
 /// fills its whole column; a third fills its whole column; a two-thirds
 /// fills two columns), and occupancy is cell overlap rather than slot

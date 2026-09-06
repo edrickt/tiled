@@ -182,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// stock square.grid.2x2 symbol can't express the quarters/sixths
     /// duality and goes stale on a layout switch, so draw a small template
     /// grid — 2×2 for quarters, 3×2 for sixths — with each cell solid only
-    /// while a tiled window actually covers that spot, hollow otherwise.
+    /// while a tiled window actually covers that spot, dimmed solid otherwise.
     /// An empty space reads as an empty frame; a full one reads solid.
     private static func statusIcon(_ snapshot: StatusIcon.Snapshot) -> NSImage {
         let cells = StatusIcon.cells(for: snapshot.layout)
@@ -199,7 +199,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let cellW = (size.width - margin * 2 - gap * CGFloat(columns - 1)) / CGFloat(columns)
             let cellH = (size.height - margin * 2 - gap) / CGFloat(rowCount)
             NSColor.black.setFill()
-            NSColor.black.setStroke()
             // One rounded frame subdivided: only each corner cell's outer
             // corner rounds (the top-left cell's top-left corner, and so
             // on); every inner edge stays square. Middle-column cells in
@@ -217,23 +216,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if col == 0, row == rowCount - 1 { corners.insert(.bottomLeft) }
                 if col == columns - 1, row == rowCount - 1 { corners.insert(.bottomRight) }
                 if filled.contains(cell) {
+                    NSColor.black.setFill()
                     Self.cellPath(
                         rect: rect, roundedCorners: corners, radius: cornerRadius
                     ).fill()
                 } else {
-                    // A stroke centers on its path, so an unstroked-size
-                    // rect would bleed half the line width outside on every
-                    // side and read larger than its filled siblings. Inset
-                    // by half the width (and shrink the radius to match) so
-                    // the outer edge lands exactly on the filled rect.
-                    let lineWidth: CGFloat = 1
-                    let outline = Self.cellPath(
-                        rect: rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
-                        roundedCorners: corners,
-                        radius: cornerRadius - lineWidth / 2
-                    )
-                    outline.lineWidth = lineWidth
-                    outline.stroke()
+                    // Idle cells render as dimmed solids, not hollow
+                    // outlines: a template image carries alpha only, so
+                    // reduced-opacity black composites as grey against the
+                    // menu bar. Same rect as an occupied cell, so the grid
+                    // never shifts weight between states.
+                    NSColor.black.withAlphaComponent(0.35).setFill()
+                    Self.cellPath(
+                        rect: rect, roundedCorners: corners, radius: cornerRadius
+                    ).fill()
                 }
             }
             return true

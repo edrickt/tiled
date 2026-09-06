@@ -3,7 +3,7 @@ import XCTest
 
 /// The menu-bar glyph is a live occupancy map, not just a layout badge:
 /// each icon cell renders solid only while a tiled window actually covers
-/// that spot, hollow otherwise. These tests pin the pure mapping from
+/// that spot, dimmed solid otherwise. These tests pin the pure mapping from
 /// tiling state to filled icon cells; `AppDelegate` draws the result.
 final class StatusIconTests: XCTestCase {
     // MARK: Icon geometry
