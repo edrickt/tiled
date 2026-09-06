@@ -100,6 +100,10 @@ you pick a free one.
   in one tile. Shuffled windows that were expanded (⌥⇧⏎) come back to their
   tiles first; expanded windows the shuffle doesn't touch stay expanded.
 - Tiling a window into its own tile does nothing — no restore, no reassert.
+- Moving a window to a free slot **grows** the neighbor that can absorb the
+  vacated cells exactly (two left sixths, top → middle third: the bottom
+  sixth becomes the left third). A hole no neighbor merges into stays a
+  hole, and fresh windows never grow anyone.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.
 - Use **Untile All** in the menu to restore every tiled window, or open a

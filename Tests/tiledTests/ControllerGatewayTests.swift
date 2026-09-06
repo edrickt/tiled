@@ -361,6 +361,32 @@ final class ControllerGatewayTests: XCTestCase {
             "a sits in its reflowed slot, not its full-screen expansion")
     }
 
+    // MARK: Growth after uncontended moves
+
+    func testMoveGrowsTheNeighborAndWritesRealFrames() {
+        // Two left sixths; the top window takes the middle third. The
+        // bottom window grows into the left third and both frames are
+        // written; focus follows the grown survivor covering the vacated
+        // tile (the same perch ethic as the evict reflow).
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .sixthTopLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .sixthBottomLeft)
+        XCTAssertEqual(controller.state.occupant(of: .sixthBottomLeft), 2)
+
+        gateway.focused = a
+        controller.handle(slot: .sixthMiddle)
+
+        XCTAssertEqual(controller.state.slot(of: 1), .sixthMiddle)
+        XCTAssertEqual(controller.state.slot(of: 2), .sixthLeft, "the bottom sixth grew upwards")
+        XCTAssertEqual(
+            gateway.focusCalls.last, b,
+            "focus lands on the grown survivor covering the vacated tile")
+        XCTAssertNil(controller.lastTileError)
+    }
+
     // MARK: Ghost cleanup
 
     func testClosedWindowPrunesOnNextHandle() {

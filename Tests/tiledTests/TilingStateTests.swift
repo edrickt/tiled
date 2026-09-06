@@ -710,6 +710,46 @@ final class TilingStateTests: XCTestCase {
                             XCTFail("\(requester) -> \(target): swap fits but got \(plan)")
                             continue
                         }
+                    } else if blockers.isEmpty {
+                        // Uncontended move: a vacated hole that merges with
+                        // exactly one adjacent slot into a whole slot grows
+                        // that neighbor (no-gap ethic, reading order picks
+                        // the mate). Otherwise the hole stays.
+                        let others = layout.filter { $0 != requester }
+                        let hole = requester.cells.subtracting(target.cells)
+                            .subtracting(others.flatMap { $0.cells })
+                        var growth: (mate: Slot, grown: Slot)?
+                        if !hole.isEmpty {
+                            let mates = others.sorted {
+                                let a = $0.readingOrder, b = $1.readingOrder
+                                if a.row != b.row { return a.row < b.row }
+                                return a.column < b.column
+                            }
+                            for mate in mates {
+                                if let g = Slot.allCases.first(where: {
+                                    $0.layout == target.layout
+                                        && $0.cells == mate.cells.union(hole)
+                                }) {
+                                    growth = (mate, g)
+                                    break
+                                }
+                            }
+                        }
+                        if let growth {
+                            let mateWindow = slotByWindow
+                                .first(where: { $0.value == growth.mate })!.key
+                            guard case .swap(let placements) = plan else {
+                                XCTFail("\(requester) -> \(target): growth fits but got \(plan)")
+                                continue
+                            }
+                            XCTAssertEqual(
+                                placements,
+                                [requesterWindow: target, mateWindow: growth.grown],
+                                "\(requester) -> \(target)")
+                        } else {
+                            XCTAssertEqual(
+                                plan, .tile(evicting: []), "\(requester) -> \(target)")
+                        }
                     } else {
                         let expect = blockers.compactMap { blocker in
                             slotByWindow.first(where: { $0.value == blocker })?.key

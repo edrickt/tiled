@@ -24,6 +24,10 @@ _Avoid_: sub-tile, block
 A movable divider between tiles whose fraction the drag-resize loop updates; screen edges are fixed, not splitters.
 _Avoid_: divider, separator, boundary (the code name is GridBoundary)
 
+**Growth**:
+The no-gap follow-up to an uncontended move: cells a move vacates merge with exactly one adjacent slot into a whole slot, and that neighbor grows into them — exact-or-empty, the same rule as eviction's reflow. Two left sixths, top moving to the middle third: the bottom sixth becomes the left third.
+_Avoid_: expand (the ⌥⇧⏎ toggle), fill
+
 **Eviction**:
 Untiling a window to make room, restoring its pre-tile frame; what `plan` returns when a swap can't fit.
 _Avoid_: displacement, removal

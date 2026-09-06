@@ -66,6 +66,40 @@ final class ShuffleTests: XCTestCase {
         }.sorted()
     }
 
+    /// Expected no-gap growth after an uncontended move, recomputed from
+    /// raw cell sets: the hole the requester vacates (old slot minus target,
+    /// minus cells other windows already cover) merges with exactly one
+    /// reading-order mate into one whole slot, and that mate grows into it.
+    /// Empty when the requester is untiled, no hole is vacated, or no merge
+    /// exists.
+    private func expectedGrowth(
+        in state: TilingState, requester: WindowID, target: Slot
+    ) -> [WindowID: Slot] {
+        guard let old = state.slot(of: requester) else { return [:] }
+        let others = state.occupants.filter { $0.value != requester }
+        let hole = old.cells
+            .subtracting(target.cells)
+            .subtracting(others.keys.flatMap { $0.cells })
+        guard !hole.isEmpty else { return [:] }
+        let mates = others
+            .filter { $0.key.layout == target.layout && !$0.key.overlaps(target) }
+            .map { (slot: $0.key, window: $0.value) }
+            .sorted {
+                let a = $0.slot.readingOrder, b = $1.slot.readingOrder
+                if a.row != b.row { return a.row < b.row }
+                return a.column < b.column
+            }
+        for mate in mates {
+            let union = mate.slot.cells.union(hole)
+            if let grown = Slot.allCases.first(where: {
+                $0.layout == target.layout && $0.cells == union
+            }) {
+                return [mate.window: grown]
+            }
+        }
+        return [:]
+    }
+
     /// Cells the requester vacates and the target does not need: the only
     /// space blockers may relocate into. Mirrors the rule in plan().
     private func freeCells(requesterSlot: Slot?, target: Slot) -> Set<TileCell> {
@@ -125,6 +159,8 @@ final class ShuffleTests: XCTestCase {
         let context = "win\(requester) -> \(target.rawValue)"
         let blockerKeys = Set(blockers(in: before, requester: requester, target: target) + [requester])
         let reflowKeys = Set(before.tiledWindows + [requester])
+        let growth = expectedGrowth(in: before, requester: requester, target: target)
+        let growthKeys = Set(growth.keys + [requester])
         // A reflow over a single blocker names the same keys as the legacy
         // swap, so the branch decision is footprint-based: a legacy swap
         // fits every placement inside the vacated footprint, a reflow never
@@ -134,13 +170,29 @@ final class ShuffleTests: XCTestCase {
             window == requester || slot.cells.isSubset(of: free)
         }
         let isReflow = Set(placements.keys) == reflowKeys && !fitsFootprint
-        XCTAssertTrue(
-            Set(placements.keys) == blockerKeys || Set(placements.keys) == reflowKeys,
-            "\(context): placement keys \(placements.keys.sorted()) != {requester}+blockers \(blockerKeys.sorted()) nor full reflow \(reflowKeys.sorted())",
-            file: file, line: line)
-        XCTAssertEqual(
-            placements[requester], target, "\(context): requester not on target",
-            file: file, line: line)
+        let isGrowth = !growth.isEmpty && Set(placements.keys) == growthKeys
+        if isGrowth {
+            // Growth shape: the requester lands on the target and each
+            // mate grows to exactly its merged slot (old slot plus the
+            // vacated hole). The grown slot legitimately escapes the
+            // vacated footprint — it takes the mate's own cells too.
+            XCTAssertEqual(
+                placements[requester], target, "\(context): requester not on target",
+                file: file, line: line)
+            for (window, slot) in placements where window != requester {
+                XCTAssertEqual(
+                    slot, growth[window], "\(context): win\(window) not on its grown slot",
+                    file: file, line: line)
+            }
+        } else {
+            XCTAssertTrue(
+                Set(placements.keys) == blockerKeys || Set(placements.keys) == reflowKeys,
+                "\(context): placement keys \(placements.keys.sorted()) != {requester}+blockers \(blockerKeys.sorted()) nor full reflow \(reflowKeys.sorted())",
+                file: file, line: line)
+            XCTAssertEqual(
+                placements[requester], target, "\(context): requester not on target",
+                file: file, line: line)
+        }
         for (window, slot) in placements {
             XCTAssertEqual(
                 slot.layout, target.layout,
@@ -156,14 +208,9 @@ final class ShuffleTests: XCTestCase {
                     file: file, line: line)
             }
         }
-        if !isReflow {
-            for (window, slot) in placements where window != requester {
-                XCTAssertTrue(
-                    slot.cells.isSubset(of: free),
-                    "\(context): win\(window) -> \(slot.rawValue) escapes the vacated footprint",
-                    file: file, line: line)
-            }
-        } else {
+        if isGrowth {
+            // Nothing more: the grown slot is validated exactly above.
+        } else if isReflow {
             let leftover = Set(TileCell.allCases).subtracting(target.cells)
             var covered: Set<TileCell> = []
             for (window, slot) in placements where window != requester {
@@ -177,6 +224,13 @@ final class ShuffleTests: XCTestCase {
                 covered, leftover,
                 "\(context): reflow leaves empty space \(leftover.subtracting(covered))",
                 file: file, line: line)
+        } else {
+            for (window, slot) in placements where window != requester {
+                XCTAssertTrue(
+                    slot.cells.isSubset(of: free),
+                    "\(context): win\(window) -> \(slot.rawValue) escapes the vacated footprint",
+                    file: file, line: line)
+            }
         }
     }
 
@@ -636,7 +690,27 @@ final class ShuffleTests: XCTestCase {
                     }
                     let expectedBlockers = blockers(in: state, requester: requester, target: target)
                     if expectedBlockers.isEmpty {
-                        XCTAssertEqual(plan, .tile(evicting: []), context)
+                        let growth = expectedGrowth(in: state, requester: requester, target: target)
+                        if growth.isEmpty {
+                            XCTAssertEqual(plan, .tile(evicting: []), context)
+                        } else {
+                            guard case .swap(let placements) = plan else {
+                                XCTFail("\(context): growth fits but got \(plan)")
+                                continue
+                            }
+                            assertValidSwap(
+                                placements, state: state, requester: requester, target: target)
+                            swapsChecked += 1
+                            var next = state
+                            next.commitSwaps(placements)
+                            XCTAssertEqual(
+                                Set(next.tiledWindows), Set(state.tiledWindows),
+                                "\(context): growth changed the window set")
+                            assertHealthy(next, context: context)
+                            XCTAssertEqual(
+                                next.plan(window: requester, into: target), .noop,
+                                "\(context): requester not settled after growth")
+                        }
                         continue
                     }
                     let leftover = Set(TileCell.allCases).subtracting(target.cells)

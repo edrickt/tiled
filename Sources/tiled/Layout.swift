@@ -485,8 +485,11 @@ struct TilingState: Equatable {
     /// - Same window already in the slot -> no-op.
     /// - Request in a different layout than the active one -> reset: evict
     ///   every tiled window, switch layouts, place the requester.
-    /// - Same layout, no overlap with other windows -> plain tile. A tiled
-    ///   window moves to the new slot; it never evicts itself.
+    /// - Same layout, no overlap with other windows -> plain tile — unless
+    ///   the move vacates a hole that merges with exactly one adjacent
+    ///   slot, in which case that neighbor grows into it (two left sixths,
+    ///   top -> middle third: the bottom sixth becomes the left third).
+    ///   A tiled window moves to the new slot; it never evicts itself.
     /// - Same layout, overlap with other windows -> the tile is always
     ///   honored and nobody is evicted while the leftover cells can house
     ///   every other window with no gaps. First a swap is tried: when the
@@ -518,7 +521,21 @@ struct TilingState: Equatable {
         where occupant != window && occupied.overlaps(slot) {
             blockers.append((occupied, occupant))
         }
-        guard !blockers.isEmpty else { return .tile(evicting: []) }
+        guard !blockers.isEmpty else {
+            // No contention — but the move can still leave a hole its
+            // neighbor takes exactly (two left sixths, the top one moving
+            // to the middle third: the bottom sixth grows into the left
+            // third). The no-gap ethic applies without contention too.
+            if let old = self.slot(of: window) {
+                let growth = reflowAfterMove(window: window, from: old, into: slot)
+                if !growth.isEmpty {
+                    var placements = growth
+                    placements[window] = slot
+                    return .swap(placements: placements)
+                }
+            }
+            return .tile(evicting: [])
+        }
         let ordered = Self.readingOrdered(blockers)
         if let old = self.slot(of: window),
             let relocation = Self.relocate(
@@ -624,6 +641,39 @@ struct TilingState: Equatable {
             return false
         }
         return search(0) ? assigned : nil
+    }
+
+    /// Decides the no-gap growth after an uncontended move: the cells
+    /// `window` vacates (its old slot minus the target, minus cells other
+    /// windows already cover) merge with exactly one adjacent occupant into
+    /// one whole slot, and that mate grows into it — a move never leaves
+    /// slack a neighbor could take. Exact-or-empty: a hole no neighbor
+    /// merges into exactly stays a hole. One merge at most can ever apply:
+    /// every merge swallows the whole hole, so two would overlap; reading
+    /// order picks deterministically. Callers guarantee no occupant
+    /// overlaps `target` (the no-blockers branch of `plan`); mates
+    /// overlapping the target are skipped so the grown slot can never
+    /// double-book it. Returns the placement (mate -> grown slot), or
+    /// empty when there is no hole or no merge.
+    func reflowAfterMove(window: WindowID, from oldSlot: Slot, into target: Slot) -> [WindowID: Slot] {
+        let others = occupantBySlot.filter { $0.value != window }
+        let hole = oldSlot.cells
+            .subtracting(target.cells)
+            .subtracting(others.keys.flatMap { $0.cells })
+        guard !hole.isEmpty else { return [:] }
+        let mates = Self.readingOrdered(
+            others
+                .filter { $0.key.layout == target.layout && !$0.key.overlaps(target) }
+                .map { (slot: $0.key, window: $0.value) })
+        for mate in mates {
+            let union = mate.slot.cells.union(hole)
+            if let grown = Slot.allCases.first(where: {
+                $0.layout == target.layout && $0.cells == union
+            }) {
+                return [mate.window: grown]
+            }
+        }
+        return [:]
     }
 
     /// Decides what happens after `window` is evicted from `slot`: the
