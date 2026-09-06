@@ -176,11 +176,13 @@ final class PlanExecutorTests: XCTestCase {
 
     // MARK: Swap refusals
 
-    func testSwapRefusalRollsBackOccupancySoStateAndScreenAgree() {
+    func testSwapRefusalRollsBackTheWholeExchange() {
         let a = addWindow()
         let b = addWindow()
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .topRight)
+        let aOriginal = gateway.frame(of: handles[a]!)
+        let bOriginal = gateway.frame(of: handles[b]!)
         gateway.refuseNextWrites(handles[a]!)
 
         let outcome = commit(run(
@@ -197,11 +199,13 @@ final class PlanExecutorTests: XCTestCase {
         } else {
             XCTFail("swap refusal must carry named feedback")
         }
-        // The refused write rolls back occupancy (unlike the old
-        // commit-then-report behavior): the menu must never claim a window
-        // sits in a slot its frame doesn't occupy. The moved partner holds.
-        XCTAssertNil(state.slot(of: a), "the refused window is untiled, not phantom")
-        XCTAssertEqual(state.slot(of: b), .topLeft)
+        // A swap is atomic: a refused exchange moves nobody. b's write to
+        // top left succeeded, but the rollback returns it — otherwise a
+        // (still at top left's pixels) and b would stack in one tile.
+        XCTAssertEqual(state.slot(of: a), .topLeft)
+        XCTAssertEqual(state.slot(of: b), .topRight)
+        XCTAssertEqual(gateway.frame(of: handles[a]!), aOriginal)
+        XCTAssertEqual(gateway.frame(of: handles[b]!), bOriginal)
     }
 
     // MARK: Switch
@@ -309,6 +313,9 @@ final class PlanExecutorTests: XCTestCase {
 
         XCTAssertEqual(
             outcome.error, "TestApp and 1 more couldn't be swapped — an app refused to resize.")
+        // Atomic: both writes refused, nothing moved at all.
+        XCTAssertEqual(state.slot(of: a), .topLeft)
+        XCTAssertEqual(state.slot(of: b), .topRight)
     }
 
     func testUndoPluralNotice() {

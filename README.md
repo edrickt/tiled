@@ -94,7 +94,11 @@ you pick a free one.
 - When every overlapping window fits into the footprint the requesting window
   vacates, they **swap** instead — nobody is untiled. (Top left → occupied
   bottom right exchanges the two windows; left half → occupied top right
-  exchanges the half and the quad.)
+  exchanges the half and the quad.) A swap is all-or-nothing: if any window
+  refuses its move, the whole exchange is called off and every window returns
+  to its pre-swap frame — never a half-moved shuffle or two windows stacked
+  in one tile. Shuffled windows that were expanded (⌥⇧⏎) come back to their
+  tiles first; expanded windows the shuffle doesn't touch stay expanded.
 - Tiling a window into its own tile does nothing — no restore, no reassert.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.

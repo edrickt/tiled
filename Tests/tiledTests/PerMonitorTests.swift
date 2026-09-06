@@ -224,6 +224,44 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
     }
 
+    // MARK: Swaps under dragged splitters
+
+    func testSwapUsesTheDraggedSplitterGrid() {
+        // Tile two left-column quads, drag the column split, then swap the
+        // top window into the bottom slot. Every placement write must
+        // derive from the dragged grid — a swap must never snap tiles back
+        // to default splitters (the executor used to read the legacy nil-
+        // screen grid, misplacing every window after any drag).
+        let a = tileOnLeft()
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 500, height: 400))
+        gateway.focused = b
+        controller.handle(slot: .bottomLeft)
+
+        var echo = gateway.frame(of: a)!
+        echo.size.width -= 10
+        gateway.simulateChange(a, to: echo)
+        var dragged = gateway.frame(of: a)!
+        dragged.size.width -= 60
+        gateway.simulateChange(a, to: dragged)
+        XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
+        // Drain the tracker's coalesced re-push before acting further.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+
+        gateway.focused = a
+        controller.handle(slot: .bottomLeft)
+
+        XCTAssertEqual(controller.occupant(of: .bottomLeft, on: leftID), 1)
+        XCTAssertEqual(controller.occupant(of: .topLeft, on: leftID), 2)
+        let grid = controller.grid(on: leftID)
+        XCTAssertEqual(
+            gateway.frame(of: a), grid.rect(for: .bottomLeft, in: Self.left.visibleFrame),
+            "the swapped window lands on the dragged grid, not the default")
+        XCTAssertEqual(
+            gateway.frame(of: b), grid.rect(for: .topLeft, in: Self.left.visibleFrame),
+            "the blocker inherits the vacated slot on the dragged grid too")
+    }
+
     func testDragResizeOnlyPushesItsOwnMonitor() {
         tileOnLeft()
         controller.handle(slot: .topLeft)

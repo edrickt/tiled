@@ -240,13 +240,26 @@ final class TilingController {
         // state holds the heirs, not the history.
         let vacated = current.slot(of: id)
 
+        // A shuffled expanded window comes back to earth before the
+        // writes: the plan moves it as an ordinary occupant, but writing
+        // a slot rect while its expansion entry lingers leaves it
+        // untracked (the tracker reads expanded windows as untiled).
+        // Disjoint expanded windows — ones the plan doesn't move — stay
+        // expanded.
+        if case .swap(let placements) = decision {
+            for wid in placements.keys where expanded[wid] != nil {
+                collapseExpanded(wid)
+            }
+        }
+
         let result = executor.execute(
             decision: decision, requester: id, slot: slot,
             state: current, records: records, nextID: nextID,
             tracker: tracker,
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
             observe: { [weak self] in self?.observe(window: $0) },
-            screenOf: { [weak self] in self?.spaceOf(window: $0) })
+            screenOf: { [weak self] in self?.spaceOf(window: $0) },
+            screen: screen)
         setSpaceState(result.state, for: screen)
         records = result.records
         nextID = result.nextID
@@ -687,6 +700,21 @@ final class TilingController {
         }
         pruneDeadWindows()
         mutateSpace(screen) { $0.error = nil; $0.notice = nil }
+        // A slot may have been re-tiled since its window was evicted (the
+        // undo stack survives new actions by design). The restoration is
+        // honored like any tile: the current occupant is untiled to its
+        // pre-tile frame first, so undo never silently clobbers a window
+        // into a ghost that overlaps the restored one on screen. The
+        // window being restored itself (same handle, e.g. reissued by an
+        // earlier undo) is not displaced.
+        for evicted in entry.snapshot {
+            let destination = evicted.screen ?? screen
+            if let current = spaceState(for: destination).occupant(of: evicted.slot),
+               let record = records[current], record.handle != evicted.handle
+            {
+                untile(window: current)
+            }
+        }
         // Group the chapter by destination screen: each window returns
         // to the display it left (legacy untagged entries restore into
         // the undone space). The requester restores to its pre-tile
@@ -911,6 +939,14 @@ final class TilingController {
         }
         mutateSpace(screen) { $0.error = nil; $0.notice = nil }
         let placements = spaceState(for: screen).reflowAfterEvict(window: id, from: slot)
+        // A moved survivor comes back to earth before the reflow write:
+        // growing an expanded window into the freed cells while its
+        // expansion entry lingers would leave it untracked. Survivors the
+        // reflow doesn't move stay expanded. (The evicted window's own
+        // expansion dies with its pre-tile restore below.)
+        for wid in placements.keys where expanded[wid] != nil {
+            collapseExpanded(wid)
+        }
         let failure = restoreOne(id).failure
         if !placements.isEmpty {
             var current = spaceState(for: screen)

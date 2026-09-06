@@ -295,6 +295,72 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertTrue(gateway.focusCalls.isEmpty, "plain tile must not refocus")
     }
 
+    // MARK: Undo integrity
+
+    func testUndoDoesNotClobberAWindowThatRetookTheSlot() {
+        // A evicted, then D evicted from the same slot, then two undos:
+        // the second undo restores A into a slot D (just restored by the
+        // first undo) holds again. The restoration is honored like any
+        // tile: D steps aside to its pre-tile frame instead of being
+        // silently clobbered into a ghost that overlaps A on screen.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .topLeft)
+        let d = gateway.addWindow(frame: CGRect(x: 50, y: 50, width: 700, height: 500))
+        gateway.focused = d
+        controller.handle(slot: .topLeft) // evicts a
+        let e = gateway.addWindow(frame: CGRect(x: 60, y: 60, width: 600, height: 400))
+        gateway.focused = e
+        controller.handle(slot: .topLeft) // evicts d
+        XCTAssertEqual(controller.state.occupant(of: .topLeft), 3)
+
+        controller.undoLastDisplacement() // d returns (fresh id 4)
+        XCTAssertEqual(controller.state.slot(of: 4), .topLeft, "d reissued under a fresh id")
+
+        controller.undoLastDisplacement() // a returns; d must yield
+        XCTAssertEqual(controller.state.occupant(of: .topLeft), 5, "a reissued under a fresh id")
+        XCTAssertNil(controller.state.slot(of: 4), "d stepped aside, not silently clobbered")
+        XCTAssertEqual(
+            gateway.frame(of: d), CGRect(x: 50, y: 50, width: 700, height: 500),
+            "d restored to its pre-tile frame, not left overlapping a's tile")
+        XCTAssertEqual(
+            gateway.frame(of: e), CGRect(x: 60, y: 60, width: 600, height: 400),
+            "e stayed untiled at its pre-tile frame")
+        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+    }
+
+    // MARK: Expansion vs. tiling
+
+    func testTilingOverAnExpandedWindowCollapsesItFirst() {
+        // a holds top left and is expanded over the screen; tiling b into
+        // left half must honor the tile. a's expansion dies first so the
+        // reflow moves a as an ordinary tracked window — an expanded window
+        // moved with its expansion entry lingering would drop out of drag
+        // tracking entirely.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .topLeft)
+        controller.handleExpandToggle()
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft, "expansion keeps the slot")
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .leftHalf)
+
+        XCTAssertEqual(controller.state.slot(of: 2), .leftHalf)
+        XCTAssertEqual(controller.state.slot(of: 1), .rightHalf, "blocker reflowed, not evicted")
+        gateway.focused = gateway.issued[0]
+        XCTAssertNil(
+            controller.expandedFocusedSlot,
+            "the shuffled window is an ordinary tracked tile, no expansion left")
+        // Bounds resolve to the owning display's visible frame, the same
+        // chain the controller uses for the write.
+        let bounds = controller.screen(for: gateway.frame(of: a)!)!.visibleFrame
+        XCTAssertEqual(
+            gateway.frame(of: a),
+            controller.grid.rect(for: .rightHalf, in: bounds),
+            "a sits in its reflowed slot, not its full-screen expansion")
+    }
+
     // MARK: Ghost cleanup
 
     func testClosedWindowPrunesOnNextHandle() {
