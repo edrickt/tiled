@@ -307,6 +307,69 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.grid, GridLayout())
     }
 
+    // MARK: Post-converge settling
+
+    func testSettlingTailAfterConvergeNeverMovesSplitters() {
+        // The reported bug: sixths R2/3 + TL + BL tiled, the R2/3 window
+        // retiled into TL. The swap writes converge, then macOS streams
+        // an animation tail that stops a few points off target and ends.
+        // Those tail frames must never reach the splitters: before the
+        // settle guard, the tail's absolute positions yanked
+        // sixthsLeftSplit and the BL window was re-pushed smaller,
+        // leaving empty space.
+        slots = [1: .sixthTopLeft, 2: .sixthsRightTwoThirds, 3: .sixthBottomLeft]
+        occupants = [.sixthTopLeft: 1, .sixthsRightTwoThirds: 2, .sixthBottomLeft: 3]
+        let bounds = CGRect(x: 0, y: 0, width: 1680, height: 1019)
+        let grid = GridLayout()
+        let tl = grid.rect(for: .sixthTopLeft, in: bounds)
+        let r23 = grid.rect(for: .sixthsRightTwoThirds, in: bounds)
+        handles[1] = gateway.addWindow(frame: tl)
+        handles[2] = gateway.addWindow(frame: r23)
+        handles[3] = gateway.addWindow(frame: grid.rect(for: .sixthBottomLeft, in: bounds))
+        tracker.markExpected(1, tl)
+        tracker.markExpected(2, r23)
+        tracker.handleChange(id: 1, frame: tl) // converges
+        tracker.handleChange(id: 2, frame: r23) // converges
+        // Tail stops 8pt narrow and the stream ends: swallowed, not a drag.
+        var tail = tl
+        tail.size.width -= 8
+        tracker.handleChange(id: 1, frame: tail)
+        XCTAssertEqual(tracker.grid, GridLayout(), "a settling tail must not move any splitter")
+    }
+
+    func testRealDragDuringSettleStillMovesSplitter() {
+        // The guard must not blunt real input: a resize that leaves the
+        // tolerance radius right after convergence lands on its absolute
+        // position, settle window or not.
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 440, width: 900, height: 500))
+        XCTAssertEqual(tracker.grid.columnSplit, 0.85, accuracy: 0.001)
+        XCTAssertEqual(tracker.grid.leftRowSplit, 0.2, accuracy: 0.001)
+    }
+
+    func testTitleBarGrabDuringSettleStillSnapsBack() {
+        // A hand on the title bar the instant a write lands: origin-only
+        // ticks inside the radius track a drag (splitters untouched), so
+        // releasing short of the untile distance snaps back to the slot.
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        tracker.handleChange(id: 1, frame: CGRect(x: 10, y: 510, width: 840, height: 500))
+        tracker.handleChange(id: 1, frame: CGRect(x: 20, y: 520, width: 840, height: 500))
+        XCTAssertEqual(tracker.grid, GridLayout(), "drag tracking never moves splitters")
+        XCTAssertFalse(dragEndFires.isEmpty, "settle must not swallow a title-bar grab")
+    }
+
+    func testExpiredSettleGoesLive() {
+        // Past the settle window the entry is gone: the next tick diffs
+        // live, so a slow follow-up resize still works.
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        now = now.addingTimeInterval(5)
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 440, width: 900, height: 500))
+        XCTAssertEqual(tracker.grid.columnSplit, 0.85, accuracy: 0.001)
+    }
+
     // MARK: Reassert baseline seeding
 
     func testReassertSeedsBaselineSoTheFirstDragDiffsCorrectly() {

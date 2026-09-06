@@ -82,6 +82,19 @@ final class DragTracker {
 
     private static let echoTolerance: CGFloat = 32
     private static let staleWrite: TimeInterval = 3
+    /// Post-converge settle window: macOS animation tails run ~0.2-0.5s,
+    /// so 1s swallows them with margin while barely extending the blind
+    /// prefix on a drag-out that starts the instant a write lands (a real
+    /// drag escapes the moment it leaves the tolerance radius anyway,
+    /// landing the splitter on its absolute position — only the untile
+    /// distance, measured from the first escaped tick, can read short).
+    private static let settleWindow: TimeInterval = 1
+    /// Post-converge settle window: macOS animation tails run ~0.2-0.5s,
+    /// so 1s swallows them with margin while barely extending the blind
+    /// prefix on a drag-out that starts the instant a write lands (a real
+    /// drag escapes the moment it leaves the tolerance radius anyway,
+    /// landing the splitter on its absolute position — only the untile
+    /// distance, measured from the first escaped tick, can read short).
     private static let edgeMoveThreshold: CGFloat = 1
     /// Origin drag distance past which a title-bar drag untiles the window.
     private static let untileDragDistance: CGFloat = 100
@@ -104,7 +117,14 @@ final class DragTracker {
         /// Last observed sum-of-edge-deltas from `frame`. Starts at infinity;
         /// only a strictly increasing distance means a user took over.
         var lastDistance: CGFloat
-        let date: Date
+        /// Write time, or the consume moment once settled: bounds both
+        /// the unapplied-write wait and the post-converge settle window.
+        var date: Date
+        /// True once a tick landed within tolerance: the write applied and
+        /// the window is settling. Close ticks keep being swallowed for
+        /// `settleWindow` so the animation tail is never mistaken for a
+        /// drag; a tick beyond tolerance ends settling and processes live.
+        var settled: Bool
     }
 
     init(
@@ -129,7 +149,8 @@ final class DragTracker {
     /// a drag. Also seeds the last-known frame for edge diffing. Any
     /// in-progress drag on the window is dropped: its baseline is stale.
     func markExpected(_ id: WindowID, _ frame: CGRect) {
-        expectedFrames[id] = ExpectedWrite(frame: frame, lastDistance: .infinity, date: context.now())
+        expectedFrames[id] = ExpectedWrite(
+            frame: frame, lastDistance: .infinity, date: context.now(), settled: false)
         lastKnownFrames[id] = frame
         clearDrag(id)
     }
@@ -220,10 +241,52 @@ final class DragTracker {
         // over, so we clear the entry and process it.
         if var entry = expectedFrames[id] {
             if Self.framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
-                expectedFrames[id] = nil // write fully applied
-                lastKnownFrames[id] = frame
-                log("echo win\(id) consumed")
-                return
+                if entry.settled,
+                    context.now().timeIntervalSince(entry.date) > Self.settleWindow
+                {
+                    // Settling over, but this tick already proved close:
+                    // swallow it against the target rather than falling
+                    // into the escape check below, whose stale
+                    // lastDistance would misread any tail offset as a
+                    // takeover. The next tick processes fully live.
+                    expectedFrames[id] = nil
+                    lastKnownFrames[id] = frame
+                    log("echo win\(id) settle-expired")
+                    return
+                } else {
+                    let wasSettled = entry.settled
+                    if !wasSettled {
+                        // Write converged: keep swallowing close ticks
+                        // through the settle window instead of going live —
+                        // the animation tail is still in flight, and its
+                        // absolute positions must never reach the splitters.
+                        entry.settled = true
+                        entry.date = context.now()
+                        entry.lastDistance = 0
+                        expectedFrames[id] = entry
+                        log("echo win\(id) consumed")
+                    } else {
+                        log("echo win\(id) settling")
+                    }
+                    // A pure-origin drift inside the radius is a hand on
+                    // the title bar, not animation settling (settling moves
+                    // edges): track the drag so snapback/untile still work
+                    // for grabs that start the instant a write lands.
+                    // Splitters stay untouched — processMove never moves
+                    // them, and the snapback rect is the grid truth.
+                    if wasSettled, let previous = lastKnownFrames[id],
+                        previous.size == frame.size, previous.origin != frame.origin
+                    {
+                        lastKnownFrames[id] = frame
+                        processMove(windowID: id, from: previous, to: frame)
+                        return
+                    }
+                    lastKnownFrames[id] = frame
+                    return
+                }
+            } else if entry.settled {
+                expectedFrames[id] = nil // left the radius; live below
+                log("echo win\(id) settle-end")
             }
             let distance = Self.frameDistance(entry.frame, frame)
             if distance > entry.lastDistance + 1 {
