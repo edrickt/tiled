@@ -9,6 +9,7 @@ enum MenuModel {
     enum Action: Equatable {
         case tileSlot(Slot)
         case toggleExpand
+        case evictFocusedWindow
         /// Layout-switch rows: collapsed replacement for the inactive
         /// layout's whole section. Tiling the focused window into the
         /// destination's top-left performs the switch through the engine's
@@ -221,6 +222,9 @@ enum MenuModel {
                     label: HotkeyService.expandBinding.label,
                     expandedSlot: snapshot.expandedSlot),
                 action: .toggleExpand))
+            items.append(Item(
+                title: MenuText.evictItemTitle(label: HotkeyService.evictBinding.label),
+                action: .evictFocusedWindow))
             items.append(.separator())
 
             // Empty state needs no row — the status line already

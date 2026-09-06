@@ -39,6 +39,21 @@ final class HotkeyServiceTests: XCTestCase {
         XCTAssertEqual(ids, (1...UInt32(Slot.allCases.count)).map { $0 })
     }
 
+    func testEvictComboIsOptionShiftDelete() {
+        // Fixed like expand's ⌥⇧⏎ — sits beside the quarters ⌥⇧ set but
+        // on ⌫ (kVK_Delete), which no slot uses.
+        XCTAssertEqual(HotkeyService.evictModifiers, UInt32(shiftKey | optionKey))
+        XCTAssertEqual(HotkeyService.evictKeyCode, UInt32(kVK_Delete))
+        XCTAssertEqual(HotkeyService.evictBinding.label, "⌥⇧⌫")
+    }
+
+    func testEvictHotkeyIDCannotCollideWithSlotOrFixedIDs() {
+        XCTAssertLessThan(UInt32(Slot.allCases.count), HotkeyService.evictHotkeyID)
+        XCTAssertNotEqual(HotkeyService.evictHotkeyID, HotkeyService.expandHotkeyID)
+        XCTAssertNotEqual(HotkeyService.evictHotkeyID, HotkeyService.settingsHotkeyID)
+        XCTAssertNotEqual(HotkeyService.evictHotkeyID, HotkeyService.undoHotkeyID)
+    }
+
     func testQuartersAndSixthsModifierSets() {
         // Quarters use ⌥⇧; sixths add ⌘. Shared keycodes across layouts
         // (U/O/M/., J/L) are disambiguated by the modifier set.

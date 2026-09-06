@@ -298,6 +298,37 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
     }
 
+    func testEvictOnlyReflowsItsOwnMonitor() {
+        // Both monitors run a two-window left column; evicting the left
+        // top-left grows the left bottom-left, and the right monitor's
+        // column is untouched.
+        let leftTop = tileOnLeft()
+        controller.handle(slot: .topLeft)
+        let leftBottom = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 500, height: 400))
+        gateway.focused = leftBottom
+        controller.handle(slot: .bottomLeft)
+        let rightTop = tileOnRight()
+        controller.handle(slot: .topLeft)
+        let rightBottom = gateway.addWindow(frame: CGRect(x: 2100, y: 100, width: 500, height: 400))
+        gateway.focused = rightBottom
+        controller.handle(slot: .bottomLeft)
+
+        gateway.focused = leftTop
+        controller.handleEvict()
+
+        XCTAssertEqual(controller.occupant(of: .leftHalf, on: leftID), 2)
+        XCTAssertNil(controller.state(on: leftID).slot(of: 1))
+        XCTAssertEqual(
+            gateway.frame(of: leftBottom),
+            GridLayout().rect(for: .leftHalf, in: Self.left.visibleFrame))
+        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 3)
+        XCTAssertEqual(controller.occupant(of: .bottomLeft, on: rightID), 4)
+        XCTAssertEqual(
+            gateway.frame(of: rightTop),
+            GridLayout().rect(for: .topLeft, in: Self.right.visibleFrame),
+            "the other monitor's tiles never move")
+    }
+
     func testEvictionNeverCrossesMonitors() {
         tileOnLeft()
         controller.handle(slot: .topLeft)

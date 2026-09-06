@@ -134,6 +134,14 @@ final class TilingController {
         /// A ⌥⇧⏎ expand write was refused: same shape as `.refused` but
         /// the announcement must not say “tiled”.
         case expandRefused(windowName: String?)
+        /// The ⌥⇧⌫ evict key was pressed on an untiled window: nothing
+        /// holds a slot, so there is nothing to release. Answers instead
+        /// of staying silent — the hotkey path never no-ops quietly.
+        case nothingToEvict
+        /// An evict reflow write was refused: same shape as `.refused`
+        /// but the announcement must not say “tiled” — the survivor
+        /// failed to grow, not to tile.
+        case evictRefused(windowName: String?)
     }
 
     var onFeedback: ((Feedback) -> Void)?
@@ -879,6 +887,50 @@ final class TilingController {
         if let heir = piece?.value, let record = records[heir] {
             gateway.focus(record.handle)
         }
+    }
+
+    /// Evicts the focused window (⌥⇧⌫): restores its pre-tile frame and
+    /// grows the surviving column-mates into the freed cells when they
+    /// cover them exactly — deleting a tile never leaves slack its
+    /// neighbors could have taken. Untiled focused windows and failed
+    /// focuses are safe no-ops with the standard feedback; like `untile`,
+    /// eviction keeps no undo chapter (the restoration IS the frame).
+    func handleEvict() {
+        pruneDeadWindows()
+        guard let handle = gateway.focusedWindow() else {
+            dbg("no focused window for evict")
+            onFeedback?(.noFocusedWindow)
+            return
+        }
+        let id = recordID(for: handle) ?? windowID(for: handle)
+        let screen = spaceOf(window: id) ?? focusedScreenID()
+        guard let slot = slotOfWindow(id) else {
+            onFeedback?(.nothingToEvict)
+            return
+        }
+        mutateSpace(screen) { $0.error = nil; $0.notice = nil }
+        let placements = spaceState(for: screen).reflowAfterEvict(window: id, from: slot)
+        let failure = restoreOne(id).failure
+        if !placements.isEmpty {
+            var current = spaceState(for: screen)
+            current.commitSwaps(placements)
+            setSpaceState(current, for: screen)
+            var rects: [WindowID: CGRect] = [:]
+            for occupant in placements.keys {
+                if let target = tracker.rect(for: occupant) { rects[occupant] = target }
+            }
+            // Refused reflow writes roll back like a refused swap: state
+            // and screen must never disagree about who holds the freed cells.
+            if pushRects(rects, excluding: nil) > 0 {
+                for occupant in placements.keys { forgetWindow(occupant) }
+                onFeedback?(.evictRefused(windowName: nil))
+            }
+        }
+        if let failure {
+            reportRestoreFailures([failure])
+        }
+        syncLegacySurface(focus: screen)
+        onChange?()
     }
 
     /// Untiles one window, restoring its pre-tile frame.

@@ -120,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let service = HotkeyService(store: hotkeyStore)
         service.handler = { [weak self] slot in self?.controller.handle(slot: slot) }
         service.expandHandler = { [weak self] in self?.controller.handleExpandToggle() }
+        service.evictHandler = { [weak self] in self?.controller.handleEvict() }
         service.settingsHandler = { [weak self] in self?.showSettings(nil) }
         service.undoHandler = { [weak self] in self?.performUndoSwitch() }
         hotkeys = service
@@ -459,6 +460,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.action = #selector(switchToSixths(_:))
             case .toggleExpand:
                 item.action = #selector(expandFocusedWindow(_:))
+            case .evictFocusedWindow:
+                item.action = #selector(evictFocusedWindow(_:))
             case .untileWindow(let id):
                 item.action = #selector(untileTiledWindow(_:))
                 item.representedObject = id
@@ -529,6 +532,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if hotkeys?.expandHotkeyFailed == true {
             hotkeyWarnings.append(MenuText.expandHotkeyWarning())
+        }
+        if hotkeys?.evictHotkeyFailed == true {
+            hotkeyWarnings.append(MenuText.evictHotkeyWarning())
         }
         for slot in hotkeys?.failedSlots ?? [] {
             let label = hotkeyStore.binding(for: slot).label
@@ -601,6 +607,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasHotkeyWarnings: Bool {
         hotkeys?.settingsHotkeyFailed == true
             || hotkeys?.expandHotkeyFailed == true
+            || hotkeys?.evictHotkeyFailed == true
             || hotkeys?.undoHotkeyFailed == true
             || !(hotkeys?.failedSlots ?? []).isEmpty
     }
@@ -633,6 +640,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func expandFocusedWindow(_ sender: Any?) {
         controller.handleExpandToggle()
+    }
+
+    @objc private func evictFocusedWindow(_ sender: Any?) {
+        controller.handleEvict()
+        announce("Focused window evicted.", fallback: "Focused window evicted.")
     }
 
     @objc private func untileAll(_ sender: NSMenuItem) {
@@ -725,6 +737,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         case .expandRefused(let name):
             text = MenuText.expandRefusedAnnouncement(windowName: name)
+            noticeFallback = controller.lastTileError
+            announce(text, fallback: noticeFallback)
+            refreshMenu()
+            return
+        case .nothingToEvict:
+            text = MenuText.nothingToEvictAnnouncement()
+            noticeFallback = "Window isn't tiled."
+        case .evictRefused(let name):
+            text = MenuText.evictRefusedAnnouncement(windowName: name)
             noticeFallback = controller.lastTileError
             announce(text, fallback: noticeFallback)
             refreshMenu()

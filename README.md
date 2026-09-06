@@ -53,6 +53,18 @@ others, like focusing does), and tiling a neighbor into a free tile leaves
 the expanded window alone. This shortcut is fixed — the slot shortcuts
 below are the remappable ones.
 
+### Evict — ⌥⇧⌫
+
+| Key  | Action                                                        |
+|------|---------------------------------------------------------------|
+| ⌥⇧⌫  | Evict the focused window: untile it and let its column-mates expand |
+
+Evicting restores the focused window to its pre-tile frame and grows the
+surviving windows that shared its column into the freed space — evict Top
+Left with Bottom Left tiled and Bottom Left becomes Left Half. Windows in
+other columns never move, and a gap nobody can fill exactly stays a gap.
+Like Expand, this shortcut is fixed.
+
 First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
 to tile it top-left, and you're going — with a miniature preview showing
 what Top Left covers. Dismiss the guide once; reopen it anytime from the menu bar menu → tiled Guide.

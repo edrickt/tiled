@@ -33,6 +33,18 @@ final class MenuTextTests: XCTestCase {
             "Expand to Fill Screen — ⌥⇧⏎")
     }
 
+    func testEvictItemTitleWithAndWithoutLabel() {
+        XCTAssertEqual(MenuText.evictItemTitle(label: "⌥⇧⌫"), "Evict Focused Window — ⌥⇧⌫")
+        XCTAssertEqual(MenuText.evictItemTitle(label: nil), "Evict Focused Window")
+    }
+
+    func testEvictHotkeyWarningNamesComboAndRecovery() {
+        XCTAssertEqual(
+            MenuText.evictHotkeyWarning(),
+            "The evict shortcut (⌥⇧⌫) is already used by another app — "
+                + "quit and reopen tiled to try registering it again.")
+    }
+
     func testWarningSummaryTitleSingularAndPlural() {
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 1),
@@ -123,5 +135,14 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.expandRefusedAnnouncement(windowName: nil),
             "That window couldn't be expanded — the app refused to resize it.")
+        XCTAssertEqual(
+            MenuText.nothingToEvictAnnouncement(),
+            "That window isn't tiled — nothing to evict.")
+        XCTAssertEqual(
+            MenuText.evictRefusedAnnouncement(windowName: "Safari"),
+            "Safari couldn't be evicted — the app refused to resize it.")
+        XCTAssertEqual(
+            MenuText.evictRefusedAnnouncement(windowName: nil),
+            "That window couldn't be evicted — the app refused to resize it.")
     }
 }

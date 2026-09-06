@@ -208,6 +208,21 @@ final class MenuModelTests: XCTestCase {
         XCTAssertFalse(items(snapshot(isTrusted: false)).contains { $0.action == .toggleExpand })
     }
 
+    func testEvictItemSitsAfterExpandRow() {
+        let model = items(snapshot(tiledWindows: [
+            .init(id: 1, slot: .topLeft, appName: "Safari"),
+        ]))
+        let evictIndex = model.firstIndex { $0.action == .evictFocusedWindow }
+        XCTAssertNotNil(evictIndex)
+        XCTAssertEqual(model[evictIndex!].title, "Evict Focused Window — ⌥⇧⌫")
+        let expandIndex = model.firstIndex { $0.action == .toggleExpand }!
+        XCTAssertEqual(evictIndex, expandIndex + 1, "the evict row follows the expand row")
+    }
+
+    func testEvictItemHiddenWhenUntrusted() {
+        XCTAssertFalse(items(snapshot(isTrusted: false)).contains { $0.action == .evictFocusedWindow })
+    }
+
     /// The tile submenu lists the active layout only, so the custom-label
     /// test forces sixths (the disabled slot under test is a sixth).
     func testTileItemsCarryLiveLabelsFromTheStore() {

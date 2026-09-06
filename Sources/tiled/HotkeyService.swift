@@ -48,6 +48,18 @@ final class HotkeyService {
     /// The fixed expand binding, for menu labels and registration.
     static let expandBinding = HotkeyBinding(modifiers: expandModifiers, keyCode: expandKeyCode)
 
+    /// Reserved Carbon id for the fixed evict hotkey (⌥⇧⌫). Slot ids
+    /// occupy 1...allCases.count and the other fixed ids are 997-999,
+    /// so 996 can never collide.
+    static let evictHotkeyID: UInt32 = 996
+    /// The evict combo: ⌥⇧⌫, fixed — slot shortcuts are remappable, this
+    /// one rides beside them like the expand toggle.
+    static let evictModifiers = UInt32(shiftKey | optionKey)
+    static let evictKeyCode = UInt32(kVK_Delete)
+
+    /// The fixed evict binding, for menu labels and registration.
+    static let evictBinding = HotkeyBinding(modifiers: evictModifiers, keyCode: evictKeyCode)
+
     /// Reserved Carbon id for the Settings fallback hotkey (⌃⌥⇧⌘,).
     /// Slot ids occupy 1...allCases.count, so this can never collide.
     static let settingsHotkeyID: UInt32 = 999
@@ -66,6 +78,7 @@ final class HotkeyService {
     private final class Context {
         var handler: ((Slot) -> Void)?
         var expandHandler: (() -> Void)?
+        var evictHandler: (() -> Void)?
         var settingsHandler: (() -> Void)?
         var undoHandler: (() -> Void)?
         let slotByID: [UInt32: Slot]
@@ -107,6 +120,16 @@ final class HotkeyService {
 
     /// Whether the expand combo registered (false = owned by another app).
     private(set) var expandHotkeyFailed = false
+
+    /// Fired by the fixed ⌥⇧⌫ combo: evicts the focused window, growing
+    /// the surviving column-mates into the freed cells.
+    var evictHandler: (() -> Void)? {
+        get { context.evictHandler }
+        set { context.evictHandler = newValue }
+    }
+
+    /// Whether the evict combo registered (false = owned by another app).
+    private(set) var evictHotkeyFailed = false
 
     /// Fired by the ⌃⌥⇧⌘, fallback combo: opens Settings even when the
     /// menu-bar icon is hidden (the icon is otherwise the only handle).
@@ -152,7 +175,22 @@ final class HotkeyService {
         failedSlots = []
         settingsHotkeyFailed = false
         expandHotkeyFailed = false
+        evictHotkeyFailed = false
         undoHotkeyFailed = false
+        var evictRef: EventHotKeyRef?
+        if RegisterEventHotKey(
+            Self.evictKeyCode,
+            Self.evictModifiers,
+            EventHotKeyID(signature: Self.signature, id: Self.evictHotkeyID),
+            GetApplicationEventTarget(),
+            0,
+            &evictRef) == noErr
+        {
+            hotKeyRefs.append(evictRef)
+        } else {
+            evictHotkeyFailed = true
+            NSLog("tiled: failed to register evict hotkey")
+        }
         var expandRef: EventHotKeyRef?
         if RegisterEventHotKey(
             Self.expandKeyCode,
@@ -245,6 +283,10 @@ final class HotkeyService {
         let context = Unmanaged<Context>.fromOpaque(userData!).takeUnretainedValue()
         if hotKeyID.id == HotkeyService.expandHotkeyID {
             DispatchQueue.main.async { context.expandHandler?() }
+            return noErr
+        }
+        if hotKeyID.id == HotkeyService.evictHotkeyID {
+            DispatchQueue.main.async { context.evictHandler?() }
             return noErr
         }
         if hotKeyID.id == HotkeyService.settingsHotkeyID {

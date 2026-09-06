@@ -28,6 +28,14 @@ enum MenuText {
         return "Return to \(SlotPresentation.title(of: expandedSlot))\(combo)"
     }
 
+    /// The evict row; the combo is fixed, so the label is always present
+    /// in practice. Mirrors the expand row: the shortcut stays in the
+    /// title text, since a key equivalent would fire both.
+    static func evictItemTitle(label: String?) -> String {
+        let combo = label.map { " — \($0)" } ?? ""
+        return "Evict Focused Window\(combo)"
+    }
+
     /// Collapses N warnings into one summary row: the menu's first
     /// screenful is the everyday surface, not a troubleshooting essay.
     /// The count carries the severity; "Open Shortcuts…" carries the
@@ -60,6 +68,12 @@ enum MenuText {
     /// The fixed expand combo lost registration (owned by another app).
     static func expandHotkeyWarning() -> String {
         "The expand shortcut (⌥⇧⏎) is already used by another app — "
+            + "quit and reopen tiled to try registering it again."
+    }
+
+    /// The fixed evict combo lost registration (owned by another app).
+    static func evictHotkeyWarning() -> String {
+        "The evict shortcut (⌥⇧⌫) is already used by another app — "
             + "quit and reopen tiled to try registering it again."
     }
 
@@ -115,5 +129,18 @@ enum MenuText {
     /// names the expand, not a tiling.
     static func expandRefusedAnnouncement(windowName: String?) -> String {
         "\(windowName ?? "That window") couldn't be expanded — the app refused to resize it."
+    }
+
+    /// Pressing evict on an untiled window: nothing holds a slot, so the
+    /// key answers instead of staying silent — the hotkey path never
+    /// no-ops quietly.
+    static func nothingToEvictAnnouncement() -> String {
+        "That window isn't tiled — nothing to evict."
+    }
+
+    /// An evict reflow write was refused. Mirrors `refusedAnnouncement`
+    /// but names the evict, not a tiling.
+    static func evictRefusedAnnouncement(windowName: String?) -> String {
+        "\(windowName ?? "That window") couldn't be evicted — the app refused to resize it."
     }
 }
