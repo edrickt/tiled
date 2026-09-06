@@ -366,14 +366,15 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testQuadOverOccupiedHalfReflowsHalf() {
-        // Tiling TL over a full left+right layout: Right stays, Left
-        // shrinks to BL covering the leftovers exactly - nobody evicted.
+        // Tiling TL over a full left+right layout: the untouched Right
+        // stays, the blocking Left shrinks to BL covering the leftovers
+        // exactly - nobody evicted, nobody moved without need.
         var state = TilingState()
         state.commit(window: a, into: .leftHalf)
         state.commit(window: b, into: .rightHalf)
         XCTAssertEqual(
             state.plan(window: c, into: .topLeft),
-            .swap(placements: [c: .topLeft, a: .rightHalf, b: .bottomLeft]))
+            .swap(placements: [c: .topLeft, a: .bottomLeft, b: .rightHalf]))
         if case .swap(let placements) = state.plan(window: c, into: .topLeft) {
             state.commitSwaps(placements)
         } else {
@@ -381,8 +382,8 @@ final class TilingStateTests: XCTestCase {
             return
         }
         XCTAssertEqual(state.occupant(of: .topLeft), c)
-        XCTAssertEqual(state.occupant(of: .rightHalf), a)
-        XCTAssertEqual(state.occupant(of: .bottomLeft), b)
+        XCTAssertEqual(state.occupant(of: .rightHalf), b)
+        XCTAssertEqual(state.occupant(of: .bottomLeft), a)
         XCTAssertNil(state.occupant(of: .leftHalf))
     }
 

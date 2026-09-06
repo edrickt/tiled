@@ -88,6 +88,34 @@ final class ReflowTests: XCTestCase {
         XCTAssertEqual(state.plan(window: a, into: .rightHalf), .tile(evicting: [c, d]))
     }
 
+    func testUndisputedWindowsStayPutDuringReflow() {
+        // Left third + right two-thirds tiled; a fresh window takes the
+        // bottom-left sixth. The untouched right two-thirds stays, the
+        // blocking left third shrinks to the top-left sixth in place -
+        // never thrown across the screen while its occupant squeezes
+        // into a corner.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthLeft)
+        state.commit(window: b, into: .sixthsRightTwoThirds)
+        let plan = state.plan(window: c, into: .sixthBottomLeft)
+        XCTAssertEqual(
+            plan,
+            .swap(placements: [
+                c: .sixthBottomLeft,
+                a: .sixthTopLeft,
+                b: .sixthsRightTwoThirds,
+            ]))
+        if case .swap(let placements) = plan {
+            state.commitSwaps(placements)
+        } else {
+            return XCTFail("expected a reflow swap, got \(plan)")
+        }
+        XCTAssertEqual(state.occupant(of: .sixthBottomLeft), c)
+        XCTAssertEqual(state.occupant(of: .sixthTopLeft), a)
+        XCTAssertEqual(state.occupant(of: .sixthsRightTwoThirds), b)
+        XCTAssertEqual(Set(state.tiledWindows), [a, b, c])
+    }
+
     func testShrinkWithoutContentionLeavesNeighborsAlone() {
         // LeftHalf -> TopLeft is a pure shrink with no blockers: the
         // neighbor stays put even though gaps remain. Reflow only runs

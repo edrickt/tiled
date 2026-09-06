@@ -539,7 +539,8 @@ final class ShuffleTests: XCTestCase {
         // An untiled window vacates nothing, so the legacy swap never
         // applies — but the reflow still does: TL+BR tiled, fresh 99 takes
         // BR while a takes the left half and b the top-right quad; sixths
-        // mirror with left/right thirds.
+        // mirror with the untouched left third staying put and the
+        // blocking right third sliding to the middle.
         var (state, _) = occupy([.topLeft, .bottomRight])
         XCTAssertEqual(
             state.plan(window: 99, into: .bottomRight),
@@ -547,7 +548,7 @@ final class ShuffleTests: XCTestCase {
         var (sixths, _) = occupy([.sixthLeft, .sixthRight])
         XCTAssertEqual(
             sixths.plan(window: 99, into: .sixthRight),
-            .swap(placements: [99: .sixthRight, a: .sixthMiddle, b: .sixthLeft]))
+            .swap(placements: [99: .sixthRight, a: .sixthLeft, b: .sixthMiddle]))
     }
 
     func testPlansAreDeterministic() {

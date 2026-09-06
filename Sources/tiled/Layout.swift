@@ -495,11 +495,16 @@ struct TilingState: Equatable {
     ///   the blockers move (TL -> occupied BR swaps the two windows;
     ///   LeftHalf -> occupied TR swaps half and quad). Otherwise every
     ///   other window reflows into the cells the target leaves behind,
-    ///   covering them exactly - blockers and untouched neighbors alike
-    ///   shrink or slide as needed, so e.g. thirds L/M/R with M ->
-    ///   RightTwoThirds parks L and R in the two left corners instead of
-    ///   evicting anyone. This applies to untiled requesters too: they
-    ///   vacate nothing, yet their leftovers can still house everyone.
+    ///   covering them exactly - with windows the target doesn't touch
+    ///   staying put whenever the remainder can still house every blocker
+    ///   (so e.g. left third + right two-thirds with a fresh window ->
+    ///   BottomLeftSixth shrinks the third to the top-left sixth in place
+    ///   instead of throwing it across the screen). When staying put
+    ///   can't cover the remainder exactly, the full search still moves
+    ///   anyone it must - e.g. thirds L/M/R with M -> RightTwoThirds parks
+    ///   L and R in the two left corners instead of evicting anyone. This
+    ///   applies to untiled requesters too: they vacate nothing, yet their
+    ///   leftovers can still house everyone.
     ///   Otherwise the overlapping windows are evicted: e.g. with all four
     ///   quads tiled, TL -> RightHalf leaves one half for three survivors,
     ///   so both blockers are evicted instead of reflowed.
@@ -537,13 +542,34 @@ struct TilingState: Equatable {
             occupantBySlot
                 .filter { $0.value != window }
                 .map { (slot: $0.key, window: $0.value) })
-        if others.count <= leftover.count,
-            let reflow = Self.relocate(
+        // Windows the target doesn't touch stay where they are when the
+        // remainder can still house every blocker exactly: the greedy
+        // search assigns in reading order with no memory of who sat
+        // where, so an undisputed window can otherwise steal the largest
+        // leftover (e.g. a left third jumping into the right two-thirds
+        // while its occupant squeezes into a corner). Falls back to the
+        // full search, so any cover the old code found is still found.
+        let pinned = others.filter { !$0.slot.overlaps(slot) }
+        let pinnedCells = Set(pinned.flatMap(\.slot.cells))
+        let homeless = others.filter { $0.slot.overlaps(slot) }
+        if others.count <= leftover.count {
+            let remainder = leftover.subtracting(pinnedCells)
+            if let settled = Self.relocate(
+                movers: Self.readingOrdered(homeless),
+                within: remainder, layout: slot.layout, exact: true)
+            {
+                var placements = settled
+                for mate in pinned { placements[mate.window] = mate.slot }
+                placements[window] = slot
+                return .swap(placements: placements)
+            }
+            if let reflow = Self.relocate(
                 movers: others, within: leftover, layout: slot.layout, exact: true)
-        {
-            var placements = reflow
-            placements[window] = slot
-            return .swap(placements: placements)
+            {
+                var placements = reflow
+                placements[window] = slot
+                return .swap(placements: placements)
+            }
         }
         return .tile(evicting: blockers.map(\.window).sorted())
     }
