@@ -197,6 +197,52 @@ final class EvictReflowTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: handle), screens[index].visibleFrame)
     }
 
+    func testEvictFocusesGrownSurvivor() {
+        setUpController()
+        let a = addFocusedWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .bottomLeft)
+
+        gateway.focused = a
+        controller.handleEvict()
+
+        XCTAssertEqual(
+            gateway.focusCalls.last, b,
+            "evict hands focus to the survivor covering the freed cells, " +
+            "so the reflow lands frontmost instead of hiding behind the evicted window")
+    }
+
+    func testEvictAloneLeavesFocusAlone() {
+        setUpController()
+        addFocusedWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        controller.handle(slot: .topLeft)
+        controller.handleEvict()
+        XCTAssertTrue(
+            gateway.focusCalls.isEmpty,
+            "nothing tiled left to focus: the evicted window keeps focus")
+    }
+
+    func testEvictHoleLeavesFocusAlone() {
+        setUpController()
+        let a = addFocusedWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+
+        gateway.focused = a
+        controller.handleEvict()
+
+        XCTAssertNil(controller.state.slot(of: 1))
+        XCTAssertEqual(controller.state.slot(of: 2), .topRight)
+        XCTAssertTrue(
+            gateway.focusCalls.isEmpty,
+            "no survivor covers the vacated tile: focus stays put instead of " +
+            "jumping to an unrelated window")
+    }
+
     func testEvictWithRefusedReflowReleasesSlotsAndReports() {
         setUpController()
         let a = addFocusedWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))

@@ -924,6 +924,8 @@ final class TilingController {
             if pushRects(rects, excluding: nil) > 0 {
                 for occupant in placements.keys { forgetWindow(occupant) }
                 onFeedback?(.evictRefused(windowName: nil))
+            } else {
+                focusEvictHeir(vacated: slot, placements: placements)
             }
         }
         if let failure {
@@ -931,6 +933,27 @@ final class TilingController {
         }
         syncLegacySurface(focus: screen)
         onChange?()
+    }
+
+    /// Focus after a successful evict lands on the grown survivor: the
+    /// evicted window stays frontmost otherwise, and the reflow hides
+    /// behind it looking like a no-op. The survivor now covering the
+    /// vacated slot takes focus; when the reflow splits the freed cells
+    /// across pieces, the first piece in reading order wins — the same
+    /// spatial order the solver deals in, matching the split-tile perch
+    /// after a swap. Refused reflows never reach here (their survivors
+    /// hold no slot), holes with no covering survivor leave focus alone.
+    private func focusEvictHeir(vacated: Slot, placements: [WindowID: Slot]) {
+        let heir = placements
+            .filter { $0.value.overlaps(vacated) }
+            .sorted {
+                let order = Slot.readingOrderedCases
+                return order.firstIndex(of: $0.value)! < order.firstIndex(of: $1.value)!
+            }
+            .first
+        if let heir = heir?.key, let record = records[heir] {
+            gateway.focus(record.handle)
+        }
     }
 
     /// Untiles one window, restoring its pre-tile frame.
