@@ -37,7 +37,7 @@ Untiling by dragging: a title-bar drag past the untile distance releases the slo
 _Avoid_: drag-to-untile, fling
 
 **Swap**:
-Exchanging places: overlapping windows move into the footprint the requester vacates, nobody untiled.
+Exchanging places: overlapping windows move into the footprint the requester vacates, nobody untiled. When that footprint has no room, every other window reflows into the cells the tile leaves behind instead — covering them exactly, so nobody is untiled and no empty space remains.
 _Avoid_: exchange, switch (which means layout switch)
 
 **Requester**:

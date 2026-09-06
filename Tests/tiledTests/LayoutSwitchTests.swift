@@ -508,9 +508,12 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertEqual(next.occupants, [.sixthLeft: 2])
         // Disjoint sixths tile: plain tile.
         XCTAssertEqual(next.plan(window: 3, into: .sixthRight), .tile(evicting: []))
-        // Occupied sixths quad takeover by a fresh window: eviction, not reset.
+        // Occupied sixths third takeover by a fresh window: reflow, not
+        // reset - 2 takes the middle third, 3 the left, 4 the right.
         next.commit(window: 3, into: .sixthRight)
-        XCTAssertEqual(next.plan(window: 4, into: .sixthRight), .tile(evicting: [3]))
+        XCTAssertEqual(
+            next.plan(window: 4, into: .sixthRight),
+            .swap(placements: [4: .sixthRight, 2: .sixthMiddle, 3: .sixthLeft]))
         // Tiled window moving between sixths thirds: move, not reset.
         XCTAssertEqual(next.plan(window: 2, into: .sixthMiddle), .tile(evicting: []))
     }

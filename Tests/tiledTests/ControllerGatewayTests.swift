@@ -252,6 +252,37 @@ final class ControllerGatewayTests: XCTestCase {
             "split tile: focus the solver's first piece, not the requester")
     }
 
+    func testReflowRetilesThroughControllerWithoutEviction() {
+        // Thirds L/M/R tiled through the real controller; the middle
+        // window takes the right two-thirds. The tile is honored, both
+        // neighbors survive in the left corners, and real frames are
+        // written for all three windows.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .sixthLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .sixthMiddle)
+        let c = gateway.addWindow(frame: CGRect(x: 0, y: 700, width: 800, height: 600))
+        gateway.focused = c
+        controller.handle(slot: .sixthRight)
+        XCTAssertEqual(controller.state.activeLayout, .sixths)
+
+        gateway.focused = b
+        controller.handle(slot: .sixthsRightTwoThirds)
+
+        XCTAssertEqual(controller.state.slot(of: 2), .sixthsRightTwoThirds)
+        XCTAssertEqual(controller.state.slot(of: 1), .sixthTopLeft)
+        XCTAssertEqual(controller.state.slot(of: 3), .sixthBottomLeft)
+        XCTAssertEqual(Set(controller.state.tiledWindows), [1, 2, 3])
+        for handle in [a, b, c] {
+            XCTAssertNotEqual(
+                gateway.frame(of: handle), CGRect(x: 0, y: 0, width: 800, height: 600),
+                "reflow writes a real tile rect")
+        }
+        XCTAssertNil(controller.lastTileError)
+    }
+
     func testPlainTileIssuesNoFocusCall() {
         // Only the swap path refocuses: resizing the already-focused
         // window never moves focus, so a plain tile must not activate.

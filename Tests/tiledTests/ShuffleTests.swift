@@ -103,12 +103,17 @@ final class ShuffleTests: XCTestCase {
     }
 
     /// Validates a swap placement dict against the full contract:
-    /// - keys are exactly {requester} + every blocker (nobody dropped,
-    ///   no strangers smuggled in, disjoint occupants untouched by design);
+    /// - keys are exactly {requester} + every blocker for a legacy swap
+    ///   (nobody dropped, no strangers smuggled in, disjoint occupants
+    ///   untouched by design), or every tiled window for a reflow (the
+    ///   requester plus every other window, blockers and untouched
+    ///   neighbors alike);
     /// - the requester lands on the target;
     /// - every slot is in the target's layout;
     /// - all slots (including the target) are pairwise cell-disjoint;
-    /// - every blocker's slot fits inside the vacated footprint.
+    /// - every legacy blocker's slot fits inside the vacated footprint;
+    ///   every reflowed window's slot fits inside the leftover cells, and
+    ///   together they cover those leftovers exactly (no empty space).
     private func assertValidSwap(
         _ placements: [WindowID: Slot],
         state before: TilingState,
@@ -118,10 +123,20 @@ final class ShuffleTests: XCTestCase {
         line: UInt = #line
     ) {
         let context = "win\(requester) -> \(target.rawValue)"
-        let expectedKeys = Set(blockers(in: before, requester: requester, target: target) + [requester])
-        XCTAssertEqual(
-            Set(placements.keys), expectedKeys,
-            "\(context): placement keys \(placements.keys.sorted()) != {requester}+blockers \(expectedKeys.sorted())",
+        let blockerKeys = Set(blockers(in: before, requester: requester, target: target) + [requester])
+        let reflowKeys = Set(before.tiledWindows + [requester])
+        // A reflow over a single blocker names the same keys as the legacy
+        // swap, so the branch decision is footprint-based: a legacy swap
+        // fits every placement inside the vacated footprint, a reflow never
+        // does (untiled requesters vacate nothing at all).
+        let free = freeCells(requesterSlot: before.slot(of: requester), target: target)
+        let fitsFootprint = placements.allSatisfy { window, slot in
+            window == requester || slot.cells.isSubset(of: free)
+        }
+        let isReflow = Set(placements.keys) == reflowKeys && !fitsFootprint
+        XCTAssertTrue(
+            Set(placements.keys) == blockerKeys || Set(placements.keys) == reflowKeys,
+            "\(context): placement keys \(placements.keys.sorted()) != {requester}+blockers \(blockerKeys.sorted()) nor full reflow \(reflowKeys.sorted())",
             file: file, line: line)
         XCTAssertEqual(
             placements[requester], target, "\(context): requester not on target",
@@ -141,11 +156,26 @@ final class ShuffleTests: XCTestCase {
                     file: file, line: line)
             }
         }
-        let free = freeCells(requesterSlot: before.slot(of: requester), target: target)
-        for (window, slot) in placements where window != requester {
-            XCTAssertTrue(
-                slot.cells.isSubset(of: free),
-                "\(context): win\(window) -> \(slot.rawValue) escapes the vacated footprint",
+        if !isReflow {
+            for (window, slot) in placements where window != requester {
+                XCTAssertTrue(
+                    slot.cells.isSubset(of: free),
+                    "\(context): win\(window) -> \(slot.rawValue) escapes the vacated footprint",
+                    file: file, line: line)
+            }
+        } else {
+            let leftover = Set(TileCell.allCases).subtracting(target.cells)
+            var covered: Set<TileCell> = []
+            for (window, slot) in placements where window != requester {
+                XCTAssertTrue(
+                    slot.cells.isSubset(of: leftover),
+                    "\(context): win\(window) -> \(slot.rawValue) escapes the leftover cells",
+                    file: file, line: line)
+                covered.formUnion(slot.cells)
+            }
+            XCTAssertEqual(
+                covered, leftover,
+                "\(context): reflow leaves empty space \(leftover.subtracting(covered))",
                 file: file, line: line)
         }
     }
@@ -505,15 +535,19 @@ final class ShuffleTests: XCTestCase {
 
     // MARK: Solver properties
 
-    func testFreshRequesterNeverSwaps() {
-        // An untiled window vacates nothing, so even a clean 1-for-1
-        // takeover evicts rather than swaps — pinned across shapes where a
-        // swap would otherwise fit (the tiled-window variant of each case
-        // swaps; see the sweep below).
+    func testFreshRequesterReflowsInsteadOfEvicting() {
+        // An untiled window vacates nothing, so the legacy swap never
+        // applies — but the reflow still does: TL+BR tiled, fresh 99 takes
+        // BR while a takes the left half and b the top-right quad; sixths
+        // mirror with left/right thirds.
         var (state, _) = occupy([.topLeft, .bottomRight])
-        XCTAssertEqual(state.plan(window: 99, into: .bottomRight), .tile(evicting: [b]))
+        XCTAssertEqual(
+            state.plan(window: 99, into: .bottomRight),
+            .swap(placements: [99: .bottomRight, a: .leftHalf, b: .topRight]))
         var (sixths, _) = occupy([.sixthLeft, .sixthRight])
-        XCTAssertEqual(sixths.plan(window: 99, into: .sixthRight), .tile(evicting: [b]))
+        XCTAssertEqual(
+            sixths.plan(window: 99, into: .sixthRight),
+            .swap(placements: [99: .sixthRight, a: .sixthMiddle, b: .sixthLeft]))
     }
 
     func testPlansAreDeterministic() {
@@ -604,8 +638,33 @@ final class ShuffleTests: XCTestCase {
                         XCTAssertEqual(plan, .tile(evicting: []), context)
                         continue
                     }
+                    let leftover = Set(TileCell.allCases).subtracting(target.cells)
+                    let otherIDs = state.tiledWindows.filter { $0 != requester }
+                    let reflowOracle = otherIDs.count <= leftover.count
+                        && Self.bruteForceAssignExactly(
+                            blockers: otherIDs, within: leftover, layout: layout) != nil
                     if requesterSlot == nil {
-                        // Untiled requester: always evicts, never swaps.
+                        // Untiled requester vacates nothing, so the legacy
+                        // swap never applies - but the reflow still can.
+                        if reflowOracle {
+                            guard case .swap(let placements) = plan else {
+                                XCTFail("\(context): reflow fits but got \(plan)")
+                                continue
+                            }
+                            assertValidSwap(
+                                placements, state: state, requester: requester, target: target)
+                            swapsChecked += 1
+                            var next = state
+                            next.commitSwaps(placements)
+                            XCTAssertEqual(
+                                Set(next.tiledWindows), Set(state.tiledWindows).union([requester]),
+                                "\(context): reflow changed the window set")
+                            assertHealthy(next, context: context)
+                            XCTAssertEqual(
+                                next.plan(window: requester, into: target), .noop,
+                                "\(context): requester not settled after reflow")
+                            continue
+                        }
                         XCTAssertEqual(
                             plan, .tile(evicting: expectedBlockers),
                             "\(context): fresh requester must evict, not swap")
@@ -617,8 +676,9 @@ final class ShuffleTests: XCTestCase {
                         blockers: expectedBlockers, within: free, layout: layout)
                     switch plan {
                     case .swap(let placements):
-                        XCTAssertNotNil(
-                            oracle, "\(context): solver swapped but no assignment exists")
+                        XCTAssertTrue(
+                            oracle != nil || reflowOracle,
+                            "\(context): solver swapped but no assignment exists")
                         assertValidSwap(
                             placements, state: state, requester: requester, target: target)
                         swapsChecked += 1
@@ -628,11 +688,14 @@ final class ShuffleTests: XCTestCase {
                         XCTAssertEqual(
                             Set(next.tiledWindows), Set(state.tiledWindows),
                             "\(context): swap changed the window set")
-                        for (slot, window) in beforeOccupants
-                        where !placements.keys.contains(window) {
-                            XCTAssertEqual(
-                                next.occupant(of: slot), window,
-                                "\(context): disjoint win\(window) moved")
+                        let reflowed = Set(placements.keys) != Set(expectedBlockers + [requester])
+                        if !reflowed {
+                            for (slot, window) in beforeOccupants
+                            where !placements.keys.contains(window) {
+                                XCTAssertEqual(
+                                    next.occupant(of: slot), window,
+                                    "\(context): disjoint win\(window) moved")
+                            }
                         }
                         assertHealthy(next, context: context)
                         XCTAssertEqual(
@@ -640,7 +703,9 @@ final class ShuffleTests: XCTestCase {
                             "\(context): requester not settled after swap")
                     case .tile(let evicting):
                         XCTAssertNil(
-                            oracle, "\(context): assignment exists but solver evicted")
+                            oracle, "\(context): legacy assignment exists but solver evicted")
+                        XCTAssertFalse(
+                            reflowOracle, "\(context): reflow fits but solver evicted")
                         XCTAssertEqual(evicting, expectedBlockers, "\(context): wrong eviction set")
                         evictionsChecked += 1
                         var next = state
@@ -658,6 +723,32 @@ final class ShuffleTests: XCTestCase {
         }
         XCTAssertGreaterThan(swapsChecked, 50, "sweep exercised too few swaps: \(swapsChecked)")
         XCTAssertGreaterThan(evictionsChecked, 50, "sweep exercised too few evictions: \(evictionsChecked)")
+    }
+
+    /// Reflow oracle: like `bruteForceAssign`, but only an assignment
+    /// covering `within` exactly (no empty space) counts.
+    private static func bruteForceAssignExactly(
+        blockers: [WindowID], within free: Set<TileCell>, layout: LayoutKind
+    ) -> [WindowID: Slot]? {
+        let candidates = Slot.allCases.filter {
+            $0.layout == layout && $0.cells.isSubset(of: free)
+        }
+        if blockers.isEmpty { return free.isEmpty ? [:] : nil }
+        guard !candidates.isEmpty else { return nil }
+        var assignment: [WindowID: Slot] = [:]
+        var used: Set<TileCell> = []
+        func search(_ index: Int) -> Bool {
+            guard index < blockers.count else { return used == free }
+            for candidate in candidates where candidate.cells.isDisjoint(with: used) {
+                assignment[blockers[index]] = candidate
+                used.formUnion(candidate.cells)
+                if search(index + 1) { return true }
+                used.subtract(candidate.cells)
+                assignment[blockers[index]] = nil
+            }
+            return false
+        }
+        return search(0) ? assignment : nil
     }
 
     // MARK: Spatial determinism
@@ -792,16 +883,22 @@ final class ShuffleTests: XCTestCase {
                 assertValidSwap(placements, state: state, requester: requester, target: target)
                 // Oracle agreement when the search space is small enough to
                 // enumerate cheaply; the direct validation above always runs.
+                // A fresh requester's window set grows by exactly itself.
+                let added: Set<WindowID> = state.slot(of: requester) == nil ? [requester] : []
                 let free = freeCells(requesterSlot: state.slot(of: requester), target: target)
                 let blockers = blockers(in: state, requester: requester, target: target)
-                if blockers.count <= 3 {
+                if blockers.count <= 3 && added.isEmpty {
                     XCTAssertNotNil(
-                        Self.bruteForceAssign(blockers: blockers, within: free, layout: target.layout),
+                        Self.bruteForceAssign(blockers: blockers, within: free, layout: target.layout)
+                            ?? Self.bruteForceAssignExactly(
+                                blockers: state.tiledWindows.filter { $0 != requester },
+                                within: Set(TileCell.allCases).subtracting(target.cells),
+                                layout: target.layout),
                         "\(context): solver swapped with no valid assignment")
                 }
                 state.commitSwaps(placements)
                 XCTAssertEqual(
-                    Set(state.tiledWindows), beforeSet,
+                    Set(state.tiledWindows), beforeSet.union(added),
                     "\(context): swap changed the window set")
             case .tile(let evicting):
                 XCTAssertEqual(

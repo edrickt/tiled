@@ -42,8 +42,9 @@ enum TileCell: String, CaseIterable, Hashable {
 /// reading order (top-to-bottom, left-to-right — `Slot.readingOrder`), so
 /// the same windows on screen always shuffle the same way regardless of
 /// tiling order. The largest fitting slot wins each assignment (halves
-/// stay halves), and anything that doesn't fit evicts instead of
-/// stranding — see `TilingState.plan(window:into:)`.
+/// stay halves), a full reflow covers the leftover cells exactly instead
+/// of evicting whenever it can, and anything that fits neither evicts
+/// instead of stranding — see `TilingState.plan(window:into:)`.
 enum Slot: String, CaseIterable {
     // Quarters
     case topLeft, topRight, bottomLeft, bottomRight
@@ -486,15 +487,22 @@ struct TilingState: Equatable {
     ///   every tiled window, switch layouts, place the requester.
     /// - Same layout, no overlap with other windows -> plain tile. A tiled
     ///   window moves to the new slot; it never evicts itself.
-    /// - Same layout, overlap with other windows -> swap if there is room,
-    ///   else evict. When the requesting window is already tiled and every
-    ///   overlapping window fits into the footprint it vacates, they
-    ///   exchange places and nobody is untiled (TL -> occupied BR swaps the
-    ///   two windows; LeftHalf -> occupied TR swaps half and quad).
+    /// - Same layout, overlap with other windows -> the tile is always
+    ///   honored and nobody is evicted while the leftover cells can house
+    ///   every other window with no gaps. First a swap is tried: when the
+    ///   requesting window is already tiled and every overlapping window
+    ///   fits into the footprint it vacates, they exchange places and only
+    ///   the blockers move (TL -> occupied BR swaps the two windows;
+    ///   LeftHalf -> occupied TR swaps half and quad). Otherwise every
+    ///   other window reflows into the cells the target leaves behind,
+    ///   covering them exactly - blockers and untouched neighbors alike
+    ///   shrink or slide as needed, so e.g. thirds L/M/R with M ->
+    ///   RightTwoThirds parks L and R in the two left corners instead of
+    ///   evicting anyone. This applies to untiled requesters too: they
+    ///   vacate nothing, yet their leftovers can still house everyone.
     ///   Otherwise the overlapping windows are evicted: e.g. with all four
-    ///   quads tiled, TL -> RightHalf overlaps two windows while vacating
-    ///   one quad, so both are evicted instead of swapped. An untiled
-    ///   requester vacates nothing, so it always evicts.
+    ///   quads tiled, TL -> RightHalf leaves one half for three survivors,
+    ///   so both blockers are evicted instead of reflowed.
     func plan(window: WindowID, into slot: Slot) -> TilePlan {
         if occupantBySlot[slot] == window { return .noop }
         if !occupantBySlot.isEmpty, slot.layout != activeLayout {
@@ -506,13 +514,10 @@ struct TilingState: Equatable {
             blockers.append((occupied, occupant))
         }
         guard !blockers.isEmpty else { return .tile(evicting: []) }
+        let ordered = Self.readingOrdered(blockers)
         if let old = self.slot(of: window),
             let relocation = Self.relocate(
-                blockers: blockers.sorted {
-                    let a = $0.slot.readingOrder, b = $1.slot.readingOrder
-                    if a.row != b.row { return a.row < b.row }
-                    return a.column < b.column
-                },
+                movers: ordered,
                 within: old.cells.subtracting(slot.cells),
                 layout: slot.layout)
         {
@@ -520,20 +525,57 @@ struct TilingState: Equatable {
             placements[window] = slot
             return .swap(placements: placements)
         }
+        // No swap fits: reflow every other window into the cells the
+        // target leaves behind, covering them exactly - blockers and
+        // untouched neighbors alike shrink or slide as needed, so nobody
+        // is evicted and no empty space remains. Tried after the swap so
+        // a minimal exchange (only blockers moving) always wins over a
+        // full reflow; applies to untiled requesters too, which vacate
+        // nothing yet whose leftovers can still house everyone.
+        let leftover = Set(TileCell.allCases).subtracting(slot.cells)
+        let others = Self.readingOrdered(
+            occupantBySlot
+                .filter { $0.value != window }
+                .map { (slot: $0.key, window: $0.value) })
+        if others.count <= leftover.count,
+            let reflow = Self.relocate(
+                movers: others, within: leftover, layout: slot.layout, exact: true)
+        {
+            var placements = reflow
+            placements[window] = slot
+            return .swap(placements: placements)
+        }
         return .tile(evicting: blockers.map(\.window).sorted())
     }
 
-    /// Assigns each blocker a distinct slot inside `free` (cells vacated by
-    /// the requesting window, minus its target), restricted to the target's
-    /// layout, preferring larger slots so halves stay halves when possible.
+    /// Spatial reading order over occupied slots (top-to-bottom,
+    /// left-to-right): the order the solver assigns blockers and reflows
+    /// in, so the same windows on screen always shuffle the same way
+    /// regardless of tiling order.
+    private static func readingOrdered(_ pairs: [(slot: Slot, window: WindowID)])
+        -> [(slot: Slot, window: WindowID)]
+    {
+        pairs.sorted {
+            let a = $0.slot.readingOrder, b = $1.slot.readingOrder
+            if a.row != b.row { return a.row < b.row }
+            return a.column < b.column
+        }
+    }
+
+    /// Assigns each listed window a distinct slot inside `free` (cells vacated by
+    /// the requesting window, minus its target - or, for a reflow, every
+    /// cell the target leaves behind), restricted to the target's layout,
+    /// preferring larger slots so halves stay halves when possible.
     /// Returns nil when there isn't enough space to accommodate everyone.
+    /// With `exact`, only an assignment covering `free` exactly (no empty
+    /// space left) counts: the reflow rule that avoids eviction.
     ///
-    /// `blockers` arrive in spatial reading order (top-to-bottom,
+    /// `movers` arrive in spatial reading order (top-to-bottom,
     /// left-to-right — see `Slot.readingOrder`): the search assigns in
     /// that order, so the same windows on screen always shuffle the same
     /// way. Tiling order — window ids — never affects the outcome: top
     /// stays top, left stays left, in both layouts.
-    private static func relocate(blockers: [(slot: Slot, window: WindowID)], within free: Set<TileCell>, layout: LayoutKind)
+    private static func relocate(movers: [(slot: Slot, window: WindowID)], within free: Set<TileCell>, layout: LayoutKind, exact: Bool = false)
         -> [WindowID: Slot]?
     {
         let bySize = Slot.allCases.filter {
@@ -545,13 +587,13 @@ struct TilingState: Equatable {
         var assigned: [WindowID: Slot] = [:]
         var used: Set<TileCell> = []
         func search(_ index: Int) -> Bool {
-            guard index < blockers.count else { return true }
+            guard index < movers.count else { return !exact || used == free }
             for candidate in bySize where candidate.cells.isDisjoint(with: used) {
-                assigned[blockers[index].window] = candidate
+                assigned[movers[index].window] = candidate
                 used.formUnion(candidate.cells)
                 if search(index + 1) { return true }
                 used.subtract(candidate.cells)
-                assigned[blockers[index].window] = nil
+                assigned[movers[index].window] = nil
             }
             return false
         }
