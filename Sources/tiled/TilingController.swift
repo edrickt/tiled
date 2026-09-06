@@ -277,19 +277,10 @@ final class TilingController {
             forgetWindow(evicted)
         }
         let outcome = result.outcome
-        if case .swap = decision, outcome.error == nil {
+        if case .swap = decision, outcome.error == nil, let vacated {
             // A swap vacates the requester's old slot: focus stays with
-            // the original tile, not the requester. Whoever inherits
-            // that slot takes focus, so a chained hotkey acts on the
-            // tile's new window with no manual refocus — tiling RH to
-            // TL leaves focus on the window that landed in RH, ready to
-            // swap onward to BL. This also re-asserts past a settle-late
-            // app stealing focus on the final rewrite. When the old slot
-            // has no single heir (blockers split it across pieces),
-            // focus takes the first overlapping piece in slot order —
-            // rawValue order, the same order the menus use, so the perch
-            // is deterministic.
-            focusSwapHeir(vacated: vacated, on: screen)
+            // the original tile, not the requester.
+            focusHeir(of: vacated, on: screen)
         }
         if let feedback = outcome.feedback {
             onFeedback?(feedback)
@@ -886,32 +877,29 @@ final class TilingController {
         gateway.focus(record.handle)
     }
 
-    /// Focus after a successful swap stays on the original tile: the heir
-    /// now sitting in the requester's vacated slot takes focus, so chained
-    /// hotkeys keep acting on that tile with no manual refocus. When the
-    /// vacated slot has no single heir (blockers split it across pieces),
-    /// focus takes the first overlapping piece in reading order —
-    /// `Slot.readingOrderedCases`, the same spatial order the solver deals
-    /// blockers in, so the perch matches the shuffle instead of
-    /// dictionary order. Refused swaps never reach here (the caller
-    /// guards on `outcome.error == nil`): a window that refused its
-    /// write holds no slot, and activating it would be a surprise.
-    private func focusSwapHeir(vacated: Slot?, on screen: ScreenID? = nil) {
-        guard let vacated else { return }
-        let occupants = spaceState(for: screen).occupants
-        if let heir = spaceState(for: screen).occupant(of: vacated), let record = records[heir] {
+    /// Focus after a successful shuffle lands on the survivor now covering
+    /// the vacated slot: its exact heir when one exists, else the first
+    /// overlapping piece in reading order — `Slot.readingOrderedCases`, the
+    /// same spatial order the solver deals pieces in, so the perch matches
+    /// the shuffle. Shared by swaps (the requester's old slot: chained
+    /// hotkeys keep acting on that tile with no manual refocus — this also
+    /// re-asserts past a settle-late app stealing focus on the final
+    /// rewrite) and evictions (the grown survivor; focus must move or the
+    /// reflow hides behind the evicted window looking like a no-op).
+    /// Refused shuffles never reach here (their windows hold no slot, and
+    /// activating one would be a surprise); holes with no covering
+    /// survivor leave focus alone.
+    private func focusHeir(of vacated: Slot, on screen: ScreenID?) {
+        let state = spaceState(for: screen)
+        if let heir = state.occupant(of: vacated), let record = records[heir] {
             gateway.focus(record.handle)
             return
         }
         // Split tile: no single heir. First overlapping piece in reading
         // order wins — the same spatial order the solver dealt the pieces in.
-        let piece = occupants
+        let piece = state.occupants
             .filter { $0.key.overlaps(vacated) }
-            .sorted {
-                let order = Slot.readingOrderedCases
-                return order.firstIndex(of: $0.key)! < order.firstIndex(of: $1.key)!
-            }
-            .first
+            .min { Slot.readingPrecedes($0.key, $1.key) }
         if let heir = piece?.value, let record = records[heir] {
             gateway.focus(record.handle)
         }
@@ -962,7 +950,7 @@ final class TilingController {
                 for occupant in placements.keys { forgetWindow(occupant) }
                 onFeedback?(.evictRefused(windowName: nil))
             } else {
-                focusEvictHeir(vacated: slot, placements: placements)
+                focusHeir(of: slot, on: screen)
             }
         }
         if let failure {
@@ -972,26 +960,6 @@ final class TilingController {
         onChange?()
     }
 
-    /// Focus after a successful evict lands on the grown survivor: the
-    /// evicted window stays frontmost otherwise, and the reflow hides
-    /// behind it looking like a no-op. The survivor now covering the
-    /// vacated slot takes focus; when the reflow splits the freed cells
-    /// across pieces, the first piece in reading order wins — the same
-    /// spatial order the solver deals in, matching the split-tile perch
-    /// after a swap. Refused reflows never reach here (their survivors
-    /// hold no slot), holes with no covering survivor leave focus alone.
-    private func focusEvictHeir(vacated: Slot, placements: [WindowID: Slot]) {
-        let heir = placements
-            .filter { $0.value.overlaps(vacated) }
-            .sorted {
-                let order = Slot.readingOrderedCases
-                return order.firstIndex(of: $0.value)! < order.firstIndex(of: $1.value)!
-            }
-            .first
-        if let heir = heir?.key, let record = records[heir] {
-            gateway.focus(record.handle)
-        }
-    }
 
     /// Untiles one window, restoring its pre-tile frame.
     func untile(window id: WindowID) {
