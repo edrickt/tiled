@@ -245,13 +245,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Which outer corner(s) of a status-icon cell round. Inner edges
     /// always stay square so the grid reads as one subdivided frame.
-    private enum IconCorner: Hashable {
+    enum IconCorner: Hashable {
         case topLeft, topRight, bottomLeft, bottomRight
     }
 
     /// Cell outline with only the given outer corners rounded. A zero
     /// radius (or no corners) is a plain rect.
-    private static func cellPath(
+    ///
+    /// The arcs sweep clockwise (the path walks clockwise): the two-arg
+    /// `appendArc` overload defaults to the counter-clockwise sweep, which
+    /// balloons into the cell and punches a circular bite out of every
+    /// rounded corner.
+    static func cellPath(
         rect: NSRect, roundedCorners: Set<IconCorner>, radius: CGFloat
     ) -> NSBezierPath {
         guard radius > 0, !roundedCorners.isEmpty else {
@@ -269,7 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             path.line(to: NSPoint(x: maxX - radius, y: maxY))
             path.appendArc(
                 withCenter: NSPoint(x: maxX - radius, y: maxY - radius),
-                radius: radius, startAngle: 90, endAngle: 0)
+                radius: radius, startAngle: 90, endAngle: 0, clockwise: true)
         } else {
             path.line(to: NSPoint(x: maxX, y: maxY))
         }
@@ -277,7 +282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             path.line(to: NSPoint(x: maxX, y: minY + radius))
             path.appendArc(
                 withCenter: NSPoint(x: maxX - radius, y: minY + radius),
-                radius: radius, startAngle: 0, endAngle: 270)
+                radius: radius, startAngle: 0, endAngle: 270, clockwise: true)
         } else {
             path.line(to: NSPoint(x: maxX, y: minY))
         }
@@ -285,7 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             path.line(to: NSPoint(x: minX + radius, y: minY))
             path.appendArc(
                 withCenter: NSPoint(x: minX + radius, y: minY + radius),
-                radius: radius, startAngle: 270, endAngle: 180)
+                radius: radius, startAngle: 270, endAngle: 180, clockwise: true)
         } else {
             path.line(to: NSPoint(x: minX, y: minY))
         }
@@ -293,7 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             path.line(to: NSPoint(x: minX, y: maxY - radius))
             path.appendArc(
                 withCenter: NSPoint(x: minX + radius, y: maxY - radius),
-                radius: radius, startAngle: 180, endAngle: 90)
+                radius: radius, startAngle: 180, endAngle: 90, clockwise: true)
         } else {
             path.line(to: NSPoint(x: minX, y: maxY))
         }

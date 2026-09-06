@@ -147,3 +147,45 @@ final class StatusIconTests: XCTestCase {
         XCTAssertNotEqual(before, after)
     }
 }
+
+extension StatusIconTests {
+    // MARK: Cell rounding geometry
+
+    /// Regression test for the circular bites punched out of every filled
+    /// corner cell: the corner arcs must sweep clockwise (the path walks
+    /// clockwise), hugging the corner. A counter-clockwise sweep balloons
+    /// into the cell — a point just inside the corner's inner diagonal
+    /// falls outside the path, reading as a white bite on screen.
+    func testRoundedCornerHugsItsCorner() {
+        let rect = NSRect(x: 0, y: 0, width: 10, height: 10)
+        let all: [AppDelegate.IconCorner] = [.topLeft, .topRight, .bottomLeft, .bottomRight]
+        for corner in all {
+            let path = AppDelegate.cellPath(
+                rect: rect, roundedCorners: [corner], radius: 3)
+            // Just inside the corner along its diagonal: inside a correct
+            // rounding, outside a ballooned (bitten) one.
+            let probe: NSPoint =
+                switch corner {
+                case .topLeft: NSPoint(x: 1, y: 9)
+                case .topRight: NSPoint(x: 9, y: 9)
+                case .bottomLeft: NSPoint(x: 1, y: 1)
+                case .bottomRight: NSPoint(x: 9, y: 1)
+                }
+            XCTAssertTrue(
+                path.contains(probe),
+                "\(corner): arc balloons into the cell instead of hugging it")
+        }
+    }
+
+    func testUnroundedCellIsTheFullRect() {
+        // No corners or zero radius: the path is the rect itself.
+        let rect = NSRect(x: 2, y: 3, width: 10, height: 8)
+        XCTAssertTrue(
+            AppDelegate.cellPath(rect: rect, roundedCorners: [], radius: 3)
+                .contains(NSPoint(x: 2.5, y: 3.5)))
+        XCTAssertTrue(
+            AppDelegate.cellPath(
+                rect: rect, roundedCorners: [.topLeft], radius: 0
+            ).contains(NSPoint(x: 2.5, y: 10.5)))
+    }
+}
