@@ -160,8 +160,13 @@ final class LiveWindowGateway: WindowGateway {
     }
     // MARK: Permissions
 
+    /// Fresh trust probe: `AXIsProcessTrusted()` caches per-process, so a
+    /// poll built on it returns `false` forever once it has seen `false` —
+    /// the grant would never be noticed and the permission window would
+    /// linger. The WithOptions variant re-queries the TCC daemon, so the
+    /// launch poll sees the flip while running and the window closes.
     private static var isTrusted: Bool {
-        AXIsProcessTrusted()
+        AXIsProcessTrustedWithOptions(nil)
     }
 
     // MARK: Focused window
