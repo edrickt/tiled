@@ -90,11 +90,22 @@ final class WelcomeTab: NSObject {
         steps.font = .systemFont(ofSize: NSFont.systemFontSize)
         stack.addArrangedSubview(steps)
 
-        // Spatial preview: the quarters grid with Top Left lit, so the
-        // first slot name is geometry, not vocabulary. Drawn from the same
-        // TileCell sets as the layout engine — it cannot disagree.
+        // Spatial previews, side by side: quarters beside sixths, so
+        // "three columns instead of two" is a comparison the eye makes
+        // instead of a sentence the reader must imagine. Drawn from the
+        // same TileCell sets as the layout engine — they cannot disagree.
         // Tertiary (not quaternary) track: at this small size the
         // quaternary fill renders near-invisible in Dark Mode.
+        let previews = NSStackView()
+        previews.orientation = .horizontal
+        previews.spacing = 16
+        previews.alignment = .top
+        stack.addArrangedSubview(previews)
+
+        let previewColumn = NSStackView()
+        previewColumn.orientation = .vertical
+        previewColumn.spacing = 4
+        previews.addArrangedSubview(previewColumn)
         let preview = SlotPreviewView(highlighted: [.topLeft], trackColor: .tertiaryLabelColor)
         preview.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -102,17 +113,26 @@ final class WelcomeTab: NSObject {
             preview.heightAnchor.constraint(equalToConstant: 100),
         ])
         // A bare NSView is not an accessibility element, so without the
-        // next two lines the label below would never reach VoiceOver.
+        // next two lines the caption below would never reach VoiceOver.
         preview.setAccessibilityElement(true)
         preview.setAccessibilityRole(.image)
         preview.setAccessibilityLabel("Preview: Top Left covers the top-left quarter")
-        stack.addArrangedSubview(preview)
+        previewColumn.addArrangedSubview(preview)
+        let quartersCaption = NSTextField(labelWithString: "Quarters: two columns")
+        quartersCaption.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        quartersCaption.textColor = .secondaryLabelColor
+        // Center under the 160pt preview: the column stretches past it,
+        // and a leading-aligned label would hang off the preview's edge.
+        quartersCaption.alignment = .center
+        previewColumn.addArrangedSubview(quartersCaption)
+        quartersCaption.widthAnchor.constraint(equalToConstant: 160).isActive = true
 
-        // Sixths preview: the same drawn-from-geometry honesty as the
-        // quarters grid above, in a 3-column shape so "three columns
-        // instead of two" is a picture, not a sentence the reader must
-        // imagine. The middle third is lit because it's the slot that
-        // only exists in sixths.
+        // The middle third is lit because it's the slot that only exists
+        // in sixths.
+        let sixthsColumn = NSStackView()
+        sixthsColumn.orientation = .vertical
+        sixthsColumn.spacing = 4
+        previews.addArrangedSubview(sixthsColumn)
         let sixthsPreview = SlotPreviewView(
             highlighted: [.sixthMiddle], trackColor: .tertiaryLabelColor,
             displayColumns: 3)
@@ -125,7 +145,13 @@ final class WelcomeTab: NSObject {
         sixthsPreview.setAccessibilityRole(.image)
         sixthsPreview.setAccessibilityLabel(
             "Preview: Sixths split the screen into three columns — the middle third covers the center column")
-        stack.addArrangedSubview(sixthsPreview)
+        sixthsColumn.addArrangedSubview(sixthsPreview)
+        let sixthsCaption = NSTextField(labelWithString: "Sixths: three columns")
+        sixthsCaption.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        sixthsCaption.textColor = .secondaryLabelColor
+        sixthsCaption.alignment = .center
+        sixthsColumn.addArrangedSubview(sixthsCaption)
+        sixthsCaption.widthAnchor.constraint(equalToConstant: 160).isActive = true
 
         let sixthsLabel = NSTextField(wrappingLabelWithString:
             "Sixths work the same way: three columns instead of two. Hold ⌥⇧⌘ with the sixths keys — " +

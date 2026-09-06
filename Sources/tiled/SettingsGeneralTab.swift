@@ -122,6 +122,17 @@ final class GeneralTab: NSObject {
         hideIconCheckbox.toolTip = "The icon disappears immediately; press \u{2303}\u{2325}\u{21E7}\u{2318}, to get back."
         stack.addArrangedSubview(hideIconCheckbox)
 
+        // Recovery consequence sits with its checkbox, not below the
+        // guide: proximity groups it with the control it explains,
+        // instead of orphaning it a divider and a section away.
+        let hint = NSTextField(wrappingLabelWithString:
+            "When the icon is hidden, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere " +
+            "or quit and reopen tiled to get back here — Settings opens automatically. " +
+            "Hiding asks first, so this never happens by accident.")
+        hint.textColor = .secondaryLabelColor
+        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        stack.addArrangedSubview(hint)
+
         let divider = NSBox()
         divider.boxType = .separator
         stack.addArrangedSubview(divider)
@@ -149,14 +160,6 @@ final class GeneralTab: NSObject {
         guideText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         guideRow.trailingAnchor.constraint(
             equalTo: stack.trailingAnchor, constant: -24).isActive = true
-
-        let hint = NSTextField(wrappingLabelWithString:
-            "When the icon is hidden, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere " +
-            "or quit and reopen tiled to get back here — Settings opens automatically. " +
-            "Hiding asks first, so this never happens by accident.")
-        hint.textColor = .secondaryLabelColor
-        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        stack.addArrangedSubview(hint)
 
         return view
     }

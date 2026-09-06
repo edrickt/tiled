@@ -122,6 +122,7 @@ final class ShortcutsTab: NSObject {
         let footer = NSStackView()
         footer.orientation = .horizontal
         footer.spacing = 12
+        footer.alignment = .firstBaseline
         footer.edgeInsets = NSEdgeInsets(top: 12, left: 0, bottom: 0, right: 0)
         resetButton = NSButton(
             title: anyResetBackup() ? "Restore Previous Shortcuts" : "Reset Shortcuts",
@@ -134,6 +135,12 @@ final class ShortcutsTab: NSObject {
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         footer.addArrangedSubview(hint)
         stack.addArrangedSubview(footer)
+        // Same inset-width cap as the permission row above (activated
+        // after the row joins the stack — constraints need a common
+        // ancestor): without it the hint's intrinsic single-line width
+        // shoves the row wide.
+        footer.trailingAnchor.constraint(
+            equalTo: stack.trailingAnchor, constant: -24).isActive = true
 
         scroll.documentView = stack
         NSLayoutConstraint.activate([
@@ -277,10 +284,14 @@ final class ShortcutsTab: NSObject {
 
         // Enable-all restores up to a whole section at once: name the
         // scope on the button so the consequence is visible before click.
+        // Rounded bezel, not inline: beside the bold borderless header,
+        // unbordered gray text reads disabled — but this is the section's
+        // second live control, and it must look like one.
         let bulk = NSButton(
             title: sectionHasDisabledSlot(layout) ? "Enable all \(count)" : "Disable all \(count)",
             target: self, action: #selector(sectionBulkToggled(_:)))
-        bulk.bezelStyle = .inline
+        bulk.bezelStyle = .rounded
+        bulk.controlSize = .small
         bulk.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         bulk.identifier = NSUserInterfaceItemIdentifier("bulk-\(layout.rawValue)")
         bulk.toolTip = sectionHasDisabledSlot(layout)
