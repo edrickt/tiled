@@ -14,6 +14,15 @@ final class LiveWindowGateway: WindowGateway {
     /// The single live instance (AXObserver callbacks carry no user data).
     static weak var active: LiveWindowGateway?
 
+    /// Per-message timeout (seconds) applied to every element we touch.
+    /// The AX default is ~6s per call, and a beachballing app would block
+    /// the hotkey path that long on every read or write — a swap loop
+    /// makes several. One second bounds the worst case while leaving
+    /// healthy-but-busy apps room to answer; a write that times out is
+    /// retryable anyway, so an over-tight bound costs a retry, not the
+    /// placement.
+    private static let messagingTimeout: Float = 1.0
+
     private var nextHandleID = 1
     /// Live element per issued handle. Entries are removed when the
     /// window dies (probed via `isAlive`) so handles never dangle.
@@ -137,7 +146,15 @@ final class LiveWindowGateway: WindowGateway {
         nextHandleID += 1
         elements[handle] = element
         pids[handle] = pid
+        Self.applyMessagingTimeout(element)
         return handle
+    }
+
+    /// Bounds every future message to `element` (reads and writes alike)
+    /// at `messagingTimeout`. Idempotent per element; elements register
+    /// once, so this runs once per window.
+    private static func applyMessagingTimeout(_ element: AXUIElement) {
+        AXUIElementSetMessagingTimeout(element, messagingTimeout)
     }
 
     private static let observerCallback: AXObserverCallback = {
@@ -173,6 +190,11 @@ final class LiveWindowGateway: WindowGateway {
 
     private static func focusedAXWindow() -> (element: AXUIElement, pid: pid_t)? {
         let systemWide = AXUIElementCreateSystemWide()
+        // The system-wide and app elements here are transient (never
+        // registered), so the per-element timeout must be applied inline:
+        // a hung focused app would otherwise block focus resolution for
+        // the default ~6s on every hotkey press.
+        applyMessagingTimeout(systemWide)
 
         var appValue: CFTypeRef?
         guard
@@ -183,6 +205,7 @@ final class LiveWindowGateway: WindowGateway {
             CFGetTypeID(rawApp) == AXUIElementGetTypeID()
         else { return nil }
         let appElement = rawApp as! AXUIElement
+        applyMessagingTimeout(appElement)
 
         var pid: pid_t = 0
         guard AXUIElementGetPid(appElement, &pid) == .success else { return nil }
@@ -240,11 +263,78 @@ final class LiveWindowGateway: WindowGateway {
             let positionValue = pointValue(axTopLeft(of: nsFrame, primaryTop: primaryTop))
         else { return false }
 
-        let positionOK = AXUIElementSetAttributeValue(
-            element, kAXPositionAttribute as CFString, positionValue) == .success
-        let sizeOK = AXUIElementSetAttributeValue(
-            element, kAXSizeAttribute as CFString, sizeValue) == .success
-        return sizeOK && positionOK
+        // The write pair retries as a unit: position writes are idempotent,
+        // so a retry after a partial application (position landed, size hit
+        // a busy app) just rewrites both — never a half-moved window.
+        var lastError: AXError = .success
+        let error = AXWrite.retrying {
+            let positionResult = AXUIElementSetAttributeValue(
+                element, kAXPositionAttribute as CFString, positionValue)
+            let sizeResult = AXUIElementSetAttributeValue(
+                element, kAXSizeAttribute as CFString, sizeValue)
+            guard positionResult == .success, sizeResult == .success else {
+                // Report whichever write failed so the retry policy can
+                // judge it; when both failed, either is a valid cause.
+                lastError = positionResult == .success ? sizeResult : positionResult
+                return lastError
+            }
+            return .success
+        }
+        return error == nil
+    }
+
+    // MARK: AX transient failures (pure policy, unit-tested without AX)
+
+    /// Retry policy for AX writes. A write fails either because the app
+    /// refused (permanent — retrying changes nothing) or because its main
+    /// thread was momentarily unable to service the message (`.cannotComplete`:
+    /// busy, beachballing, mid-launch — the classic flaky swap). Only the
+    /// transient class retries, with a short backoff, on the calling
+    /// thread: hotkey handling already blocks the main runloop on the AX
+    /// round-trip itself, and an asynchronous retry would break the
+    /// executor's synchronous all-or-nothing writes.
+    enum AXWrite {
+        /// The error class worth retrying: the app could not complete the
+        /// request right now. Everything else — unsupported attribute,
+        /// disabled API, invalid element — is a permanent refusal.
+        static func isRetryable(_ error: AXError) -> Bool {
+            error == .cannotComplete
+        }
+
+        /// Total attempts per write: one initial try plus two retries.
+        /// More retries would stack multi-second latencies onto a single
+        /// hotkey press for an app that is genuinely stuck.
+        static let maxAttempts = 3
+
+        /// Backoff before the first retry. Doubles per attempt; the total
+        /// added latency across a fully-retried write is 0.3s.
+        static let baseDelay: TimeInterval = 0.1
+
+        /// Wait before retrying after `attempt` (0-indexed) failed.
+        static func delay(forAttempt attempt: Int) -> TimeInterval {
+            baseDelay * pow(2, Double(attempt))
+        }
+
+        /// Runs `operation` up to `maxAttempts` times, retrying only
+        /// retryable errors with backoff. Returns nil on success, else
+        /// the last error (retryable or not — callers only distinguish
+        /// success, but the code is kept for logging and tests).
+        /// `sleep` is injectable so tests can observe the backoff without
+        /// waiting on real time.
+        static func retrying(
+            operation: () -> AXError,
+            sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
+        ) -> AXError? {
+            var lastError: AXError?
+            for attempt in 0..<maxAttempts {
+                let error = operation()
+                if error == .success { return nil }
+                lastError = error
+                guard isRetryable(error), attempt < maxAttempts - 1 else { break }
+                sleep(delay(forAttempt: attempt))
+            }
+            return lastError
+        }
     }
 
     // MARK: Geometry (pure conversions, unit-tested without AX)
