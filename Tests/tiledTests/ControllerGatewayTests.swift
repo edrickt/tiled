@@ -227,6 +227,23 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertTrue(controller.state.occupants.isEmpty)
     }
 
+    func testPruneKeepsBusyWindows() {
+        // A busy app cannot answer the liveness probe — unknown, not dead.
+        // Pruning on that maybe would untile a live window and drop its
+        // record; only a confirmed death releases the slot.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        XCTAssertNotNil(controller.state.slot(of: 1))
+        gateway.busy.insert(handle)
+
+        controller.pruneDeadWindows()
+
+        XCTAssertEqual(
+            controller.state.slot(of: 1), .topLeft,
+            "an unanswerable probe must never prune a live window")
+    }
+
     func testShortDragSnapsBackIntoTile() {
         let drag = tileAndDrag(10, 10) // net displacement ~28pt
         let expectation = XCTestExpectation(description: "snapback")

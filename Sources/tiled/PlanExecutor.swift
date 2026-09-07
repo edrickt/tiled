@@ -135,16 +135,33 @@ final class PlanExecutor {
                 // is deterministic. Echo bookkeeping follows the restored
                 // frames — nobody is forgotten, everyone is still tiled
                 // at their old slot.
+                var rollbackFailures: [WindowID] = []
                 for (window, _) in ordered {
                     guard let frame = preSwapFrames[window],
                         let record = records[window]
                     else { continue }
                     tracker.markExpected(window, frame)
-                    _ = gateway.setFrame(record.handle, to: frame)
+                    if !gateway.setFrame(record.handle, to: frame) {
+                        rollbackFailures.append(window)
+                    }
                 }
                 let names = failed.compactMap { appName(for: $0, records: records) }
                 outcome.error = Self.swapRefusalMessage(names: names)
                 outcome.feedback = .refused(windowName: Self.swapRefusalName(names: names))
+                if !rollbackFailures.isEmpty {
+                    // A refused rollback is worse than a refused swap: the
+                    // exchange was called off in state (old slots kept),
+                    // but a window whose restore was refused sits at its
+                    // attempted swap position — state and screen disagree
+                    // until the user is told. The transient class was
+                    // already retried at the gateway, so this is a real
+                    // refusal; name it and let the error override the
+                    // plain refusal message.
+                    let rollbackNames = rollbackFailures.compactMap {
+                        appName(for: $0, records: records)
+                    }
+                    outcome.error = Self.swapRollbackMessage(names: rollbackNames)
+                }
             } else {
                 state = planned
             }
@@ -240,7 +257,10 @@ final class PlanExecutor {
         }
         var restored = 0
         for entry in snapshot {
-            guard gateway.isAlive(entry.handle) else { continue }
+            // Skip confirmed deaths only: an unknown liveness (busy app)
+            // still attempts the restore — the write re-probes, and a
+            // failed attempt is reported, not silently skipped.
+            guard gateway.liveness(of: entry.handle) != .dead else { continue }
             // Handles whose records were pruned need fresh ids, issued
             // here on the local copy so the creation stays visible to
             // the commit and write below (a controller-side creation
@@ -467,5 +487,20 @@ final class PlanExecutor {
     /// wasn't a tiling.
     private static func swapRefusalName(names: [String]) -> String? {
         names.first
+    }
+
+    /// The error when the rollback of a refused swap itself failed: the
+    /// plain refusal message would understate the situation (windows may
+    /// be in the wrong tiles), so it gets its own wording, named like the
+    /// other swap errors.
+    private static func swapRollbackMessage(names: [String]) -> String {
+        switch names.count {
+        case 0:
+            return "The swap was refused, and some windows couldn't be moved back — they may be in the wrong tiles."
+        case 1:
+            return "The swap was refused, and \(names[0]) couldn't be moved back — it may be in the wrong tile."
+        default:
+            return "The swap was refused, and \(names.count) windows couldn't be moved back — they may be in the wrong tiles."
+        }
     }
 }

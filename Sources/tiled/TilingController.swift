@@ -590,9 +590,11 @@ final class TilingController {
 
     /// Drops records whose handle is gone (window closed, app quit).
     /// Called lazily before each hotkey and by the prune timer; internal so
-    /// tests can drive ghost cleanup without waiting on the runloop.
+    /// tests can drive ghost cleanup without waiting on the runloop. Only
+    /// confirmed deaths prune: a busy app's unanswerable probe is unknown,
+    /// and pruning on a maybe would untile a live window.
     func pruneDeadWindows() {
-        for (id, record) in records where !gateway.isAlive(record.handle) {
+        for (id, record) in records where gateway.liveness(of: record.handle) == .dead {
             forgetWindow(id)
         }
     }

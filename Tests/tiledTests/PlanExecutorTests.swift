@@ -208,6 +208,33 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: handles[b]!), bOriginal)
     }
 
+    func testFailedRollbackSurfacesItsOwnError() {
+        // A refusal stacked on a refusal: a refuses its swap write (calling
+        // the exchange off) AND its own rollback write. The transient class
+        // is already retried at the gateway, so this is a hard refusal —
+        // the plain refusal message would understate it: a's restore never
+        // landed, so state and screen may disagree. The error must say so.
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        let bOriginal = gateway.frame(of: handles[b]!)
+        gateway.refuseNextWrites(handles[a]!, count: 5)
+
+        let outcome = commit(run(
+            .swap(placements: [a: .topRight, b: .topLeft]),
+            requester: a, slot: .topRight))
+
+        // State keeps the pre-swap slots either way (the exchange was
+        // called off); b's rollback succeeded so b matches its slot.
+        XCTAssertEqual(state.slot(of: a), .topLeft)
+        XCTAssertEqual(state.slot(of: b), .topRight)
+        XCTAssertEqual(gateway.frame(of: handles[b]!), bOriginal, "b's rollback succeeded")
+        XCTAssertEqual(
+            outcome.error,
+            "The swap was refused, and TestApp couldn't be moved back — it may be in the wrong tile.")
+    }
+
     func testSwapPartnerSilentlyIgnoringCommitsWithoutError() {
         // The dominant real-world refusal shape: the gateway reports
         // success but the app never moves. The executor trusts the
@@ -300,6 +327,37 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertNil(error)
         XCTAssertEqual(state.occupant(of: .topLeft).flatMap { records[$0]?.handle }, handles[a],
             "evicted window returns to its slot (under a fresh id — its record was pruned at switch)")
+    }
+
+    func testUndoAttemptsRestoreForBusyWindows() {
+        // A busy app answers the liveness probe with unknown, never dead:
+        // undo must still attempt the restore rather than silently skip a
+        // maybe-alive window. (With the pre-tri-state `isAlive`, a transient
+        // probe failure read as dead and the window was skipped entirely.)
+        // Contrast testUndoSkipsDeadHandlesAndReports: same setup, but the
+        // handle is busy instead of dead, so the restore lands.
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        let outcome = commit(run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
+        guard let snapshot = outcome.snapshot else {
+            return XCTFail("switch should snapshot")
+        }
+        gateway.busy.insert(handles[a]!)
+
+        let result = executor.undo(
+            snapshot: snapshot, requester: outcome.requester,
+            state: state, records: records, nextID: nextID, tracker: tracker,
+            boundsOf: { $0 }, observe: { _ in })
+
+        XCTAssertNil(result.error)
+        XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 1 window restored.")
+        XCTAssertEqual(
+            result.state.occupant(of: .topLeft).flatMap { result.3[$0]?.handle },
+            handles[a],
+            "unknown liveness still restores the window to its slot")
     }
 
     func testUndoSkipsDeadHandlesAndReports() {

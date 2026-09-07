@@ -59,15 +59,22 @@ final class LiveWindowGateway: WindowGateway {
         return Self.setFrame(element, to: frame)
     }
 
-    func isAlive(_ handle: WindowHandle) -> Bool {
-        guard let element = elements[handle] else { return false }
-        let alive = Self.isAlive(element)
-        if !alive {
+    func liveness(of handle: WindowHandle) -> Liveness {
+        guard let element = elements[handle] else { return .dead }
+        switch Self.probe(element) {
+        case .alive:
+            return .alive
+        case .unknown:
+            // A busy app fails the probe without being gone: keep the
+            // element registered so the window never falls out of
+            // management on a maybe.
+            return .unknown
+        case .dead:
             elements[handle] = nil
             pids[handle] = nil
             changeHandlers[handle] = nil
+            return .dead
         }
-        return alive
     }
 
     func observe(_ handle: WindowHandle, onChange: @escaping () -> Void) {
@@ -224,12 +231,23 @@ final class LiveWindowGateway: WindowGateway {
 
     // MARK: Liveness
 
-    /// Cheap liveness probe: the element is considered gone when its position
-    /// attribute can no longer be read (window closed, app quit).
-    private static func isAlive(_ element: AXUIElement) -> Bool {
+    /// Liveness probe outcome for one element.
+    private enum Probe { case alive, dead, unknown }
+
+    /// Cheap liveness probe: read the position attribute. A read that
+    /// names a gone element (invalid element, no window) is dead; a read
+    /// the app could not complete right now (`.cannotComplete` — busy,
+    /// beachballing, mid-launch) is unknown, never dead: dropping a live
+    /// window on a transient failure would untile it on the next prune.
+    private static func probe(_ element: AXUIElement) -> Probe {
         var value: CFTypeRef?
-        return AXUIElementCopyAttributeValue(
-            element, kAXPositionAttribute as CFString, &value) == .success
+        switch AXUIElementCopyAttributeValue(
+            element, kAXPositionAttribute as CFString, &value)
+        {
+        case .success: return .alive
+        case .cannotComplete: return .unknown
+        default: return .dead
+        }
     }
 
     // MARK: Geometry

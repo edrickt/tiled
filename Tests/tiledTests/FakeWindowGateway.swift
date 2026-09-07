@@ -67,8 +67,15 @@ final class FakeWindowGateway: WindowGateway {
         return true
     }
 
-    func isAlive(_ handle: WindowHandle) -> Bool {
-        windows[handle]?.alive ?? false
+    /// Handles whose liveness probe reports unknown (a busy app that
+    /// cannot answer the probe): alive for every other purpose, never
+    /// pruned.
+    var busy: Set<WindowHandle> = []
+
+    func liveness(of handle: WindowHandle) -> Liveness {
+        guard let window = windows[handle] else { return .dead }
+        if !window.alive { return .dead }
+        return busy.contains(handle) ? .unknown : .alive
     }
 
     func observe(_ handle: WindowHandle, onChange: @escaping () -> Void) {
