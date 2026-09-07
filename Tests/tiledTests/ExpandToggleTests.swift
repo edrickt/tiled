@@ -40,6 +40,22 @@ final class ExpandToggleTests: XCTestCase {
         GridLayout().rect(for: slot, in: bounds(for: frame))
     }
 
+    /// Independent invariant: a produced frame must sit inside the
+    /// visible frame of the screen that owns the pre-toggle frame.
+    /// `bounds(for:)` mirrors the controller's ownership chain, so a
+    /// broken rule could agree with itself; containment is checked
+    /// against the screen API directly, which the mirroring cannot fake.
+    private func assertWithinOwningVisibleFrame(_ produced: CGRect, preToggle: CGRect) {
+        let screens = NSScreen.screens
+        guard let index = TilingController.owningScreenIndex(
+            frames: screens.map(\.frame), for: preToggle)
+        else { return } // off-screen: the fallback chain owns the frame
+        XCTAssertTrue(
+            screens[index].visibleFrame.contains(produced),
+            "produced \(produced) escapes the owning screen's visible frame " +
+            "\(screens[index].visibleFrame)")
+    }
+
     // MARK: Untiled windows
 
     func testExpandFillsScreenWithoutTiling() {
@@ -49,7 +65,9 @@ final class ExpandToggleTests: XCTestCase {
 
         controller.handleExpandToggle()
 
-        XCTAssertEqual(gateway.frame(of: handle), bounds(for: original))
+        let expanded = gateway.frame(of: handle)!
+        XCTAssertEqual(expanded, bounds(for: original))
+        assertWithinOwningVisibleFrame(expanded, preToggle: original)
         XCTAssertTrue(controller.state.occupants.isEmpty, "expanding never tiles")
     }
 

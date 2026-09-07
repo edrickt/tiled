@@ -59,13 +59,32 @@ final class GrowthTests: XCTestCase {
     // MARK: Exact-or-empty
 
     func testMoveWithoutHoleLeavesNeighborsAlone() {
-        // a=sixthLeft -> sixthTopLeft is a pure shrink: b already covers
-        // the bottom half of the old slot, so nothing is vacated.
+        // a=sixthLeft -> sixthTopLeft is a pure shrink: it vacates exactly
+        // the bottom half of the old third (the bottom-left sixth's
+        // cells), and the only other window (sixthRight) covers none of
+        // them — no single neighbor merges the hole into a whole slot,
+        // so exact-or-empty keeps the hole and nobody moves.
         var state = TilingState()
         state.commit(window: a, into: .sixthLeft)
         state.commit(window: b, into: .sixthRight)
 
         XCTAssertEqual(state.plan(window: a, into: .sixthTopLeft), .tile(evicting: []))
+    }
+
+    func testUncontendedExpansionGrowsNobody() {
+        // The mirror shrink: a alone in the top-left sixth expanding to
+        // the whole left third — its old cells are a subset of the target,
+        // so nothing is vacated and there is no growth decision to make.
+        // A fresh window behaves the same (it vacates nothing).
+        var state = TilingState()
+        state.commit(window: a, into: .sixthTopLeft)
+
+        XCTAssertEqual(state.plan(window: a, into: .sixthLeft), .tile(evicting: []))
+        if case .tile(evicting: []) = state.plan(window: a, into: .sixthLeft) {
+            state.commit(window: a, into: .sixthLeft)
+        }
+        XCTAssertEqual(state.occupant(of: .sixthLeft), a)
+        XCTAssertEqual(Set(state.tiledWindows), [a], "expansion never untiles anyone")
     }
 
     func testHoleNoMateMergesStaysHole() {

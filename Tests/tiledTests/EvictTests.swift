@@ -149,6 +149,22 @@ final class EvictReflowTests: XCTestCase {
         return controller.grid.rect(for: slot, in: screens[index].visibleFrame)
     }
 
+    /// Independent invariant: a produced frame must sit inside the
+    /// visible frame of the screen that owns the window's pre-tile
+    /// frame. `expectedRect` mirrors the controller's ownership rule, so
+    /// a broken rule could agree with itself; containment is checked
+    /// against the screen API directly, which the mirroring cannot fake.
+    private func assertWithinOwningVisibleFrame(_ produced: CGRect, preTile: CGRect) {
+        let screens = NSScreen.screens
+        guard let index = TilingController.owningScreenIndex(
+            frames: screens.map(\.frame), for: preTile)
+        else { return } // off-screen: the fallback chain owns the frame
+        XCTAssertTrue(
+            screens[index].visibleFrame.contains(produced),
+            "produced \(produced) escapes the owning screen's visible frame " +
+            "\(screens[index].visibleFrame)")
+    }
+
     func testEvictUntilesFocusedAndRestoresPreTileFrame() {
         setUpController()
         let handle = addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
@@ -178,9 +194,10 @@ final class EvictReflowTests: XCTestCase {
 
         XCTAssertNil(controller.state.slot(of: 1), "evicted window holds no slot")
         XCTAssertEqual(controller.state.slot(of: 2), .leftHalf, "column-mate expands")
-        XCTAssertEqual(
-            gateway.frame(of: b), expectedRect(.leftHalf, for: b),
-            "column-mate frame covers the freed cells")
+        let grown = gateway.frame(of: b)!
+        XCTAssertEqual(grown, expectedRect(.leftHalf, for: b),
+                       "column-mate frame covers the freed cells")
+        assertWithinOwningVisibleFrame(grown, preTile: CGRect(x: 0, y: 0, width: 800, height: 600))
     }
 
     func testEvictWithNoFocusedWindowAnswers() {

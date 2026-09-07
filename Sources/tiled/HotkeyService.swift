@@ -75,6 +75,33 @@ final class HotkeyService {
     static let undoModifiers = UInt32(controlKey | optionKey | shiftKey | cmdKey)
     static let undoKeyCode = UInt32(kVK_ANSI_Z)
 
+    /// Where a Carbon hotkey event routes. Extracted from carbonCallback
+    /// so a table test pins it: a routing typo here turns a global
+    /// hotkey into a dead key while the menu still advertises it.
+    enum Route: Equatable {
+        case slot(Slot)
+        case expand
+        case evict
+        case settings
+        case undo
+    }
+
+    /// Pure id → route mapping over the slot table the callback holds.
+    /// Unknown ids return nil (the callback answers eventNotHandledErr,
+    /// letting the event fall through to other apps).
+    static func route(
+        forHotKeyID id: UInt32, slotByID: [UInt32: Slot]
+    ) -> Route? {
+        if let slot = slotByID[id] { return .slot(slot) }
+        switch id {
+        case expandHotkeyID: return .expand
+        case evictHotkeyID: return .evict
+        case settingsHotkeyID: return .settings
+        case undoHotkeyID: return .undo
+        default: return nil
+        }
+    }
+
     private final class Context {
         var handler: ((Slot) -> Void)?
         var expandHandler: (() -> Void)?
@@ -189,7 +216,7 @@ final class HotkeyService {
             hotKeyRefs.append(evictRef)
         } else {
             evictHotkeyFailed = true
-            NSLog("tiled: failed to register evict hotkey")
+            NSLog("Tiled: failed to register evict hotkey")
         }
         var expandRef: EventHotKeyRef?
         if RegisterEventHotKey(
@@ -203,7 +230,7 @@ final class HotkeyService {
             hotKeyRefs.append(expandRef)
         } else {
             expandHotkeyFailed = true
-            NSLog("tiled: failed to register expand hotkey")
+            NSLog("Tiled: failed to register expand hotkey")
         }
         var settingsRef: EventHotKeyRef?
         if RegisterEventHotKey(
@@ -217,7 +244,7 @@ final class HotkeyService {
             hotKeyRefs.append(settingsRef)
         } else {
             settingsHotkeyFailed = true
-            NSLog("tiled: failed to register settings fallback hotkey")
+            NSLog("Tiled: failed to register settings fallback hotkey")
         }
         var undoRef: EventHotKeyRef?
         if RegisterEventHotKey(
@@ -231,7 +258,7 @@ final class HotkeyService {
             hotKeyRefs.append(undoRef)
         } else {
             undoHotkeyFailed = true
-            NSLog("tiled: failed to register undo hotkey")
+            NSLog("Tiled: failed to register undo hotkey")
         }
         for slot in Slot.allCases {
             let binding = store.binding(for: slot)
@@ -249,7 +276,7 @@ final class HotkeyService {
                 hotKeyRefs.append(ref)
             } else {
                 failedSlots.append(slot)
-                NSLog("tiled: failed to register hotkey for %@ (osstatus %d)", slot.rawValue, status)
+                NSLog("Tiled: failed to register hotkey for %@ (osstatus %d)", slot.rawValue, status)
             }
         }
     }
@@ -281,24 +308,24 @@ final class HotkeyService {
             &hotKeyID)
         guard status == noErr else { return status }
         let context = Unmanaged<Context>.fromOpaque(userData!).takeUnretainedValue()
-        if hotKeyID.id == HotkeyService.expandHotkeyID {
+        switch HotkeyService.route(forHotKeyID: hotKeyID.id, slotByID: context.slotByID) {
+        case .expand:
             DispatchQueue.main.async { context.expandHandler?() }
             return noErr
-        }
-        if hotKeyID.id == HotkeyService.evictHotkeyID {
+        case .evict:
             DispatchQueue.main.async { context.evictHandler?() }
             return noErr
-        }
-        if hotKeyID.id == HotkeyService.settingsHotkeyID {
+        case .settings:
             DispatchQueue.main.async { context.settingsHandler?() }
             return noErr
-        }
-        if hotKeyID.id == HotkeyService.undoHotkeyID {
+        case .undo:
             DispatchQueue.main.async { context.undoHandler?() }
             return noErr
+        case .slot(let slot):
+            DispatchQueue.main.async { context.handler?(slot) }
+            return noErr
+        case nil:
+            return OSStatus(eventNotHandledErr)
         }
-        guard let slot = context.slotByID[hotKeyID.id] else { return OSStatus(eventNotHandledErr) }
-        DispatchQueue.main.async { context.handler?(slot) }
-        return noErr
     }
 }

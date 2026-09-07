@@ -12,6 +12,9 @@ final class ControllerBulkOperationTests: XCTestCase {
     private var controller: TilingController!
     private var feedbacks: [TilingController.Feedback] = []
     private var changeCount = 0
+    /// Block-based observers returned by addObserver(forName:) must be
+    /// removed explicitly or they leak for the process lifetime.
+    private var observers: [NSObjectProtocol] = []
 
     override func setUp() {
         super.setUp()
@@ -19,6 +22,14 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller = TilingController(gateway: gateway, pruneInterval: nil)
         controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
         controller.onChange = { [weak self] in self?.changeCount += 1 }
+    }
+
+    override func tearDown() {
+        for token in observers {
+            NotificationCenter.default.removeObserver(token)
+        }
+        observers = []
+        super.tearDown()
     }
 
     @discardableResult
@@ -550,12 +561,13 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .topRight)
 
         let reasserted = XCTestExpectation(description: "screen change reassert")
-        NotificationCenter.default.addObserver(
+        let token = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main
         ) { _ in
             reasserted.fulfill()
         }
+        observers.append(token)
         NotificationCenter.default.post(
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
         wait(for: [reasserted], timeout: 1.0)

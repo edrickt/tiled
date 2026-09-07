@@ -206,4 +206,18 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertTrue(store.duplicates(
             of: HotkeyStore.defaultBinding(for: .topLeft), ignoring: .topRight).isEmpty)
     }
+
+    func testStoredNegativeModifiersFallsBackToDefaults() {
+        // Never written by set — corrupt data only (hand-edited plist,
+        // older build). UInt32(modifiers) would trap, so the store must
+        // reject the entry wholesale instead of trusting the key code.
+        let name = suiteName
+        UserDefaults(suiteName: name)!.set(
+            ["modifiers": -5, "keyCode": 6], forKey: "hotkey.topLeft")
+
+        let store = HotkeyStore(defaults: UserDefaults(suiteName: name)!)
+        XCTAssertEqual(
+            store.binding(for: .topLeft), HotkeyStore.defaultBinding(for: .topLeft),
+            "corrupt modifiers fall back to the factory default")
+    }
 }

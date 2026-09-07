@@ -246,7 +246,12 @@ final class PerMonitorTests: XCTestCase {
         gateway.simulateChange(a, to: dragged)
         XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
         // Drain the tracker's coalesced re-push before acting further.
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        // The re-push is enqueued with DispatchQueue.main.async, so one
+        // async hop after it guarantees it landed (FIFO) — no runloop
+        // spin needed.
+        let drained = XCTestExpectation(description: "coalesced re-push drained")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 1.0)
 
         gateway.focused = a
         controller.handle(slot: .bottomLeft)
@@ -284,6 +289,19 @@ final class PerMonitorTests: XCTestCase {
 
         let expectation = XCTestExpectation(description: "neighbor re-push")
         DispatchQueue.main.async {
+            // Positive side: the dragged monitor's splitter actually
+            // moved and its neighbor re-pushed onto the dragged grid —
+            // the isolation claim must be two-sided, or a mutant that
+            // deletes the re-push entirely would pass.
+            let grid = self.controller.grid(on: self.leftID)
+            XCTAssertNotEqual(
+                grid.leftRowSplit, 0.5,
+                "the drag moved the left monitor's row splitter")
+            XCTAssertEqual(
+                self.gateway.frame(of: leftNeighbor),
+                grid.rect(for: .bottomLeft, in: Self.left.visibleFrame),
+                "the dragged monitor's neighbor re-pushed onto the dragged grid")
+            // Negative side: the other monitor's window never moves.
             XCTAssertEqual(self.gateway.frame(of: rightHandle), rightBefore)
             expectation.fulfill()
         }

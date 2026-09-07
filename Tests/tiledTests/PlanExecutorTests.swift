@@ -76,12 +76,17 @@ final class PlanExecutorTests: XCTestCase {
 
     func testTilePlacesAndWritesFrame() {
         let id = addWindow()
+        let initialFrame = gateway.frame(of: handles[id]!)!
+        let expected = tracker.grid.rect(for: .topLeft, in: initialFrame)
 
         let outcome = commit(run(.tile(evicting: []), requester: id, slot: .topLeft))
 
         XCTAssertNil(outcome.error)
         XCTAssertEqual(state.slot(of: id), .topLeft)
         XCTAssertNotEqual(records[id]?.preTileFrame, .zero)
+        XCTAssertEqual(
+            gateway.frame(of: handles[id]!), expected,
+            "the tile writes the top-left quad of the window's own bounds")
     }
 
     func testTileRefusalRollsBackAndReports() {
@@ -164,6 +169,11 @@ final class PlanExecutorTests: XCTestCase {
         let b = addWindow()
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .topRight)
+        // Both windows still sit at their initial frames, so each write's
+        // bounds resolve to the same rect and the quads are exact.
+        let initial = gateway.frame(of: handles[a]!)!
+        let aTarget = tracker.grid.rect(for: .topRight, in: initial)
+        let bTarget = tracker.grid.rect(for: .topLeft, in: initial)
 
         let outcome = commit(run(
             .swap(placements: [a: .topRight, b: .topLeft]),
@@ -172,6 +182,12 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertNil(outcome.error)
         XCTAssertEqual(state.slot(of: a), .topRight)
         XCTAssertEqual(state.slot(of: b), .topLeft)
+        XCTAssertEqual(
+            gateway.frame(of: handles[a]!), aTarget,
+            "the requester lands in the top-right quad")
+        XCTAssertEqual(
+            gateway.frame(of: handles[b]!), bTarget,
+            "the partner lands in the top-left quad")
     }
 
     // MARK: Swap refusals

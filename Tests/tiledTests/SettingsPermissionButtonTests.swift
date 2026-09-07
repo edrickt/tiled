@@ -7,6 +7,21 @@ import XCTest
 /// an explanation row whose button opens the Accessibility pane —
 /// labeled identically to the launch explainer's button.
 final class SettingsPermissionButtonTests: XCTestCase {
+    private var suiteName: String!
+
+    override func setUp() {
+        super.setUp()
+        // A fresh suite per run: a fixed suite name persists on disk and
+        // leaks state (and stale preferences) between runs.
+        suiteName = "SettingsPermissionButtonTests-\(UUID().uuidString)"
+    }
+
+    override func tearDown() {
+        UserDefaults().removePersistentDomain(forName: suiteName)
+        suiteName = nil
+        super.tearDown()
+    }
+
     private func findButton(titled title: String, in view: NSView) -> NSButton? {
         if let button = view as? NSButton, button.title == title { return button }
         for subview in view.subviews {
@@ -16,7 +31,7 @@ final class SettingsPermissionButtonTests: XCTestCase {
     }
 
     private func temporaryDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "SettingsPermissionButtonTests")!
+        UserDefaults(suiteName: suiteName)!
     }
 
     func testGeneralTabLeadsWithTheAccessibilityButtonWhenUntrusted() {

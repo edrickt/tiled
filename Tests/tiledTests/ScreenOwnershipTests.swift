@@ -91,16 +91,20 @@ final class ScreenOwnershipTests: XCTestCase {
 
     func testStackedMidpointAloneDoesNotDecide() {
         // A thin band between the displays holds the midpoint but not the
-        // majority: top keeps 120px, the band 80px, bottom takes 60px.
-        // (With two contiguous screens the midpoint always lies in the
-        // majority portion, so divergence needs the three-way split —
-        // mirroring the side-by-side sliver test.)
+        // majority. Widths are deliberately unequal (top 1000, band 1400,
+        // bottom 600) and the overlap heights run the other way (top 150,
+        // band 80, bottom 200), so neither a widest-screen nor a
+        // tallest-overlap heuristic can agree with the area rule — only
+        // true area math picks the top screen (135000 > 120000 > 72000
+        // px² of overlap). (With two contiguous screens the midpoint
+        // always lies in the majority portion, so divergence needs the
+        // three-way split — mirroring the side-by-side sliver test.)
         let frames = [
-            CGRect(x: 0, y: 1080, width: 1920, height: 1080),
-            CGRect(x: 0, y: 1000, width: 1920, height: 80),
-            CGRect(x: 0, y: 0, width: 1920, height: 1000),
+            CGRect(x: 0, y: 1080, width: 1000, height: 1080),
+            CGRect(x: 0, y: 1000, width: 1400, height: 80),
+            CGRect(x: 0, y: 0, width: 600, height: 1000),
         ]
-        let frame = CGRect(x: 200, y: 940, width: 800, height: 260)
+        let frame = CGRect(x: 0, y: 800, width: 900, height: 430)
         XCTAssertTrue(frames[1].contains(CGPoint(x: frame.midX, y: frame.midY)))
         XCTAssertEqual(
             TilingController.owningScreenIndex(frames: frames, for: frame), 0)

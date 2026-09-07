@@ -66,23 +66,33 @@ final class RecorderButton: NSButton {
         // the announcement; the button owns the moment it fires.
         onArmed?(slot)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.isRecording else { return event }
-            // Navigation keys pass through so keyboard users can tab away
-            // mid-record (the button disarms via resignFirstResponder's
-            // focus reset); Esc still cancels explicitly.
-            if HotkeyRecorder.shouldPassThrough(event) {
-                self.cancelSilently()
-                return event
-            }
-            guard let outcome = HotkeyRecorder.outcome(for: event) else {
-                return nil // swallow non-decisive keys, stay armed
-            }
-            let done = self.completion
-            self.completion = nil
-            self.stopRecording()
-            done?(outcome)
-            return nil // swallow the decisive keypress too
+            guard let self else { return event }
+            return self.routeRecordedEvent(event)
         }
+    }
+
+    /// The armed state machine's routing, extracted from the event
+    /// monitor so tests can drive it without a live monitor. Returns the
+    /// event to pass through, or nil to swallow. The contract: a
+    /// decisive key fires the pending completion exactly once and
+    /// disarms; a non-decisive key is swallowed and the button stays
+    /// armed; a pass-through key (tab away) silently cancels.
+    func routeRecordedEvent(_ event: NSEvent) -> NSEvent? {
+        guard isRecording, completion != nil else { return event }
+        // Navigation keys pass through so keyboard users can tab away
+        // mid-record (the button disarms via resignFirstResponder's
+        // focus reset); Esc still cancels explicitly.
+        if HotkeyRecorder.shouldPassThrough(event) {
+            cancelSilently()
+            return event
+        }
+        guard let outcome = HotkeyRecorder.outcome(for: event) else {
+            return nil // swallow non-decisive keys, stay armed
+        }
+        let done = completion
+        stopRecording() // clears completion + disarms before the callback
+        done?(outcome)
+        return nil // swallow the decisive keypress too
     }
 
     /// Rejects a duplicate with a horizontal shake, keeping the old binding.

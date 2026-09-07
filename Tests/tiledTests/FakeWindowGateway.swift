@@ -26,6 +26,16 @@ final class FakeWindowGateway: WindowGateway {
     /// the dominant real-world refusal shape (an app that ignores AX
     /// resizes while returning success).
     var silentIgnore: Set<WindowHandle> = []
+    /// Whether `focus` makes `focusedWindow` return the focused handle.
+    /// The real adapter only requests activation: the system may ignore
+    /// it, and the next focus query answers with whatever actually has
+    /// focus. Off, focus requests are recorded but the environment keeps
+    /// its own focus — the fidelity mode for that divergence.
+    var focusChangesFocused = true
+    /// The frame a successful write actually applies. Real apps can
+    /// clamp or round the requested rect while still reporting success,
+    /// so the live frame can differ from the target. Identity by default.
+    var writtenFrame: (WindowHandle, CGRect) -> CGRect = { _, target in target }
 
     @discardableResult
     func addWindow(frame: CGRect, appName: String? = "TestApp") -> WindowHandle {
@@ -62,7 +72,7 @@ final class FakeWindowGateway: WindowGateway {
             windows[handle] = window
             return false
         }
-        window.frame = frame
+        window.frame = writtenFrame(handle, frame)
         windows[handle] = window
         return true
     }
@@ -84,7 +94,7 @@ final class FakeWindowGateway: WindowGateway {
 
     func focus(_ handle: WindowHandle) {
         focusCalls.append(handle)
-        focused = handle
+        if focusChangesFocused { focused = handle }
     }
 
     func appName(of handle: WindowHandle) -> String? {

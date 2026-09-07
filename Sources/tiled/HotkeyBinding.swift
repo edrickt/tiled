@@ -188,6 +188,11 @@ final class HotkeyStore {
         else {
             return Self.defaultBinding(for: slot)
         }
+        // A negative keyCode is the disabled encoding; a negative modifiers
+        // is corrupt data (never written by set) and must not reach
+        // UInt32 (a trap). Fall back to the factory default like any
+        // other unreadable entry.
+        guard modifiers >= 0 else { return Self.defaultBinding(for: slot) }
         return HotkeyBinding(
             modifiers: UInt32(modifiers), keyCode: code >= 0 ? UInt32(code) : nil)
     }

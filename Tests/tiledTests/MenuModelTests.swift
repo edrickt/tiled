@@ -340,6 +340,34 @@ final class MenuModelTests: XCTestCase {
         XCTAssertTrue(model.contains { $0.title.contains("Safari") })
     }
 
+    func testOrphanRowWithMismatchedSectionKeyStillRenders() {
+        // Defensive tail: a stale snapshot can carry a window whose
+        // screenName matches no section header. The row must still
+        // render (trailing, after the matched sections) — silently
+        // dropping a user's window from the manage list is the one
+        // failure this branch exists to prevent.
+        var snap = snapshot(tiledWindows: [
+            .init(id: 1, slot: .topLeft, appName: "Safari", screenName: "Display 1"),
+            .init(id: 2, slot: .sixthTopLeft, appName: "Orphan", screenName: "Display 2"),
+        ])
+        snap.monitorSections = [
+            .init(title: "Display 1 — Quarters · 1 tiled", key: "Display 1"),
+        ]
+        let model = items(snap)
+
+        let titles = model.map(\.title)
+        XCTAssertTrue(
+            titles.contains { $0.contains("Orphan") },
+            "the mismatched window must not vanish from the manage list")
+        // It renders after the matched section, not under a header that
+        // does not describe it.
+        let headerIndex = titles.firstIndex(of: "Display 1 — Quarters · 1 tiled")!
+        let safariIndex = titles.firstIndex { $0.contains("Safari") }!
+        let orphanIndex = titles.firstIndex { $0.contains("Orphan") }!
+        XCTAssertEqual(safariIndex, headerIndex + 1)
+        XCTAssertGreaterThan(orphanIndex, safariIndex)
+    }
+
     func testEmptySpaceHasNoWindowListOrBulkActions() {
         let model = items(snapshot())
         XCTAssertFalse(model.contains { $0.action == .untileAll })
@@ -365,7 +393,7 @@ final class MenuModelTests: XCTestCase {
         for snap in [snapshot(), snapshot(isTrusted: false), snapshot(warnings: ["x"])] {
             let model = items(snap)
             XCTAssertEqual(
-                model.suffix(3).map(\.title), ["tiled Guide", "Settings…", "Quit tiled"])
+                model.suffix(3).map(\.title), ["Tiled Guide", "Settings…", "Quit Tiled"])
             XCTAssertEqual(model.last?.keyEquivalent, "q")
             XCTAssertEqual(model.first { $0.action == .showSettings }?.keyEquivalent, ",")
         }

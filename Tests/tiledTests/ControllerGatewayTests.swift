@@ -477,6 +477,22 @@ final class ControllerGatewayTests: XCTestCase {
                 gateway.frame(of: handle), CGRect(x: 0, y: 0, width: 800, height: 600),
                 "reflow writes a real tile rect")
         }
+        // Exact rects, not just "a real rect": each window sits in its
+        // slot's geometry over the owning display's visible frame — the
+        // same bounds chain the controller's write uses.
+        let bounds = controller.screen(for: gateway.frame(of: a)!)!.visibleFrame
+        XCTAssertEqual(
+            gateway.frame(of: a),
+            controller.grid.rect(for: .sixthTopLeft, in: bounds),
+            "the surviving top-left sixth is exact")
+        XCTAssertEqual(
+            gateway.frame(of: b),
+            controller.grid.rect(for: .sixthsRightTwoThirds, in: bounds),
+            "the requester covers the right two-thirds exactly")
+        XCTAssertEqual(
+            gateway.frame(of: c),
+            controller.grid.rect(for: .sixthBottomLeft, in: bounds),
+            "the surviving bottom-left sixth is exact")
         XCTAssertNil(controller.lastTileError)
     }
 

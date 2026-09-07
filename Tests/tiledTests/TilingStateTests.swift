@@ -344,14 +344,33 @@ final class TilingStateTests: XCTestCase {
         }
     }
 
-    func testEvictionsAreSorted() {
-        // Deterministic order: evicted ids come back sorted, not in slot order.
+    func testLeftHalfOverTwoQuadsReflowsRight() {
+        // TL + BL tiled; a fresh window takes the left half. Both quads
+        // slide right (TR + BR) covering the leftover exactly: nobody
+        // evicted. (Mirror of testRightHalfOverTwoQuadsReflows.)
         var state = TilingState()
         state.commit(window: c, into: .topLeft)
         state.commit(window: a, into: .bottomLeft)
         XCTAssertEqual(
             state.plan(window: b, into: .leftHalf),
             .swap(placements: [b: .leftHalf, c: .topRight, a: .bottomRight]))
+    }
+
+    func testEvictionListIsSortedNotInReadingOrCommitOrder() {
+        // Evicted ids come back sorted by id, which is observable only
+        // when commit order and spatial reading order disagree with it:
+        // blockers committed top-right first (id 4), bottom-right second
+        // (id 3) — both reading order and commit order would list [4, 3],
+        // but the plan must name [3, 4].
+        var state = TilingState()
+        state.commit(window: 4, into: .topRight)
+        state.commit(window: 3, into: .bottomRight)
+        state.commit(window: 2, into: .bottomLeft)
+        state.commit(window: 1, into: .topLeft)
+        // Requester 1 (TL) -> Right Half: the two right quads overlap the
+        // target, the vacated quad and the leftover left half cannot
+        // house three quads exactly, so both blockers are evicted.
+        XCTAssertEqual(state.plan(window: 1, into: .rightHalf), .tile(evicting: [3, 4]))
     }
 
     func testRightHalfOverTwoQuadsReflows() {

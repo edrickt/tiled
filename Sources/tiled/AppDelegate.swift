@@ -78,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(
-            withTitle: "About tiled",
+            withTitle: "About Tiled",
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         // HIG: Settings belongs in the app menu. The status menu keeps its
         // own Settings… row for the icon-first path; this row makes ⌘, work
@@ -87,9 +87,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             withTitle: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
         settingsItem.target = self
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide tiled", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide Tiled", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit tiled", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Tiled", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
 
         let windowItem = NSMenuItem()
@@ -307,7 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// slots are taken, so the state isn't sight-only.
     private static func statusIconDescription(_ snapshot: StatusIcon.Snapshot) -> String {
         let total = StatusIcon.cells(for: snapshot.layout).count
-        return "tiled \(snapshot.layout.title) layout, "
+        return "Tiled \(snapshot.layout.title) layout, "
             + "\(snapshot.filled.count) of \(total) slots occupied"
     }
 
@@ -375,10 +375,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func menuSnapshot() -> MenuModel.Snapshot {
         let warnings = activeWarnings
         let rows = controller.tiledWindowsInfo
-        // Multi-monitor: group the manage list per display. The grouping
-        // key is the display name (or positional fallback); one section
-        // per display that has windows, in controller order. Single
-        // monitor (or no screen tags) renders the flat legacy list.
+        let presentation = Self.monitorPresentation(
+            rows: rows,
+            layoutForScreen: { screen in
+                guard let screen else { return controller.activeLayout }
+                return controller.activeLayout(on: screen)
+            })
+        return MenuModel.Snapshot(
+            isTrusted: controller.isTrusted,
+            warnings: warnings.hotkeyWarnings,
+            notice: controller.lastNotice,
+            layoutTitle: presentation.statusLine,
+            activeLayout: controller.activeLayout,
+            tileError: warnings.tileError,
+            hasHotkeyWarnings: hasHotkeyWarnings,
+            hasSplitterBackup: controller.hasSplitterBackup,
+            hasFocusedWindow: gateway.isTrusted && gateway.focusedWindow() != nil,
+            expandedSlot: controller.expandedFocusedSlot,
+            tiledWindows: presentation.tiledWindows,
+            canUndoDisplacement: controller.canUndoDisplacement,
+            evictedCount: controller.evictedCount,
+            monitorSections: presentation.sections)
+    }
+
+    /// Pure multi-monitor grouping for the manage list, extracted from
+    /// menuSnapshot so tests pin it without a live controller. The
+    /// grouping key is the display name (or positional fallback); one
+    /// section per display that has windows, in controller order. Single
+    /// monitor (or no screen tags) renders the flat legacy list.
+    static func monitorPresentation(
+        rows: [TilingController.TiledWindowInfo],
+        layoutForScreen: (ScreenID?) -> LayoutKind
+    ) -> (sections: [MenuModel.Snapshot.MonitorSection],
+          tiledWindows: [MenuModel.Snapshot.TiledWindow],
+          statusLine: String) {
         let grouped = Dictionary(grouping: rows, by: \.screenName)
         let sections: [MenuModel.Snapshot.MonitorSection]
         let orderedRows: [MenuModel.Snapshot.TiledWindow]
@@ -388,7 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for row in rows {
                 if !built.contains(where: { $0.key == row.screenName }) {
                     let count = rows.filter { $0.screenName == row.screenName }.count
-                    let layout = row.screen.flatMap(controller.activeLayout(on:)) ?? controller.activeLayout
+                    let layout = layoutForScreen(row.screen)
                     let display = row.screenName ?? "Display"
                     let noun = count == 1 ? "1 tiled" : "\(count) tiled"
                     built.append(.init(
@@ -412,25 +442,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // · 1 tiled") so the compass never hides a background monitor.
         let statusLine: String
         if sections.isEmpty {
-            statusLine = "Layout: \(controller.activeLayout.title) · \(rows.count) tiled"
+            statusLine = "Layout: \(layoutForScreen(nil).title) · \(rows.count) tiled"
         } else {
             statusLine = sections.map(\.title).joined(separator: " + ")
         }
-        return MenuModel.Snapshot(
-            isTrusted: controller.isTrusted,
-            warnings: warnings.hotkeyWarnings,
-            notice: controller.lastNotice,
-            layoutTitle: statusLine,
-            activeLayout: controller.activeLayout,
-            tileError: warnings.tileError,
-            hasHotkeyWarnings: hasHotkeyWarnings,
-            hasSplitterBackup: controller.hasSplitterBackup,
-            hasFocusedWindow: gateway.isTrusted && gateway.focusedWindow() != nil,
-            expandedSlot: controller.expandedFocusedSlot,
-            tiledWindows: orderedRows,
-            canUndoDisplacement: controller.canUndoDisplacement,
-            evictedCount: controller.evictedCount,
-            monitorSections: sections)
+        return (sections, orderedRows, statusLine)
+    }
+
+    /// Pure Action → selector wiring, extracted from makeItem so a table
+    /// test pins every case: a selector typo or cast mistake here
+    /// degrades to a silent no-op row, which no UI test would catch.
+    static func menuWiring(
+        for action: MenuModel.Action
+    ) -> (selector: Selector, representedObject: Any?, targetsSelf: Bool) {
+        switch action {
+        case .tileSlot(let slot):
+            return (#selector(AppDelegate.tileSlot(_:)), slot.rawValue, true)
+        case .switchToQuarters:
+            return (#selector(AppDelegate.switchToQuarters(_:)), nil, true)
+        case .switchToSixths:
+            return (#selector(AppDelegate.switchToSixths(_:)), nil, true)
+        case .toggleExpand:
+            return (#selector(AppDelegate.expandFocusedWindow(_:)), nil, true)
+        case .evictFocusedWindow:
+            return (#selector(AppDelegate.evictFocusedWindow(_:)), nil, true)
+        case .untileWindow(let id):
+            return (#selector(AppDelegate.untileTiledWindow(_:)), id, true)
+        case .focusWindow(let id):
+            return (#selector(AppDelegate.focusTiledWindow(_:)), id, true)
+        case .tileHere(let slot):
+            return (#selector(AppDelegate.tileFocusedHere(_:)), slot.rawValue, true)
+        case .undoSwitch:
+            return (#selector(AppDelegate.undoSwitch(_:)), nil, true)
+        case .untileAll:
+            return (#selector(AppDelegate.untileAll(_:)), nil, true)
+        case .resetDividers:
+            return (#selector(AppDelegate.resetDividers(_:)), nil, true)
+        case .showGuide:
+            return (#selector(AppDelegate.showGuide(_:)), nil, true)
+        case .showSettings:
+            return (#selector(AppDelegate.showSettings(_:)), nil, true)
+        case .openAccessibilitySettings:
+            return (#selector(AppDelegate.openAccessibilitySettings(_:)), nil, true)
+        case .openShortcuts:
+            return (#selector(AppDelegate.openShortcuts(_:)), nil, true)
+        case .quit:
+            // Quit rides the responder chain like the app menu's Quit;
+            // everything else targets this delegate.
+            return (#selector(NSApplication.terminate(_:)), nil, false)
+        }
     }
 
 
@@ -450,47 +510,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.setAccessibilityHelp(reason)
         }
         if let action = model.action {
-            switch action {
-            case .tileSlot(let slot):
-                item.action = #selector(tileSlot(_:))
-                item.representedObject = slot.rawValue
-            case .switchToQuarters:
-                item.action = #selector(switchToQuarters(_:))
-            case .switchToSixths:
-                item.action = #selector(switchToSixths(_:))
-            case .toggleExpand:
-                item.action = #selector(expandFocusedWindow(_:))
-            case .evictFocusedWindow:
-                item.action = #selector(evictFocusedWindow(_:))
-            case .untileWindow(let id):
-                item.action = #selector(untileTiledWindow(_:))
-                item.representedObject = id
-            case .focusWindow(let id):
-                item.action = #selector(focusTiledWindow(_:))
-                item.representedObject = id
-            case .tileHere(let slot):
-                item.action = #selector(tileFocusedHere(_:))
-                item.representedObject = slot.rawValue
-            case .undoSwitch:
-                item.action = #selector(undoSwitch(_:))
-            case .untileAll:
-                item.action = #selector(untileAll(_:))
-            case .resetDividers:
-                item.action = #selector(resetDividers(_:))
-            case .showGuide:
-                item.action = #selector(showGuide(_:))
-            case .showSettings:
-                item.action = #selector(showSettings(_:))
-            case .openAccessibilitySettings:
-                item.action = #selector(openAccessibilitySettings(_:))
-            case .openShortcuts:
-                item.action = #selector(openShortcuts(_:))
-            case .quit:
-                item.action = #selector(NSApplication.terminate(_:))
+            let wiring = Self.menuWiring(for: action)
+            item.action = wiring.selector
+            if let represented = wiring.representedObject {
+                item.representedObject = represented
             }
-            // Quit rides the responder chain like the app menu's Quit;
-            // everything else targets this delegate.
-            if action != .quit {
+            if wiring.targetsSelf {
                 item.target = self
             }
         }
@@ -705,7 +730,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 userInfo: [.announcement: text,
                            .priority: NSAccessibilityPriorityLevel.high.rawValue])
         } else if let noticeText {
-            NSLog("tiled: %@", noticeText)
+            NSLog("Tiled: %@", noticeText)
         }
     }
 

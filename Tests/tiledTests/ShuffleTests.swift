@@ -500,8 +500,9 @@ final class ShuffleTests: XCTestCase {
     }
 
     func testSixthsTwoThirdsSlide() {
-        // a=RightTwoThirds -> LeftTwoThirds (occupied b=Left third): free
-        // is the c3 column, so b slides into Right third exactly.
+        // a=RightTwoThirds -> LeftTwoThirds (occupied b=Left third): the
+        // footprint a vacates beyond the target is the right third's
+        // column, so b slides into Right third exactly.
         var (state, _) = occupy([.sixthsRightTwoThirds, .sixthLeft])
         // owners: a=rightTwoThirds, b=left.
         let plan = state.plan(window: a, into: .sixthsLeftTwoThirds)
@@ -515,11 +516,11 @@ final class ShuffleTests: XCTestCase {
     }
 
     func testSixthsBlockerTakesVacatedTwoThirdsWhole() {
-        // a=LeftTwoThirds -> TopRight corner (occupied b=Right third…):
-        // unreachable (they overlap). Instead: b=Right third tiled alone
-        // with a=LeftTwoThirds — also overlapping. Reachable version:
-        // b=TopRight corner + c=BottomRight corner, a=LeftTwoThirds ->
-        // TopRight: blockers b (corner) — c is disjoint from the target.
+        // a=LeftTwoThirds -> TopRight corner (occupied b=TopRight corner):
+        // the blocker overlaps the target, and the vacated left
+        // two-thirds is itself one whole slot, so b inherits it whole;
+        // c (BottomRight corner) is disjoint from the target and never
+        // moves.
         var (state, _) = occupy([.sixthsLeftTwoThirds, .sixthTopRight, .sixthBottomRight])
         // owners: a=leftTwoThirds, b=topRight corner, c=bottomRight corner.
         let plan = state.plan(window: a, into: .sixthTopRight)
@@ -606,9 +607,14 @@ final class ShuffleTests: XCTestCase {
     }
 
     func testPlansAreDeterministic() {
-        // The solver sorts blockers and breaks size ties by slot order, so
-        // the same request against the same state must produce the same
-        // plan — a shuffle must never depend on dictionary iteration order.
+        // Plan purity: calling plan() must not mutate state, and within
+        // one process the same request against the same state must
+        // produce the same plan (the solver sorts blockers and breaks
+        // size ties by slot order). Cross-process order independence —
+        // Swift randomizes dictionary order per process, so this check
+        // cannot see it — is covered by the tiling-order tests and the
+        // fuzz walk, whose occupants are always committed in varied id
+        // orders and asserted in reading order.
         let configs: [[Slot]] = [
             [.topLeft, .bottomLeft, .rightHalf],
             [.topLeft, .topRight, .bottomLeft, .bottomRight],

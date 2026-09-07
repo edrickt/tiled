@@ -11,6 +11,9 @@ import AppKit
 /// delegate can re-register hotkeys and refresh the menu.
 final class ShortcutsTab: NSObject {
     private let hotkeyStore: HotkeyStore
+    /// Park/backup/collapse persistence. Injectable so tests can run the
+    /// whole park lifecycle without touching the host's real preferences.
+    private let defaults: UserDefaults
     var onHotkeysChange: (() -> Void)?
     /// Live Accessibility trust probe: with permission off every recorder
     /// below is a dead end, so this tab leads with the same fix row the
@@ -39,8 +42,9 @@ final class ShortcutsTab: NSObject {
         Slot.allCases.lazy.compactMap { self.recorderButtons[$0] }.first
     }
 
-    init(hotkeyStore: HotkeyStore) {
+    init(hotkeyStore: HotkeyStore, defaults: UserDefaults = .standard) {
         self.hotkeyStore = hotkeyStore
+        self.defaults = defaults
     }
 
     func build(size: NSSize, window: NSWindow?) -> NSView {
@@ -68,7 +72,7 @@ final class ShortcutsTab: NSObject {
         permissionRow.spacing = 12
         permissionRow.alignment = .firstBaseline
         let warningText = NSTextField(wrappingLabelWithString:
-            "tiled can't see or move windows — Accessibility permission is off.")
+            "Tiled can't see or move windows — Accessibility permission is off.")
         warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warningText.textColor = .labelColor
         warningText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -198,7 +202,7 @@ final class ShortcutsTab: NSObject {
             announce(
                 trusted
                     ? "Accessibility permission granted — tiled can see and move windows now."
-                    : "tiled can't see or move windows — Accessibility permission is off.")
+                    : "Tiled can't see or move windows — Accessibility permission is off.")
         }
         lastKnownTrusted = trusted
     }
@@ -410,7 +414,7 @@ final class ShortcutsTab: NSObject {
     }
 
     private func parkedBinding(for slot: Slot) -> HotkeyBinding? {
-        guard let dict = UserDefaults.standard.dictionary(forKey: parkedKey(for: slot)),
+        guard let dict = defaults.dictionary(forKey: parkedKey(for: slot)),
               let modifiers = dict["modifiers"] as? Int,
               let code = dict["keyCode"] as? Int, code >= 0
         else { return nil }
@@ -418,24 +422,24 @@ final class ShortcutsTab: NSObject {
     }
 
     private func parkBinding(_ binding: HotkeyBinding, for slot: Slot) {
-        UserDefaults.standard.set(
+        defaults.set(
             ["modifiers": Int(binding.modifiers),
              "keyCode": binding.keyCode.map(Int.init) ?? -1],
             forKey: parkedKey(for: slot))
     }
 
     private func clearParkedBinding(for slot: Slot) {
-        UserDefaults.standard.removeObject(forKey: parkedKey(for: slot))
+        defaults.removeObject(forKey: parkedKey(for: slot))
     }
 
     /// Collapsible section state, persisted so the tab reopens as left.
     private var collapsedSections: Set<LayoutKind> {
         get {
-            let raw = UserDefaults.standard.stringArray(forKey: "collapsedShortcutSections") ?? []
+            let raw = defaults.stringArray(forKey: "collapsedShortcutSections") ?? []
             return Set(raw.compactMap(LayoutKind.init(rawValue:)))
         }
         set {
-            UserDefaults.standard.set(newValue.map(\.rawValue), forKey: "collapsedShortcutSections")
+            defaults.set(newValue.map(\.rawValue), forKey: "collapsedShortcutSections")
         }
     }
 
@@ -527,7 +531,7 @@ final class ShortcutsTab: NSObject {
                     "\(candidate.label ?? "That combo") is already used by \(owners) — " +
                     "\(SlotPresentation.title(of: slot)) kept its old shortcut."
                 showConflict(message)
-                NSLog("tiled: %@", message)
+                NSLog("Tiled: %@", message)
             }
         }
     }
@@ -621,7 +625,7 @@ final class ShortcutsTab: NSObject {
     }
 
     private func resetBackupBinding(for slot: Slot) -> HotkeyBinding? {
-        guard let dict = UserDefaults.standard.dictionary(forKey: resetBackupKey(for: slot)),
+        guard let dict = defaults.dictionary(forKey: resetBackupKey(for: slot)),
               let modifiers = dict["modifiers"] as? Int,
               let code = dict["keyCode"] as? Int
         else { return nil }
@@ -629,14 +633,14 @@ final class ShortcutsTab: NSObject {
     }
 
     private func parkResetBackup(_ binding: HotkeyBinding, for slot: Slot) {
-        UserDefaults.standard.set(
+        defaults.set(
             ["modifiers": Int(binding.modifiers),
              "keyCode": binding.keyCode.map(Int.init) ?? -1],
             forKey: resetBackupKey(for: slot))
     }
 
     private func clearResetBackup(for slot: Slot) {
-        UserDefaults.standard.removeObject(forKey: resetBackupKey(for: slot))
+        defaults.removeObject(forKey: resetBackupKey(for: slot))
     }
 
     private func anyResetBackup() -> Bool {

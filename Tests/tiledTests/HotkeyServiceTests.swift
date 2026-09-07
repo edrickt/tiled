@@ -47,6 +47,26 @@ final class HotkeyServiceTests: XCTestCase {
         XCTAssertEqual(HotkeyService.evictBinding.label, "⌥⇧⌫")
     }
 
+    func testUndoComboIsAllFourModifiersPlusZ() {
+        // The menu's undo row and MenuText.undoHotkeyWarning both promise
+        // ⌃⌥⇧⌘Z. Pinned here so a keycode drift cannot make the advertised
+        // combo a dead one.
+        XCTAssertEqual(
+            HotkeyService.undoModifiers,
+            UInt32(controlKey | optionKey | shiftKey | cmdKey))
+        XCTAssertEqual(HotkeyService.undoKeyCode, UInt32(kVK_ANSI_Z))
+        XCTAssertEqual(
+            HotkeyBinding(modifiers: HotkeyService.undoModifiers, keyCode: HotkeyService.undoKeyCode)
+                .label, "⌃⌥⇧⌘Z")
+    }
+
+    func testUndoHotkeyIDCannotCollideWithSlotOrFixedIDs() {
+        XCTAssertLessThan(UInt32(Slot.allCases.count), HotkeyService.undoHotkeyID)
+        XCTAssertNotEqual(HotkeyService.undoHotkeyID, HotkeyService.expandHotkeyID)
+        XCTAssertNotEqual(HotkeyService.undoHotkeyID, HotkeyService.evictHotkeyID)
+        XCTAssertNotEqual(HotkeyService.undoHotkeyID, HotkeyService.settingsHotkeyID)
+    }
+
     func testEvictHotkeyIDCannotCollideWithSlotOrFixedIDs() {
         XCTAssertLessThan(UInt32(Slot.allCases.count), HotkeyService.evictHotkeyID)
         XCTAssertNotEqual(HotkeyService.evictHotkeyID, HotkeyService.expandHotkeyID)
@@ -64,6 +84,39 @@ final class HotkeyServiceTests: XCTestCase {
         for slot in Slot.allCases where slot.layout == .sixths {
             XCTAssertEqual(
                 slot.modifiers, UInt32(shiftKey | optionKey | cmdKey), "\(slot.rawValue)")
+        }
+    }
+
+    func testCarbonEventIDRoutesToTheRightHandler() {
+        // The callback's only routing logic, pinned as a table: every
+        // slot id routes to its slot, each fixed combo to its own route,
+        // and unknown ids route nowhere (eventNotHandledErr — the event
+        // falls through to other apps instead of being swallowed).
+        let slotByID = Dictionary(
+            uniqueKeysWithValues: Slot.allCases.map { ($0.hotkeyID, $0) })
+        XCTAssertEqual(slotByID.count, Slot.allCases.count)
+
+        for slot in Slot.allCases {
+            XCTAssertEqual(
+                HotkeyService.route(forHotKeyID: slot.hotkeyID, slotByID: slotByID),
+                .slot(slot), "\(slot.rawValue)")
+        }
+        XCTAssertEqual(
+            HotkeyService.route(forHotKeyID: HotkeyService.expandHotkeyID, slotByID: slotByID),
+            .expand)
+        XCTAssertEqual(
+            HotkeyService.route(forHotKeyID: HotkeyService.evictHotkeyID, slotByID: slotByID),
+            .evict)
+        XCTAssertEqual(
+            HotkeyService.route(forHotKeyID: HotkeyService.settingsHotkeyID, slotByID: slotByID),
+            .settings)
+        XCTAssertEqual(
+            HotkeyService.route(forHotKeyID: HotkeyService.undoHotkeyID, slotByID: slotByID),
+            .undo)
+        for unknown: UInt32 in [0, 500, 995, 1000] {
+            XCTAssertNil(
+                HotkeyService.route(forHotKeyID: unknown, slotByID: slotByID),
+                "unknown id \(unknown) must fall through")
         }
     }
 }
