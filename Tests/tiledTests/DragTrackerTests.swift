@@ -263,6 +263,32 @@ final class DragTrackerTests: XCTestCase {
 
     // MARK: Stale writes
 
+    func testConvergenceVerdictReadsTheEchoTrail() {
+        // No entry (consumed/takeover/superseded): inconclusive.
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        now += TimeInterval(5)
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        XCTAssertNil(tracker.convergence(for: 1), "consumed entry: inconclusive")
+
+        // Total silence: ignored.
+        tile(2, .topRight, frame: CGRect(x: 840, y: 500, width: 840, height: 500))
+        XCTAssertEqual(tracker.convergence(for: 2), .ignored)
+
+        // A converging tick settles the entry: converged.
+        tile(3, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
+        var echo = CGRect(x: 0, y: 0, width: 840, height: 500)
+        echo.origin.x += 10
+        tracker.handleChange(id: 3, frame: echo)
+        XCTAssertEqual(tracker.convergence(for: 3), .converged)
+
+        // Frames that never approach the target: inconclusive (alive,
+        // leave it alone) — the controller compares live frames.
+        tile(4, .bottomRight, frame: CGRect(x: 840, y: 0, width: 840, height: 500))
+        tracker.handleChange(id: 4, frame: CGRect(x: 0, y: 0, width: 840, height: 300))
+        XCTAssertNil(tracker.convergence(for: 4))
+    }
+
     func testStaleWriteStopsWaitingAndProcessesLaterTicks() {
         tile(1, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
         tile(2, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))

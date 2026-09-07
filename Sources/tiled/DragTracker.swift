@@ -100,6 +100,22 @@ final class DragTracker {
     /// so tests fire drag ends manually instead of waiting on the runloop.
     typealias DragEndScheduler = (_ fire: @escaping () -> Void) -> () -> Void
 
+    /// Delay before a placement write is judged converged or ignored.
+    /// Past the stale-write window (no tick even approached the target),
+    /// with margin for slow apps: animations settle in ~0.5s, so 3.5s of
+    /// total silence means the app ignored the write, not that it is
+    /// still animating.
+    static let verifyDelay: TimeInterval = 3.5
+
+    /// Schedules a convergence check; returns a canceller. Same shape as
+    /// the drag-end scheduler so tests fire verifications manually.
+    static let scheduleVerifyOnMain: DragEndScheduler = { fire in
+        let item = DispatchWorkItem(block: fire)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + DragTracker.verifyDelay, execute: item)
+        return { item.cancel() }
+    }
+
     static let scheduleDragEndOnMain: DragEndScheduler = { fire in
         let item = DispatchWorkItem(block: fire)
         DispatchQueue.main.asyncAfter(
@@ -155,6 +171,20 @@ final class DragTracker {
     /// reported. Lets diffing prefer intent over echoes.
     func lastPushedTarget(for id: WindowID) -> CGRect? {
         expectedFrames[id]?.frame
+    }
+
+    /// Convergence verdict for one pending write, read by the controller's
+    /// late verification. Nil = inconclusive, leave the window alone:
+    /// the entry is gone (consumed by success, cleared by takeover, or
+    /// superseded by a newer write) or frames arrived but never settled.
+    /// `.ignored` = total AX silence since the push: no tick even
+    /// approached the target, so the app ignored the write. `.converged`
+    /// = a tick landed within tolerance of the target.
+    enum Convergence { case converged, ignored }
+    func convergence(for id: WindowID) -> Convergence? {
+        guard let entry = expectedFrames[id] else { return nil }
+        if entry.settled { return .converged }
+        return entry.lastDistance == .infinity ? .ignored : nil
     }
 
     /// Forgets a window: untile, restore, and prune paths call this so

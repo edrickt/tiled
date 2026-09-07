@@ -13,6 +13,9 @@ final class TilingController {
     /// Drag-end debounce scheduler for the tracker's drag-out loop.
     /// Injectable so tests fire drag ends without waiting on the runloop.
     private let scheduleDragEnd: DragTracker.DragEndScheduler
+    /// Convergence-check scheduler for the late silent-ignore verification.
+    /// Injectable so tests fire verifications without waiting 3.5s.
+    private let scheduleVerify: DragTracker.DragEndScheduler
     private lazy var executor = PlanExecutor(
         gateway: gateway, log: { [weak self] in self?.dbg($0) })
 
@@ -158,10 +161,12 @@ final class TilingController {
         gateway: WindowGateway = LiveWindowGateway(),
         pruneInterval: TimeInterval? = 5.0,
         scheduleDragEnd: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleDragEndOnMain,
+        scheduleVerify: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleVerifyOnMain,
         screens: ScreenProvider? = nil
     ) {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
+        self.scheduleVerify = scheduleVerify
         self.screens = screens ?? { NSScreen.screens.enumerated().map { ScreenInfo(appKit: $0.element, index: $0.offset) } }
         // Windows closed while tiled otherwise linger as ghosts until the
         // next hotkey; release their slots within seconds instead.
@@ -289,9 +294,86 @@ final class TilingController {
             $0.notice = outcome.notice
             if let error = outcome.error { $0.error = error }
         }
+        if outcome.error == nil {
+            // Late convergence check: a silent ignore (gateway success,
+            // app never moved) is invisible at write time, so verify one
+            // verify-delay later via the echo trail — no extra AX traffic
+            // on the hot path. Windows that converged, produced any frames,
+            // or were re-written since are skipped; only total silence
+            // rolls back. Cancelled by the next placement's scheduling
+            // (a newer write supersedes) and by forget paths.
+            scheduleVerification(of: decision, requester: id, on: screen)
+        }
         syncLegacySurface(focus: screen)
         pushUndo(snapshot: outcome.snapshot, requester: outcome.requester, on: screen)
         onChange?()
+    }
+
+    /// Pending convergence checks by window: a newer placement for the
+    /// same window supersedes (cancels) the older check, and forget paths
+    /// cancel outright — a verification must never roll back a window
+    /// that already moved on.
+    private var pendingVerifications: [WindowID: () -> Void] = [:]
+
+    private func scheduleVerification(of decision: TilePlan, requester id: WindowID, on screen: ScreenID?) {
+        let placed: [WindowID]
+        switch decision {
+        case .swap(let placements): placed = Array(placements.keys)
+        case .tile, .switchLayout: placed = [id]
+        case .noop: return
+        }
+        scheduleVerification(of: placed, on: screen)
+    }
+
+    /// Schedules one convergence check per window, superseding any pending
+    /// check for the same window: only the latest write is ever judged.
+    private func scheduleVerification(of placed: [WindowID], on screen: ScreenID?) {
+        for window in placed {
+            pendingVerifications[window]?()
+            let checkScreen = screen
+            pendingVerifications[window] = scheduleVerify { [weak self] in
+                self?.pendingVerifications[window] = nil
+                self?.verifyConvergence(window, on: checkScreen)
+            }
+        }
+    }
+
+    private func cancelVerification(_ id: WindowID) {
+        pendingVerifications[id]?()
+        pendingVerifications[id] = nil
+    }
+
+    /// Late silent-ignore check: `scheduleVerification` fires this one
+    /// verify-delay after the placement. Converged / inconclusive /
+    /// re-placed windows are left alone; a window whose write drew total
+    /// AX silence is rolled back exactly like a refused write — slot
+    /// released, tracker entry cleared, standard refusal surfaced — so
+    /// state and screen agree instead of disagreeing silently.
+    private func verifyConvergence(_ id: WindowID, on screen: ScreenID?) {
+        guard records[id] != nil, slotOfWindow(id) != nil else { return }
+        guard tracker.convergence(for: id) == .ignored else { return }
+        let errorScreen = spaceOf(window: id) ?? screen
+        tracker.forget(id)
+        if let errorScreen {
+            var s = spaceState(for: errorScreen)
+            s.remove(window: id)
+            setSpaceState(s, for: errorScreen)
+        }
+        spaceOwnership[id] = nil
+        expanded[id] = nil
+        let name = appName(for: id) ?? "That window"
+        // A later error (e.g. a newer refusal) wins over this late one.
+        // Scoped to the window's own screen: the placement may tile onto
+        // a background display while focus sits elsewhere.
+        if space(for: errorScreen)?.error == nil {
+            mutateSpace(errorScreen) {
+                $0.error = "\(name) couldn't be tiled \u{2014} the app refused to resize it."
+            }
+        }
+        onFeedback?(.refused(windowName: name))
+        syncLegacySurface(focus: errorScreen)
+        onChange?()
+        dbg("verify FAILED win\(id): silent ignore, rolled back")
     }
 
     /// Records a destructive outcome on the undo stack: keeps the
@@ -363,12 +445,16 @@ final class TilingController {
     /// Returns the refusal count. `excluding` names the window whose frame
     /// is the drag's source of truth; it is informational — snapback rects
     /// DO name the (formerly) dragged window, with `excluding` nil.
+    /// Successful pushes schedule the same late convergence check as
+    /// placements: a re-push the app silently ignores rolls back the same
+    /// way. Per-window supersede keeps drag streams to one pending check.
     private func pushRects(_ rects: [WindowID: CGRect], excluding: WindowID?) -> Int {
         var failed = 0
         for (id, target) in rects {
             guard let record = records[id] else { continue }
             tracker.markExpected(id, target)
             if !gateway.setFrame(record.handle, to: target) { failed += 1 }
+            else { scheduleVerification(of: [id], on: spaceOf(window: id)) }
             dbg("push win\(id) target=\(target)")
         }
         if failed > 0 {
@@ -1096,6 +1182,7 @@ final class TilingController {
     /// expansion. Callers handle any frame writes first — this only
     /// forgets. Shared by untile, drag-out untile, prune, and eviction.
     private func forgetWindow(_ id: WindowID) {
+        cancelVerification(id)
         records[id] = nil
         tracker.forget(id)
         if let screen = spaceOf(window: id) {

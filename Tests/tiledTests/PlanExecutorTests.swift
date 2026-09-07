@@ -211,11 +211,11 @@ final class PlanExecutorTests: XCTestCase {
     func testSwapPartnerSilentlyIgnoringCommitsWithoutError() {
         // The dominant real-world refusal shape: the gateway reports
         // success but the app never moves. The executor trusts the
-        // write result, so the exchange commits with no error — state
-        // and screen disagree until the next assertion re-pushes. Pinned
-        // here so the gap is visible: detecting it needs a post-write
-        // frame read-back the executor deliberately skips (an extra AX
-        // round-trip per window per swap).
+        // write result, so the exchange commits with no error at write
+        // time — the controller's late verification (fired here manually
+        // via the injectable scheduler in controller tests) rolls the
+        // ignored window back. Pinned at this level so the write-time
+        // trust is visible; see ControllerGatewayTests for the rollback.
         let a = addWindow()
         let b = addWindow()
         state.commit(window: a, into: .topLeft)

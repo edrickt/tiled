@@ -14,19 +14,30 @@ final class ControllerGatewayTests: XCTestCase {
     private var controller: TilingController!
     /// Drag-end fires captured from the injectable scheduler (latest wins).
     private var dragEndFires: [() -> Void] = []
+    /// Convergence verifications captured from the injectable scheduler.
+    private var verifyFires: [() -> Void] = []
+    /// How many scheduled verifications were cancelled (superseded).
+    private var verifyCancels = 0
 
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
         dragEndFires = []
+        verifyFires = []
+        verifyCancels = 0
         // No runloop timer: tests drive pruneDeadWindows directly so a
-        // live 5-second timer can't fire mid-test. Drag ends fire via the
-        // captured scheduler instead of the runloop.
+        // live 5-second timer can't fire mid-test. Drag ends and
+        // convergence checks fire via the captured schedulers instead
+        // of the runloop.
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             scheduleDragEnd: { [weak self] fire in
                 self?.dragEndFires.append(fire)
                 return {}
+            },
+            scheduleVerify: { [weak self] fire in
+                self?.verifyFires.append(fire)
+                return { self?.verifyCancels += 1 }
             })
     }
 
@@ -452,5 +463,126 @@ final class ControllerGatewayTests: XCTestCase {
 
         XCTAssertNil(controller.state.slot(of: 1))
         XCTAssertEqual(controller.state.occupant(of: .topRight), 2)
+    }
+
+    // MARK: Convergence verification (silent ignores)
+
+    func testConvergedWriteSurvivesVerification() {
+        // The app applies the write (echo tick converges): the late
+        // check sees a settled entry and leaves the tile alone.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tiledFrame = gateway.frame(of: handle)!
+        gateway.simulateChange(handle, to: tiledFrame) // echo converges
+        XCTAssertFalse(verifyFires.isEmpty, "placements schedule a check")
+
+        verifyFires.last?()
+
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        XCTAssertNil(controller.lastTileError)
+    }
+
+    func testSilentIgnoreRollsBackAtVerification() {
+        // The gateway reports success but the app never moves: total AX
+        // silence past the check, so the tile rolls back exactly like a
+        // refused write — slot released, standard refusal surfaced.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        gateway.silentIgnore.insert(handle)
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft, "commits at write time")
+
+        verifyFires.last?()
+
+        XCTAssertNil(controller.state.slot(of: 1), "rolled back like a refusal")
+        XCTAssertNotNil(controller.lastTileError)
+    }
+
+    func testUserDragBeforeVerificationLeavesTheWindowAlone() {
+        // The app produces frames (user grabbed the window mid-flight):
+        // inconclusive, never a rollback — a takeover is activity, not
+        // an ignore.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        var dragged = gateway.frame(of: handle)!
+        dragged.origin.x += 200
+        dragged.origin.y += 200
+        gateway.simulateChange(handle, to: dragged) // escapes: takeover
+
+        verifyFires.last?()
+
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        XCTAssertNil(controller.lastTileError)
+    }
+
+    func testNewerPlacementSupersedesItsVerification() {
+        // A second placement cancels the first check: the stale fire
+        // never runs in production, and the window keeps its new tile.
+        // Firing the current (second) check rolls back the ignored
+        // second write instead — each check judges only its own write.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        gateway.silentIgnore.insert(handle)
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(verifyFires.count, 1)
+        controller.handle(slot: .topRight)
+        XCTAssertEqual(verifyCancels, 1, "the first check was superseded")
+        XCTAssertEqual(
+            controller.state.slot(of: 1), .topRight,
+            "the superseded check rolls back nothing")
+        verifyFires.last?()
+        XCTAssertNil(
+            controller.state.slot(of: 1),
+            "the second check judges the second (also ignored) write")
+    }
+
+    func testUntileBeforeVerificationCancelsTheCheck() {
+        // The window is untiled before its check fires: the forget path
+        // cancels, so the late fire is a safe no-op, not a stray error.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        gateway.silentIgnore.insert(handle)
+        controller.handle(slot: .topLeft)
+        controller.untile(window: 1)
+        XCTAssertTrue(controller.state.occupants.isEmpty)
+
+        verifyFires.last?()
+
+        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertNil(controller.lastTileError)
+    }
+
+    func testSwapRollsBackOnlyTheIgnoredPartner() {
+        // Two windows exchange; the requester converges (echo tick) but
+        // the partner never moves. Verification rolls back exactly the
+        // silent window — the converged requester keeps its new tile.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+        verifyFires.removeAll()
+
+        gateway.silentIgnore.insert(b)
+        gateway.focused = a
+        controller.handle(slot: .topRight)
+        XCTAssertEqual(controller.state.slot(of: 1), .topRight)
+        XCTAssertEqual(controller.state.slot(of: 2), .topLeft)
+        // The requester's write converges; the partner stays silent.
+        gateway.simulateChange(a, to: gateway.frame(of: a)!)
+        XCTAssertEqual(verifyFires.count, 2)
+
+        for fire in verifyFires { fire() }
+
+        XCTAssertEqual(
+            controller.state.slot(of: 1), .topRight,
+            "the converged requester keeps its tile")
+        XCTAssertNil(
+            controller.state.slot(of: 2),
+            "the silent partner rolls back like a refusal")
+        XCTAssertNotNil(controller.lastTileError)
     }
 }
