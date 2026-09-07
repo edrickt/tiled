@@ -106,7 +106,7 @@ struct HotkeyBinding: Equatable {
 
 /// Display names and menu groupings for slots. Lives beside the hotkey
 /// model because nearly every consumer is hotkey UI (menu, Settings rows,
-/// announcements) - the one exception is the controller's two status
+/// announcements); the one exception is the controller's two status
 /// lines, which read through this too so wording changes in one place.
 /// `Slot` itself keeps only geometry (cells, layout, overlap).
 enum SlotPresentation {
@@ -134,7 +134,7 @@ enum SlotPresentation {
 
     /// Quarters submenu groupings: 6 flat items under one header push the
     /// chunking limit, so the menu splits them the same way sixths are
-    /// chunked - quads first, then the two halves.
+    /// chunked: quads first, then the two halves.
     static var quartersQuads: [Slot] {
         [.topLeft, .topRight, .bottomLeft, .bottomRight]
     }

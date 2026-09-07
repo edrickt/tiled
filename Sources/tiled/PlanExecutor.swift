@@ -29,8 +29,8 @@ struct EvictedWindow {
 /// Previously interleaved with focus, prune, and dispatch inside
 /// `TilingController.handle`; the real bugs hid in how the branches
 /// shared snapshot and error state, not in any one branch. Now the whole
-/// execution - deciding writes, performing them via the gateway and
-/// tracker, and reporting refusals - lives behind `execute`, testable
+/// execution (deciding writes, performing them via the gateway and
+/// tracker, and reporting refusals) lives behind `execute`, testable
 /// through it with a fake gateway.
 ///
 /// The controller keeps focus resolution, ghost pruning, and change
@@ -43,7 +43,7 @@ final class PlanExecutor {
         var error: String?
         /// One-step undo for any destructive plan: the windows displaced to
         /// make room, rebuilt from live handles on undo. Layout switches
-        /// and ordinary evictions share one recovery path - the more
+        /// and ordinary evictions share one recovery path: the more
         /// frequent, silent eviction is exactly the case that needs it.
         var snapshot: [EvictedWindow]?
         var requester: WindowID?
@@ -71,7 +71,7 @@ final class PlanExecutor {
     /// `screen` names the tiling space every placement belongs to (the
     /// plan was decided over one space's state, so all its windows share
     /// one display): every slot-rect write derives from that screen's
-    /// splitter grid. Nil - headless tests and legacy snapshots - selects
+    /// splitter grid. Nil (headless tests and legacy snapshots) selects
     /// the legacy shared grid.
     func execute(
         decision: TilePlan, requester id: WindowID, slot: Slot,
@@ -85,7 +85,7 @@ final class PlanExecutor {
         var records = records
         // The eviction notice names the displaced app when known: the
         // user's first question after a surprise eviction is "where did
-        // Safari go?" - a count answers bookkeeping, not memory. One
+        // Safari go?"; a count answers bookkeeping, not memory. One
         // named app reads alone; more read as first-plus-count.
         let evictionNames = { [self] (evicted: [WindowID]) in
             evicted.compactMap { appName(for: $0, records: records) }
@@ -98,7 +98,7 @@ final class PlanExecutor {
             // or the whole exchange is called off. Writes go in slot
             // reading order (top-to-bottom, left-to-right) so the write
             // sequence is deterministic, and on any refusal every window
-            // is written back to its pre-swap frame - a refused exchange
+            // is written back to its pre-swap frame: a refused exchange
             // must never leave two windows stacked in one tile (the
             // refused window's frame never vacated it) or a half-moved
             // shuffle behind. State stays untouched on refusal: the
@@ -133,7 +133,7 @@ final class PlanExecutor {
                 // that already moved return to where they were), in the
                 // same reading order as the writes so the rollback itself
                 // is deterministic. Echo bookkeeping follows the restored
-                // frames - nobody is forgotten, everyone is still tiled
+                // frames: nobody is forgotten, everyone is still tiled
                 // at their old slot.
                 var rollbackFailures: [WindowID] = []
                 for (window, _) in ordered {
@@ -152,7 +152,7 @@ final class PlanExecutor {
                     // A refused rollback is worse than a refused swap: the
                     // exchange was called off in state (old slots kept),
                     // but a window whose restore was refused sits at its
-                    // attempted swap position - state and screen disagree
+                    // attempted swap position: state and screen disagree
                     // until the user is told. The transient class was
                     // already retried at the gateway, so this is a real
                     // refusal; name it and let the error override the
@@ -192,7 +192,7 @@ final class PlanExecutor {
                 // Narrate the event AND the recovery: the notice is the
                 // hotkey user's only record of a mass-untile, and the
                 // undo row may sit below the fold. One sentence, one
-                // cue - no menu-title splicing, just the combo.
+                // cue: no menu-title splicing, just the combo.
                 outcome.notice =
                     "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. " +
                     "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
@@ -229,7 +229,7 @@ final class PlanExecutor {
             if placeResult.error == nil, restoreFailures.isEmpty, !evicted.isEmpty {
                 // Ordinary eviction gets the same narrative as a layout
                 // switch: a notice naming the displaced app plus the shared
-                // one-step undo. The switch was never special - it was
+                // one-step undo. The switch was never special; it was
                 // just the first destruction anyone bothered to narrate.
                 outcome.snapshot = snapshot
                 outcome.requester = id
@@ -258,7 +258,7 @@ final class PlanExecutor {
         var restored = 0
         for entry in snapshot {
             // Skip confirmed deaths only: an unknown liveness (busy app)
-            // still attempts the restore - the write re-probes, and a
+            // still attempts the restore: the write re-probes, and a
             // failed attempt is reported, not silently skipped.
             guard gateway.liveness(of: entry.handle) != .dead else { continue }
             // Handles whose records were pruned need fresh ids, issued
@@ -282,7 +282,7 @@ final class PlanExecutor {
             // whose windows still sit at their pre-tile frames, or a
             // settle frame the gateway applied late): skip the write and
             // count it restored. Rewriting an identical frame is not just
-            // wasteful - on a settling window it re-arms echo tracking
+            // wasteful: on a settling window it re-arms echo tracking
             // and risks a phantom drag-out. The grid is the destination
             // screen's, not the legacy shared one.
             if let record = records[id],
@@ -308,7 +308,7 @@ final class PlanExecutor {
             // The undo itself must not push a new chapter: restoration is
             // the consumption of history, not a new destruction. (The
             // controller pops before calling, so the only way a push
-            // could happen here is a nested execute - which never does.)
+            // could happen here is a nested execute, which never does.)
             return ("Undid displacement \u{00B7} \(noun) restored.", nil, state, records, nextID)
         }
         return (nil, "Couldn't restore the evicted windows.", state, records, nextID)
@@ -319,7 +319,7 @@ final class PlanExecutor {
     /// One snapshot entry per displaced window, captured before the
     /// restore deletes its record: the handle to find it again, the slot
     /// to return it to, the frame it held before tiling. `fallback` is
-    /// the slot to use when occupancy is already gone by capture time -
+    /// the slot to use when occupancy is already gone by capture time;
     /// only the switch branch knows the requested slot.
     private static func snapshotEntry(
         for evictedID: WindowID, state: TilingState, records: [WindowID: WindowRecord],
@@ -335,7 +335,7 @@ final class PlanExecutor {
     /// The eviction notice: names the displaced app when known ("where
     /// did Safari go?" beats "1 window moved"), plus the shared
     /// one-step undo with its global reach. Falls back to the real
-    /// evicted count when the gateway names nothing - never a hardcoded
+    /// evicted count when the gateway names nothing: never a hardcoded
     /// "1 window" for N unnamed windows.
     private static func evictionNotice(names: [String], count: Int) -> String {
         let head: String
@@ -383,7 +383,7 @@ final class PlanExecutor {
             let name = appName(for: id, records: records) ?? "That window"
             log("place FAILED win\(id) -> \(slot.rawValue)")
             return (
-                "\(name) couldn't be tiled - the app refused to resize it.",
+                "\(name) couldn't be tiled: the app refused to resize it.",
                 .refused(windowName: name))
         }
         log("place win\(id) -> \(slot.rawValue)")
@@ -430,10 +430,10 @@ final class PlanExecutor {
         guard !failures.isEmpty, error == nil else { return }
         if failures.count == 1 {
             error =
-                "Couldn't restore “\(failures[0])” - it may still be sitting in its old tile."
+                "Couldn't restore “\(failures[0])”: it may still be sitting in its old tile."
         } else {
             error =
-                "Couldn't restore \(failures.count) windows - they may still be sitting in their old tiles."
+                "Couldn't restore \(failures.count) windows: they may still be sitting in their old tiles."
         }
     }
 
@@ -472,8 +472,8 @@ final class PlanExecutor {
 
     private static func refusalMessage(count: Int) -> String {
         count == 1
-            ? "Couldn't move that window - the app refused to resize it."
-            : "Couldn't move \(count) windows - an app refused to resize."
+            ? "Couldn't move that window: the app refused to resize it."
+            : "Couldn't move \(count) windows: an app refused to resize."
     }
 
     /// Swap refusals name the app like the tile path does: same failure
@@ -482,11 +482,11 @@ final class PlanExecutor {
     private static func swapRefusalMessage(names: [String]) -> String {
         switch names.count {
         case 0:
-            return "Couldn't move that window - the app refused to resize it."
+            return "Couldn't move that window: the app refused to resize it."
         case 1:
-            return "\(names[0]) couldn't be swapped - the app refused to resize it."
+            return "\(names[0]) couldn't be swapped: the app refused to resize it."
         default:
-            return "\(names[0]) and \(names.count - 1) more couldn't be swapped - "
+            return "\(names[0]) and \(names.count - 1) more couldn't be swapped: "
                 + "an app refused to resize."
         }
     }
@@ -505,11 +505,11 @@ final class PlanExecutor {
     private static func swapRollbackMessage(names: [String]) -> String {
         switch names.count {
         case 0:
-            return "The swap was refused, and some windows couldn't be moved back - they may be in the wrong tiles."
+            return "The swap was refused, and some windows couldn't be moved back; they may be in the wrong tiles."
         case 1:
-            return "The swap was refused, and \(names[0]) couldn't be moved back - it may be in the wrong tile."
+            return "The swap was refused, and \(names[0]) couldn't be moved back; it may be in the wrong tile."
         default:
-            return "The swap was refused, and \(names.count) windows couldn't be moved back - they may be in the wrong tiles."
+            return "The swap was refused, and \(names.count) windows couldn't be moved back; they may be in the wrong tiles."
         }
     }
 }

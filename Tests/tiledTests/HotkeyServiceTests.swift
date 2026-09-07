@@ -40,7 +40,7 @@ final class HotkeyServiceTests: XCTestCase {
     }
 
     func testEvictComboIsOptionShiftDelete() {
-        // Fixed like expand's ⌥⇧⏎ - sits beside the quarters ⌥⇧ set but
+        // Fixed like expand's ⌥⇧⏎: it sits beside the quarters ⌥⇧ set but
         // on ⌫ (kVK_Delete), which no slot uses.
         XCTAssertEqual(HotkeyService.evictModifiers, UInt32(shiftKey | optionKey))
         XCTAssertEqual(HotkeyService.evictKeyCode, UInt32(kVK_Delete))
@@ -90,7 +90,7 @@ final class HotkeyServiceTests: XCTestCase {
     func testCarbonEventIDRoutesToTheRightHandler() {
         // The callback's only routing logic, pinned as a table: every
         // slot id routes to its slot, each fixed combo to its own route,
-        // and unknown ids route nowhere (eventNotHandledErr - the event
+        // and unknown ids route nowhere (eventNotHandledErr; the event
         // falls through to other apps instead of being swallowed).
         let slotByID = Dictionary(
             uniqueKeysWithValues: Slot.allCases.map { ($0.hotkeyID, $0) })

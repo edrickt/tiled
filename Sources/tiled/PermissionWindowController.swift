@@ -2,7 +2,7 @@ import AppKit
 
 /// Launch permission window: explains why Tiled needs Accessibility and
 /// hands the user one button into the System Settings pane. Replaces the
-/// automatic system prompt - the request arrives with the product's own
+/// automatic system prompt: the request arrives with the product's own
 /// explanation, and granting is an explicit click, never a surprise
 /// dialog the user can't attribute.
 ///
@@ -95,12 +95,12 @@ final class PermissionWindowController: NSWindowController {
 
         let body = NSTextField(wrappingLabelWithString:
             "Tiling, drag-resize, and window tracking run on the Accessibility API. " +
-            "Tiled reads window positions and sizes only - never window contents.")
+            "Tiled reads window positions and sizes only, never window contents.")
         body.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         body.textColor = .secondaryLabelColor
         body.alignment = .center
         // Own narrower measure: the centered stacks size to content, so
-        // the container insets alone don't bind this line - without a
+        // the container insets alone don't bind this line; without a
         // cap it spans the full content width, edge to edge.
         body.widthAnchor.constraint(lessThanOrEqualToConstant: 320).isActive = true
         body.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -108,12 +108,12 @@ final class PermissionWindowController: NSWindowController {
 
         // The grant as numbered steps, ending on the self-closing promise:
         // the poll dismisses this window the moment trust arrives, so say
-        // so - nobody should wonder whether they must come back and
+        // so; nobody should wonder whether they must come back and
         // confirm.
         let steps = NSTextField(wrappingLabelWithString:
             "1. Open Accessibility Settings below.\n" +
             "2. Turn on Tiled.\n" +
-            "3. Return here - this window closes itself.")
+            "3. Return here; this window closes itself.")
         steps.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         // Left-aligned text in a centered block: the field sizes to its
         // longest line and centers on the window, while the step numbers

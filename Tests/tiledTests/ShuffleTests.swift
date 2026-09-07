@@ -4,7 +4,7 @@ import XCTest
 /// Rigorous coverage for shuffling: the swap/exchange path of the tiling
 /// engine (`TilePlan.swap` + `TilingState.commitSwaps`).
 ///
-/// There is no dedicated "shuffle" affordance in the app - shuffling IS the
+/// There is no dedicated "shuffle" affordance in the app: shuffling IS the
 /// swap rule: when a tiled window requests an occupied slot and every
 /// overlapping window fits into the footprint it vacates, the windows
 /// exchange places and nobody is untiled. These tests pin that contract
@@ -175,7 +175,7 @@ final class ShuffleTests: XCTestCase {
             // Growth shape: the requester lands on the target and each
             // mate grows to exactly its merged slot (old slot plus the
             // vacated hole). The grown slot legitimately escapes the
-            // vacated footprint - it takes the mate's own cells too.
+            // vacated footprint: it takes the mate's own cells too.
             XCTAssertEqual(
                 placements[requester], target, "\(context): requester not on target",
                 file: file, line: line)
@@ -235,8 +235,8 @@ final class ShuffleTests: XCTestCase {
     }
 
     /// Independent oracle for the swap/evict decision: plain product
-    /// enumeration over candidate slots in raw allCases order - no
-    /// largest-first heuristic, no pruning beyond disjointness - returning
+    /// enumeration over candidate slots in raw allCases order (no
+    /// largest-first heuristic, no pruning beyond disjointness), returning
     /// an actual assignment when one exists. Agrees with the solver on
     /// success/failure iff the solver neither under- nor over-swaps.
     private static func bruteForceAssign(
@@ -420,7 +420,7 @@ final class ShuffleTests: XCTestCase {
 
     func testBlockerInheritsVacatedHalf() {
         // a=LeftHalf -> TR (occupied b): free is the whole left half, so b
-        // takes over the entire half - halves stay halves when possible
+        // takes over the entire half; halves stay halves when possible
         // (largest-first preference), not two quads.
         var (state, _) = occupy([.leftHalf, .topRight])
         let plan = state.plan(window: a, into: .topRight)
@@ -592,7 +592,7 @@ final class ShuffleTests: XCTestCase {
 
     func testFreshRequesterReflowsInsteadOfEvicting() {
         // An untiled window vacates nothing, so the legacy swap never
-        // applies - but the reflow still does: TL+BR tiled, fresh 99 takes
+        // applies, but the reflow still does: TL+BR tiled, fresh 99 takes
         // BR while a takes the left half and b the top-right quad; sixths
         // mirror with the untouched left third staying put and the
         // blocking right third sliding to the middle.
@@ -610,9 +610,9 @@ final class ShuffleTests: XCTestCase {
         // Plan purity: calling plan() must not mutate state, and within
         // one process the same request against the same state must
         // produce the same plan (the solver sorts blockers and breaks
-        // size ties by slot order). Cross-process order independence -
-        // Swift randomizes dictionary order per process, so this check
-        // cannot see it - is covered by the tiling-order tests and the
+        // size ties by slot order). Cross-process order independence
+        // (Swift randomizes dictionary order per process, so this check
+        // cannot see it) is covered by the tiling-order tests and the
         // fuzz walk, whose occupants are always committed in varied id
         // orders and asserted in reading order.
         let configs: [[Slot]] = [
@@ -848,7 +848,7 @@ final class ShuffleTests: XCTestCase {
     }
 
     func testQuartersSplitIgnoresTilingOrder() {
-        // Same visual layout - TL + BL + RH - tiled in opposite orders.
+        // Same visual layout (TL + BL + RH) tiled in opposite orders.
         // RH -> LH must split top-stays-top either way: the TL window
         // takes TR, the BL window takes BR, no matter who was tiled first.
         var early = TilingState()
@@ -909,7 +909,7 @@ final class ShuffleTests: XCTestCase {
 
     // MARK: Deterministic fuzz walk
 
-    /// Seeded PRNG (LCG): the walk is fully deterministic - same seed,
+    /// Seeded PRNG (LCG): the walk is fully deterministic: same seed,
     /// same 3000 requests, same assertions, every run.
     private struct DeterministicRNG {
         var state: UInt64 = 0x123456789ABCDEF

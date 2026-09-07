@@ -2,7 +2,7 @@ import XCTest
 @testable import tiled
 
 /// PlanExecutor through its own interface: branch execution (tile, swap,
-/// switch), refusal rollback, restore-failure precedence, and undo - with
+/// switch), refusal rollback, restore-failure precedence, and undo, with
 /// a fake gateway and a real DragTracker. No controller, no AX.
 final class PlanExecutorTests: XCTestCase {
     private var gateway: FakeWindowGateway!
@@ -206,7 +206,7 @@ final class PlanExecutorTests: XCTestCase {
             requester: a, slot: .topRight))
 
         XCTAssertEqual(
-            outcome.error, "TestApp couldn't be swapped - the app refused to resize it.")
+            outcome.error, "TestApp couldn't be swapped: the app refused to resize it.")
         XCTAssertNotNil(outcome.feedback)
         if case .refused(let name) = outcome.feedback {
             // Same failure class as a tile refusal, same attribution: the
@@ -216,7 +216,7 @@ final class PlanExecutorTests: XCTestCase {
             XCTFail("swap refusal must carry named feedback")
         }
         // A swap is atomic: a refused exchange moves nobody. b's write to
-        // top left succeeded, but the rollback returns it - otherwise a
+        // top left succeeded, but the rollback returns it; otherwise a
         // (still at top left's pixels) and b would stack in one tile.
         XCTAssertEqual(state.slot(of: a), .topLeft)
         XCTAssertEqual(state.slot(of: b), .topRight)
@@ -227,7 +227,7 @@ final class PlanExecutorTests: XCTestCase {
     func testFailedRollbackSurfacesItsOwnError() {
         // A refusal stacked on a refusal: a refuses its swap write (calling
         // the exchange off) AND its own rollback write. The transient class
-        // is already retried at the gateway, so this is a hard refusal -
+        // is already retried at the gateway, so this is a hard refusal;
         // the plain refusal message would understate it: a's restore never
         // landed, so state and screen may disagree. The error must say so.
         let a = addWindow()
@@ -248,14 +248,14 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: handles[b]!), bOriginal, "b's rollback succeeded")
         XCTAssertEqual(
             outcome.error,
-            "The swap was refused, and TestApp couldn't be moved back - it may be in the wrong tile.")
+            "The swap was refused, and TestApp couldn't be moved back; it may be in the wrong tile.")
     }
 
     func testSwapPartnerSilentlyIgnoringCommitsWithoutError() {
         // The dominant real-world refusal shape: the gateway reports
         // success but the app never moves. The executor trusts the
         // write result, so the exchange commits with no error at write
-        // time - the controller's late verification (fired here manually
+        // time; the controller's late verification (fired here manually
         // via the injectable scheduler in controller tests) rolls the
         // ignored window back. Pinned at this level so the write-time
         // trust is visible; see ControllerGatewayTests for the rollback.
@@ -342,7 +342,7 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertEqual(notice, "Undid displacement \u{00B7} 1 window restored.")
         XCTAssertNil(error)
         XCTAssertEqual(state.occupant(of: .topLeft).flatMap { records[$0]?.handle }, handles[a],
-            "evicted window returns to its slot (under a fresh id - its record was pruned at switch)")
+            "evicted window returns to its slot (under a fresh id; its record was pruned at switch)")
     }
 
     func testUndoAttemptsRestoreForBusyWindows() {
@@ -413,7 +413,7 @@ final class PlanExecutorTests: XCTestCase {
             requester: a, slot: .topRight))
 
         XCTAssertEqual(
-            outcome.error, "TestApp and 1 more couldn't be swapped - an app refused to resize.")
+            outcome.error, "TestApp and 1 more couldn't be swapped: an app refused to resize.")
         // Atomic: both writes refused, nothing moved at all.
         XCTAssertEqual(state.slot(of: a), .topLeft)
         XCTAssertEqual(state.slot(of: b), .topRight)

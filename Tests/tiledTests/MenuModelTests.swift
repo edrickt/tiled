@@ -59,7 +59,7 @@ final class MenuModelTests: XCTestCase {
             hasHotkeyWarnings: true))
         // One summary row, not one row per warning: the menu's first
         // screenful is the everyday surface, not a troubleshooting essay.
-        XCTAssertEqual(model.first?.title, "⚠ 1 shortcut problem - other apps own it")
+        XCTAssertEqual(model.first?.title, "⚠ 1 shortcut problem: other apps own it")
         XCTAssertFalse(model.first!.isEnabled)
         // The compass survives trouble: the summary rides above the status line.
         XCTAssertTrue(
@@ -87,17 +87,17 @@ final class MenuModelTests: XCTestCase {
             tileError: "Safari couldn't be tiled",
             hasHotkeyWarnings: true))
         XCTAssertEqual(model[0].title, "Safari couldn't be tiled")
-        XCTAssertEqual(model[1].title, "⚠ 1 shortcut problem - other apps own it")
+        XCTAssertEqual(model[1].title, "⚠ 1 shortcut problem: other apps own it")
         XCTAssertEqual(model[2].title, "Open Shortcuts…")
     }
 
     func testWarningSummaryCounts() {
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 1),
-            "⚠ 1 shortcut problem - other apps own it")
+            "⚠ 1 shortcut problem: other apps own it")
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 3),
-            "⚠ 3 shortcut problems - other apps own them")
+            "⚠ 3 shortcut problems: other apps own them")
     }
 
     func testExpandRowReflectsExpandedState() {
@@ -105,21 +105,21 @@ final class MenuModelTests: XCTestCase {
         let plain = items(snapshot())
         XCTAssertEqual(
             plain.first { $0.action == .toggleExpand }?.title,
-            "Expand to Fill Screen - ⌥⇧⏎")
+            "Expand to Fill Screen · ⌥⇧⏎")
         // Stateful toggle: with an expanded focused window the row says
-        // where the toggle goes back - no guessing what it does now.
+        // where the toggle goes back: no guessing what it does now.
         let expanded = items(snapshot(expandedSlot: .leftHalf))
         XCTAssertEqual(
             expanded.first { $0.action == .toggleExpand }?.title,
-            "Return to Left Half - ⌥⇧⏎")
+            "Return to Left Half · ⌥⇧⏎")
     }
 
     func testHotkeyWarningsGrowAnOpenShortcutsRow() {
         let model = items(snapshot(
-            warnings: ["⌥⇧U is already used by another app - “Top Left” has no hotkey."],
+            warnings: ["⌥⇧U is already used by another app; “Top Left” has no hotkey."],
             hasHotkeyWarnings: true))
         let warnings = model.prefix(2).map(\.title)
-        XCTAssertEqual(warnings[0], "⚠ 1 shortcut problem - other apps own it")
+        XCTAssertEqual(warnings[0], "⚠ 1 shortcut problem: other apps own it")
         // A disabled row can't fix itself: the actionable row follows,
         // opening exactly the tab that can rebind it.
         XCTAssertEqual(warnings[1], "Open Shortcuts…")
@@ -129,7 +129,7 @@ final class MenuModelTests: XCTestCase {
 
     func testCollapsedWarningsKeepSingleRowForMany() {
         let model = items(snapshot(warnings: ["a", "b", "c"]))
-        XCTAssertEqual(model.prefix(1).map(\.title), ["⚠ 3 shortcut problems - other apps own them"])
+        XCTAssertEqual(model.prefix(1).map(\.title), ["⚠ 3 shortcut problems: other apps own them"])
         XCTAssertTrue(model.prefix(1).allSatisfy { !$0.isEnabled })
     }
 
@@ -154,7 +154,7 @@ final class MenuModelTests: XCTestCase {
         let quarters = tileSubmenu(items(snapshot(activeLayout: .quarters)))!
         let qChildren = quarters.children!
         let qHeaders = qChildren.filter(\.isHeader).map(\.title)
-        XCTAssertEqual(qHeaders, ["Quarters - Quads", "Halves"])
+        XCTAssertEqual(qHeaders, ["Quarters · Quads", "Halves"])
         let qSlots = qChildren.compactMap {
             if case .tileSlot(let slot)? = $0.action { return slot }
             return nil
@@ -171,13 +171,13 @@ final class MenuModelTests: XCTestCase {
         let uSwitch = uTile.children!.first { $0.action == .switchToSixths }
         XCTAssertEqual(uSwitch?.isEnabled, false)
         XCTAssertEqual(
-            uSwitch?.disabledReason, "Needs a focused window - click a window first.")
+            uSwitch?.disabledReason, "Needs a focused window: click a window first.")
 
         // Sixths on screen: corners + thirds + two-thirds + one row back.
         let sixths = tileSubmenu(items(snapshot(activeLayout: .sixths)))!
         let sChildren = sixths.children!
         let sHeaders = sChildren.filter(\.isHeader).map(\.title)
-        XCTAssertEqual(sHeaders, ["Sixths - Corners", "Thirds", "Two-Thirds"])
+        XCTAssertEqual(sHeaders, ["Sixths · Corners", "Thirds", "Two-Thirds"])
         let sSlots = sChildren.compactMap {
             if case .tileSlot(let slot)? = $0.action { return slot }
             return nil
@@ -199,7 +199,7 @@ final class MenuModelTests: XCTestCase {
         ]))
         let expandIndex = model.firstIndex { $0.action == .toggleExpand }
         XCTAssertNotNil(expandIndex)
-        XCTAssertEqual(model[expandIndex!].title, "Expand to Fill Screen - ⌥⇧⏎")
+        XCTAssertEqual(model[expandIndex!].title, "Expand to Fill Screen · ⌥⇧⏎")
         let tileIndex = model.firstIndex { $0.title == "Tile Focused Window" }!
         XCTAssertEqual(expandIndex, tileIndex + 1, "the expand row follows the tile submenu")
     }
@@ -214,7 +214,7 @@ final class MenuModelTests: XCTestCase {
         ]))
         let evictIndex = model.firstIndex { $0.action == .evictFocusedWindow }
         XCTAssertNotNil(evictIndex)
-        XCTAssertEqual(model[evictIndex!].title, "Evict Focused Window - ⌥⇧⌫")
+        XCTAssertEqual(model[evictIndex!].title, "Evict Focused Window · ⌥⇧⌫")
         let expandIndex = model.firstIndex { $0.action == .toggleExpand }!
         XCTAssertEqual(evictIndex, expandIndex + 1, "the evict row follows the expand row")
     }
@@ -238,7 +238,7 @@ final class MenuModelTests: XCTestCase {
         }
         let tile = model.first { $0.title == "Tile Focused Window" }!
         let topLeft = tile.children!.first { $0.title.contains("Top Left Sixth") }!
-        XCTAssertEqual(topLeft.title, "Top Left Sixth - ⌥Q")
+        XCTAssertEqual(topLeft.title, "Top Left Sixth · ⌥Q")
         XCTAssertEqual(topLeft.action, .tileSlot(.sixthTopLeft))
         // A disabled slot (nil label) still renders, without a combo.
         let disabled = tile.children!.first { $0.title.contains("Right Third") }!
@@ -252,7 +252,7 @@ final class MenuModelTests: XCTestCase {
             .init(id: 7, slot: .leftHalf, appName: "Safari"),
         ]))
         let row = model.first { $0.title.contains("Left Half") }!
-        XCTAssertEqual(row.title, "Left Half - Safari (⌥⇧J)")
+        XCTAssertEqual(row.title, "Left Half · Safari (⌥⇧J)")
         XCTAssertEqual(row.action, nil, "the row itself doesn't act")
         XCTAssertEqual(row.children?.map(\.title), [
             "Untile This Window", "Focus Safari", "Tile Focused Window Here",
@@ -278,7 +278,7 @@ final class MenuModelTests: XCTestCase {
             ],
             canUndoDisplacement: true, evictedCount: 2))
         let undo = withUndo.first { $0.action == .undoSwitch }
-        XCTAssertEqual(undo?.title, "Restore 2 Evicted Windows - \u{2303}\u{2325}\u{21E7}\u{2318}Z")
+        XCTAssertEqual(undo?.title, "Restore 2 Evicted Windows · \u{2303}\u{2325}\u{21E7}\u{2318}Z")
         XCTAssertEqual(undo?.keyEquivalent, "", "the true combo lives in the title, not a ⌘Z glyph")
 
         let withoutUndo = items(snapshot(
@@ -315,18 +315,18 @@ final class MenuModelTests: XCTestCase {
             .init(id: 2, slot: .topLeft, appName: "Mail", screenName: "Display 2"),
         ])
         snap.monitorSections = [
-            .init(title: "Display 1 - Quarters · 1 tiled", key: "Display 1"),
-            .init(title: "Display 2 - Sixths · 1 tiled", key: "Display 2"),
+            .init(title: "Display 1 · Quarters · 1 tiled", key: "Display 1"),
+            .init(title: "Display 2 · Sixths · 1 tiled", key: "Display 2"),
         ]
         let model = items(snap)
         let headers = model.filter(\.isHeader).map(\.title)
-        XCTAssertTrue(headers.contains("Display 1 - Quarters · 1 tiled"))
-        XCTAssertTrue(headers.contains("Display 2 - Sixths · 1 tiled"))
+        XCTAssertTrue(headers.contains("Display 1 · Quarters · 1 tiled"))
+        XCTAssertTrue(headers.contains("Display 2 · Sixths · 1 tiled"))
         // Rows follow their header in order: Safari under Display 1,
         // Mail under Display 2.
         let titles = model.map(\.title)
-        let first = titles.firstIndex(of: "Display 1 - Quarters · 1 tiled")!
-        let second = titles.firstIndex(of: "Display 2 - Sixths · 1 tiled")!
+        let first = titles.firstIndex(of: "Display 1 · Quarters · 1 tiled")!
+        let second = titles.firstIndex(of: "Display 2 · Sixths · 1 tiled")!
         XCTAssertTrue(titles[first + 1].contains("Safari"))
         XCTAssertTrue(titles[second + 1].contains("Mail"))
     }
@@ -343,7 +343,7 @@ final class MenuModelTests: XCTestCase {
     func testOrphanRowWithMismatchedSectionKeyStillRenders() {
         // Defensive tail: a stale snapshot can carry a window whose
         // screenName matches no section header. The row must still
-        // render (trailing, after the matched sections) - silently
+        // render (trailing, after the matched sections), silently
         // dropping a user's window from the manage list is the one
         // failure this branch exists to prevent.
         var snap = snapshot(tiledWindows: [
@@ -351,7 +351,7 @@ final class MenuModelTests: XCTestCase {
             .init(id: 2, slot: .sixthTopLeft, appName: "Orphan", screenName: "Display 2"),
         ])
         snap.monitorSections = [
-            .init(title: "Display 1 - Quarters · 1 tiled", key: "Display 1"),
+            .init(title: "Display 1 · Quarters · 1 tiled", key: "Display 1"),
         ]
         let model = items(snap)
 
@@ -361,7 +361,7 @@ final class MenuModelTests: XCTestCase {
             "the mismatched window must not vanish from the manage list")
         // It renders after the matched section, not under a header that
         // does not describe it.
-        let headerIndex = titles.firstIndex(of: "Display 1 - Quarters · 1 tiled")!
+        let headerIndex = titles.firstIndex(of: "Display 1 · Quarters · 1 tiled")!
         let safariIndex = titles.firstIndex { $0.contains("Safari") }!
         let orphanIndex = titles.firstIndex { $0.contains("Orphan") }!
         XCTAssertEqual(safariIndex, headerIndex + 1)

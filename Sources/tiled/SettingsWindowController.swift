@@ -222,7 +222,7 @@ final class SettingsWindowController: NSWindowController {
 
     /// Rebuilds the whole tab view (used when opening Welcome onto a
     /// hidden window whose tabs were built without it). Delegates to
-    /// buildTabView with a one-shot override - no duplicated tab code.
+    /// buildTabView with a one-shot override: no duplicated tab code.
     private var forceWelcomeOnce = false
 
     private func rebuildTabView(includingWelcome: Bool) {

@@ -264,7 +264,7 @@ final class TilingStateTests: XCTestCase {
     func testSwitchLayoutEvictionListMatchesControllerBehavior() {
         // The controller untile()s every window in plan's evicting list, so
         // switchLayout's list must contain EVERY tiled window including the
-        // requester when tiled - otherwise a tiled window would survive a
+        // requester when tiled; otherwise a tiled window would survive a
         // reset and leave two layouts on screen.
         for layout in [[Slot.topLeft, Slot.bottomRight], [Slot.sixthLeft, Slot.sixthRight]] {
             var state = TilingState()
@@ -360,7 +360,7 @@ final class TilingStateTests: XCTestCase {
         // Evicted ids come back sorted by id, which is observable only
         // when commit order and spatial reading order disagree with it:
         // blockers committed top-right first (id 4), bottom-right second
-        // (id 3) - both reading order and commit order would list [4, 3],
+        // (id 3); both reading order and commit order would list [4, 3],
         // but the plan must name [3, 4].
         var state = TilingState()
         state.commit(window: 4, into: .topRight)
@@ -939,7 +939,7 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testTiledWindowRequestingOtherLayoutResetsToo() {
-        // Even a tiled window resets when it targets the other layout - it
+        // Even a tiled window resets when it targets the other layout: it
         // joins the evicted set rather than swapping across layouts.
         var state = TilingState()
         state.commit(window: a, into: .topLeft)

@@ -208,7 +208,7 @@ final class HotkeyBindingTests: XCTestCase {
     }
 
     func testStoredNegativeModifiersFallsBackToDefaults() {
-        // Never written by set - corrupt data only (hand-edited plist,
+        // Never written by set; corrupt data only (hand-edited plist,
         // older build). UInt32(modifiers) would trap, so the store must
         // reject the entry wholesale instead of trusting the key code.
         let name = suiteName

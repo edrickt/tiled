@@ -2,7 +2,7 @@ import AppKit
 
 /// The first-run Welcome tab: one demonstration, not seventeen combos.
 /// Dismissing removes the tab for this launch (persisted); it stays
-/// re-openable from General, so the teaching moment is never lost - the
+/// re-openable from General, so the teaching moment is never lost; the
 /// tab is one-time per launch, not one-time forever.
 final class WelcomeTab: NSObject {
     private let hotkeyStore: HotkeyStore
@@ -47,7 +47,7 @@ final class WelcomeTab: NSObject {
             stack.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
             stack.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-            // No bottom constraint - see TopAnchoredStackView.
+            // No bottom constraint (see TopAnchoredStackView).
         ])
         view.addSubview(scroll)
 
@@ -63,10 +63,10 @@ final class WelcomeTab: NSObject {
         permissionRow.spacing = 12
         permissionRow.alignment = .firstBaseline
         let warningText = NSTextField(wrappingLabelWithString:
-            "Tiled can't see or move windows - Accessibility permission is off.")
+            "Tiled can't see or move windows: Accessibility permission is off.")
         warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warningText.textColor = .labelColor
-        // Label wraps, button never shrinks - and the row is capped to
+        // Label wraps, button never shrinks, and the row is capped to
         // the inset width below, so the button holds the 24pt inset at
         // any window width (see GeneralTab for the same pattern).
         warningText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -85,7 +85,7 @@ final class WelcomeTab: NSObject {
         let steps = NSTextField(wrappingLabelWithString:
             "1. Click any window to focus it.\n" +
             "2. Press \(topLeft) to tile it top-left.\n" +
-            "3. Press it again - tiling its own tile does nothing, safely.\n" +
+            "3. Press it again; tiling its own tile does nothing, safely.\n" +
             "Every combo lives under Tile Focused Window in the menu bar menu.")
         steps.font = .systemFont(ofSize: NSFont.systemFontSize)
         stack.addArrangedSubview(steps)
@@ -93,7 +93,7 @@ final class WelcomeTab: NSObject {
         // Spatial previews, side by side: quarters beside sixths, so
         // "three columns instead of two" is a comparison the eye makes
         // instead of a sentence the reader must imagine. Drawn from the
-        // same TileCell sets as the layout engine - they cannot disagree.
+        // same TileCell sets as the layout engine, so they cannot disagree.
         // Tertiary (not quaternary) track: at this small size the
         // quaternary fill renders near-invisible in Dark Mode.
         let previews = NSStackView()
@@ -144,7 +144,7 @@ final class WelcomeTab: NSObject {
         sixthsPreview.setAccessibilityElement(true)
         sixthsPreview.setAccessibilityRole(.image)
         sixthsPreview.setAccessibilityLabel(
-            "Preview: Sixths split the screen into three columns - the middle third covers the center column")
+            "Preview: Sixths split the screen into three columns; the middle third covers the center column")
         sixthsColumn.addArrangedSubview(sixthsPreview)
         let sixthsCaption = NSTextField(labelWithString: "Sixths: three columns")
         sixthsCaption.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -154,7 +154,7 @@ final class WelcomeTab: NSObject {
         sixthsCaption.widthAnchor.constraint(equalToConstant: 160).isActive = true
 
         let sixthsLabel = NSTextField(wrappingLabelWithString:
-            "Sixths work the same way: three columns instead of two. Hold ⌥⇧⌘ with the sixths keys - " +
+            "Sixths work the same way: three columns instead of two. Hold ⌥⇧⌘ with the sixths keys; " +
             "the full list lives in Settings → Shortcuts.")
         sixthsLabel.textColor = .secondaryLabelColor
         sixthsLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -164,9 +164,9 @@ final class WelcomeTab: NSObject {
         // where the user can meet them before they happen: drag-out's
         // snap-back ("my window snapped back!") and Expand's
         // cover-don't-release semantics ("did it break my layout?"). One
-        // sentence each - the README holds the full rules.
+        // sentence each; the README holds the full rules.
         let behaviorNote = NSTextField(wrappingLabelWithString:
-            "Drag a tiled window far and it comes untiled where you drop it - " +
+            "Drag a tiled window far and it comes untiled where you drop it; " +
             "a short drag snaps back into its tile. ⌥⇧⏎ expands a window " +
             "without releasing its slot; press it again to return.")
         behaviorNote.textColor = .secondaryLabelColor
@@ -174,7 +174,7 @@ final class WelcomeTab: NSObject {
         stack.addArrangedSubview(behaviorNote)
 
         let dismiss = NSButton(
-            title: "Got it - show General next time",
+            title: "Got it, show General next time",
             target: self, action: #selector(dismissTapped(_:)))
         dismiss.bezelStyle = .rounded
         dismissButton = dismiss

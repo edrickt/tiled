@@ -3,7 +3,7 @@ import XCTest
 
 /// Exhaustive coverage for layout switching: quarters <-> sixths are
 /// mutually exclusive on screen, so any request into the non-active layout
-/// (with a non-empty space) must reset - evict EVERY tiled window, switch,
+/// (with a non-empty space) must reset: evict EVERY tiled window, switch,
 /// and place exactly the requester. These tests pin that contract from
 /// every angle: full slot matrices, every occupancy shape, commit
 /// semantics, ordering, sequences, and a cross-layout BFS invariant sweep.
@@ -117,7 +117,7 @@ final class LayoutSwitchTests: XCTestCase {
 
     func testEmptySpaceNeverSwitches() {
         // The empty space defaults to quarters, but even a sixths request
-        // is a plain tile - there is nothing to evict and no layout to leave.
+        // is a plain tile: there is nothing to evict and no layout to leave.
         for slot in Slot.allCases {
             XCTAssertEqual(
                 TilingState().plan(window: 1, into: slot), .tile(evicting: []),
@@ -198,7 +198,7 @@ final class LayoutSwitchTests: XCTestCase {
     }
 
     func testOverlappingCrossLayoutPairResetsJustTheSame() {
-        // TL fully contains sixthTopLeft's cell - still a full reset, never
+        // TL fully contains sixthTopLeft's cell; still a full reset, never
         // a swap or a partial eviction of "just the overlap".
         XCTAssertFalse(Slot.topLeft.cells.isDisjoint(with: Slot.sixthTopLeft.cells))
         var state = TilingState()
@@ -211,7 +211,7 @@ final class LayoutSwitchTests: XCTestCase {
 
     func testSwitchNeverReturnsTileSwapOrNoop() {
         // Across every occupancy shape, a cross-layout request must be a
-        // switchLayout - never a same-layout tile/swap leaking through.
+        // switchLayout, never a same-layout tile/swap leaking through.
         for config in Self.quartersConfigs {
             let (state, _) = makeState(slots: config, firstID: 10)
             for target in Self.sixthsSlots {
@@ -240,7 +240,7 @@ final class LayoutSwitchTests: XCTestCase {
 
     func testTiledRequesterIsAlwaysInItsOwnEvictionSet() {
         // Whatever tiled window asks for the other layout joins the evicted
-        // set - otherwise it would survive the reset and straddle layouts.
+        // set; otherwise it would survive the reset and straddle layouts.
         for config in Self.quartersConfigs {
             let (state, ids) = makeState(slots: config, firstID: 1)
             for requester in ids {
@@ -338,7 +338,7 @@ final class LayoutSwitchTests: XCTestCase {
     }
 
     func testSwitchEvictionsAreSortedInBothDirections() {
-        // Commit order is slot order, not id order - the plan must still
+        // Commit order is slot order, not id order; the plan must still
         // come back sorted for deterministic controller restores.
         var quarters = TilingState()
         quarters.commit(window: 30, into: .topLeft)
@@ -363,7 +363,7 @@ final class LayoutSwitchTests: XCTestCase {
             .switchLayout(evicting: [10, 20, 30, 40, 50, 60]))
     }
 
-    // MARK: Commit semantics - exactly the requester remains
+    // MARK: Commit semantics (exactly the requester remains)
 
     func testSwitchCommitLeavesExactlyTheRequester() {
         for config in Self.quartersConfigs {
@@ -470,7 +470,7 @@ final class LayoutSwitchTests: XCTestCase {
 
     func testSameSlotNeverSwitchesAcrossAllSlots() {
         // plan() checks occupancy before layout, so the identical request
-        // is a noop for every slot in both layouts - never a reset.
+        // is a noop for every slot in both layouts, never a reset.
         for slot in Slot.allCases {
             var state = TilingState()
             state.commit(window: 1, into: slot)
@@ -485,7 +485,7 @@ final class LayoutSwitchTests: XCTestCase {
 
     func testFreshWindowIntoActiveLayoutTilesNormally() {
         // The reset fires only when the target layout differs from the
-        // ACTIVE one - a fresh window joining the current layout is a plain
+        // ACTIVE one; a fresh window joining the current layout is a plain
         // tile (or swap), never a switch.
         var quarters = TilingState()
         quarters.commit(window: 1, into: .topLeft)
@@ -553,7 +553,7 @@ final class LayoutSwitchTests: XCTestCase {
 
     func testQuartersSessionSwitchSixthsSessionSwitchBack() {
         // Fill quarters, reset into sixths, build a sixths session, reset
-        // back, and rebuild quarters - asserting the full state at each hop.
+        // back, and rebuild quarters, asserting the full state at each hop.
         var state = TilingState()
         for (id, slot) in [(1, Slot.topLeft), (2, .topRight), (3, .bottomLeft)] {
             apply(state.plan(window: id, into: slot), to: &state, requester: id, target: slot)

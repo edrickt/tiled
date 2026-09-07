@@ -29,13 +29,13 @@ enum TileCell: String, CaseIterable, Hashable {
 
 extension TileCell {
     /// The cell at refinement strip `column` (0..<4) and row `row`
-    /// (0 = top, 1 = bottom) - the inverse of the case order above.
+    /// (0 = top, 1 = bottom), the inverse of the case order above.
     init(column: Int, row: Int) {
         self = Self.allCases[column + 4 * row]
     }
 }
 
-/// One slot's structural geometry - the single declaration every derived
+/// One slot's structural geometry: the single declaration every derived
 /// property reads: which layout it belongs to, and the span of refinement
 /// strips (columns) and rows it covers.
 ///
@@ -65,12 +65,12 @@ struct SlotGeometry: Equatable {
 /// full-height thirds and two-thirds.
 ///
 /// Predictability contract: swapping assigns displaced windows in spatial
-/// reading order (top-to-bottom, left-to-right - `Slot.readingOrder`), so
+/// reading order (top-to-bottom, left-to-right; `Slot.readingOrder`), so
 /// the same windows on screen always shuffle the same way regardless of
 /// tiling order. The largest fitting slot wins each assignment (halves
 /// stay halves), a full reflow covers the leftover cells exactly instead
 /// of evicting whenever it can, and anything that fits neither evicts
-/// instead of stranding - see `TilingState.plan(window:into:)`.
+/// instead of stranding (see `TilingState.plan(window:into:)`).
 enum Slot: String, CaseIterable {
     // Quarters
     case topLeft, topRight, bottomLeft, bottomRight
@@ -129,7 +129,7 @@ enum Slot: String, CaseIterable {
     /// built from. Halves and two-thirds sort by their centroid, so they
     /// interleave naturally with the quads and sixths around them. The
     /// swap solver assigns blockers in this order, so the same windows
-    /// on screen always shuffle the same way - tiling order (window
+    /// on screen always shuffle the same way: tiling order (window
     /// ids) never affects the outcome, in either layout.
     var readingOrder: (row: Int, column: Double) {
         // A slot straddling both rows (halves, thirds, two-thirds)
@@ -141,7 +141,7 @@ enum Slot: String, CaseIterable {
     }
 
     /// Total spatial reading order: row band, then mean column, then
-    /// declaration order as the tiebreak - the order the swap solver
+    /// declaration order as the tiebreak: the order the swap solver
     /// assigns blockers in and the menus present slots in, so the same
     /// windows on screen always shuffle the same way regardless of
     /// tiling order.
@@ -164,7 +164,7 @@ enum TileEdge: CaseIterable {
 
 /// A movable boundary in the grid. Screen edges are fixed, not boundaries.
 ///
-/// Each case is pure data - the stored fraction it reads and writes, its
+/// Each case is pure data: the stored fraction it reads and writes, its
 /// clamp range, and any sibling it must not cross. All splitter behavior
 /// (`position`, `update`) is written once against these descriptors.
 enum GridBoundary: CaseIterable {
@@ -411,7 +411,7 @@ extension TilePlan {
     /// plan for `requester`.
     ///
     /// `.switchLayout`'s eviction set names every tiled window, including
-    /// the requester itself when it is already tiled - but the requester
+    /// the requester itself when it is already tiled, but the requester
     /// is moving, not being evicted: its old tile is vacated by the
     /// subsequent commit, and its record (and pre-tile frame) must survive
     /// until `place` runs. Restoring it first would delete its record, so
@@ -430,7 +430,7 @@ extension TilePlan {
 }
 
 /// Pure tiling state: which window occupies which slot.
-/// No AppKit, no AX - fully unit-testable.
+/// No AppKit, no AX; fully unit-testable.
 struct TilingState: Equatable {
     private(set) var occupantBySlot: [Slot: WindowID] = [:]
 
@@ -456,7 +456,7 @@ struct TilingState: Equatable {
     /// Decides what happens when `window` requests `slot`.
     ///
     /// Every decision follows one principle: after the move, the grid
-    /// must agree with itself - the requester owns `slot`, no two windows
+    /// must agree with itself: the requester owns `slot`, no two windows
     /// share cells, and cells the move vacates go to a neighbor whenever
     /// exactly one can absorb them. When other windows overlap the
     /// target, disturbance is minimized in a fixed preference ladder,
@@ -480,7 +480,7 @@ struct TilingState: Equatable {
     /// vacated cells to the one neighbor that absorbs them exactly (two
     /// left sixths, the top one moving to the middle third: the bottom
     /// sixth grows into the left third). A move never leaves slack a
-    /// neighbor could take - but a hole no neighbor merges into exactly
+    /// neighbor could take, but a hole no neighbor merges into exactly
     /// stays a hole (exact-or-empty).
     private func uncontendedMove(window: WindowID, into slot: Slot) -> TilePlan {
         if let old = self.slot(of: window) {
@@ -499,7 +499,7 @@ struct TilingState: Equatable {
     /// with no gaps. The preference ladder, cheapest first:
     ///
     /// 1. Swap: the requester is tiled and every blocker fits in the
-    ///    footprint it vacates - only blockers move (TL -> occupied BR
+    ///    footprint it vacates: only blockers move (TL -> occupied BR
     ///    swaps the two windows; LeftHalf -> occupied TR swaps half and
     ///    quad).
     /// 2. Pinned reflow: windows the target doesn't touch stay where they
@@ -575,9 +575,9 @@ struct TilingState: Equatable {
     /// space left) counts: the reflow rule that avoids eviction.
     ///
     /// `movers` arrive in spatial reading order (top-to-bottom,
-    /// left-to-right - see `Slot.readingOrder`): the search assigns in
+    /// left-to-right, see `Slot.readingOrder`): the search assigns in
     /// that order, so the same windows on screen always shuffle the same
-    /// way. Tiling order - window ids - never affects the outcome: top
+    /// way. Tiling order (window ids) never affects the outcome: top
     /// stays top, left stays left, in both layouts.
     private static func relocate(movers: [(slot: Slot, window: WindowID)], within free: Set<TileCell>, layout: LayoutKind, exact: Bool = false)
         -> [WindowID: Slot]?
@@ -651,7 +651,7 @@ struct TilingState: Equatable {
 
     /// Decides what happens after `window` is evicted from `slot`: the
     /// first adjacent survivor whose cells plus the hole form exactly one
-    /// slot expands into it - vertically (evicting Top Left grows Bottom
+    /// slot expands into it: vertically (evicting Top Left grows Bottom
     /// Left into Left Half) or horizontally (evicting the left third grows
     /// the middle third into the left two-thirds). Returns the one
     /// placement, or empty when the vacated slot's occupant mismatches or

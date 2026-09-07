@@ -1,7 +1,7 @@
 /// Platform-free description of the status menu, extracted from
-/// `AppDelegate` so the structure contracts - warning precedence over the
+/// `AppDelegate` so the structure contracts (warning precedence over the
 /// status line, slot grouping, empty states, undo visibility, the
-/// untrusted block - are testable without building NSMenu items.
+/// untrusted block) are testable without building NSMenu items.
 /// `AppDelegate` maps these onto NSMenu/NSMenuItem one-for-one.
 enum MenuModel {
     /// What a clickable item does when chosen. `AppDelegate` maps each
@@ -63,7 +63,7 @@ enum MenuModel {
         /// the *active* layout's slots; the inactive one collapses to a
         /// single switch row. Switching is destructive (it untiles
         /// everything) and rare, while the current layout's slots are
-        /// the everyday decision set - one submenu, one layout's worth
+        /// the everyday decision set: one submenu, one layout's worth
         /// of scanning.
         var activeLayout: LayoutKind
         /// A one-off tiling refusal (an app that wouldn't resize), kept
@@ -103,7 +103,7 @@ enum MenuModel {
         }
 
         struct MonitorSection: Equatable {
-            /// Header title, e.g. "Display 1 - Quarters · 2 tiled".
+            /// Header title, e.g. "Display 1 · Quarters · 2 tiled".
             var title: String
             /// Grouping key matching `TiledWindow.screenName`.
             var key: String?
@@ -122,10 +122,10 @@ enum MenuModel {
         // outcome narrates even while warnings persist. The layout/count
         // line doubles as the empty state ("0 tiled" reads as a status, so
         // no separate "No tiled windows" row that would contradict an undo
-        // notice above it) and always renders while trusted - trouble is
+        // notice above it) and always renders while trusted; trouble is
         // exactly when the user needs it.
         if snapshot.isTrusted {
-            // A tiling refusal renders verbatim as its own row - never
+            // A tiling refusal renders verbatim as its own row, never
             // folded into the shortcut summary. Squashing "Safari
             // couldn't be tiled" under "shortcut problem" would
             // misdiagnose it and point the user at the wrong subsystem.
@@ -147,7 +147,7 @@ enum MenuModel {
             if snapshot.hasHotkeyWarnings {
                 // A disabled row can't fix itself: offer the door. The
                 // hotkey surface lives in Settings → Shortcuts, so the
-                // row after a failure opens exactly that tab - the one
+                // row after a failure opens exactly that tab: the one
                 // surface a hotkey-first user can act on.
                 items.append(Item(title: "Open Shortcuts…", action: .openShortcuts))
             }
@@ -155,7 +155,7 @@ enum MenuModel {
             // suppressed by them: a lingering hotkey failure must not
             // permanently erase the record of what the workspace just did.
             // Warnings diagnose; the notice narrates; the status line
-            // orients - three jobs, three rows, in that order.
+            // orients: three jobs, three rows, in that order.
             if let notice = snapshot.notice {
                 items.append(Item(title: notice, isEnabled: false))
             }
@@ -172,7 +172,7 @@ enum MenuModel {
                 // The everyday decision set: quads + halves, never the
                 // sixths 11. The inactive layout is one switch row, not
                 // a section.
-                tileChildren.append(Item(title: "Quarters - Quads", isEnabled: false, isHeader: true))
+                tileChildren.append(Item(title: "Quarters · Quads", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.quartersQuads {
                     tileChildren.append(tileItem(slot, binding))
                 }
@@ -182,7 +182,7 @@ enum MenuModel {
                 }
                 tileChildren.append(.separator())
                 // Honest switch row: enabled only with a focused window to
-                // tile, and titled for what it does - the focused window
+                // tile, and titled for what it does: the focused window
                 // moves into the destination's top-left as the switch
                 // happens. The disabled form names its own precondition, so
                 // the row never reads as broken. (The "…" stays off: no
@@ -192,11 +192,11 @@ enum MenuModel {
                     isEnabled: snapshot.hasFocusedWindow,
                     action: .switchToSixths,
                     disabledReason: snapshot.hasFocusedWindow
-                        ? nil : "Needs a focused window - click a window first."))            } else {
+                        ? nil : "Needs a focused window: click a window first."))            } else {
                 // Sixths sub-groups mirror the thirds/two-thirds naming in
                 // Settings: 11 flat items exceed working memory at the moment
                 // of action, so chunk them into corners, thirds, two-thirds.
-                tileChildren.append(Item(title: "Sixths - Corners", isEnabled: false, isHeader: true))
+                tileChildren.append(Item(title: "Sixths · Corners", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsCorners {
                     tileChildren.append(tileItem(slot, binding))
                 }
@@ -214,7 +214,7 @@ enum MenuModel {
                     isEnabled: snapshot.hasFocusedWindow,
                     action: .switchToQuarters,
                     disabledReason: snapshot.hasFocusedWindow
-                        ? nil : "Needs a focused window - click a window first."))
+                        ? nil : "Needs a focused window: click a window first."))
             }
             items.append(Item(title: "Tile Focused Window", children: tileChildren))
             items.append(Item(
@@ -227,11 +227,11 @@ enum MenuModel {
                 action: .evictFocusedWindow))
             items.append(.separator())
 
-            // Empty state needs no row - the status line already
+            // Empty state needs no row: the status line already
             // reports "0 tiled".
             if !snapshot.tiledWindows.isEmpty {
                 // Multi-monitor: group the manage list per display with a
-                // disabled header per section ("Display 1 - Quarters · 2
+                // disabled header per section ("Display 1 · Quarters · 2
                 // tiled"). Single-monitor setups render the flat list.
                 if snapshot.monitorSections.isEmpty {
                     for window in snapshot.tiledWindows {
@@ -264,7 +264,7 @@ enum MenuModel {
                     // (and undoes in the wrong app everywhere else).
                     items.append(Item(
                         title: MenuText.undoDisplacementTitle(evictedCount: snapshot.evictedCount)
-                            + " - \u{2303}\u{2325}\u{21E7}\u{2318}Z",
+                            + " · \u{2303}\u{2325}\u{21E7}\u{2318}Z",
                         action: .undoSwitch))
                 }
                 items.append(Item(

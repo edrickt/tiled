@@ -3,7 +3,7 @@ import XCTest
 
 /// DragTracker through its own interface: echo suppression, edge-to-
 /// splitter mapping, and apply coalescing, driven by direct `handleChange`
-/// calls. No controller, no AX - the loop tested where it lives.
+/// calls. No controller, no AX; the loop tested where it lives.
 final class DragTrackerTests: XCTestCase {
     private var gateway: FakeWindowGateway!
     private var pushed: [(rects: [WindowID: CGRect], excluding: WindowID?)]!
@@ -63,7 +63,7 @@ final class DragTrackerTests: XCTestCase {
     }
 
     /// A tracker wired like the shared one but with an injectable
-    /// `liveFrameOf` - the seam the no-op-write skip and the silent-
+    /// `liveFrameOf` (the seam the no-op-write skip and the silent-
     /// convergence check read instead of intent.
     private func makeTracker(
         liveFrameOf: @escaping (WindowID) -> CGRect?
@@ -126,7 +126,7 @@ final class DragTrackerTests: XCTestCase {
 
         // Echo tick first (swallowed), then a corner drag: the right edge
         // moves +60 (columnSplit) and the bottom edge -60 (leftRowSplit)
-        // in a single change - both boundaries must update.
+        // in a single change; both boundaries must update.
         var echo = CGRect(x: 0, y: 500, width: 840, height: 500)
         echo.size.width += 10
         tracker.handleChange(id: 1, frame: echo)
@@ -336,7 +336,7 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.convergence(for: 3), .converged)
 
         // Frames that never approach the target: inconclusive (alive,
-        // leave it alone) - the controller compares live frames.
+        // leave it alone); the controller compares live frames.
         tile(4, .bottomRight, frame: CGRect(x: 840, y: 0, width: 840, height: 500))
         tracker.handleChange(id: 4, frame: CGRect(x: 0, y: 0, width: 840, height: 300))
         XCTAssertNil(tracker.convergence(for: 4))
@@ -445,7 +445,7 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertFalse(dragEndFires.isEmpty, "settle must not swallow a title-bar grab")
 
         // Release (~28pt of drag, well inside the untile distance): the
-        // pending drag end snaps the window back into its slot rect -
+        // pending drag end snaps the window back into its slot rect,
         // the top-left quadrant of the dragged frame (identity boundsOf).
         dragEndFires.last?()
         XCTAssertTrue(untiled.isEmpty, "~28pt of drag stays inside the tile")
@@ -523,7 +523,7 @@ final class DragTrackerTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
 
         // Control: the same reassert with the live frame far from the
-        // target pushes and marks intent - the skip is the live frame's
+        // target pushes and marks intent; the skip is the live frame's
         // doing, not the reassert's.
         liveFrames[1] = CGRect(x: 600, y: 100, width: 50, height: 50)
         tracker.reassertAll(occupants: occupants)
@@ -543,7 +543,7 @@ final class DragTrackerTests: XCTestCase {
         // Total echo silence is not automatically a silent ignore: apps
         // that round frames to an internal grid can absorb a write whose
         // target sits within their rounding distance, emitting no
-        // notification. The live frame is the tiebreaker - within the
+        // notification. The live frame is the tiebreaker: within the
         // echo tolerance of the target means converged; far from it
         // means genuinely ignored.
         var liveFrames: [WindowID: CGRect] = [:]

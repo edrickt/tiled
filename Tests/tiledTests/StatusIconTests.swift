@@ -154,7 +154,7 @@ extension StatusIconTests {
     /// Regression test for the circular bites punched out of every filled
     /// corner cell: the corner arcs must sweep clockwise (the path walks
     /// clockwise), hugging the corner. A counter-clockwise sweep balloons
-    /// into the cell - a point just inside the corner's inner diagonal
+    /// into the cell: a point just inside the corner's inner diagonal
     /// falls outside the path, reading as a white bite on screen.
     func testRoundedCornerHugsItsCorner() {
         let rect = NSRect(x: 0, y: 0, width: 10, height: 10)

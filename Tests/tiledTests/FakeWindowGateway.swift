@@ -30,7 +30,7 @@ final class FakeWindowGateway: WindowGateway {
     /// The real adapter only requests activation: the system may ignore
     /// it, and the next focus query answers with whatever actually has
     /// focus. Off, focus requests are recorded but the environment keeps
-    /// its own focus - the fidelity mode for that divergence.
+    /// its own focus (the fidelity mode for that divergence).
     var focusChangesFocused = true
     /// The frame a successful write actually applies. Real apps can
     /// clamp or round the requested rect while still reporting success,

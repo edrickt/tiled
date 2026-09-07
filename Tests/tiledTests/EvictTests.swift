@@ -4,13 +4,13 @@ import XCTest
 import AppKit
 
 /// The evict hotkey's (⌥⇧⌫) controller behavior: untiles the focused
-/// window - restoring its pre-tile frame - and grows the surviving
+/// window (restoring its pre-tile frame) and grows the surviving
 /// column-mate into the freed cells when they cover them exactly. Driven
 /// through `FakeWindowGateway` so the assertions pin real side effects:
 /// written frames, slot releases, reflow placements, and feedback.
 /// its slot, survivors sharing a vertical strip with the vacated slot
-/// expand to cover the freed cells exactly - e.g. evicting Top Left grows
-/// Bottom Left into Left Half. Column-local like the tile reflow is
+/// expand to cover the freed cells exactly (e.g. evicting Top Left grows
+/// Bottom Left into Left Half). Column-local like the tile reflow is
 /// exact-or-empty: a hole nobody can fill stays a hole, and other columns
 /// never move.
 final class EvictReflowTests: XCTestCase {
@@ -99,8 +99,8 @@ final class EvictReflowTests: XCTestCase {
     }
 
     func testEvictTopLeftGrowsOnlyTheMergeableMate() {
-        // Bottom-left merges up into the left half; top-right can't -
-        // the full top row is no slot - so it stays put and its hole stays.
+        // Bottom-left merges up into the left half; top-right can't
+        // (the full top row is no slot), so it stays put and its hole stays.
         var state = TilingState()
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .topRight)

@@ -97,7 +97,7 @@ final class ControllerGatewayTests: XCTestCase {
 
     func testRetilingKeepsASingleObservation() {
         // Every placement re-registers (place calls observe unconditionally).
-        // The gateway must collapse that to one live handler per window -
+        // The gateway must collapse that to one live handler per window:
         // the fake overwrites like the live gateway's dedupe, so a second
         // registration replaces instead of stacking, and callbacks still
         // reach the tracker (a drag after the retile moves the splitter).
@@ -135,7 +135,7 @@ final class ControllerGatewayTests: XCTestCase {
         // Simulate the user grabbing BL's *top* edge (the row divider;
         // the bottom edge is a fixed screen edge): an echo-converging
         // tick first (swallowed, like an animated write), then a larger
-        // move away - the escape the echo logic treats as a real drag.
+        // move away: the escape the echo logic treats as a real drag.
         var first = gateway.frame(of: bottom)!
         first.size.height -= 10
         gateway.simulateChange(bottom, to: first)
@@ -207,7 +207,7 @@ final class ControllerGatewayTests: XCTestCase {
         // A title-bar drag is in flight (ticks streamed, drag-end
         // pending) when the window dies: pruning releases the slot and
         // clears the tracker's drag state, so the late drag-end finds
-        // no slot and fires no untile - and nothing crashes.
+        // no slot and fires no untile, and nothing crashes.
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         controller.handle(slot: .topLeft)
@@ -228,7 +228,7 @@ final class ControllerGatewayTests: XCTestCase {
     }
 
     func testPruneKeepsBusyWindows() {
-        // A busy app cannot answer the liveness probe - unknown, not dead.
+        // A busy app cannot answer the liveness probe: unknown, not dead.
         // Pruning on that maybe would untile a live window and drop its
         // record; only a confirmed death releases the slot.
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
@@ -248,7 +248,7 @@ final class ControllerGatewayTests: XCTestCase {
 
     /// Tiles the focused window into `slot` and returns its handle.
     /// The placement write echoes (a real app moves and emits AX
-    /// notifications), so the placement's echo entry is consumed here -
+    /// notifications), so the placement's echo entry is consumed here;
     /// otherwise the fake's silence swallows the drag below as a
     /// "converging echo" and the test never reaches the re-push.
     @discardableResult
@@ -264,7 +264,7 @@ final class ControllerGatewayTests: XCTestCase {
 
     func testNoOpPlacementDoesNotEvictOnVerification() {
         // The placement flavor of the same bug: tiling a window whose
-        // frame already equals the slot rect writes nothing observable -
+        // frame already equals the slot rect writes nothing observable:
         // no echo can follow, and the placement's own late convergence
         // check evicted it.
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
@@ -282,7 +282,7 @@ final class ControllerGatewayTests: XCTestCase {
         for fire in verifyFires { fire() }
 
         // Untiling cleared the record, so the re-tile runs under a fresh
-        // window id - resolve it from the occupancy, not the old id.
+        // window id; resolve it from the occupancy, not the old id.
         XCTAssertNotNil(
             controller.state.occupant(of: .topLeft),
             "a no-op placement write must not read as a silent ignore")
@@ -294,7 +294,7 @@ final class ControllerGatewayTests: XCTestCase {
         // frame lands ~5pt off the target (rounded to its own internal
         // grid) and it emits no notification for the absorbed write. The
         // late convergence check must consult the live frame before
-        // calling that silence a silent ignore - the window is tiled.
+        // calling that silence a silent ignore; the window is tiled.
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         controller.handle(slot: .topLeft)
@@ -302,18 +302,18 @@ final class ControllerGatewayTests: XCTestCase {
         verifyFires.removeAll()
 
         // Re-place from an untiled state parked at the rounded frame:
-        // the write goes out (5pt off target - a real write, not skipped),
+        // the write goes out (5pt off target: a real write, not skipped),
         // the app absorbs it back to the same rounded frame, no echo.
         controller.untile(window: 1)
         // Park the untiled window at the grid-rounded frame it had in the
-        // previous session: 5pt off the target - outside the no-op skip,
+        // previous session: 5pt off the target, outside the no-op skip,
         // so the placement write is real.
         let rounded = CGRect(x: target.minX, y: target.minY + 5,
                              width: target.width - 1, height: target.height)
         gateway.simulateSilentChange(handle, to: rounded)
         gateway.focused = handle
         controller.handle(slot: .topLeft)
-        // The app absorbs the write back to its rounded frame - no echo.
+        // The app absorbs the write back to its rounded frame; no echo.
         gateway.simulateSilentChange(handle, to: rounded)
 
         for fire in verifyFires { fire() }
@@ -326,18 +326,18 @@ final class ControllerGatewayTests: XCTestCase {
     func testNoOpRepushDoesNotEvictUnchangedNeighbor() {
         // THE random-eviction bug: every resize drag re-pushes every
         // occupant of the screen, and a push whose target equals the
-        // window's current frame is a no-op write - the app emits no AX
+        // window's current frame is a no-op write: the app emits no AX
         // notification for it, so the late convergence check read total
         // silence as a silent ignore and rolled the UNINVOLVED window
         // back (evicted ~3.5s after a drag it wasn't part of).
         let a = tileFocused(.topLeft)    // win 1
         let b = tileFocused(.bottomLeft) // win 2
-        _ = tileFocused(.topRight)       // win 3 - untouched by the drag below
+        _ = tileFocused(.topRight)       // win 3, untouched by the drag below
         verifyFires.removeAll()
 
         // Resize-drag B's top edge up 100: B changes, its re-push changes
         // A (shares the left row splitter), and C is re-pushed at its
-        // already-correct rect - a no-op write with no echo.
+        // already-correct rect: a no-op write with no echo.
         let bFrame = gateway.frame(of: b)!
         var dragged = bFrame
         dragged.size.height += 100 // top edge (maxY) rises; bottom stays
@@ -349,7 +349,7 @@ final class ControllerGatewayTests: XCTestCase {
         wait(for: [pushed], timeout: 1.0)
 
         // The apps echo their real frame changes (A and B really moved);
-        // C emitted nothing - its write changed nothing.
+        // C emitted nothing; its write changed nothing.
         gateway.simulateChange(a, to: gateway.frame(of: a)!)
         gateway.simulateChange(b, to: gateway.frame(of: b)!)
 
@@ -381,8 +381,8 @@ final class ControllerGatewayTests: XCTestCase {
     func testSwapKeepsFocusOnOriginalTile() {
         // TL + BL tiled, right half tiled; tiling the right-half window
         // into top left swaps it with the TL window, which inherits the
-        // whole right half. Focus must stay on the original tile - the
-        // heir now in right half - not follow the requester to top left.
+        // whole right half. Focus must stay on the original tile (the
+        // heir now in right half), not follow the requester to top left.
         // Chaining then works with no manual refocus: the next hotkey
         // acts on the heir still sitting in the original tile.
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
@@ -440,7 +440,7 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(controller.state.slot(of: 1), .topRight)
         XCTAssertEqual(controller.state.slot(of: 2), .bottomRight)
         // No piece IS the old tile (RH holds no single heir), so the
-        // first-overlapping-piece rule applies in reading order - the
+        // first-overlapping-piece rule applies in reading order: the
         // same spatial order the solver deals in, hence the TL heir now
         // in top-right. The pin is determinism matching the shuffle,
         // not which corner wins.
@@ -478,7 +478,7 @@ final class ControllerGatewayTests: XCTestCase {
                 "reflow writes a real tile rect")
         }
         // Exact rects, not just "a real rect": each window sits in its
-        // slot's geometry over the owning display's visible frame - the
+        // slot's geometry over the owning display's visible frame, the
         // same bounds chain the controller's write uses.
         let bounds = controller.screen(for: gateway.frame(of: a)!)!.visibleFrame
         XCTAssertEqual(
@@ -547,7 +547,7 @@ final class ControllerGatewayTests: XCTestCase {
     func testTilingOverAnExpandedWindowCollapsesItFirst() {
         // a holds top left and is expanded over the screen; tiling b into
         // left half must honor the tile. a's expansion dies first so the
-        // reflow moves a as an ordinary tracked window - an expanded window
+        // reflow moves a as an ordinary tracked window; an expanded window
         // moved with its expansion entry lingering would drop out of drag
         // tracking entirely.
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
@@ -638,7 +638,7 @@ final class ControllerGatewayTests: XCTestCase {
     func testSilentIgnoreRollsBackAtVerification() {
         // The gateway reports success but the app never moves: total AX
         // silence past the check, so the tile rolls back exactly like a
-        // refused write - slot released, standard refusal surfaced.
+        // refused write: slot released, standard refusal surfaced.
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         gateway.silentIgnore.insert(handle)
@@ -653,7 +653,7 @@ final class ControllerGatewayTests: XCTestCase {
 
     func testUserDragBeforeVerificationLeavesTheWindowAlone() {
         // The app produces frames (user grabbed the window mid-flight):
-        // inconclusive, never a rollback - a takeover is activity, not
+        // inconclusive, never a rollback: a takeover is activity, not
         // an ignore.
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
@@ -673,7 +673,7 @@ final class ControllerGatewayTests: XCTestCase {
         // A second placement cancels the first check: the stale fire
         // never runs in production, and the window keeps its new tile.
         // Firing the current (second) check rolls back the ignored
-        // second write instead - each check judges only its own write.
+        // second write instead; each check judges only its own write.
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         gateway.silentIgnore.insert(handle)
@@ -709,7 +709,7 @@ final class ControllerGatewayTests: XCTestCase {
     func testSwapRollsBackOnlyTheIgnoredPartner() {
         // Two windows exchange; the requester converges (echo tick) but
         // the partner never moves. Verification rolls back exactly the
-        // silent window - the converged requester keeps its new tile.
+        // silent window: the converged requester keeps its new tile.
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = a
         controller.handle(slot: .topLeft)

@@ -4,10 +4,10 @@ import Carbon.HIToolbox
 /// interprets keypresses for the Shortcuts-tab recorder button.
 ///
 /// Outcomes:
-/// - `.binding` - a combo with ≥1 of ⌃⌥⇧⌘ plus a non-modifier key.
-/// - `.clear` - bare ⌫/forward-delete disables the slot.
-/// - `.cancel` - bare ⎋ aborts the record, keeping the old binding.
-/// - nil - keep recording (bare keys, lone modifiers, caps lock, repeats,
+/// - `.binding`: a combo with ≥1 of ⌃⌥⇧⌘ plus a non-modifier key.
+/// - `.clear`: bare ⌫/forward-delete disables the slot.
+/// - `.cancel`: bare ⎋ aborts the record, keeping the old binding.
+/// - nil: keep recording (bare keys, lone modifiers, caps lock, repeats,
 ///   mouse/wheel events).
 enum HotkeyRecorder {
     enum Outcome: Equatable {
@@ -31,7 +31,7 @@ enum HotkeyRecorder {
     /// ⌃⌥⇧⌘), so swallowing them would trap keyboard users mid-record.
     /// Space rides along: with the recorder focused it re-activates the
     /// button, which is the same keep-the-old-binding cancel a second
-    /// click performs - never a swallowed, uncued keypress.
+    /// click performs, never a swallowed, uncued keypress.
     /// The monitor checks this first and returns the event unswallowed.
     static func shouldPassThrough(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown,

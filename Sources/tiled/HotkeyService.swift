@@ -40,7 +40,7 @@ final class HotkeyService {
     /// Slot ids occupy 1...allCases.count and the Settings fallback id is
     /// 999, so 998 can never collide.
     static let expandHotkeyID: UInt32 = 998
-    /// The expand combo: ⌥⇧⏎, fixed - slot shortcuts are remappable, this
+    /// The expand combo: ⌥⇧⏎, fixed; slot shortcuts are remappable, this
     /// one rides beside them like the Settings fallback.
     static let expandModifiers = UInt32(shiftKey | optionKey)
     static let expandKeyCode = UInt32(kVK_Return)
@@ -52,7 +52,7 @@ final class HotkeyService {
     /// occupy 1...allCases.count and the other fixed ids are 997-999,
     /// so 996 can never collide.
     static let evictHotkeyID: UInt32 = 996
-    /// The evict combo: ⌥⇧⌫, fixed - slot shortcuts are remappable, this
+    /// The evict combo: ⌥⇧⌫, fixed; slot shortcuts are remappable, this
     /// one rides beside them like the expand toggle.
     static let evictModifiers = UInt32(shiftKey | optionKey)
     static let evictKeyCode = UInt32(kVK_Delete)
@@ -170,7 +170,7 @@ final class HotkeyService {
 
     /// Fired by the fixed ⌃⌥⇧⌘Z combo: undoes the last layout switch from
     /// anywhere. The switch is triggered by global hotkeys while other apps
-    /// are frontmost, so the undo must be global too - a menu-open ⌘Z
+    /// are frontmost, so the undo must be global too: a menu-open ⌘Z
     /// would undo in the wrong app.
     var undoHandler: (() -> Void)? {
         get { context.undoHandler }
