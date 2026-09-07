@@ -244,6 +244,91 @@ final class ControllerGatewayTests: XCTestCase {
             "an unanswerable probe must never prune a live window")
     }
 
+    // MARK: No-op re-push convergence
+
+    /// Tiles the focused window into `slot` and returns its handle.
+    /// The placement write echoes (a real app moves and emits AX
+    /// notifications), so the placement's echo entry is consumed here —
+    /// otherwise the fake's silence swallows the drag below as a
+    /// "converging echo" and the test never reaches the re-push.
+    @discardableResult
+    private func tileFocused(_ slot: Slot) -> WindowHandle {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: slot)
+        if let frame = gateway.frame(of: handle) {
+            gateway.simulateChange(handle, to: frame)
+        }
+        return handle
+    }
+
+    func testNoOpPlacementDoesNotEvictOnVerification() {
+        // The placement flavor of the same bug: tiling a window whose
+        // frame already equals the slot rect writes nothing observable —
+        // no echo can follow, and the placement's own late convergence
+        // check evicted it.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tileRect = gateway.frame(of: handle)!
+        verifyFires.removeAll()
+
+        controller.untile(window: 1)
+        // Silently park the untiled window exactly at the tile rect.
+        gateway.simulateSilentChange(handle, to: tileRect)
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+
+        for fire in verifyFires { fire() }
+
+        // Untiling cleared the record, so the re-tile runs under a fresh
+        // window id — resolve it from the occupancy, not the old id.
+        XCTAssertNotNil(
+            controller.state.occupant(of: .topLeft),
+            "a no-op placement write must not read as a silent ignore")
+        XCTAssertEqual(gateway.frame(of: handle), tileRect)
+    }
+
+    func testNoOpRepushDoesNotEvictUnchangedNeighbor() {
+        // THE random-eviction bug: every resize drag re-pushes every
+        // occupant of the screen, and a push whose target equals the
+        // window's current frame is a no-op write — the app emits no AX
+        // notification for it, so the late convergence check read total
+        // silence as a silent ignore and rolled the UNINVOLVED window
+        // back (evicted ~3.5s after a drag it wasn't part of).
+        let a = tileFocused(.topLeft)    // win 1
+        let b = tileFocused(.bottomLeft) // win 2
+        _ = tileFocused(.topRight)       // win 3 — untouched by the drag below
+        verifyFires.removeAll()
+
+        // Resize-drag B's top edge up 100: B changes, its re-push changes
+        // A (shares the left row splitter), and C is re-pushed at its
+        // already-correct rect — a no-op write with no echo.
+        let bFrame = gateway.frame(of: b)!
+        var dragged = bFrame
+        dragged.size.height += 100 // top edge (maxY) rises; bottom stays
+        gateway.simulateChange(b, to: dragged)
+
+        // The re-push is coalesced onto the next runloop tick.
+        let pushed = XCTestExpectation(description: "coalesced push")
+        DispatchQueue.main.async { pushed.fulfill() }
+        wait(for: [pushed], timeout: 1.0)
+
+        // The apps echo their real frame changes (A and B really moved);
+        // C emitted nothing — its write changed nothing.
+        gateway.simulateChange(a, to: gateway.frame(of: a)!)
+        gateway.simulateChange(b, to: gateway.frame(of: b)!)
+
+        // The convergence checks fire one verify-delay later.
+        for fire in verifyFires { fire() }
+
+        XCTAssertEqual(
+            controller.state.slot(of: 3), .topRight,
+            "a no-op re-push must never evict the uninvolved window")
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft, "echoed re-push keeps the window tiled")
+        XCTAssertEqual(controller.state.slot(of: 2), .bottomLeft, "dragged window stays tiled")
+    }
+
     func testShortDragSnapsBackIntoTile() {
         let drag = tileAndDrag(10, 10) // net displacement ~28pt
         let expectation = XCTestExpectation(description: "snapback")

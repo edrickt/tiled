@@ -298,6 +298,9 @@ final class LiveWindowGateway: WindowGateway {
             }
             return .success
         }
+        if let error, ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+            NSLog("tiled: setFrame failed after retries (error %d)", error.rawValue)
+        }
         return error == nil
     }
 

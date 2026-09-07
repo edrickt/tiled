@@ -41,6 +41,12 @@ final class DragTracker {
         /// Occupants of one screen, for neighbor re-push. Nil falls back
         /// to `occupants()`.
         var occupantsOf: ((ScreenID) -> [Slot: WindowID])? = nil
+        /// The window's live frame, as the app reports it — unlike
+        /// `frameOf`, which may prefer our last pushed target (intent)
+        /// for edge diffing. No-op write detection must consult the live
+        /// frame: intent says where we wanted the window, the live frame
+        /// says where it actually is.
+        var liveFrameOf: (WindowID) -> CGRect? = { _ in nil }
     }
 
     private(set) var grid = GridLayout()
@@ -81,6 +87,13 @@ final class DragTracker {
     private var pendingExclusion: WindowID?
 
     private static let echoTolerance: CGFloat = 32
+    /// Writes within this distance of the window's current frame are
+    /// no-ops: the app changes nothing and emits no AX notification, so
+    /// marking them expected would leave an echo entry that never
+    /// converges — and the late convergence check would read that silence
+    /// as a silent ignore and evict an already-correct window. Skipped
+    /// writes are success: state already agrees with the screen.
+    static let noOpWriteTolerance: CGFloat = 1
     private static let staleWrite: TimeInterval = 3
     /// Post-converge settle window: macOS animation tails run ~0.2-0.5s,
     /// so 1s swallows them with margin while barely extending the blind
@@ -469,6 +482,16 @@ final class DragTracker {
 
     private func schedule(rects: [WindowID: CGRect], excluding: WindowID?) {
         for (id, rect) in rects {
+            // No-op writes are skipped, not pushed: nothing would change,
+            // nothing would echo, and the pending convergence check would
+            // evict an already-correct window. Live frame, not intent —
+            // intent equals the target by definition.
+            if let live = context.liveFrameOf(id),
+                Self.close(live, rect, tolerance: Self.noOpWriteTolerance)
+            {
+                log("skip win\(id) no-op write rect=\(rect)")
+                continue
+            }
             pendingRects[id] = rect
         }
         pendingExclusion = excluding
@@ -496,6 +519,11 @@ final class DragTracker {
     private static func framesClose(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
         abs(a.minX - b.minX) <= tolerance && abs(a.maxX - b.maxX) <= tolerance
             && abs(a.minY - b.minY) <= tolerance && abs(a.maxY - b.maxY) <= tolerance
+    }
+
+    /// True when `a` and `b` differ by at most `tolerance` per edge.
+    static func close(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
+        framesClose(a, b, tolerance: tolerance)
     }
 
     /// Sum of per-edge deltas between two frames.

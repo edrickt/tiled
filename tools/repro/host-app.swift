@@ -17,5 +17,6 @@ func makeWindow(_ title: String, _ frame: CGRect) -> NSWindow {
 // AppKit coords (bottom-left origin). Screen ~1512x982.
 let a = makeWindow("HOSTA", NSRect(x: 200, y: 500, width: 600, height: 350))
 let b = makeWindow("HOSTB", NSRect(x: 250, y: 120, width: 600, height: 300))
-_ = a; _ = b
+let c = makeWindow("HOSTC", NSRect(x: 300, y: 300, width: 500, height: 200))
+_ = a; _ = b; _ = c
 app.run()

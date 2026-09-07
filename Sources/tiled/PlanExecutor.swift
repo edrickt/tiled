@@ -451,6 +451,15 @@ final class PlanExecutor {
         let current = gateway.frame(of: record.handle) ?? record.preTileFrame
         let bounds = boundsOf(current)
         let target = tracker.grid(for: screen).rect(for: slot, in: bounds)
+        // A no-op write changes nothing observable: skip it and count
+        // success. Writing anyway would draw no echo, and the caller's
+        // late convergence check would evict an already-correct window.
+        if let live = gateway.frame(of: record.handle),
+            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)
+        {
+            log("applyLayout win\(id) no-op skip target=\(target)")
+            return true
+        }
         tracker.markExpected(id, target)
         let ok = gateway.setFrame(record.handle, to: target)
         log("applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) target=\(target) ok=\(ok)")

@@ -29,7 +29,8 @@ final class TilingController {
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
             occupants: { [weak self] in self?.trackedOccupants ?? [:] },
             screenOf: { [weak self] in self?.spaceOf(window: $0) },
-            occupantsOf: { [weak self] screen in self?.trackedOccupants(on: screen) ?? [:] }),
+            occupantsOf: { [weak self] screen in self?.trackedOccupants(on: screen) ?? [:] },
+            liveFrameOf: { [weak self] id in self?.liveFrameForTracker(id) }),
         apply: { [weak self] rects, excluding in
             guard let self else { return 0 }
             return self.pushRects(rects, excluding: excluding)
@@ -452,6 +453,16 @@ final class TilingController {
         var failed = 0
         for (id, target) in rects {
             guard let record = records[id] else { continue }
+            // No-op writes are skipped, not pushed: the app changes
+            // nothing and emits no echo, so a marked expectation here
+            // would never converge and the late check would evict an
+            // already-correct window.
+            if let current = gateway.frame(of: record.handle),
+                DragTracker.close(current, target, tolerance: DragTracker.noOpWriteTolerance)
+            {
+                dbg("push win\(id) no-op skip target=\(target)")
+                continue
+            }
             tracker.markExpected(id, target)
             if !gateway.setFrame(record.handle, to: target) { failed += 1 }
             else { scheduleVerification(of: [id], on: spaceOf(window: id)) }
@@ -473,6 +484,14 @@ final class TilingController {
         guard let record = records[id] else { return nil }
         if let pushed = tracker.lastPushedTarget(for: id) { return pushed }
         return gateway.frame(of: record.handle) ?? record.preTileFrame
+    }
+
+    /// The window's frame as the app reports it — the no-op-write check
+    /// must never consult intent (`frameForTracker`), which equals the
+    /// push target by definition and would skip every push.
+    private func liveFrameForTracker(_ id: WindowID) -> CGRect? {
+        guard let record = records[id] else { return nil }
+        return gateway.frame(of: record.handle)
     }
 
     /// Pure screen-ownership rule, extracted for tests: index of the
@@ -595,6 +614,7 @@ final class TilingController {
     /// and pruning on a maybe would untile a live window.
     func pruneDeadWindows() {
         for (id, record) in records where gateway.liveness(of: record.handle) == .dead {
+            dbg("prune win\(id): dead handle, releasing slot")
             forgetWindow(id)
         }
     }
