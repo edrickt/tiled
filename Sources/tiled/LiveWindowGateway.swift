@@ -82,7 +82,7 @@ final class LiveWindowGateway: WindowGateway {
         changeHandlers[handle] = onChange
         let key = UInt(CFHash(element))
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
-            NSLog("tiled: [DEBUG-obs] observe win%d pid=%d key=%lu already=%d",
+            NSLog("Tiled: [DEBUG-obs] observe win%d pid=%d key=%lu already=%d",
                   handle.id, pid, key, observedElements.contains(key) ? 1 : 0)
         }
         guard !observedElements.contains(key) else { return }
@@ -113,7 +113,7 @@ final class LiveWindowGateway: WindowGateway {
             let status = AXObserverAddNotification(
                 observer, element, name as CFString, nil)
             if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
-                NSLog("tiled: [DEBUG-obs] add %@ on pid %d (%d)", name as String, pid, status.rawValue)
+                NSLog("Tiled: [DEBUG-obs] add %@ on pid %d (%d)", name as String, pid, status.rawValue)
             }
             if status != .success {
                 NSLog(
@@ -140,7 +140,7 @@ final class LiveWindowGateway: WindowGateway {
 
     func registerAccessibilityInterest() {
         // Prompt:false — the explainer window asks in the product's own
-        // words; this call only puts tiled on the System Settings list
+        // words; this call only puts Tiled on the System Settings list
         // so the toggle is findable when the user gets there.
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): false] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(opts)
@@ -184,7 +184,7 @@ final class LiveWindowGateway: WindowGateway {
     /// went stale for the same reason: registrations outlive records).
     private func handleAXNotification(notification: String, element: AXUIElement) {
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
-            NSLog("tiled: [DEBUG-obs] notification %@ arrived", notification)
+            NSLog("Tiled: [DEBUG-obs] notification %@ arrived", notification)
         }
         for (handle, registered) in elements
         where CFEqual(registered, element) {
@@ -192,7 +192,7 @@ final class LiveWindowGateway: WindowGateway {
             return
         }
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
-            NSLog("tiled: [DEBUG-obs] notification %@ matched NO handle (%d elements)",
+            NSLog("Tiled: [DEBUG-obs] notification %@ matched NO handle (%d elements)",
                   notification, elements.count)
         }
     }
@@ -313,7 +313,7 @@ final class LiveWindowGateway: WindowGateway {
             return .success
         }
         if let error, ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
-            NSLog("tiled: setFrame failed after retries (error %d)", error.rawValue)
+            NSLog("Tiled: setFrame failed after retries (error %d)", error.rawValue)
         }
         return error == nil
     }

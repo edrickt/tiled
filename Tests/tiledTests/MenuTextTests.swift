@@ -42,7 +42,7 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.evictHotkeyWarning(),
             "The evict shortcut (⌥⇧⌫) is already used by another app — "
-                + "quit and reopen tiled to try registering it again.")
+                + "quit and reopen Tiled to try registering it again.")
     }
 
     func testWarningSummaryTitleSingularAndPlural() {
@@ -60,7 +60,7 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.settingsHotkeyWarning(),
             "The Settings shortcut (⌃⌥⇧⌘,) is already used by another app — "
-                + "quit and reopen tiled to get back to Settings while hidden.")
+                + "quit and reopen Tiled to get back to Settings while hidden.")
     }
 
     func testHotkeyFailureWarningNamesLabelAndSlot() {
@@ -79,14 +79,14 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.undoHotkeyWarning(),
             "The undo shortcut (⌃⌥⇧⌘Z) is already used by another app — "
-                + "undo the last displacement from the tiled menu instead.")
+                + "undo the last displacement from the Tiled menu instead.")
     }
 
     func testExpandHotkeyWarningNamesComboAndRecovery() {
         XCTAssertEqual(
             MenuText.expandHotkeyWarning(),
             "The expand shortcut (⌥⇧⏎) is already used by another app — "
-                + "quit and reopen tiled to try registering it again.")
+                + "quit and reopen Tiled to try registering it again.")
     }
 
     // MARK: Menu rows

@@ -7,15 +7,15 @@ cd "$(dirname "$0")/.."
 
 ./scripts/make-app.sh
 
-if pgrep -fq "Tiled.app/Contents/MacOS/tiled"; then
-    echo "Quitting running tiled…"
-    pkill -f "Tiled.app/Contents/MacOS/tiled"
+if pgrep -fq "Tiled.app/Contents/MacOS/Tiled"; then
+    echo "Quitting running Tiled…"
+    pkill -f "Tiled.app/Contents/MacOS/Tiled"
     sleep 1
 fi
 
 # A running instance also holds the debug binary's menu slot; clear it too.
 if pgrep -fq "\.build/(debug|release)/tiled"; then
-    echo "Quitting dev-build tiled…"
+    echo "Quitting dev-build Tiled…"
     pkill -f "\.build/(debug|release)/tiled" || true
     sleep 1
 fi

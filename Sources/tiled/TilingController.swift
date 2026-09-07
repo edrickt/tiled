@@ -154,7 +154,7 @@ final class TilingController {
 
     private func dbg(_ message: @autoclosure () -> String) {
         if Self.debugLogging {
-            NSLog("tiled: %@", message())
+            NSLog("Tiled: %@", message())
         }
     }
 

@@ -1,4 +1,4 @@
-# tiled
+# Tiled
 
 A native macOS window manager: tile windows into quarters or sixths with global hotkeys or the menu bar, with live drag-resize of shared edges.
 

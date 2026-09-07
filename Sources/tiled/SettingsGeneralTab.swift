@@ -10,7 +10,7 @@ import ServiceManagement
 final class GeneralTab: NSObject {
     private let settings: AppSettings
     var onHideIconChange: ((Bool) -> Void)?
-    /// Reopens the Welcome tab (the General tab's "Show tiled Guide"
+    /// Reopens the Welcome tab (the General tab's "Show Tiled Guide"
     /// button). The shell owns tab switching.
     var onShowGuide: (() -> Void)?
     /// Live probe of the Settings fallback hotkey, so the hide-icon
@@ -78,7 +78,7 @@ final class GeneralTab: NSObject {
         permissionRow.spacing = 12
         permissionRow.alignment = .firstBaseline
         let warningText = NSTextField(wrappingLabelWithString:
-            "tiled can't see or move windows — Accessibility permission is off.")
+            "Tiled can't see or move windows — Accessibility permission is off.")
         warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warningText.textColor = .labelColor
         // The label wraps; the button never shrinks. Without this the
@@ -104,7 +104,7 @@ final class GeneralTab: NSObject {
         launchAtLoginCheckbox = NSButton(
             checkboxWithTitle: "Launch at login",
             target: self, action: #selector(launchAtLoginToggled(_:)))
-        launchAtLoginCheckbox.toolTip = "Start tiled automatically when you log in."
+        launchAtLoginCheckbox.toolTip = "Start Tiled automatically when you log in."
         stack.addArrangedSubview(launchAtLoginCheckbox)
 
         // Inline failure explanation: when SMAppService throws (e.g. a
@@ -127,7 +127,7 @@ final class GeneralTab: NSObject {
         // instead of orphaning it a divider and a section away.
         let hint = NSTextField(wrappingLabelWithString:
             "When the icon is hidden, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere " +
-            "or quit and reopen tiled to get back here — Settings opens automatically. " +
+            "or quit and reopen Tiled to get back here — Settings opens automatically. " +
             "Hiding asks first, so this never happens by accident.")
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -151,7 +151,7 @@ final class GeneralTab: NSObject {
         guideText.textColor = .secondaryLabelColor
         guideRow.addArrangedSubview(guideText)
         let guideButton = NSButton(
-            title: "Show tiled Guide", target: self, action: #selector(showGuideTapped(_:)))
+            title: "Show Tiled Guide", target: self, action: #selector(showGuideTapped(_:)))
         guideButton.bezelStyle = .rounded
         guideButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         guideRow.addArrangedSubview(guideButton)
@@ -186,7 +186,7 @@ final class GeneralTab: NSObject {
                 userInfo: [
                     .announcement: trusted
                         ? "Accessibility permission granted — tiled can see and move windows now."
-                        : "tiled can't see or move windows — Accessibility permission is off.",
+                        : "Tiled can't see or move windows — Accessibility permission is off.",
                     .priority: NSAccessibilityPriorityLevel.high.rawValue,
                 ])
         }
@@ -217,11 +217,11 @@ final class GeneralTab: NSObject {
         } catch {
             // SMAppService can fail outside a properly bundled app (e.g. a
             // raw `swift run` binary); say why inline, not only in the log.
-            NSLog("tiled: Launch at Login %@ failed: %@", enable ? "enable" : "disable", "\(error)")
+            NSLog("Tiled: Launch at Login %@ failed: %@", enable ? "enable" : "disable", "\(error)")
             sender.state = enable ? .off : .on
             loginFailureLabel.stringValue =
                 "Launch at login couldn't be \(enable ? "enabled" : "disabled") — " +
-                "tiled must be running as an installed app bundle for it to work."
+                "Tiled must be running as an installed app bundle for it to work."
             loginFailureLabel.isHidden = false
         }
     }
@@ -237,8 +237,8 @@ final class GeneralTab: NSObject {
             let settingsHotkeyAlive = isSettingsHotkeyRegisteredProvider?() ?? true
             let recovery = settingsHotkeyAlive
                 ? "To get back, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere "
-                    + "or quit and reopen tiled — Settings opens automatically."
-                : "To get back, quit and reopen tiled — Settings opens automatically. "
+                    + "or quit and reopen Tiled — Settings opens automatically."
+                : "To get back, quit and reopen Tiled — Settings opens automatically. "
                     + "(The \u{2303}\u{2325}\u{21E7}\u{2318}, fallback is "
                     + "already used by another app.)"
             let alert = NSAlert()

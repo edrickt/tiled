@@ -1,4 +1,4 @@
-# tiled
+# Tiled
 
 A native macOS window manager. Tile windows into quarters (2×2 plus halves)
 or sixths (3×2 grid plus thirds and two-thirds), with global hotkeys or from
@@ -69,7 +69,7 @@ fill exactly stays a gap. Like Expand, this shortcut is fixed.
 
 First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
 to tile it top-left, and you're going — with a miniature preview showing
-what Top Left covers. Dismiss the guide once; reopen it anytime from the menu bar menu → tiled Guide.
+what Top Left covers. Dismiss the guide once; reopen it anytime from the menu bar menu → Tiled Guide.
 
 The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
 
@@ -144,7 +144,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 ```bash
 swift build          # debug build
 swift test           # layout-engine unit tests
-./scripts/make-app.sh # release build bundled as build/Tiled.app
+./scripts/make-app.sh # release build bundled as build/tiled.app
 ```
 
 ### Running during development
@@ -163,7 +163,7 @@ so macOS may ask you to re-grant the permission after rebuilds. For serious
 use, sign with a stable identity (even a free Apple ID "Apple Development"
 certificate) so TCC remembers the grant.
 
-Quitting tiled leaves your windows where they are.
+Quitting Tiled leaves your windows where they are.
 
 ## Status / roadmap
 

@@ -8,7 +8,7 @@ swift build -c release
 APP="build/Tiled.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/tiled "$APP/Contents/MacOS/tiled"
+cp .build/release/tiled "$APP/Contents/MacOS/Tiled"
 
 # App icon: regenerate with scripts/make-icon.swift + iconutil if missing.
 if [ ! -f Resources/AppIcon.icns ]; then
@@ -22,9 +22,9 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key><string>tiled</string>
+    <key>CFBundleExecutable</key><string>Tiled</string>
     <key>CFBundleIdentifier</key><string>dev.tiled.app</string>
-    <key>CFBundleName</key><string>tiled</string>
+    <key>CFBundleName</key><string>Tiled</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>

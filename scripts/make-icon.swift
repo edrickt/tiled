@@ -1,4 +1,4 @@
-// Renders the tiled app icon into an .iconset directory: a dark squircle
+// Renders the Tiled app icon into an .iconset directory: a dark squircle
 // carrying a 2×2 grid of tiles with Top Left lit in accent blue — the
 // product's first lesson ("press ⌥⇧U to tile top-left") as a picture.
 //

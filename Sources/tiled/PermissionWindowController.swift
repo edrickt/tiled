@@ -1,6 +1,6 @@
 import AppKit
 
-/// Launch permission window: explains why tiled needs Accessibility and
+/// Launch permission window: explains why Tiled needs Accessibility and
 /// hands the user one button into the System Settings pane. Replaces the
 /// automatic system prompt — the request arrives with the product's own
 /// explanation, and granting is an explicit click, never a surprise
@@ -87,7 +87,7 @@ final class PermissionWindowController: NSWindowController {
         ask.spacing = 4
         hero.addArrangedSubview(ask)
 
-        let headline = NSTextField(labelWithString: "tiled needs Accessibility permission")
+        let headline = NSTextField(labelWithString: "Tiled needs Accessibility permission")
         headline.font = .systemFont(ofSize: NSFont.systemFontSize + 4, weight: .bold)
         headline.alignment = .center
         headlineField = headline
@@ -95,7 +95,7 @@ final class PermissionWindowController: NSWindowController {
 
         let body = NSTextField(wrappingLabelWithString:
             "Tiling, drag-resize, and window tracking run on the Accessibility API. " +
-            "tiled reads window positions and sizes only — never window contents.")
+            "Tiled reads window positions and sizes only — never window contents.")
         body.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         body.textColor = .secondaryLabelColor
         body.alignment = .center
@@ -112,7 +112,7 @@ final class PermissionWindowController: NSWindowController {
         // confirm.
         let steps = NSTextField(wrappingLabelWithString:
             "1. Open Accessibility Settings below.\n" +
-            "2. Turn on tiled.\n" +
+            "2. Turn on Tiled.\n" +
             "3. Return here — this window closes itself.")
         steps.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         // Left-aligned text in a centered block: the field sizes to its

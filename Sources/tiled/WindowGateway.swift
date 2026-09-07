@@ -22,7 +22,7 @@ enum Liveness {
     case unknown
 }
 
-/// The single seam between tiled and the macOS Accessibility framework.
+/// The single seam between Tiled and the macOS Accessibility framework.
 ///
 /// Everything the product needs from AX — focus, geometry, liveness,
 /// observation, activation, and permission state — goes through here.

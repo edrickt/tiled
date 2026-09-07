@@ -3,7 +3,7 @@ import XCTest
 
 @testable import tiled
 
-/// The launch permission window: explains why tiled needs Accessibility
+/// The launch permission window: explains why Tiled needs Accessibility
 /// and requires an explicit click into System Settings — replacing the
 /// automatic system prompt with the product's own explanation.
 final class PermissionWindowTests: XCTestCase {

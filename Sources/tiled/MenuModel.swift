@@ -282,9 +282,9 @@ enum MenuModel {
 
         // 4. App.
         items.append(.separator())
-        items.append(Item(title: "tiled Guide", action: .showGuide))
+        items.append(Item(title: "Tiled Guide", action: .showGuide))
         items.append(Item(title: "Settings…", keyEquivalent: ",", action: .showSettings))
-        items.append(Item(title: "Quit tiled", keyEquivalent: "q", action: .quit))
+        items.append(Item(title: "Quit Tiled", keyEquivalent: "q", action: .quit))
         return items
     }
 

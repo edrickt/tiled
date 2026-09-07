@@ -56,14 +56,14 @@ final class WelcomeTab: NSObject {
         stack.addArrangedSubview(title)
 
         // Permission warning, before the steps: an untrusted install
-        // cannot do step 1 ("click any window" works, but tiled sees no
+        // cannot do step 1 ("click any window" works, but Tiled sees no
         // focused window), so lead with the fix, not a broken promise.
         permissionRow = NSStackView()
         permissionRow.orientation = .horizontal
         permissionRow.spacing = 12
         permissionRow.alignment = .firstBaseline
         let warningText = NSTextField(wrappingLabelWithString:
-            "tiled can't see or move windows — Accessibility permission is off.")
+            "Tiled can't see or move windows — Accessibility permission is off.")
         warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warningText.textColor = .labelColor
         // Label wraps, button never shrinks — and the row is capped to
@@ -183,7 +183,7 @@ final class WelcomeTab: NSObject {
         // menu-bar item reopens it (see showWelcomeAgain). One-time
         // moment, permanently reachable.
         let revisit = NSTextField(wrappingLabelWithString:
-            "You can reopen this guide anytime from the menu bar menu → tiled Guide.")
+            "You can reopen this guide anytime from the menu bar menu → Tiled Guide.")
         revisit.textColor = .secondaryLabelColor
         revisit.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stack.addArrangedSubview(revisit)

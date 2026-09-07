@@ -83,7 +83,7 @@ final class SettingsWindowController: NSWindowController {
             contentRect: NSRect(x: 0, y: 0, width: 440, height: 480),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false)
-        window.title = "tiled"
+        window.title = "Tiled"
         window.minSize = NSSize(width: 400, height: 300)
         window.center()
         // HIG convention: a settings window reopens where it was left.
@@ -166,7 +166,7 @@ final class SettingsWindowController: NSWindowController {
 
         // First-run tab: demonstrates one tiling instead of listing
         // seventeen combos. Removed per launch once dismissed; re-openable
-        // from the menu bar menu → tiled Guide (via a one-shot build override).
+        // from the menu bar menu → Tiled Guide (via a one-shot build override).
         if !settings.didDismissWelcome || forceWelcomeOnce {
             let welcome = NSTabViewItem(identifier: "welcome")
             welcome.label = "Welcome"
@@ -189,8 +189,8 @@ final class SettingsWindowController: NSWindowController {
         tabView.tabViewItem(at: index).view = view
     }
 
-    /// Reopens the Welcome tab on demand (menu-bar "tiled Guide" item,
-    /// General's "Show tiled Guide" button). Builds the tab view with Welcome present without clearing
+    /// Reopens the Welcome tab on demand (menu-bar "Tiled Guide" item,
+    /// General's "Show Tiled Guide" button). Builds the tab view with Welcome present without clearing
     /// the dismissal flag, so the next launch still opens on General.
     /// When the window is hidden, the tab view is rebuilt first so the
     /// Welcome item exists before selection (selectTab is identifier-safe
