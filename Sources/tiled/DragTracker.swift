@@ -190,14 +190,28 @@ final class DragTracker {
     /// late verification. Nil = inconclusive, leave the window alone:
     /// the entry is gone (consumed by success, cleared by takeover, or
     /// superseded by a newer write) or frames arrived but never settled.
-    /// `.ignored` = total AX silence since the push: no tick even
-    /// approached the target, so the app ignored the write. `.converged`
-    /// = a tick landed within tolerance of the target.
+    /// `.ignored` = the write never took effect and nothing echoed.
+    /// `.converged` = a tick landed within tolerance of the target.
     enum Convergence { case converged, ignored }
     func convergence(for id: WindowID) -> Convergence? {
-        guard let entry = expectedFrames[id] else { return nil }
+        guard var entry = expectedFrames[id] else { return nil }
         if entry.settled { return .converged }
-        return entry.lastDistance == .infinity ? .ignored : nil
+        guard entry.lastDistance == .infinity else { return nil }
+        // Total echo silence alone is not a silent ignore: apps that
+        // round frames to an internal grid (Terminal rounds to character
+        // cells) can absorb a write whose target sits within their
+        // rounding distance — the frame does not actually change, so no
+        // notification is emitted. Before calling it ignored, check the
+        // live frame directly: within the echo tolerance of the target
+        // means the write took effect (or needed no effect).
+        if let live = context.liveFrameOf(id),
+            Self.framesClose(entry.frame, live, tolerance: Self.echoTolerance)
+        {
+            expectedFrames[id] = nil
+            log("convergence win\(id): silent but at target (live=\(live))")
+            return .converged
+        }
+        return .ignored
     }
 
     /// Forgets a window: untile, restore, and prune paths call this so

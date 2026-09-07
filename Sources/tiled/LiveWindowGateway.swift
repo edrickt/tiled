@@ -81,6 +81,10 @@ final class LiveWindowGateway: WindowGateway {
         guard let element = elements[handle], let pid = pids[handle] else { return }
         changeHandlers[handle] = onChange
         let key = UInt(CFHash(element))
+        if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+            NSLog("tiled: [DEBUG-obs] observe win%d pid=%d key=%lu already=%d",
+                  handle.id, pid, key, observedElements.contains(key) ? 1 : 0)
+        }
         guard !observedElements.contains(key) else { return }
         observedElements.insert(key)
 
@@ -108,6 +112,9 @@ final class LiveWindowGateway: WindowGateway {
         for name in [kAXWindowResizedNotification, kAXWindowMovedNotification] {
             let status = AXObserverAddNotification(
                 observer, element, name as CFString, nil)
+            if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+                NSLog("tiled: [DEBUG-obs] add %@ on pid %d (%d)", name as String, pid, status.rawValue)
+            }
             if status != .success {
                 NSLog(
                     "tiled: could not observe %@ on pid %d (%d)", name as String, pid,
@@ -176,10 +183,17 @@ final class LiveWindowGateway: WindowGateway {
     /// controller never touches `AXUIElement` (the old refcon-id scheme
     /// went stale for the same reason: registrations outlive records).
     private func handleAXNotification(notification: String, element: AXUIElement) {
+        if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+            NSLog("tiled: [DEBUG-obs] notification %@ arrived", notification)
+        }
         for (handle, registered) in elements
         where CFEqual(registered, element) {
             changeHandlers[handle]?()
             return
+        }
+        if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+            NSLog("tiled: [DEBUG-obs] notification %@ matched NO handle (%d elements)",
+                  notification, elements.count)
         }
     }
     // MARK: Permissions

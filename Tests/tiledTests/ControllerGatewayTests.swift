@@ -289,6 +289,40 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: handle), tileRect)
     }
 
+    func testGridRoundedPlacementStaysTiled() {
+        // Terminal-style grid rounding: the app applies the write, but its
+        // frame lands ~5pt off the target (rounded to its own internal
+        // grid) and it emits no notification for the absorbed write. The
+        // late convergence check must consult the live frame before
+        // calling that silence a silent ignore — the window is tiled.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let target = gateway.frame(of: handle)!
+        verifyFires.removeAll()
+
+        // Re-place from an untiled state parked at the rounded frame:
+        // the write goes out (5pt off target — a real write, not skipped),
+        // the app absorbs it back to the same rounded frame, no echo.
+        controller.untile(window: 1)
+        // Park the untiled window at the grid-rounded frame it had in the
+        // previous session: 5pt off the target — outside the no-op skip,
+        // so the placement write is real.
+        let rounded = CGRect(x: target.minX, y: target.minY + 5,
+                             width: target.width - 1, height: target.height)
+        gateway.simulateSilentChange(handle, to: rounded)
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        // The app absorbs the write back to its rounded frame — no echo.
+        gateway.simulateSilentChange(handle, to: rounded)
+
+        for fire in verifyFires { fire() }
+
+        XCTAssertNotNil(
+            controller.state.occupant(of: .topLeft),
+            "a grid-rounded placement must not read as a silent ignore")
+    }
+
     func testNoOpRepushDoesNotEvictUnchangedNeighbor() {
         // THE random-eviction bug: every resize drag re-pushes every
         // occupant of the screen, and a push whose target equals the
