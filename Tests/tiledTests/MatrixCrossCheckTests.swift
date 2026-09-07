@@ -2,14 +2,14 @@ import XCTest
 @testable import tiled
 
 /// Closes the "commit dance" gap: the pure-state matrices in
-/// LayoutSwitchTests/ShuffleTests validate `plan()` against a hand-written
-/// copy of the controller's apply order. Here every (occupancy, request)
-/// pair from those same matrices is replayed through the real
+/// LayoutSwitchTests validate `plan()` against a hand-written copy of
+/// the controller's apply order. Here every (occupancy, request) pair
+/// from those same matrices is replayed through the real
 /// `TilingController.handle` (restore ordering, record lifecycle, commit,
 /// and cross-layout reset included) and the end state must match the pure
 /// plan application exactly. Both requester kinds run: a fresh untiled
-/// window (tile/evict/switch paths) and an already-tiled window (swap and
-/// no-op paths, which only tiled requesters can produce).
+/// window (tile/evict/switch paths) and an already-tiled window (move
+/// and no-op paths, which only tiled requesters can produce).
 final class MatrixCrossCheckTests: XCTestCase {
     /// The pure contract: evicted windows are removed before the requester
     /// is committed. Cross-validated against the real controller by this
@@ -20,8 +20,6 @@ final class MatrixCrossCheckTests: XCTestCase {
         switch plan {
         case .noop:
             break
-        case .swap(let placements):
-            state.commitSwaps(placements)
         case .tile(let evicting), .switchLayout(let evicting):
             for evicted in evicting where evicted != requester {
                 state.remove(window: evicted)

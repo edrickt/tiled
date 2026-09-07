@@ -57,15 +57,10 @@ below are the remappable ones.
 
 | Key  | Action                                                        |
 |------|---------------------------------------------------------------|
-| ⌥⇧⌫  | Evict the focused window: untile it and let its column-mates expand |
+| ⌥⇧⌫  | Evict the focused window: untile it and restore its pre-tile frame  |
 
-Evicting restores the focused window to its pre-tile frame and grows the
-adjacent survivor into the freed space when the two form exactly one slot
-together, vertically or horizontally. Evict Top Left with Bottom Left
-tiled and Bottom Left becomes Left Half; evict the left third with the
-middle third tiled and the middle third becomes the left two-thirds.
-Windows that merge into no exact slot never move, and a gap nobody can
-fill exactly stays a gap. Like Expand, this shortcut is fixed.
+Evicting restores the focused window to its pre-tile frame and releases
+its slot. Like Expand, this shortcut is fixed.
 
 First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
 to tile it top-left, and you're going, with a miniature preview showing
@@ -91,34 +86,21 @@ you pick a free one.
   slot. Evicted windows are restored to their pre-tile frames.
   - Two quads occupied on one side + the half key → both quads are evicted.
   - A half occupied + a quad key on that side → the half window is evicted.
-- When every overlapping window fits into the footprint the requesting window
-  vacates, they **swap** instead, and nobody is untiled. (Top left → occupied
-  bottom right exchanges the two windows; left half → occupied top right
-  exchanges the half and the quad.) A swap is all-or-nothing: if any window
-  refuses its move, the whole exchange is called off and every window returns
-  to its pre-swap frame, never a half-moved shuffle or two windows stacked
-  in one tile. Shuffled windows that were expanded (⌥⇧⏎) come back to their
-  tiles first; expanded windows the shuffle doesn't touch stay expanded.
 - Tiling a window into its own tile does nothing: no restore, no reassert.
-- Moving a window to a free slot **grows** the neighbor that can absorb the
-  vacated cells exactly (two left sixths, top → middle third: the bottom
-  sixth becomes the left third). A hole no neighbor merges into stays a
-  hole, and fresh windows never grow anyone.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.
-- Use **Untile All** in the menu to restore every tiled window, or open a
-  tiled window's submenu to focus it, untile just that window, or tile the
-  focused window into its slot.
 - **Drag a tiled window by its title bar**: past ~100pt of drag it untiles
   right where you dropped it (the drop is the placement; no pre-tile
   restore); a shorter drag snaps back into its tile. A single far jump
   (a programmatic move, not a hand drag) always snaps back.
+- Use **Untile All** in the menu to restore every tiled window, or open a
+  tiled window's submenu to focus it, untile just that window, or tile the
+  focused window into its slot.
 - Each monitor tiles independently: every display runs its own layout,
-  occupancy, splitters, and undo history. Tiling, switching, swapping,
-  drag-resizing, and ⌃⌥⇧⌘Z on one monitor never disturb the other;
-  the same tile can even be occupied on both at once. The menu groups
-  tiled windows per display; Untile All and Reset Splitters act on the
-  focused monitor only.
+  occupancy, splitters, and undo history. Tiling, switching, drag-resizing,
+  and ⌃⌥⇧⌘Z on one monitor never disturb the other; the same tile can
+  even be occupied on both at once. The menu groups tiled windows per
+  display; Untile All and Reset Splitters act on the focused monitor only.
 - Quarters and sixths are mutually exclusive per monitor: requesting a slot in
   the other layout untiles every tiled window on that monitor and switches layouts. The menu
   names the switch and how to undo it ("Switched to Sixths · 3 windows
@@ -170,7 +152,7 @@ Quitting Tiled leaves your windows where they are.
 - [x] Menu bar app (LSUIElement), Accessibility permission flow
 - [x] 17 global hotkeys (Carbon RegisterEventHotKey) + clickable menu equivalents
 - [x] In-app keyboard-shortcut reference
-- [x] Pure, unit-tested tiling state with eviction, swap, and layout-switch rules
+- [x] Pure, unit-tested tiling state with eviction and layout-switch rules
 - [x] Fixed-rect tiling via the Accessibility API
 - [x] Live shared-edge resizing (observe native drag + compensate neighbors)
 - [x] Sixths layout (3×2 grid, thirds, two-thirds)

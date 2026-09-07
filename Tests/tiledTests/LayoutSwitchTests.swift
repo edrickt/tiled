@@ -76,8 +76,6 @@ final class LayoutSwitchTests: XCTestCase {
         switch plan {
         case .noop:
             break // no state change
-        case .swap(let placements):
-            state.commitSwaps(placements)
         case .tile(let evicting), .switchLayout(let evicting):
             for evicted in evicting { state.remove(window: evicted) }
             state.commit(window: requester, into: target)
@@ -209,9 +207,9 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertEqual(state.plan(window: 1, into: .sixthTopLeft), .switchLayout(evicting: [1]))
     }
 
-    func testSwitchNeverReturnsTileSwapOrNoop() {
+    func testSwitchNeverReturnsTileOrNoop() {
         // Across every occupancy shape, a cross-layout request must be a
-        // switchLayout, never a same-layout tile/swap leaking through.
+        // switchLayout, never a same-layout tile leaking through.
         for config in Self.quartersConfigs {
             let (state, _) = makeState(slots: config, firstID: 10)
             for target in Self.sixthsSlots {
@@ -288,9 +286,7 @@ final class LayoutSwitchTests: XCTestCase {
         // .tile never names the requester, so the filter is a no-op there.
         XCTAssertEqual(TilePlan.tile(evicting: [1, 3]).windowsToRestore(requester: 2), [1, 3])
         XCTAssertEqual(TilePlan.tile(evicting: []).windowsToRestore(requester: 1), [])
-        // .swap/.noop restore nothing.
-        XCTAssertEqual(
-            TilePlan.swap(placements: [1: .topLeft]).windowsToRestore(requester: 1), [])
+        // .noop restores nothing.
         XCTAssertEqual(TilePlan.noop.windowsToRestore(requester: 1), [])
     }
 
@@ -486,7 +482,7 @@ final class LayoutSwitchTests: XCTestCase {
     func testFreshWindowIntoActiveLayoutTilesNormally() {
         // The reset fires only when the target layout differs from the
         // ACTIVE one; a fresh window joining the current layout is a plain
-        // tile (or swap), never a switch.
+        // tile, never a switch.
         var quarters = TilingState()
         quarters.commit(window: 1, into: .topLeft)
         XCTAssertEqual(quarters.plan(window: 2, into: .bottomRight), .tile(evicting: []))
@@ -499,8 +495,8 @@ final class LayoutSwitchTests: XCTestCase {
     }
 
     func testAfterSwitchSameLayoutRequestsDoNotReset() {
-        // Once switched, the new layout is home: disjoint tiles and swaps
-        // proceed without another reset.
+        // Once switched, the new layout is home: disjoint tiles proceed
+        // without another reset.
         var state = TilingState()
         state.commit(window: 1, into: .topLeft)
         var next = state
@@ -508,13 +504,10 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertEqual(next.occupants, [.sixthLeft: 2])
         // Disjoint sixths tile: plain tile.
         XCTAssertEqual(next.plan(window: 3, into: .sixthRight), .tile(evicting: []))
-        // Occupied sixths third takeover by a fresh window: reflow, not
-        // reset - the untouched 2 stays left, the blocking 3 slides to
-        // the middle, 4 takes the right.
+        // Occupied sixths third takeover by a fresh window: eviction of
+        // the blocker, not a reset.
         next.commit(window: 3, into: .sixthRight)
-        XCTAssertEqual(
-            next.plan(window: 4, into: .sixthRight),
-            .swap(placements: [4: .sixthRight, 2: .sixthLeft, 3: .sixthMiddle]))
+        XCTAssertEqual(next.plan(window: 4, into: .sixthRight), .tile(evicting: [3]))
         // Tiled window moving between sixths thirds: move, not reset.
         XCTAssertEqual(next.plan(window: 2, into: .sixthMiddle), .tile(evicting: []))
     }

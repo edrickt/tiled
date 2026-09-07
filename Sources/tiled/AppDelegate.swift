@@ -769,12 +769,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .nothingToEvict:
             text = MenuText.nothingToEvictAnnouncement()
             noticeFallback = "Window isn't tiled."
-        case .evictRefused(let name):
-            text = MenuText.evictRefusedAnnouncement(windowName: name)
-            noticeFallback = controller.lastTileError
-            announce(text, fallback: noticeFallback)
-            refreshMenu()
-            return
         }
         announce(text, fallback: noticeFallback)
         refreshMenu()

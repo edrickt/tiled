@@ -148,8 +148,8 @@ final class HotkeyService {
     /// Whether the expand combo registered (false = owned by another app).
     private(set) var expandHotkeyFailed = false
 
-    /// Fired by the fixed ⌥⇧⌫ combo: evicts the focused window, growing
-    /// the surviving column-mates into the freed cells.
+    /// Fired by the fixed ⌥⇧⌫ combo: evicts the focused window
+    /// (restores its pre-tile frame and releases its slot).
     var evictHandler: (() -> Void)? {
         get { context.evictHandler }
         set { context.evictHandler = newValue }

@@ -376,138 +376,6 @@ final class ControllerGatewayTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
-    // MARK: Swap focus
-
-    func testSwapKeepsFocusOnOriginalTile() {
-        // TL + BL tiled, right half tiled; tiling the right-half window
-        // into top left swaps it with the TL window, which inherits the
-        // whole right half. Focus must stay on the original tile (the
-        // heir now in right half), not follow the requester to top left.
-        // Chaining then works with no manual refocus: the next hotkey
-        // acts on the heir still sitting in the original tile.
-        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
-        gateway.focused = a
-        controller.handle(slot: .topLeft)
-        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
-        gateway.focused = b
-        controller.handle(slot: .bottomLeft)
-        let c = gateway.addWindow(frame: CGRect(x: 0, y: 700, width: 800, height: 600))
-        gateway.focused = c
-        controller.handle(slot: .rightHalf)
-        XCTAssertEqual(controller.state.slot(of: 3), .rightHalf)
-
-        gateway.focused = c
-        controller.handle(slot: .topLeft)
-
-        XCTAssertEqual(controller.state.slot(of: 3), .topLeft, "requester swapped in")
-        XCTAssertEqual(controller.state.slot(of: 1), .rightHalf, "blocker relocated, not evicted")
-        XCTAssertEqual(
-            gateway.focusCalls.last, a,
-            "focus stays on the original tile: the heir now in right half")
-
-        // No manual refocus: the heir holds focus, so the next hotkey
-        // moves the original tile's current window again.
-        controller.handle(slot: .bottomLeft)
-
-        XCTAssertEqual(controller.state.slot(of: 1), .bottomLeft, "heir swapped onward")
-        XCTAssertEqual(controller.state.slot(of: 2), .rightHalf, "next heir inherits the tile")
-        XCTAssertEqual(controller.state.slot(of: 3), .topLeft, "first requester undisturbed")
-        XCTAssertEqual(
-            gateway.focusCalls.last, b,
-            "focus still on the original tile after the chained swap")
-    }
-
-    func testSwapSplitFocusesTopmostPiece() {
-        // RH -> LH splits the vacated right half between the two left
-        // quads (TR + BR): no single heir holds the old tile, so focus
-        // takes the first overlapping piece in slot order rather than
-        // following the requester.
-        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
-        gateway.focused = a
-        controller.handle(slot: .topLeft)
-        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
-        gateway.focused = b
-        controller.handle(slot: .bottomLeft)
-        let c = gateway.addWindow(frame: CGRect(x: 0, y: 700, width: 800, height: 600))
-        gateway.focused = c
-        controller.handle(slot: .rightHalf)
-        XCTAssertEqual(controller.state.slot(of: 3), .rightHalf)
-
-        gateway.focused = c
-        controller.handle(slot: .leftHalf)
-
-        XCTAssertEqual(controller.state.slot(of: 3), .leftHalf)
-        XCTAssertEqual(controller.state.slot(of: 1), .topRight)
-        XCTAssertEqual(controller.state.slot(of: 2), .bottomRight)
-        // No piece IS the old tile (RH holds no single heir), so the
-        // first-overlapping-piece rule applies in reading order: the
-        // same spatial order the solver deals in, hence the TL heir now
-        // in top-right. The pin is determinism matching the shuffle,
-        // not which corner wins.
-        XCTAssertEqual(
-            gateway.focusCalls.last, a,
-            "split tile: focus the solver's first piece, not the requester")
-    }
-
-    func testReflowRetilesThroughControllerWithoutEviction() {
-        // Thirds L/M/R tiled through the real controller; the middle
-        // window takes the right two-thirds. The tile is honored, both
-        // neighbors survive in the left corners, and real frames are
-        // written for all three windows.
-        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
-        gateway.focused = a
-        controller.handle(slot: .sixthLeft)
-        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
-        gateway.focused = b
-        controller.handle(slot: .sixthMiddle)
-        let c = gateway.addWindow(frame: CGRect(x: 0, y: 700, width: 800, height: 600))
-        gateway.focused = c
-        controller.handle(slot: .sixthRight)
-        XCTAssertEqual(controller.state.activeLayout, .sixths)
-
-        gateway.focused = b
-        controller.handle(slot: .sixthsRightTwoThirds)
-
-        XCTAssertEqual(controller.state.slot(of: 2), .sixthsRightTwoThirds)
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthTopLeft)
-        XCTAssertEqual(controller.state.slot(of: 3), .sixthBottomLeft)
-        XCTAssertEqual(Set(controller.state.tiledWindows), [1, 2, 3])
-        for handle in [a, b, c] {
-            XCTAssertNotEqual(
-                gateway.frame(of: handle), CGRect(x: 0, y: 0, width: 800, height: 600),
-                "reflow writes a real tile rect")
-        }
-        // Exact rects, not just "a real rect": each window sits in its
-        // slot's geometry over the owning display's visible frame, the
-        // same bounds chain the controller's write uses.
-        let bounds = controller.screen(for: gateway.frame(of: a)!)!.visibleFrame
-        XCTAssertEqual(
-            gateway.frame(of: a),
-            controller.grid.rect(for: .sixthTopLeft, in: bounds),
-            "the surviving top-left sixth is exact")
-        XCTAssertEqual(
-            gateway.frame(of: b),
-            controller.grid.rect(for: .sixthsRightTwoThirds, in: bounds),
-            "the requester covers the right two-thirds exactly")
-        XCTAssertEqual(
-            gateway.frame(of: c),
-            controller.grid.rect(for: .sixthBottomLeft, in: bounds),
-            "the surviving bottom-left sixth is exact")
-        XCTAssertNil(controller.lastTileError)
-    }
-
-    func testPlainTileIssuesNoFocusCall() {
-        // Only the swap path refocuses: resizing the already-focused
-        // window never moves focus, so a plain tile must not activate.
-        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
-        gateway.focused = handle
-
-        controller.handle(slot: .topLeft)
-
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
-        XCTAssertTrue(gateway.focusCalls.isEmpty, "plain tile must not refocus")
-    }
-
     // MARK: Undo integrity
 
     func testUndoDoesNotClobberAWindowThatRetookTheSlot() {
@@ -544,12 +412,10 @@ final class ControllerGatewayTests: XCTestCase {
 
     // MARK: Expansion vs. tiling
 
-    func testTilingOverAnExpandedWindowCollapsesItFirst() {
+    func testTilingOverAnExpandedWindowEvictsIt() {
         // a holds top left and is expanded over the screen; tiling b into
-        // left half must honor the tile. a's expansion dies first so the
-        // reflow moves a as an ordinary tracked window; an expanded window
-        // moved with its expansion entry lingering would drop out of drag
-        // tracking entirely.
+        // left half must honor the tile. a is evicted: its pre-tile frame
+        // is restored and its expansion dies with the restore write.
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = a
         controller.handle(slot: .topLeft)
@@ -560,44 +426,10 @@ final class ControllerGatewayTests: XCTestCase {
         controller.handle(slot: .leftHalf)
 
         XCTAssertEqual(controller.state.slot(of: 2), .leftHalf)
-        XCTAssertEqual(controller.state.slot(of: 1), .rightHalf, "blocker reflowed, not evicted")
-        gateway.focused = gateway.issued[0]
-        XCTAssertNil(
-            controller.expandedFocusedSlot,
-            "the shuffled window is an ordinary tracked tile, no expansion left")
-        // Bounds resolve to the owning display's visible frame, the same
-        // chain the controller uses for the write.
-        let bounds = controller.screen(for: gateway.frame(of: a)!)!.visibleFrame
+        XCTAssertNil(controller.state.slot(of: 1), "the blocker was evicted")
         XCTAssertEqual(
-            gateway.frame(of: a),
-            controller.grid.rect(for: .rightHalf, in: bounds),
-            "a sits in its reflowed slot, not its full-screen expansion")
-    }
-
-    // MARK: Growth after uncontended moves
-
-    func testMoveGrowsTheNeighborAndWritesRealFrames() {
-        // Two left sixths; the top window takes the middle third. The
-        // bottom window grows into the left third and both frames are
-        // written; focus follows the grown survivor covering the vacated
-        // tile (the same perch ethic as the evict reflow).
-        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
-        gateway.focused = a
-        controller.handle(slot: .sixthTopLeft)
-        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
-        gateway.focused = b
-        controller.handle(slot: .sixthBottomLeft)
-        XCTAssertEqual(controller.state.occupant(of: .sixthBottomLeft), 2)
-
-        gateway.focused = a
-        controller.handle(slot: .sixthMiddle)
-
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthMiddle)
-        XCTAssertEqual(controller.state.slot(of: 2), .sixthLeft, "the bottom sixth grew upwards")
-        XCTAssertEqual(
-            gateway.focusCalls.last, b,
-            "focus lands on the grown survivor covering the vacated tile")
-        XCTAssertNil(controller.lastTileError)
+            gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 600),
+            "a was restored to its pre-tile frame, not left expanded")
     }
 
     // MARK: Ghost cleanup
@@ -706,35 +538,5 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertNil(controller.lastTileError)
     }
 
-    func testSwapRollsBackOnlyTheIgnoredPartner() {
-        // Two windows exchange; the requester converges (echo tick) but
-        // the partner never moves. Verification rolls back exactly the
-        // silent window: the converged requester keeps its new tile.
-        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
-        gateway.focused = a
-        controller.handle(slot: .topLeft)
-        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
-        gateway.focused = b
-        controller.handle(slot: .topRight)
-        verifyFires.removeAll()
 
-        gateway.silentIgnore.insert(b)
-        gateway.focused = a
-        controller.handle(slot: .topRight)
-        XCTAssertEqual(controller.state.slot(of: 1), .topRight)
-        XCTAssertEqual(controller.state.slot(of: 2), .topLeft)
-        // The requester's write converges; the partner stays silent.
-        gateway.simulateChange(a, to: gateway.frame(of: a)!)
-        XCTAssertEqual(verifyFires.count, 2)
-
-        for fire in verifyFires { fire() }
-
-        XCTAssertEqual(
-            controller.state.slot(of: 1), .topRight,
-            "the converged requester keeps its tile")
-        XCTAssertNil(
-            controller.state.slot(of: 2),
-            "the silent partner rolls back like a refusal")
-        XCTAssertNotNil(controller.lastTileError)
-    }
 }

@@ -23,7 +23,7 @@ struct EvictedWindow {
     var screen: ScreenID? = nil
 }
 
-/// Executes tiling plans: the branch interaction of tile / swap / switch
+/// Executes tiling plans: the branch interaction of tile / switch
 /// plus snapshot, restore, rollback, and notice logic.
 ///
 /// Previously interleaved with focus, prune, and dispatch inside
@@ -93,80 +93,6 @@ final class PlanExecutor {
         switch decision {
         case .noop:
             return (Outcome(), state, records, nextID) // unreachable: callers guard noop first
-        case .swap(let placements):
-            // A swap is atomic: either every window lands in its new slot
-            // or the whole exchange is called off. Writes go in slot
-            // reading order (top-to-bottom, left-to-right) so the write
-            // sequence is deterministic, and on any refusal every window
-            // is written back to its pre-swap frame: a refused exchange
-            // must never leave two windows stacked in one tile (the
-            // refused window's frame never vacated it) or a half-moved
-            // shuffle behind. State stays untouched on refusal: the
-            // windows keep their old slots, matching their old frames.
-            // `readingPrecedes` orders slots spatially, so the write
-            // sequence walks the exchange in reading order with no
-            // per-window index lookup: the comparator reads rank
-            // straight off the slot.
-            let ordered = placements.sorted { a, b in
-                if a.value != b.value { return Slot.readingPrecedes(a.value, b.value) }
-                return a.key < b.key
-            }
-            var preSwapFrames: [WindowID: CGRect] = [:]
-            for (window, _) in ordered {
-                if let record = records[window], let frame = gateway.frame(of: record.handle) {
-                    preSwapFrames[window] = frame
-                }
-            }
-            var planned = state
-            planned.commitSwaps(placements)
-            var failed: [WindowID] = []
-            for (occupant, _) in ordered {
-                if !applyLayout(
-                    for: occupant, state: planned, records: records,
-                    tracker: tracker, boundsOf: boundsOf, screen: screen)
-                { failed.append(occupant) }
-            }
-            var outcome = Outcome()
-            if !failed.isEmpty {
-                // Call the whole exchange off: restore every pre-swap
-                // frame (the refused window's is a no-op write; partners
-                // that already moved return to where they were), in the
-                // same reading order as the writes so the rollback itself
-                // is deterministic. Echo bookkeeping follows the restored
-                // frames: nobody is forgotten, everyone is still tiled
-                // at their old slot.
-                var rollbackFailures: [WindowID] = []
-                for (window, _) in ordered {
-                    guard let frame = preSwapFrames[window],
-                        let record = records[window]
-                    else { continue }
-                    tracker.markExpected(window, frame)
-                    if !gateway.setFrame(record.handle, to: frame) {
-                        rollbackFailures.append(window)
-                    }
-                }
-                let names = failed.compactMap { appName(for: $0, records: records) }
-                outcome.error = Self.swapRefusalMessage(names: names)
-                outcome.feedback = .refused(windowName: Self.swapRefusalName(names: names))
-                if !rollbackFailures.isEmpty {
-                    // A refused rollback is worse than a refused swap: the
-                    // exchange was called off in state (old slots kept),
-                    // but a window whose restore was refused sits at its
-                    // attempted swap position: state and screen disagree
-                    // until the user is told. The transient class was
-                    // already retried at the gateway, so this is a real
-                    // refusal; name it and let the error override the
-                    // plain refusal message.
-                    let rollbackNames = rollbackFailures.compactMap {
-                        appName(for: $0, records: records)
-                    }
-                    outcome.error = Self.swapRollbackMessage(names: rollbackNames)
-                }
-            } else {
-                state = planned
-            }
-            log("swap win\(id) -> \(slot.rawValue) placements=\(placements) failed=\(failed)")
-            return (outcome, state, records, nextID)
         case .switchLayout:
             // The requester moves rather than evicts: restore everyone
             // else first (restoring it would delete its record, so `place`
@@ -474,42 +400,5 @@ final class PlanExecutor {
         count == 1
             ? "Couldn't move that window: the app refused to resize it."
             : "Couldn't move \(count) windows: an app refused to resize."
-    }
-
-    /// Swap refusals name the app like the tile path does: same failure
-    /// class, same attribution. One named window reads alone; more read
-    /// as the first name plus a count.
-    private static func swapRefusalMessage(names: [String]) -> String {
-        switch names.count {
-        case 0:
-            return "Couldn't move that window: the app refused to resize it."
-        case 1:
-            return "\(names[0]) couldn't be swapped: the app refused to resize it."
-        default:
-            return "\(names[0]) and \(names.count - 1) more couldn't be swapped: "
-                + "an app refused to resize."
-        }
-    }
-
-    /// The announcement name for a swap refusal: the app when known,
-    /// never the tile path's "That window" fallback for a move that
-    /// wasn't a tiling.
-    private static func swapRefusalName(names: [String]) -> String? {
-        names.first
-    }
-
-    /// The error when the rollback of a refused swap itself failed: the
-    /// plain refusal message would understate the situation (windows may
-    /// be in the wrong tiles), so it gets its own wording, named like the
-    /// other swap errors.
-    private static func swapRollbackMessage(names: [String]) -> String {
-        switch names.count {
-        case 0:
-            return "The swap was refused, and some windows couldn't be moved back; they may be in the wrong tiles."
-        case 1:
-            return "The swap was refused, and \(names[0]) couldn't be moved back; it may be in the wrong tile."
-        default:
-            return "The swap was refused, and \(names.count) windows couldn't be moved back; they may be in the wrong tiles."
-        }
     }
 }

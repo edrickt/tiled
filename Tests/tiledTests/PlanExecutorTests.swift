@@ -1,7 +1,7 @@
 import XCTest
 @testable import tiled
 
-/// PlanExecutor through its own interface: branch execution (tile, swap,
+/// PlanExecutor through its own interface: branch execution (tile,
 /// switch), refusal rollback, restore-failure precedence, and undo, with
 /// a fake gateway and a real DragTracker. No controller, no AX.
 final class PlanExecutorTests: XCTestCase {
@@ -162,122 +162,6 @@ final class PlanExecutorTests: XCTestCase {
                 + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
     }
 
-    // MARK: Swap
-
-    func testSwapMovesBothWithoutEvicting() {
-        let a = addWindow()
-        let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        // Both windows still sit at their initial frames, so each write's
-        // bounds resolve to the same rect and the quads are exact.
-        let initial = gateway.frame(of: handles[a]!)!
-        let aTarget = tracker.grid.rect(for: .topRight, in: initial)
-        let bTarget = tracker.grid.rect(for: .topLeft, in: initial)
-
-        let outcome = commit(run(
-            .swap(placements: [a: .topRight, b: .topLeft]),
-            requester: a, slot: .topRight))
-
-        XCTAssertNil(outcome.error)
-        XCTAssertEqual(state.slot(of: a), .topRight)
-        XCTAssertEqual(state.slot(of: b), .topLeft)
-        XCTAssertEqual(
-            gateway.frame(of: handles[a]!), aTarget,
-            "the requester lands in the top-right quad")
-        XCTAssertEqual(
-            gateway.frame(of: handles[b]!), bTarget,
-            "the partner lands in the top-left quad")
-    }
-
-    // MARK: Swap refusals
-
-    func testSwapRefusalRollsBackTheWholeExchange() {
-        let a = addWindow()
-        let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        let aOriginal = gateway.frame(of: handles[a]!)
-        let bOriginal = gateway.frame(of: handles[b]!)
-        gateway.refuseNextWrites(handles[a]!)
-
-        let outcome = commit(run(
-            .swap(placements: [a: .topRight, b: .topLeft]),
-            requester: a, slot: .topRight))
-
-        XCTAssertEqual(
-            outcome.error, "TestApp couldn't be swapped: the app refused to resize it.")
-        XCTAssertNotNil(outcome.feedback)
-        if case .refused(let name) = outcome.feedback {
-            // Same failure class as a tile refusal, same attribution: the
-            // announcement must name the app, never "That window" for a swap.
-            XCTAssertEqual(name, "TestApp")
-        } else {
-            XCTFail("swap refusal must carry named feedback")
-        }
-        // A swap is atomic: a refused exchange moves nobody. b's write to
-        // top left succeeded, but the rollback returns it; otherwise a
-        // (still at top left's pixels) and b would stack in one tile.
-        XCTAssertEqual(state.slot(of: a), .topLeft)
-        XCTAssertEqual(state.slot(of: b), .topRight)
-        XCTAssertEqual(gateway.frame(of: handles[a]!), aOriginal)
-        XCTAssertEqual(gateway.frame(of: handles[b]!), bOriginal)
-    }
-
-    func testFailedRollbackSurfacesItsOwnError() {
-        // A refusal stacked on a refusal: a refuses its swap write (calling
-        // the exchange off) AND its own rollback write. The transient class
-        // is already retried at the gateway, so this is a hard refusal;
-        // the plain refusal message would understate it: a's restore never
-        // landed, so state and screen may disagree. The error must say so.
-        let a = addWindow()
-        let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        let bOriginal = gateway.frame(of: handles[b]!)
-        gateway.refuseNextWrites(handles[a]!, count: 5)
-
-        let outcome = commit(run(
-            .swap(placements: [a: .topRight, b: .topLeft]),
-            requester: a, slot: .topRight))
-
-        // State keeps the pre-swap slots either way (the exchange was
-        // called off); b's rollback succeeded so b matches its slot.
-        XCTAssertEqual(state.slot(of: a), .topLeft)
-        XCTAssertEqual(state.slot(of: b), .topRight)
-        XCTAssertEqual(gateway.frame(of: handles[b]!), bOriginal, "b's rollback succeeded")
-        XCTAssertEqual(
-            outcome.error,
-            "The swap was refused, and TestApp couldn't be moved back; it may be in the wrong tile.")
-    }
-
-    func testSwapPartnerSilentlyIgnoringCommitsWithoutError() {
-        // The dominant real-world refusal shape: the gateway reports
-        // success but the app never moves. The executor trusts the
-        // write result, so the exchange commits with no error at write
-        // time; the controller's late verification (fired here manually
-        // via the injectable scheduler in controller tests) rolls the
-        // ignored window back. Pinned at this level so the write-time
-        // trust is visible; see ControllerGatewayTests for the rollback.
-        let a = addWindow()
-        let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        let bOriginal = gateway.frame(of: handles[b]!)
-        gateway.silentIgnore.insert(handles[b]!)
-
-        let outcome = commit(run(
-            .swap(placements: [a: .topRight, b: .topLeft]),
-            requester: a, slot: .topRight))
-
-        XCTAssertNil(outcome.error, "the write 'succeeded'")
-        XCTAssertEqual(state.slot(of: a), .topRight)
-        XCTAssertEqual(state.slot(of: b), .topLeft)
-        XCTAssertEqual(
-            gateway.frame(of: handles[b]!), bOriginal,
-            "the partner never moved; screen and state disagree")
-    }
-
     // MARK: Switch
 
     func testSwitchSnapshotsEvictedAndNotices() {
@@ -398,25 +282,6 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertEqual(result.error, "Couldn't restore the evicted windows.")
         XCTAssertTrue(result.state.occupants.isEmpty,
             "dead evictee skipped; requester restored (untiled)")
-    }
-
-    func testSwapRefusalPluralMessage() {
-        let a = addWindow()
-        let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        gateway.refuseNextWrites(handles[a]!)
-        gateway.refuseNextWrites(handles[b]!)
-
-        let outcome = commit(run(
-            .swap(placements: [a: .topRight, b: .topLeft]),
-            requester: a, slot: .topRight))
-
-        XCTAssertEqual(
-            outcome.error, "TestApp and 1 more couldn't be swapped: an app refused to resize.")
-        // Atomic: both writes refused, nothing moved at all.
-        XCTAssertEqual(state.slot(of: a), .topLeft)
-        XCTAssertEqual(state.slot(of: b), .topRight)
     }
 
     func testUndoPluralNotice() {

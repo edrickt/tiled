@@ -24,25 +24,17 @@ _Avoid_: sub-tile, block
 A movable divider between tiles whose fraction the drag-resize loop updates; screen edges are fixed, not splitters.
 _Avoid_: divider, separator, boundary (the code name is GridBoundary)
 
-**Growth**:
-The no-gap follow-up to an uncontended move: cells a move vacates merge with exactly one adjacent slot into a whole slot, and that neighbor grows into them, exact-or-empty, the same rule as eviction's reflow. Two left sixths, top moving to the middle third: the bottom sixth becomes the left third.
-_Avoid_: expand (the ⌥⇧⏎ toggle), fill
-
 **Eviction**:
-Untiling a window to make room, restoring its pre-tile frame; what `plan` returns when a swap can't fit.
+Untiling a window to make room, restoring its pre-tile frame; what `plan` returns when another window overlaps the requested slot.
 _Avoid_: displacement, removal
 
 **Expand**:
-Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it. The tracker ignores expanded windows.
+Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it.
 _Avoid_: maximize, zoom, fullscreen
 
 **Drag-out**:
 Untiling by dragging: a title-bar drag past the untile distance releases the slot and leaves the window where dropped: the drop is the placement, never a pre-tile restore. A shorter drag snaps back into the tile.
 _Avoid_: drag-to-untile, fling
-
-**Swap**:
-Exchanging places: overlapping windows move into the footprint the requester vacates, nobody untiled. When that footprint has no room, every other window reflows into the cells the tile leaves behind instead, covering them exactly, so nobody is untiled and no empty space remains. A swap is all-or-nothing: any refused write calls off the whole exchange, every window back to its pre-swap frame.
-_Avoid_: exchange, switch (which means layout switch)
 
 **Requester**:
 The window asking to be tiled in the current `handle` call; never evicts itself.
@@ -53,5 +45,5 @@ The controller's opaque reference to a managed window, issued by the window gate
 _Avoid_: window id (that's the pure-state key), element
 
 **Plan execution**:
-Committing a decided plan (tile, swap, or switch): snapshot, restore, place, rollback, and notice logic. Owned by the plan executor; the controller keeps focus, pruning, and dispatch.
+Committing a decided plan (tile or switch): snapshot, restore, place, rollback, and notice logic. Owned by the plan executor; the controller keeps focus, pruning, and dispatch.
 _Avoid_: placement (which is only the place step), commit

@@ -16,7 +16,7 @@ final class LiveWindowGateway: WindowGateway {
 
     /// Per-message timeout (seconds) applied to every element we touch.
     /// The AX default is ~6s per call, and a beachballing app would block
-    /// the hotkey path that long on every read or write; a swap loop
+    /// the hotkey path that long on every read or write; a drag-resize loop
     /// makes several. One second bounds the worst case while leaving
     /// healthy-but-busy apps room to answer; a write that times out is
     /// retryable anyway, so an over-tight bound costs a retry, not the
@@ -323,7 +323,7 @@ final class LiveWindowGateway: WindowGateway {
     /// Retry policy for AX writes. A write fails either because the app
     /// refused (permanent: retrying changes nothing) or because its main
     /// thread was momentarily unable to service the message (`.cannotComplete`:
-    /// busy, beachballing, mid-launch, the classic flaky swap). Only the
+    /// busy, beachballing, mid-launch). Only the
     /// transient class retries, with a short backoff, on the calling
     /// thread: hotkey handling already blocks the main runloop on the AX
     /// round-trip itself, and an asynchronous retry would break the

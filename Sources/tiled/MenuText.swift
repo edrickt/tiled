@@ -137,10 +137,4 @@ enum MenuText {
     static func nothingToEvictAnnouncement() -> String {
         "That window isn't tiled: nothing to evict."
     }
-
-    /// An evict reflow write was refused. Mirrors `refusedAnnouncement`
-    /// but names the evict, not a tiling.
-    static func evictRefusedAnnouncement(windowName: String?) -> String {
-        "\(windowName ?? "That window") couldn't be evicted: the app refused to resize it."
-    }
 }

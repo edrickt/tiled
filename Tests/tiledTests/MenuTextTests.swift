@@ -138,11 +138,5 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.nothingToEvictAnnouncement(),
             "That window isn't tiled: nothing to evict.")
-        XCTAssertEqual(
-            MenuText.evictRefusedAnnouncement(windowName: "Safari"),
-            "Safari couldn't be evicted: the app refused to resize it.")
-        XCTAssertEqual(
-            MenuText.evictRefusedAnnouncement(windowName: nil),
-            "That window couldn't be evicted: the app refused to resize it.")
     }
 }

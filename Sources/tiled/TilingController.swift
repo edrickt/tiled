@@ -142,10 +142,6 @@ final class TilingController {
         /// holds a slot, so there is nothing to release. Answers instead
         /// of staying silent: the hotkey path never no-ops quietly.
         case nothingToEvict
-        /// An evict reflow write was refused: same shape as `.refused`
-        /// but the announcement must not say “tiled”: the survivor
-        /// failed to grow, not to tile.
-        case evictRefused(windowName: String?)
     }
 
     var onFeedback: ((Feedback) -> Void)?
@@ -241,22 +237,6 @@ final class TilingController {
         // Clear this monitor's slate (not the focused one: the requester
         // may tile onto a background display while focus sits elsewhere).
         mutateSpace(screen) { $0.error = nil; $0.notice = nil }
-        // The swap keeps focus on the original tile: capture the slot
-        // the requester is about to vacate now; after `execute` the
-        // state holds the heirs, not the history.
-        let vacated = current.slot(of: id)
-
-        // A shuffled expanded window comes back to earth before the
-        // writes: the plan moves it as an ordinary occupant, but writing
-        // a slot rect while its expansion entry lingers leaves it
-        // untracked (the tracker reads expanded windows as untiled).
-        // Disjoint expanded windows (ones the plan doesn't move) stay
-        // expanded.
-        if case .swap(let placements) = decision {
-            for wid in placements.keys where expanded[wid] != nil {
-                collapseExpanded(wid)
-            }
-        }
 
         let result = executor.execute(
             decision: decision, requester: id, slot: slot,
@@ -283,11 +263,6 @@ final class TilingController {
             forgetWindow(evicted)
         }
         let outcome = result.outcome
-        if case .swap = decision, outcome.error == nil, let vacated {
-            // A swap vacates the requester's old slot: focus stays with
-            // the original tile, not the requester.
-            focusHeir(of: vacated, on: screen)
-        }
         if let feedback = outcome.feedback {
             onFeedback?(feedback)
         }
@@ -319,7 +294,6 @@ final class TilingController {
     private func scheduleVerification(of decision: TilePlan, requester id: WindowID, on screen: ScreenID?) {
         let placed: [WindowID]
         switch decision {
-        case .swap(let placements): placed = Array(placements.keys)
         case .tile, .switchLayout: placed = [id]
         case .noop: return
         }
@@ -985,41 +959,10 @@ final class TilingController {
         gateway.focus(record.handle)
     }
 
-    /// Focus after a successful shuffle lands on the survivor now covering
-    /// the vacated slot: its exact heir when one exists, else the first
-    /// overlapping piece in reading order: `Slot.readingPrecedes`, the
-    /// same spatial order the solver deals pieces in, so the perch matches
-    /// the shuffle. Shared by swaps (the requester's old slot: chained
-    /// hotkeys keep acting on that tile with no manual refocus; this also
-    /// re-asserts past a settle-late app stealing focus on the final
-    /// rewrite) and evictions (the grown survivor; focus must move or the
-    /// reflow hides behind the evicted window looking like a no-op).
-    /// Refused shuffles never reach here (their windows hold no slot, and
-    /// activating one would be a surprise); holes with no covering
-    /// survivor leave focus alone.
-    private func focusHeir(of vacated: Slot, on screen: ScreenID?) {
-        let state = spaceState(for: screen)
-        if let heir = state.occupant(of: vacated), let record = records[heir] {
-            gateway.focus(record.handle)
-            return
-        }
-        // Split tile: no single heir. First overlapping piece in reading
-        // order wins: the same spatial order the solver dealt the pieces in.
-        let piece = state.occupants
-            .filter { $0.key.overlaps(vacated) }
-            .min { Slot.readingPrecedes($0.key, $1.key) }
-        if let heir = piece?.value, let record = records[heir] {
-            gateway.focus(record.handle)
-        }
-    }
-
     /// Evicts the focused window (⌥⇧⌫): restores its pre-tile frame and
-    /// grows the adjacent survivor into the freed cells when they form
-    /// exactly one slot together (vertically or horizontally), so
-    /// deleting a tile never leaves slack its neighbor could have taken.
-    /// Untiled focused windows and failed focuses are safe no-ops with
-    /// the standard feedback; like `untile`, eviction keeps no undo
-    /// chapter (the restoration IS the frame).
+    /// releases the slot. Untiled focused windows and failed focuses are
+    /// safe no-ops with the standard feedback; like `untile`, eviction
+    /// keeps no undo chapter (the restoration IS the frame).
     func handleEvict() {
         pruneDeadWindows()
         guard let handle = gateway.focusedWindow() else {
@@ -1029,45 +972,17 @@ final class TilingController {
         }
         let id = recordID(for: handle) ?? windowID(for: handle)
         let screen = spaceOf(window: id) ?? focusedScreenID()
-        guard let slot = slotOfWindow(id) else {
+        guard slotOfWindow(id) != nil else {
             onFeedback?(.nothingToEvict)
             return
         }
         mutateSpace(screen) { $0.error = nil; $0.notice = nil }
-        let placements = spaceState(for: screen).reflowAfterEvict(window: id, from: slot)
-        // A moved survivor comes back to earth before the reflow write:
-        // growing an expanded window into the freed cells while its
-        // expansion entry lingers would leave it untracked. Survivors the
-        // reflow doesn't move stay expanded. (The evicted window's own
-        // expansion dies with its pre-tile restore below.)
-        for wid in placements.keys where expanded[wid] != nil {
-            collapseExpanded(wid)
-        }
-        let failure = restoreOne(id).failure
-        if !placements.isEmpty {
-            var current = spaceState(for: screen)
-            current.commitSwaps(placements)
-            setSpaceState(current, for: screen)
-            var rects: [WindowID: CGRect] = [:]
-            for occupant in placements.keys {
-                if let target = tracker.rect(for: occupant) { rects[occupant] = target }
-            }
-            // Refused reflow writes roll back like a refused swap: state
-            // and screen must never disagree about who holds the freed cells.
-            if pushRects(rects, excluding: nil) > 0 {
-                for occupant in placements.keys { forgetWindow(occupant) }
-                onFeedback?(.evictRefused(windowName: nil))
-            } else {
-                focusHeir(of: slot, on: screen)
-            }
-        }
-        if let failure {
+        if let failure = restoreOne(id).failure {
             reportRestoreFailures([failure])
         }
         syncLegacySurface(focus: screen)
         onChange?()
     }
-
 
     /// Untiles one window, restoring its pre-tile frame.
     func untile(window id: WindowID) {
