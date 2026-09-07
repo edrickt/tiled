@@ -1,7 +1,7 @@
 import AppKit
 
 /// The Shortcuts tab: one recorder row per slot, grouped under collapsible
-/// layout headers — mirroring the Tile Focused Window submenu so the two
+/// layout headers - mirroring the Tile Focused Window submenu so the two
 /// never disagree about grouping.
 ///
 /// Owns rows, sections, parked bindings, collapse state, the recorder
@@ -72,7 +72,7 @@ final class ShortcutsTab: NSObject {
         permissionRow.spacing = 12
         permissionRow.alignment = .firstBaseline
         let warningText = NSTextField(wrappingLabelWithString:
-            "Tiled can't see or move windows — Accessibility permission is off.")
+            "Tiled can't see or move windows - Accessibility permission is off.")
         warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warningText.textColor = .labelColor
         warningText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -100,7 +100,7 @@ final class ShortcutsTab: NSObject {
         conflictLabel.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
         conflictLabel.isHidden = true
         // No static accessibility label: the message IS the accessible
-        // content. A fixed label would mask it on re-navigation — Sam
+        // content. A fixed label would mask it on re-navigation - Sam
         // would hear "Shortcut conflict" with no way to re-read which
         // slot kept what. The live-region announcement covers the moment;
         // the text itself covers every moment after.
@@ -108,7 +108,7 @@ final class ShortcutsTab: NSObject {
 
         // Headers show row counts so a collapsed section still communicates
         // its size. Bulk enable/disable lives in the small button beside
-        // each header — deliberately separate from the disclosure control,
+        // each header - deliberately separate from the disclosure control,
         // which only collapses.
         for layout in [LayoutKind.quarters, LayoutKind.sixths] {
             stack.addArrangedSubview(sectionHeader(for: layout))
@@ -134,13 +134,13 @@ final class ShortcutsTab: NSObject {
         resetButton.bezelStyle = .rounded
         footer.addArrangedSubview(resetButton)
         let hint = NSTextField(wrappingLabelWithString:
-            "Click a shortcut, press a new combo — Esc keeps the old one, ⌫ disables.")
+            "Click a shortcut, press a new combo - Esc keeps the old one, ⌫ disables.")
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         footer.addArrangedSubview(hint)
         stack.addArrangedSubview(footer)
         // Same inset-width cap as the permission row above (activated
-        // after the row joins the stack — constraints need a common
+        // after the row joins the stack - constraints need a common
         // ancestor): without it the hint's intrinsic single-line width
         // shoves the row wide.
         footer.trailingAnchor.constraint(
@@ -151,7 +151,7 @@ final class ShortcutsTab: NSObject {
             stack.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
             stack.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-            // No bottom constraint — a bottom pin (even >=) stretches the
+            // No bottom constraint - a bottom pin (even >=) stretches the
             // stack to the viewport and sinks the footer; the flipped
             // document view keeps short content at the top instead.
         ])
@@ -201,8 +201,8 @@ final class ShortcutsTab: NSObject {
         if let previous = lastKnownTrusted, previous != trusted {
             announce(
                 trusted
-                    ? "Accessibility permission granted — tiled can see and move windows now."
-                    : "Tiled can't see or move windows — Accessibility permission is off.")
+                    ? "Accessibility permission granted - tiled can see and move windows now."
+                    : "Tiled can't see or move windows - Accessibility permission is off.")
         }
         lastKnownTrusted = trusted
     }
@@ -232,13 +232,13 @@ final class ShortcutsTab: NSObject {
         // The footer paragraph explains the contract, but a tooltip meets
         // the user at the control itself.
         button.toolTip = "Click to record a new combo; Esc keeps the old one, ⌫ disables."
-        // Armed/cancelled states change only the button title — announce
+        // Armed/cancelled states change only the button title - announce
         // both, so keyboard and VoiceOver users get the same state the
         // mouse path sees. Fires on arm (the monitor starts listening)
         // and on silent tab-away cancel (no decision, no visual trace).
         button.onArmed = { [weak self] armedSlot in
             self?.announce(
-                "Capturing a shortcut for \(SlotPresentation.title(of: armedSlot)) — press a combo, or Esc to keep the old one.")
+                "Capturing a shortcut for \(SlotPresentation.title(of: armedSlot)) - press a combo, or Esc to keep the old one.")
         }
         button.onSilentCancel = { [weak self] cancelledSlot in
             self?.announce(
@@ -251,11 +251,11 @@ final class ShortcutsTab: NSObject {
 
     /// Section header row: a borderless chevron + title button (collapse
     /// only) plus a small Enable/Disable-all button with its scope in the
-    /// title ("Enable all 6"). Two controls, two jobs — the header never
+    /// title ("Enable all 6"). Two controls, two jobs - the header never
     /// pretends to be the bulk toggle.
     ///
     /// (Not a .disclosure bezel: that cell refuses to draw its title on
-    /// current macOS — it renders a bare triangle no matter how the title
+    /// current macOS - it renders a bare triangle no matter how the title
     /// is set, and never exposes it to accessibility. A borderless button
     /// with an SF Symbol chevron renders and reads reliably.)
     private func sectionHeader(for layout: LayoutKind) -> NSView {
@@ -289,7 +289,7 @@ final class ShortcutsTab: NSObject {
         // Enable-all restores up to a whole section at once: name the
         // scope on the button so the consequence is visible before click.
         // Rounded bezel, not inline: beside the bold borderless header,
-        // unbordered gray text reads disabled — but this is the section's
+        // unbordered gray text reads disabled - but this is the section's
         // second live control, and it must look like one.
         let bulk = NSButton(
             title: sectionHasDisabledSlot(layout) ? "Enable all \(count)" : "Disable all \(count)",
@@ -314,10 +314,10 @@ final class ShortcutsTab: NSObject {
 
     /// Bulk toggle: Disable all parks current combos aside (persisted under
     /// a defaults key) and disables the section; Enable all restores them.
-    /// Kept out of HotkeyStore — parking is UI state, not the binding model.
+    /// Kept out of HotkeyStore - parking is UI state, not the binding model.
     /// A slot edited while disabled keeps its edit: the park is stale the
     /// moment the recorder commits, so blindly restoring it would silently
-    /// destroy a deliberate configuration — the only silent data-loss path
+    /// destroy a deliberate configuration - the only silent data-loss path
     /// the tab would otherwise have.
     @objc private func sectionBulkToggled(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue,
@@ -332,7 +332,7 @@ final class ShortcutsTab: NSObject {
                     if current.keyCode != nil, current != parked {
                         // Edited after the disable: the park is stale,
                         // the edit wins. Drop the park, keep the combo,
-                        // and say so — the live region exists for this.
+                        // and say so - the live region exists for this.
                         clearParkedBinding(for: slot)
                         keptEdits.append(SlotPresentation.title(of: slot))
                     } else {
@@ -348,7 +348,7 @@ final class ShortcutsTab: NSObject {
             if !keptEdits.isEmpty {
                 let names = keptEdits.joined(separator: ", ")
                 showConflict(
-                    "\(names) \(keptEdits.count == 1 ? "was" : "were") edited while disabled — " +
+                    "\(names) \(keptEdits.count == 1 ? "was" : "were") edited while disabled - " +
                     "kept the new \(keptEdits.count == 1 ? "combo" : "combos").")
             }
         } else {
@@ -382,7 +382,7 @@ final class ShortcutsTab: NSObject {
     /// identifier, so restoration is one lookup away.
     ///
     /// Returns the rebuilt view (also delivered via `onContentRebuilt`)
-    /// so headless callers — tests included — can drive the tab without
+    /// so headless callers - tests included - can drive the tab without
     /// a shell.
     @discardableResult
     private func rebuildContent(restoringFocusTo identifier: String? = nil) -> NSView {
@@ -489,7 +489,7 @@ final class ShortcutsTab: NSObject {
         case .clear:
             // A stray ⌫ must not silently discard a tuned combo: park the
             // previous binding first (same keys as Disable-all, so the
-            // next Enable-all restores it), and say what happened — the
+            // next Enable-all restores it), and say what happened - the
             // footer names the owner on clashes; the clear path owes the
             // same courtesy.
             let previous = hotkeyStore.binding(for: slot)
@@ -500,7 +500,7 @@ final class ShortcutsTab: NSObject {
             button.showBinding(hotkeyStore.binding(for: slot))
             if let label = previous.label {
                 showConflict(
-                    "\(SlotPresentation.title(of: slot)) disabled — " +
+                    "\(SlotPresentation.title(of: slot)) disabled - " +
                     "its old combo (\(label)) is parked; Enable all restores it.")
             } else {
                 clearConflict()
@@ -528,7 +528,7 @@ final class ShortcutsTab: NSObject {
                 button.shake()
                 let owners = slots.map { SlotPresentation.title(of: $0) }.joined(separator: ", ")
                 let message =
-                    "\(candidate.label ?? "That combo") is already used by \(owners) — " +
+                    "\(candidate.label ?? "That combo") is already used by \(owners) - " +
                     "\(SlotPresentation.title(of: slot)) kept its old shortcut."
                 showConflict(message)
                 NSLog("Tiled: %@", message)
@@ -538,7 +538,7 @@ final class ShortcutsTab: NSObject {
 
     /// VoiceOver announcement for recorder state changes (arm, silent
     /// cancel) and permission transitions. Posted against the conflict
-    /// line's view — the Shortcuts tab's live region — consistent with
+    /// line's view - the Shortcuts tab's live region - consistent with
     /// duplicate announcements. Silently skipped when the window is
     /// hidden (announcements against a non-visible element are dropped
     /// by the system anyway, but the guard keeps the intent explicit).
@@ -571,7 +571,7 @@ final class ShortcutsTab: NSObject {
     @objc private func resetShortcuts(_ sender: NSButton) {
         // The button is two actions in sequence: first a reversible reset
         // (backup kept), then a restore of that backup. Reversible beats
-        // "can't be undone" — especially when parking infrastructure
+        // "can't be undone" - especially when parking infrastructure
         // already exists for Disable all.
         if anyResetBackup() {
             restoreResetBackup(sender)
@@ -582,16 +582,16 @@ final class ShortcutsTab: NSObject {
 
     /// Resets everything to factory defaults, keeping the previous combos
     /// one step away: the reset button becomes Restore Previous Shortcuts
-    /// until the backup is restored (or overwritten by the next reset —
+    /// until the backup is restored (or overwritten by the next reset -
     /// the dialog says so when a backup already exists, so the second
     /// reset never silently destroys the first snapshot).
     private func confirmAndReset(_ sender: NSButton) {
         let alert = NSAlert()
         alert.messageText = "Reset all \(Slot.allCases.count) shortcuts to defaults?"
         alert.informativeText = anyResetBackup()
-            ? "This replaces your previous backup — those combos will be gone. "
+            ? "This replaces your previous backup - those combos will be gone. "
                 + "Your current combos become the new backup."
-            : "Your current combos are kept — use Restore Previous Shortcuts to get them back."
+            : "Your current combos are kept - use Restore Previous Shortcuts to get them back."
         alert.addButton(withTitle: "Reset Shortcuts")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }

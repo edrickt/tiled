@@ -4,7 +4,7 @@ import XCTest
 /// Per-monitor independence: each display runs its own layout, occupancy,
 /// and splitters. Tiling, switching, swapping, and drag-resize on one
 /// monitor never disturb the other. Driven through `TilingController` with
-/// the fake gateway and an injected two-screen provider — the same seam
+/// the fake gateway and an injected two-screen provider - the same seam
 /// as the other controller tests.
 final class PerMonitorTests: XCTestCase {
     private static let left = ScreenInfo(
@@ -229,7 +229,7 @@ final class PerMonitorTests: XCTestCase {
     func testSwapUsesTheDraggedSplitterGrid() {
         // Tile two left-column quads, drag the column split, then swap the
         // top window into the bottom slot. Every placement write must
-        // derive from the dragged grid — a swap must never snap tiles back
+        // derive from the dragged grid - a swap must never snap tiles back
         // to default splitters (the executor used to read the legacy nil-
         // screen grid, misplacing every window after any drag).
         let a = tileOnLeft()
@@ -247,7 +247,7 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
         // Drain the tracker's coalesced re-push before acting further.
         // The re-push is enqueued with DispatchQueue.main.async, so one
-        // async hop after it guarantees it landed (FIFO) — no runloop
+        // async hop after it guarantees it landed (FIFO) - no runloop
         // spin needed.
         let drained = XCTestExpectation(description: "coalesced re-push drained")
         DispatchQueue.main.async { drained.fulfill() }
@@ -290,7 +290,7 @@ final class PerMonitorTests: XCTestCase {
         let expectation = XCTestExpectation(description: "neighbor re-push")
         DispatchQueue.main.async {
             // Positive side: the dragged monitor's splitter actually
-            // moved and its neighbor re-pushed onto the dragged grid —
+            // moved and its neighbor re-pushed onto the dragged grid -
             // the isolation claim must be two-sided, or a mutant that
             // deletes the re-push entirely would pass.
             let grid = self.controller.grid(on: self.leftID)

@@ -14,7 +14,7 @@ final class GeneralTab: NSObject {
     /// button). The shell owns tab switching.
     var onShowGuide: (() -> Void)?
     /// Live probe of the Settings fallback hotkey, so the hide-icon
-    /// confirm can name a recovery that is actually registered — never a
+    /// confirm can name a recovery that is actually registered - never a
     /// dead combo while removing the last visible handle to the app.
     var isSettingsHotkeyRegisteredProvider: (() -> Bool)?
     /// Live Accessibility trust probe, injected by the shell: with the
@@ -41,7 +41,7 @@ final class GeneralTab: NSObject {
 
     /// Builds the tab inside a scroll view: the window's own minimum
     /// size (400×300) is smaller than this content, and larger
-    /// accessibility text grows it further — without scrolling the tail
+    /// accessibility text grows it further - without scrolling the tail
     /// clips silently.
     func build(size: NSSize) -> NSView {
         let view = NSView(frame: NSRect(origin: .zero, size: size))
@@ -78,7 +78,7 @@ final class GeneralTab: NSObject {
         permissionRow.spacing = 12
         permissionRow.alignment = .firstBaseline
         let warningText = NSTextField(wrappingLabelWithString:
-            "Tiled can't see or move windows — Accessibility permission is off.")
+            "Tiled can't see or move windows - Accessibility permission is off.")
         warningText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warningText.textColor = .labelColor
         // The label wraps; the button never shrinks. Without this the
@@ -96,7 +96,7 @@ final class GeneralTab: NSObject {
         // Cap the row to the inset content width (leading comes from the
         // stack's .leading alignment): the button holds the 24pt inset at
         // any window width instead of riding on the label's intrinsic
-        // single-line width. Activated after the row joins the stack —
+        // single-line width. Activated after the row joins the stack -
         // constraints need a common ancestor.
         permissionRow.trailingAnchor.constraint(
             equalTo: stack.trailingAnchor, constant: -24).isActive = true
@@ -108,7 +108,7 @@ final class GeneralTab: NSObject {
         stack.addArrangedSubview(launchAtLoginCheckbox)
 
         // Inline failure explanation: when SMAppService throws (e.g. a
-        // raw `swift run` binary), the checkbox reverts — this label says
+        // raw `swift run` binary), the checkbox reverts - this label says
         // why, so the toggle never silently "doesn't work".
         loginFailureLabel = NSTextField(wrappingLabelWithString: "")
         loginFailureLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -127,7 +127,7 @@ final class GeneralTab: NSObject {
         // instead of orphaning it a divider and a section away.
         let hint = NSTextField(wrappingLabelWithString:
             "When the icon is hidden, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere " +
-            "or quit and reopen Tiled to get back here — Settings opens automatically. " +
+            "or quit and reopen Tiled to get back here - Settings opens automatically. " +
             "Hiding asks first, so this never happens by accident.")
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -177,7 +177,7 @@ final class GeneralTab: NSObject {
         let trusted = isTrustedProvider?() ?? true
         permissionRow?.isHidden = trusted
         // Only a visible-state flip is announced; the first probe just
-        // sets the baseline. Post against the row itself — announcements
+        // sets the baseline. Post against the row itself - announcements
         // for non-visible elements are dropped by the system anyway.
         if let previous = lastKnownTrusted, previous != trusted, let row = permissionRow {
             NSAccessibility.post(
@@ -185,8 +185,8 @@ final class GeneralTab: NSObject {
                 notification: .announcementRequested,
                 userInfo: [
                     .announcement: trusted
-                        ? "Accessibility permission granted — tiled can see and move windows now."
-                        : "Tiled can't see or move windows — Accessibility permission is off.",
+                        ? "Accessibility permission granted - tiled can see and move windows now."
+                        : "Tiled can't see or move windows - Accessibility permission is off.",
                     .priority: NSAccessibilityPriorityLevel.high.rawValue,
                 ])
         }
@@ -220,7 +220,7 @@ final class GeneralTab: NSObject {
             NSLog("Tiled: Launch at Login %@ failed: %@", enable ? "enable" : "disable", "\(error)")
             sender.state = enable ? .off : .on
             loginFailureLabel.stringValue =
-                "Launch at login couldn't be \(enable ? "enabled" : "disabled") — " +
+                "Launch at login couldn't be \(enable ? "enabled" : "disabled") - " +
                 "Tiled must be running as an installed app bundle for it to work."
             loginFailureLabel.isHidden = false
         }
@@ -232,13 +232,13 @@ final class GeneralTab: NSObject {
             // Hiding removes the only visible handle to the app (including
             // Quit), so confirm with a recovery path that is actually
             // registered: if the Settings fallback hotkey lost to another
-            // app, the dialog must not promise ⌃⌥⇧⌘, — it names the
+            // app, the dialog must not promise ⌃⌥⇧⌘, - it names the
             // relaunch path instead.
             let settingsHotkeyAlive = isSettingsHotkeyRegisteredProvider?() ?? true
             let recovery = settingsHotkeyAlive
                 ? "To get back, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere "
-                    + "or quit and reopen Tiled — Settings opens automatically."
-                : "To get back, quit and reopen Tiled — Settings opens automatically. "
+                    + "or quit and reopen Tiled - Settings opens automatically."
+                : "To get back, quit and reopen Tiled - Settings opens automatically. "
                     + "(The \u{2303}\u{2325}\u{21E7}\u{2318}, fallback is "
                     + "already used by another app.)"
             let alert = NSAlert()

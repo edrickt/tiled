@@ -16,7 +16,7 @@ final class LiveWindowGateway: WindowGateway {
 
     /// Per-message timeout (seconds) applied to every element we touch.
     /// The AX default is ~6s per call, and a beachballing app would block
-    /// the hotkey path that long on every read or write — a swap loop
+    /// the hotkey path that long on every read or write - a swap loop
     /// makes several. One second bounds the worst case while leaving
     /// healthy-but-busy apps room to answer; a write that times out is
     /// retryable anyway, so an over-tight bound costs a retry, not the
@@ -139,7 +139,7 @@ final class LiveWindowGateway: WindowGateway {
     var isTrusted: Bool { Self.isTrusted }
 
     func registerAccessibilityInterest() {
-        // Prompt:false — the explainer window asks in the product's own
+        // Prompt:false - the explainer window asks in the product's own
         // words; this call only puts Tiled on the System Settings list
         // so the toggle is findable when the user gets there.
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): false] as CFDictionary
@@ -199,7 +199,7 @@ final class LiveWindowGateway: WindowGateway {
     // MARK: Permissions
 
     /// Fresh trust probe: `AXIsProcessTrusted()` caches per-process, so a
-    /// poll built on it returns `false` forever once it has seen `false` —
+    /// poll built on it returns `false` forever once it has seen `false` -
     /// the grant would never be noticed and the permission window would
     /// linger. The WithOptions variant re-queries the TCC daemon, so the
     /// launch poll sees the flip while running and the window closes.
@@ -250,7 +250,7 @@ final class LiveWindowGateway: WindowGateway {
 
     /// Cheap liveness probe: read the position attribute. A read that
     /// names a gone element (invalid element, no window) is dead; a read
-    /// the app could not complete right now (`.cannotComplete` — busy,
+    /// the app could not complete right now (`.cannotComplete` - busy,
     /// beachballing, mid-launch) is unknown, never dead: dropping a live
     /// window on a transient failure would untile it on the next prune.
     private static func probe(_ element: AXUIElement) -> Probe {
@@ -268,7 +268,7 @@ final class LiveWindowGateway: WindowGateway {
 
     /// Frame of a window in AppKit global coordinates (bottom-left origin).
     /// The AX position attribute is the top-left corner in top-left-origin
-    /// global coordinates, so the y axis must be converted here — everything
+    /// global coordinates, so the y axis must be converted here - everything
     /// downstream (layout, drag detection, echo suppression) speaks AppKit.
     private static func frame(of element: AXUIElement) -> CGRect? {
         guard
@@ -297,7 +297,7 @@ final class LiveWindowGateway: WindowGateway {
 
         // The write pair retries as a unit: position writes are idempotent,
         // so a retry after a partial application (position landed, size hit
-        // a busy app) just rewrites both — never a half-moved window.
+        // a busy app) just rewrites both - never a half-moved window.
         var lastError: AXError = .success
         let error = AXWrite.retrying {
             let positionResult = AXUIElementSetAttributeValue(
@@ -321,17 +321,17 @@ final class LiveWindowGateway: WindowGateway {
     // MARK: AX transient failures (pure policy, unit-tested without AX)
 
     /// Retry policy for AX writes. A write fails either because the app
-    /// refused (permanent — retrying changes nothing) or because its main
+    /// refused (permanent - retrying changes nothing) or because its main
     /// thread was momentarily unable to service the message (`.cannotComplete`:
-    /// busy, beachballing, mid-launch — the classic flaky swap). Only the
+    /// busy, beachballing, mid-launch - the classic flaky swap). Only the
     /// transient class retries, with a short backoff, on the calling
     /// thread: hotkey handling already blocks the main runloop on the AX
     /// round-trip itself, and an asynchronous retry would break the
     /// executor's synchronous all-or-nothing writes.
     enum AXWrite {
         /// The error class worth retrying: the app could not complete the
-        /// request right now. Everything else — unsupported attribute,
-        /// disabled API, invalid element — is a permanent refusal.
+        /// request right now. Everything else - unsupported attribute,
+        /// disabled API, invalid element - is a permanent refusal.
         static func isRetryable(_ error: AXError) -> Bool {
             error == .cannotComplete
         }
@@ -352,7 +352,7 @@ final class LiveWindowGateway: WindowGateway {
 
         /// Runs `operation` up to `maxAttempts` times, retrying only
         /// retryable errors with backoff. Returns nil on success, else
-        /// the last error (retryable or not — callers only distinguish
+        /// the last error (retryable or not - callers only distinguish
         /// success, but the code is kept for logging and tests).
         /// `sleep` is injectable so tests can observe the backoff without
         /// waiting on real time.

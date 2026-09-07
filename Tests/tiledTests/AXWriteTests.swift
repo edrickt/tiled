@@ -23,7 +23,7 @@ final class AXWriteTests: XCTestCase {
         for error in permanent {
             XCTAssertFalse(
                 LiveWindowGateway.AXWrite.isRetryable(error),
-                "\(error) must not retry — it is permanent")
+                "\(error) must not retry - it is permanent")
         }
     }
 

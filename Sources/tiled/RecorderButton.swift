@@ -97,7 +97,7 @@ final class RecorderButton: NSButton {
 
     /// Rejects a duplicate with a horizontal shake, keeping the old binding.
     /// Honors Reduce Motion: when the user asked for less motion the shake
-    /// is skipped — the VoiceOver announcement and preserved binding carry
+    /// is skipped - the VoiceOver announcement and preserved binding carry
     /// the meaning on their own.
     func shake() {
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
@@ -108,7 +108,7 @@ final class RecorderButton: NSButton {
 
     /// One step of the shake, chained through sequential animation groups.
     /// Four animator calls inside a single NSAnimationContext run
-    /// concurrently — they compose into one blur, not a left-right shake —
+    /// concurrently - they compose into one blur, not a left-right shake -
     /// so each offset gets its own group and the next starts in the
     /// previous group's completion handler.
     ///
@@ -140,7 +140,7 @@ final class RecorderButton: NSButton {
     /// Tabbing away mid-record disarms without deciding: the pending
     /// completion is dropped and the label reverts to the stored binding.
     /// (The controller owns the store; the button restores its own title
-    /// from the last shown binding via the next reloadShortcutRows pass —
+    /// from the last shown binding via the next reloadShortcutRows pass -
     /// here it simply stops claiming the keypress.)
     private func cancelSilently() {
         stopMonitoring()
@@ -151,7 +151,7 @@ final class RecorderButton: NSButton {
             setAccessibilityValue(lastBinding.label ?? "disabled")
         }
         // Tabbing away mid-record disarms with no decision and no visual
-        // trace — say so, so the state change is never silent.
+        // trace - say so, so the state change is never silent.
         onSilentCancel?(slot)
     }
 

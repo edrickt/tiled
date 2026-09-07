@@ -1,5 +1,5 @@
 // Renders the Tiled app icon into an .iconset directory: a dark squircle
-// carrying a 2×2 grid of tiles with Top Left lit in accent blue — the
+// carrying a 2×2 grid of tiles with Top Left lit in accent blue - the
 // product's first lesson ("press ⌥⇧U to tile top-left") as a picture.
 //
 // Usage: swift scripts/make-icon.swift <iconset-dir>
@@ -25,7 +25,7 @@ func drawIcon(size: CGFloat) {
         ending: NSColor(srgbRed: 0.10, green: 0.10, blue: 0.12, alpha: 1))
     background?.draw(in: squircle, angle: -90)
 
-    // 2×2 tile grid. Top-left tile lit in accent blue, the rest dimmed —
+    // 2×2 tile grid. Top-left tile lit in accent blue, the rest dimmed -
     // the quarters layout, with the slot the Welcome tab teaches first.
     let pad = rect.width * 0.18
     let grid = rect.insetBy(dx: pad, dy: pad)

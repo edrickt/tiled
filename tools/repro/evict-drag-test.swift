@@ -6,7 +6,7 @@ import ApplicationServices
 // verify-rollback eviction. The drag re-pushes every occupant of the
 // screen; TR's rect is unchanged by this edge, so its re-push is a no-op
 // write. If TR's app emits no AX notification for a no-op write, the
-// convergence check at +3.5s reads .ignored and rolls TR back — eviction
+// convergence check at +3.5s reads .ignored and rolls TR back - eviction
 // seconds after a drag the window wasn't even part of.
 //
 // Requires: tiled with TILED_DEBUG=1 (stderr → /tmp/tiled-debug.log), host app running.
@@ -57,7 +57,7 @@ func post(_ e: CGEvent?) { e?.post(tap: .cghidEventTap); usleep(40_000) }
 
 // Clear any latched modifier state before synthesizing input: hotkey
 // events below carry ⌥⇧ flags, and a latched ⌥⇧ turns every subsequent
-// synthesized edge drag into a symmetric aspect-preserving resize —
+// synthesized edge drag into a symmetric aspect-preserving resize -
 // corrupting the whole experiment (observed: windows uniformly scaled
 // about their center during "vertical" drags).
 let kVK_OptionClear: CGKeyCode = 58, kVK_ShiftClear: CGKeyCode = 56
@@ -181,7 +181,7 @@ for tick in 1...16 {
     usleep(500_000)
     let (_, tail) = logTail(since: logOffset)
     if tail.contains("verify FAILED") || tail.contains("prune win") || tail.contains("drag-untile") {
-        print("RED at +\(String(format: "%.1f", Double(tick) * 0.5))s — untile marker fired:")
+        print("RED at +\(String(format: "%.1f", Double(tick) * 0.5))s - untile marker fired:")
         print(tail.suffix(800))
         red = true
         break

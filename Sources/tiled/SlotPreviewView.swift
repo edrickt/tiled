@@ -19,7 +19,7 @@ final class SlotPreviewView: NSView {
     ///   small sizes in Dark Mode, where quaternary can render
     ///   near-invisible against the window background.
     /// - Parameter displayColumns: 4 (the shared refinement) or 3 for a
-    ///   sixths-shaped preview — refinement cols 0..3 fold onto display
+    ///   sixths-shaped preview - refinement cols 0..3 fold onto display
     ///   cols 0..2 (1+2 merge into the middle third), so sixths geometry
     ///   reads as three columns instead of an uneven quarter grid.
     init(

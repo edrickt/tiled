@@ -21,7 +21,7 @@ final class AppDelegateMenuTests: XCTestCase {
         // Rows with no screen tags still group under one "Display" header:
         // the nil key exists in the grouping dictionary, so the single-
         // group check treats it as grouped. (The truly flat branch is
-        // reachable only with zero rows — see the empty test above.)
+        // reachable only with zero rows - see the empty test above.)
         let rows = [
             row(1, .topLeft),
             row(2, .topRight),
@@ -31,15 +31,15 @@ final class AppDelegateMenuTests: XCTestCase {
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
-            .init(title: "Display — Quarters · 2 tiled", key: nil)
+            .init(title: "Display - Quarters · 2 tiled", key: nil)
         ])
         XCTAssertEqual(presentation.tiledWindows.map(\.id), [1, 2])
-        XCTAssertEqual(presentation.statusLine, "Display — Quarters · 2 tiled")
+        XCTAssertEqual(presentation.statusLine, "Display - Quarters · 2 tiled")
     }
 
     func testOneTaggedDisplayStillGroups() {
         // Even a single display renders its header when rows carry tags:
-        // the per-display status line ("Display 1 — Quarters · 2 tiled")
+        // the per-display status line ("Display 1 - Quarters · 2 tiled")
         // is how multi-monitor users read the compass.
         let display = ScreenID(rawValue: 0)
         let rows = [
@@ -51,10 +51,10 @@ final class AppDelegateMenuTests: XCTestCase {
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
-            .init(title: "Built-in — Quarters · 2 tiled", key: "Built-in")
+            .init(title: "Built-in - Quarters · 2 tiled", key: "Built-in")
         ])
         XCTAssertEqual(presentation.tiledWindows.map(\.screenName), ["Built-in", "Built-in"])
-        XCTAssertEqual(presentation.statusLine, "Built-in — Quarters · 2 tiled")
+        XCTAssertEqual(presentation.statusLine, "Built-in - Quarters · 2 tiled")
     }
 
     func testNoWindowsAtAllRendersTheEmptyStatusLine() {
@@ -81,12 +81,12 @@ final class AppDelegateMenuTests: XCTestCase {
             rows: rows, layoutForScreen: { $0 == right ? .sixths : .quarters })
 
         XCTAssertEqual(presentation.sections, [
-            .init(title: "Display 1 — Quarters · 2 tiled", key: "Display 1"),
-            .init(title: "Display 2 — Sixths · 1 tiled", key: "Display 2"),
+            .init(title: "Display 1 - Quarters · 2 tiled", key: "Display 1"),
+            .init(title: "Display 2 - Sixths · 1 tiled", key: "Display 2"),
         ])
         XCTAssertEqual(presentation.tiledWindows.map(\.id), [1, 2, 3])
         XCTAssertEqual(presentation.statusLine,
-                       "Display 1 — Quarters · 2 tiled + Display 2 — Sixths · 1 tiled")
+                       "Display 1 - Quarters · 2 tiled + Display 2 - Sixths · 1 tiled")
     }
 
     func testSectionTitlesUseTheSingularAndPluralNoun() {
@@ -94,7 +94,7 @@ final class AppDelegateMenuTests: XCTestCase {
         let one = AppDelegate.monitorPresentation(
             rows: [row(1, .topLeft, screen: display, screenName: "D")],
             layoutForScreen: { _ in .quarters })
-        XCTAssertEqual(one.sections.first?.title, "D — Quarters · 1 tiled")
+        XCTAssertEqual(one.sections.first?.title, "D - Quarters · 1 tiled")
 
         let two = AppDelegate.monitorPresentation(
             rows: [
@@ -102,7 +102,7 @@ final class AppDelegateMenuTests: XCTestCase {
                 row(2, .bottomLeft, screen: display, screenName: "D"),
             ],
             layoutForScreen: { _ in .quarters })
-        XCTAssertEqual(two.sections.first?.title, "D — Quarters · 2 tiled")
+        XCTAssertEqual(two.sections.first?.title, "D - Quarters · 2 tiled")
     }
 
     func testNilScreenNameFallsBackToDisplayWhenGrouped() {
@@ -118,7 +118,7 @@ final class AppDelegateMenuTests: XCTestCase {
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
-            .init(title: "Display — Quarters · 2 tiled", key: nil)
+            .init(title: "Display - Quarters · 2 tiled", key: nil)
         ])
     }
 
@@ -127,7 +127,7 @@ final class AppDelegateMenuTests: XCTestCase {
     func testEveryActionWiresItsSelectorAndRepresentedObject() {
         // One assertion per Action case: the mapping is the only thing
         // between a click and its handler, and a mismatch there is a
-        // silent no-op row. Selectors pinned by name — the wiring lives
+        // silent no-op row. Selectors pinned by name - the wiring lives
         // on private @objc methods, so #selector is not referable here.
         let cases: [(MenuModel.Action, String, Any?, Bool)] = [
             (.tileSlot(.topLeft), "tileSlot:", Slot.topLeft.rawValue, true),

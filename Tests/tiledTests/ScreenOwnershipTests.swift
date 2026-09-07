@@ -3,7 +3,7 @@ import XCTest
 
 /// Screen-ownership rule for multi-display tiling: the display showing the
 /// largest share of a window owns it, so a straddled window never jitters
-/// between screens on its midpoint. Pure function over synthetic frames —
+/// between screens on its midpoint. Pure function over synthetic frames -
 /// no displays, AX, or UI needed.
 final class ScreenOwnershipTests: XCTestCase {
     // Two 1920-wide displays side by side in AppKit coords.
@@ -32,7 +32,7 @@ final class ScreenOwnershipTests: XCTestCase {
     // MARK: Straddles
 
     func testStraddlePicksMostlyVisibleSide() {
-        // 400px on the left, 800px on the right — midpoint is irrelevant.
+        // 400px on the left, 800px on the right - midpoint is irrelevant.
         XCTAssertEqual(owner(of: CGRect(x: 1520, y: 100, width: 1200, height: 600)), 1)
         XCTAssertEqual(owner(of: CGRect(x: 1120, y: 100, width: 1200, height: 600)), 0)
     }
@@ -94,11 +94,11 @@ final class ScreenOwnershipTests: XCTestCase {
         // majority. Widths are deliberately unequal (top 1000, band 1400,
         // bottom 600) and the overlap heights run the other way (top 150,
         // band 80, bottom 200), so neither a widest-screen nor a
-        // tallest-overlap heuristic can agree with the area rule — only
+        // tallest-overlap heuristic can agree with the area rule - only
         // true area math picks the top screen (135000 > 120000 > 72000
         // px² of overlap). (With two contiguous screens the midpoint
         // always lies in the majority portion, so divergence needs the
-        // three-way split — mirroring the side-by-side sliver test.)
+        // three-way split - mirroring the side-by-side sliver test.)
         let frames = [
             CGRect(x: 0, y: 1080, width: 1000, height: 1080),
             CGRect(x: 0, y: 1000, width: 1400, height: 80),

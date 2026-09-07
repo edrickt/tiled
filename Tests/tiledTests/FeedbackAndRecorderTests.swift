@@ -6,7 +6,7 @@ import XCTest
 
 /// The recorder's VoiceOver contract: each button names its slot (the row
 /// label is a separate, unassociated static text) and exposes its binding
-/// or recording state as the value — so the Shortcuts tab is seventeen
+/// or recording state as the value - so the Shortcuts tab is seventeen
 /// distinguishable controls, not seventeen anonymous buttons.
 final class RecorderButtonAccessibilityTests: XCTestCase {
     func testInitLabelsTheSlot() {
@@ -39,7 +39,7 @@ final class RecorderButtonAccessibilityTests: XCTestCase {
 
 /// The failure HUD is gone: tiling feedback never pops a panel over the
 /// workspace. Haptic + VoiceOver announcement + menu state carry every
-/// outcome — so there is nothing here to test. This placeholder keeps the
+/// outcome - so there is nothing here to test. This placeholder keeps the
 /// file (and its recorder tests below) intact.
 
 
@@ -139,9 +139,9 @@ final class RecorderButtonRoutingTests: XCTestCase {
 /// while the section was disabled: a stale park loses to a fresh edit,
 /// and the tab says which slots it kept. Drives the real bulk button
 /// (identifier "bulk-quarters") so the test covers the same path the
-/// user clicks — including the rebuild that swaps the button itself.
+/// user clicks - including the rebuild that swaps the button itself.
 /// Everything runs against a throwaway defaults suite: the park keys live
-/// outside the store, so the tab's persistence is injected too — a leak
+/// outside the store, so the tab's persistence is injected too - a leak
 /// here would rewrite the developer's actual hotkeys.
 final class ShortcutsBulkEnableTests: XCTestCase {
     private var defaults: UserDefaults!
@@ -211,7 +211,7 @@ final class ShortcutsBulkEnableTests: XCTestCase {
 
         XCTAssertEqual(
             store.binding(for: .topLeft), fresh,
-            "the fresh edit wins over the stale park — no silent data loss")
+            "the fresh edit wins over the stale park - no silent data loss")
         XCTAssertNil(
             defaults.dictionary(forKey: "parkedHotkey.topLeft"),
             "the stale park is dropped, not left to strike later")

@@ -3,7 +3,7 @@ import XCTest
 
 /// No-gap growth after an uncontended move: a window moving to a disjoint
 /// slot vacates cells, and when those cells merge with exactly one adjacent
-/// occupant into one whole slot, that neighbor grows into them — the move
+/// occupant into one whole slot, that neighbor grows into them - the move
 /// never leaves slack a neighbor could take (the max-space ethic, the same
 /// exact-or-empty rule the evict reflow uses). Two left sixths with the top
 /// one moving to the middle third is the canonical case: the bottom sixth
@@ -62,7 +62,7 @@ final class GrowthTests: XCTestCase {
         // a=sixthLeft -> sixthTopLeft is a pure shrink: it vacates exactly
         // the bottom half of the old third (the bottom-left sixth's
         // cells), and the only other window (sixthRight) covers none of
-        // them — no single neighbor merges the hole into a whole slot,
+        // them - no single neighbor merges the hole into a whole slot,
         // so exact-or-empty keeps the hole and nobody moves.
         var state = TilingState()
         state.commit(window: a, into: .sixthLeft)
@@ -73,7 +73,7 @@ final class GrowthTests: XCTestCase {
 
     func testUncontendedExpansionGrowsNobody() {
         // The mirror shrink: a alone in the top-left sixth expanding to
-        // the whole left third — its old cells are a subset of the target,
+        // the whole left third - its old cells are a subset of the target,
         // so nothing is vacated and there is no growth decision to make.
         // A fresh window behaves the same (it vacates nothing).
         var state = TilingState()
@@ -100,7 +100,7 @@ final class GrowthTests: XCTestCase {
 
     func testFreshRequesterNeverGrowsAnyone() {
         // A fresh window vacates nothing, so tiling into a free slot
-        // never grows a neighbor — even one that could absorb the slot's
+        // never grows a neighbor - even one that could absorb the slot's
         // surroundings.
         var state = TilingState()
         state.commit(window: a, into: .sixthTopLeft)
@@ -111,7 +111,7 @@ final class GrowthTests: XCTestCase {
 
     func testGrowthIsDeterministicAcrossTilingOrder() {
         // Same visual arrangement, opposite tiling order: the growth is
-        // identical — spatial order, never window ids.
+        // identical - spatial order, never window ids.
         var early = TilingState()
         early.commit(window: 1, into: .sixthTopLeft)
         early.commit(window: 2, into: .sixthBottomLeft)

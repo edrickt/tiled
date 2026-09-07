@@ -18,7 +18,7 @@ final class MenuTextTests: XCTestCase {
     }
 
     func testExpandItemTitleWithAndWithoutLabel() {
-        XCTAssertEqual(MenuText.expandItemTitle(label: "⌥⇧⏎"), "Expand to Fill Screen — ⌥⇧⏎")
+        XCTAssertEqual(MenuText.expandItemTitle(label: "⌥⇧⏎"), "Expand to Fill Screen - ⌥⇧⏎")
         XCTAssertEqual(MenuText.expandItemTitle(label: nil), "Expand to Fill Screen")
     }
 
@@ -27,31 +27,31 @@ final class MenuTextTests: XCTestCase {
         // window is expanded the row says where the toggle goes back.
         XCTAssertEqual(
             MenuText.expandItemTitle(label: "⌥⇧⏎", expandedSlot: .topLeft),
-            "Return to Top Left — ⌥⇧⏎")
+            "Return to Top Left - ⌥⇧⏎")
         XCTAssertEqual(
             MenuText.expandItemTitle(label: "⌥⇧⏎", expandedSlot: nil),
-            "Expand to Fill Screen — ⌥⇧⏎")
+            "Expand to Fill Screen - ⌥⇧⏎")
     }
 
     func testEvictItemTitleWithAndWithoutLabel() {
-        XCTAssertEqual(MenuText.evictItemTitle(label: "⌥⇧⌫"), "Evict Focused Window — ⌥⇧⌫")
+        XCTAssertEqual(MenuText.evictItemTitle(label: "⌥⇧⌫"), "Evict Focused Window - ⌥⇧⌫")
         XCTAssertEqual(MenuText.evictItemTitle(label: nil), "Evict Focused Window")
     }
 
     func testEvictHotkeyWarningNamesComboAndRecovery() {
         XCTAssertEqual(
             MenuText.evictHotkeyWarning(),
-            "The evict shortcut (⌥⇧⌫) is already used by another app — "
+            "The evict shortcut (⌥⇧⌫) is already used by another app - "
                 + "quit and reopen Tiled to try registering it again.")
     }
 
     func testWarningSummaryTitleSingularAndPlural() {
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 1),
-            "⚠ 1 shortcut problem — other apps own it")
+            "⚠ 1 shortcut problem - other apps own it")
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 3),
-            "⚠ 3 shortcut problems — other apps own them")
+            "⚠ 3 shortcut problems - other apps own them")
     }
 
     // MARK: Warnings
@@ -59,33 +59,33 @@ final class MenuTextTests: XCTestCase {
     func testSettingsHotkeyWarningNamesComboAndRecovery() {
         XCTAssertEqual(
             MenuText.settingsHotkeyWarning(),
-            "The Settings shortcut (⌃⌥⇧⌘,) is already used by another app — "
+            "The Settings shortcut (⌃⌥⇧⌘,) is already used by another app - "
                 + "quit and reopen Tiled to get back to Settings while hidden.")
     }
 
     func testHotkeyFailureWarningNamesLabelAndSlot() {
         XCTAssertEqual(
             MenuText.hotkeyFailureWarning(label: "⌥⇧U", slot: .topLeft),
-            "⌥⇧U is already used by another app — “Top Left” has no hotkey.")
+            "⌥⇧U is already used by another app - “Top Left” has no hotkey.")
     }
 
     func testHotkeyFailureWarningFallsBackToSlotNameWithoutSelfContradiction() {
         XCTAssertEqual(
             MenuText.hotkeyFailureWarning(label: nil, slot: .sixthLeft),
-            "The shortcut for “Left Third” is already used by another app — it has no hotkey.")
+            "The shortcut for “Left Third” is already used by another app - it has no hotkey.")
     }
 
     func testUndoHotkeyWarningNamesComboAndMenuRecovery() {
         XCTAssertEqual(
             MenuText.undoHotkeyWarning(),
-            "The undo shortcut (⌃⌥⇧⌘Z) is already used by another app — "
+            "The undo shortcut (⌃⌥⇧⌘Z) is already used by another app - "
                 + "undo the last displacement from the Tiled menu instead.")
     }
 
     func testExpandHotkeyWarningNamesComboAndRecovery() {
         XCTAssertEqual(
             MenuText.expandHotkeyWarning(),
-            "The expand shortcut (⌥⇧⏎) is already used by another app — "
+            "The expand shortcut (⌥⇧⏎) is already used by another app - "
                 + "quit and reopen Tiled to try registering it again.")
     }
 
@@ -94,20 +94,20 @@ final class MenuTextTests: XCTestCase {
     func testWindowLineWithAndWithoutLabel() {
         XCTAssertEqual(
             MenuText.windowLine(slot: .leftHalf, appName: "Safari", label: "⌥⇧J"),
-            "Left Half — Safari (⌥⇧J)")
+            "Left Half - Safari (⌥⇧J)")
         XCTAssertEqual(
             MenuText.windowLine(slot: .leftHalf, appName: "Safari", label: nil),
-            "Left Half — Safari")
+            "Left Half - Safari")
     }
 
     func testWindowLineFallbackAppName() {
         XCTAssertEqual(
             MenuText.windowLine(slot: .rightHalf, appName: nil, label: nil),
-            "Right Half — window")
+            "Right Half - window")
     }
 
     func testTileItemTitleWithAndWithoutLabel() {
-        XCTAssertEqual(MenuText.tileItemTitle(slot: .topLeft, label: "⌥⇧U"), "Top Left — ⌥⇧U")
+        XCTAssertEqual(MenuText.tileItemTitle(slot: .topLeft, label: "⌥⇧U"), "Top Left - ⌥⇧U")
         XCTAssertEqual(MenuText.tileItemTitle(slot: .topLeft, label: nil), "Top Left")
     }
 
@@ -116,33 +116,33 @@ final class MenuTextTests: XCTestCase {
     func testAnnouncements() {
         XCTAssertEqual(
             MenuText.noFocusedWindowAnnouncement(),
-            "No focused window — click a window first.")
+            "No focused window - click a window first.")
         XCTAssertEqual(
             MenuText.nothingToUndoAnnouncement(),
-            "Nothing to undo — a later change replaced it.")
+            "Nothing to undo - a later change replaced it.")
         XCTAssertEqual(
             MenuText.alreadyTiledAnnouncement(slot: .topRight),
-            "Top Right — already there.")
+            "Top Right - already there.")
         XCTAssertEqual(
             MenuText.refusedAnnouncement(windowName: "Safari"),
-            "Safari couldn't be tiled — the app refused to resize it.")
+            "Safari couldn't be tiled - the app refused to resize it.")
         XCTAssertEqual(
             MenuText.refusedAnnouncement(windowName: nil),
-            "That window couldn't be tiled — the app refused to resize it.")
+            "That window couldn't be tiled - the app refused to resize it.")
         XCTAssertEqual(
             MenuText.expandRefusedAnnouncement(windowName: "Safari"),
-            "Safari couldn't be expanded — the app refused to resize it.")
+            "Safari couldn't be expanded - the app refused to resize it.")
         XCTAssertEqual(
             MenuText.expandRefusedAnnouncement(windowName: nil),
-            "That window couldn't be expanded — the app refused to resize it.")
+            "That window couldn't be expanded - the app refused to resize it.")
         XCTAssertEqual(
             MenuText.nothingToEvictAnnouncement(),
-            "That window isn't tiled — nothing to evict.")
+            "That window isn't tiled - nothing to evict.")
         XCTAssertEqual(
             MenuText.evictRefusedAnnouncement(windowName: "Safari"),
-            "Safari couldn't be evicted — the app refused to resize it.")
+            "Safari couldn't be evicted - the app refused to resize it.")
         XCTAssertEqual(
             MenuText.evictRefusedAnnouncement(windowName: nil),
-            "That window couldn't be evicted — the app refused to resize it.")
+            "That window couldn't be evicted - the app refused to resize it.")
     }
 }

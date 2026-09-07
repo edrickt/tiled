@@ -4,7 +4,7 @@ import XCTest
 /// No-eviction reflow: the tile action is always honored, and windows
 /// covered by it (plus, when needed, untouched neighbors that must shrink
 /// to leave no empty space) are re-tiled into the leftover cells instead
-/// of being evicted — whenever the leftovers can house every other window
+/// of being evicted - whenever the leftovers can house every other window
 /// with no gaps. Otherwise the legacy swap/evict rules apply.
 final class ReflowTests: XCTestCase {
     private let a = 1

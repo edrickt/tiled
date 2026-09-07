@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Snapshot the current status menu was built from. Diffed on every
     /// refresh so the menu is rebuilt only when something it reads moved.
     private var lastMenuSnapshot: MenuModel.Snapshot?
-    /// What the status icon currently depicts — layout plus fill — so it
+    /// What the status icon currently depicts - layout plus fill - so it
     /// redraws when windows come and go within one layout, not just when
     /// the layout itself flips 2×2 ↔ 3×2.
     private var lastIconSnapshot: StatusIcon.Snapshot?
@@ -68,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Keyboard equivalents for the accessory app: LSUIElement apps have
     /// no visible menu bar, but NSApp.mainMenu key equivalents work
-    /// whenever the app is active — without this, ⌘Q/⌘W are dead while
+    /// whenever the app is active - without this, ⌘Q/⌘W are dead while
     /// Settings has focus (the status item's Quit only applies while
     /// that menu is open).
     private func setupMainMenu() {
@@ -164,8 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// One immutable pass over the state the icon reads: the active
-    /// layout plus which icon cells are covered. Occupancy keyed by slot —
-    /// the pure input `StatusIcon Snapshot` needs — derives from the
+    /// layout plus which icon cells are covered. Occupancy keyed by slot -
+    /// the pure input `StatusIcon Snapshot` needs - derives from the
     /// controller's window rows; expanded windows keep their slot (an
     /// expanded window still owns its tile), so they still light it.
     /// Multi-monitor: the focused display's space drives the glyph, so
@@ -182,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// current layout's geometry, and which of its slots are occupied. The
     /// stock square.grid.2x2 symbol can't express the quarters/sixths
     /// duality and goes stale on a layout switch, so draw a small template
-    /// grid — 2×2 for quarters, 3×2 for sixths — with each cell solid only
+    /// grid - 2×2 for quarters, 3×2 for sixths - with each cell solid only
     /// while a tiled window actually covers that spot, dimmed solid otherwise.
     /// An empty space reads as an empty frame; a full one reads solid.
     private static func statusIcon(_ snapshot: StatusIcon.Snapshot) -> NSImage {
@@ -311,7 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + "\(snapshot.filled.count) of \(total) slots occupied"
     }
 
-    /// Redraws the status icon when its snapshot moved — a layout switch
+    /// Redraws the status icon when its snapshot moved - a layout switch
     /// or a window tiled/untiled within one layout. Called from
     /// refreshMenu, which fires on every state change.
     private func updateStatusIcon() {
@@ -422,7 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let display = row.screenName ?? "Display"
                     let noun = count == 1 ? "1 tiled" : "\(count) tiled"
                     built.append(.init(
-                        title: "\(display) — \(layout.title) · \(noun)",
+                        title: "\(display) - \(layout.title) · \(noun)",
                         key: row.screenName))
                 }
                 ordered.append(.init(
@@ -438,7 +438,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         // Status line: one monitor reads as before; two read per
-        // display ("Display 1 — Quarters · 2 tiled + Display 2 — Sixths
+        // display ("Display 1 - Quarters · 2 tiled + Display 2 - Sixths
         // · 1 tiled") so the compass never hides a background monitor.
         let statusLine: String
         if sections.isEmpty {
@@ -544,7 +544,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (a refusal narrative, rendered verbatim) versus hotkey
     /// registration losses (counted into the summary row with their
     /// Open Shortcuts door). Mixing the two misdiagnosed refusals as
-    /// shortcut problems — the menu's headline row pointed users at the
+    /// shortcut problems - the menu's headline row pointed users at the
     /// wrong subsystem. Failures are reported here, never only logged.
     /// Labels come from the store so they reflect custom bindings.
     private var activeWarnings: (tileError: String?, hotkeyWarnings: [String]) {
@@ -580,7 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Opens Settings, optionally landing on a specific tab. The Welcome
     /// tab is selectable here (first run, permission grant, hidden-icon
-    /// recovery) — the no-arg path keeps the General default.
+    /// recovery) - the no-arg path keeps the General default.
     private func showSettings(selecting tab: SettingsWindowController.Tab?) {
         ensureSettingsController()
         if let tab {
@@ -617,7 +617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hotkeys?.failedSlots ?? []
             }
             // General's hide-icon confirm names a recovery combo only when
-            // it is actually registered — never a dead promise while
+            // it is actually registered - never a dead promise while
             // removing the last visible handle to the app.
             controller.isSettingsHotkeyRegisteredProvider = { [weak self] in
                 guard let hotkeys = self?.hotkeys else { return false }
@@ -652,7 +652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Collapsed layout-switch rows: honest about focus. With a focused
     /// window this tiles into the destination's top-left, performing the
     /// switch through the engine's mutual-exclusion rule (identical to
-    /// pressing that layout's own hotkey — same undo notice, same
+    /// pressing that layout's own hotkey - same undo notice, same
     /// reversibility). With no focused window the row is disabled, not a
     /// no-op: a menu row must not promise a switch it cannot perform.
     @objc private func switchToQuarters(_ sender: Any?) {
@@ -676,7 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // No modal: Untile All restores every window to its pre-tile
         // frame, and the eviction-undo snapshot behind it makes the
         // whole operation one ⌃⌥⇧⌘Z from reversal. The sticky notice +
-        // undo row ARE the safety — a modal here would tax the daily
+        // undo row ARE the safety - a modal here would tax the daily
         // user for protection the design already provides structurally.
         controller.untileAll()
         announce("All tiled windows restored.", fallback: "All tiled windows restored.")
@@ -695,7 +695,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard confirmBulkAction(
             message: "Reset every splitter to even splits?",
             detail: "Custom drag positions in both layouts are replaced. "
-                + "Your current positions are kept — use Restore Previous Splitters to get them back.",
+                + "Your current positions are kept - use Restore Previous Splitters to get them back.",
             button: "Reset Splitters")
         else { return }
         controller.resetDividers()
@@ -703,7 +703,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Confirms a destructive bulk action with the consequence in the
-    /// message and on the button itself — never a bare OK.
+    /// message and on the button itself - never a bare OK.
     private func confirmBulkAction(message: String, detail: String, button: String) -> Bool {
         let alert = NSAlert()
         alert.messageText = message
@@ -718,7 +718,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// status-item button when present; the Settings window when the icon
     /// is hidden (the one configuration where the menu isn't a glance
     /// away and spoken feedback matters most); logs only when neither
-    /// exists. The state change is never visual-only — and never
+    /// exists. The state change is never visual-only - and never
     /// announcement-less, either.
     private func announce(_ text: String, fallback noticeText: String? = nil) {
         let element: Any? =
@@ -736,7 +736,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Subtle confirmation for ineffective hotkey presses: the safe no-op
     /// stays silent in state and menu, but the hand gets a haptic and
-    /// VoiceOver users get an announcement — pressing harder is never the
+    /// VoiceOver users get an announcement - pressing harder is never the
     /// answer, and now the app says so. No on-screen panel: tiling
     /// feedback stays out of the way; the menu carries the details.
     private func signalFeedback(_ feedback: TilingController.Feedback) {

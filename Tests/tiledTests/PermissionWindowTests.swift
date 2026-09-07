@@ -4,7 +4,7 @@ import XCTest
 @testable import tiled
 
 /// The launch permission window: explains why Tiled needs Accessibility
-/// and requires an explicit click into System Settings — replacing the
+/// and requires an explicit click into System Settings - replacing the
 /// automatic system prompt with the product's own explanation.
 final class PermissionWindowTests: XCTestCase {
     func testWindowNamesThePermissionAndShowsTheGrantButton() {
@@ -25,14 +25,14 @@ final class PermissionWindowTests: XCTestCase {
         XCTAssertEqual(
             controller.headlineField.font,
             .systemFont(ofSize: NSFont.systemFontSize + 4, weight: .bold),
-            "The ask is this window's whole job — it leads at display scale, not settings-row scale.")
+            "The ask is this window's whole job - it leads at display scale, not settings-row scale.")
     }
 
     func testGrantButtonIsLargeAndTheDefaultButton() {
         let controller = PermissionWindowController()
         XCTAssertEqual(
             controller.openSettingsButton.controlSize, .large,
-            "The grant is the window's one action — it renders at large control size.")
+            "The grant is the window's one action - it renders at large control size.")
         XCTAssertTrue(
             controller.window?.defaultButtonCell === controller.openSettingsButton.cell,
             "The grant button must be the default: Return works from anywhere in the window.")

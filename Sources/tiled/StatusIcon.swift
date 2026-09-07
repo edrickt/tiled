@@ -13,7 +13,7 @@
 enum StatusIcon {
     /// What the icon currently depicts: layout geometry plus fill. The
     /// delegate diffs this to redraw on occupancy changes, not just
-    /// layout switches — windows coming and going within one layout must
+    /// layout switches - windows coming and going within one layout must
     /// flip cells without the layout moving.
     struct Snapshot: Equatable {
         var layout: LayoutKind
@@ -37,7 +37,7 @@ enum StatusIcon {
     }
 
     /// Which icon cells of `layout` are covered by `occupants`, in icon
-    /// order. A cell lights when any occupant's cells intersect it —
+    /// order. A cell lights when any occupant's cells intersect it -
     /// halves, thirds, and two-thirds light every cell they span, and a
     /// squatter from the other layout still lights the cells it touches.
     static func filledCells(

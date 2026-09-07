@@ -2,7 +2,7 @@
 
 A native macOS window manager. Tile windows into quarters (2×2 plus halves)
 or sixths (3×2 grid plus thirds and two-thirds), with global hotkeys or from
-the menu bar. Dragging a tiled window's edge resizes it live — neighbors
+the menu bar. Dragging a tiled window's edge resizes it live - neighbors
 sharing the edge follow.
 
 ## Hotkeys
@@ -11,7 +11,7 @@ Tile the focused window. Tiling a window into its own tile is a no-op (it
 stays exactly where it is). Every shortcut also exists as a menu item
 under **Tile Focused Window** in the menu bar menu.
 
-### Quarters — hold ⌥⇧
+### Quarters - hold ⌥⇧
 
 | Key   | Tile          |
 |-------|---------------|
@@ -22,7 +22,7 @@ under **Tile Focused Window** in the menu bar menu.
 | ⌥⇧J   | Left half     |
 | ⌥⇧L   | Right half    |
 
-### Sixths — hold ⌥⇧⌘
+### Sixths - hold ⌥⇧⌘
 
 | Key    | Tile               |
 |--------|--------------------|
@@ -38,22 +38,22 @@ under **Tile Focused Window** in the menu bar menu.
 | ⌥⇧⌘H   | Left two-thirds    |
 | ⌥⇧⌘;   | Right two-thirds   |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
-| ⌃⌥⇧⌘Z   | Undo the last displacement — layout switch or eviction (works from anywhere) |
+| ⌃⌥⇧⌘Z   | Undo the last displacement - layout switch or eviction (works from anywhere) |
 
-### Expand — ⌥⇧⏎
+### Expand - ⌥⇧⏎
 
 | Key  | Action                                                        |
 |------|---------------------------------------------------------------|
 | ⌥⇧⏎  | Expand the focused window to fill the screen (not fullscreen mode) |
 
-Press ⌥⇧⏎ again and the window returns to its previous tile — or its
+Press ⌥⇧⏎ again and the window returns to its previous tile - or its
 previous frame, if it wasn't tiled. The layout is never erased: a tiled
 window keeps its slot while expanded (the expanded window just covers the
 others, like focusing does), and tiling a neighbor into a free tile leaves
-the expanded window alone. This shortcut is fixed — the slot shortcuts
+the expanded window alone. This shortcut is fixed - the slot shortcuts
 below are the remappable ones.
 
-### Evict — ⌥⇧⌫
+### Evict - ⌥⇧⌫
 
 | Key  | Action                                                        |
 |------|---------------------------------------------------------------|
@@ -61,14 +61,14 @@ below are the remappable ones.
 
 Evicting restores the focused window to its pre-tile frame and grows the
 adjacent survivor into the freed space when the two form exactly one slot
-together — vertically or horizontally. Evict Top Left with Bottom Left
+together - vertically or horizontally. Evict Top Left with Bottom Left
 tiled and Bottom Left becomes Left Half; evict the left third with the
 middle third tiled and the middle third becomes the left two-thirds.
 Windows that merge into no exact slot never move, and a gap nobody can
 fill exactly stays a gap. Like Expand, this shortcut is fixed.
 
 First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
-to tile it top-left, and you're going — with a miniature preview showing
+to tile it top-left, and you're going - with a miniature preview showing
 what Top Left covers. Dismiss the guide once; reopen it anytime from the menu bar menu → Tiled Guide.
 
 The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
@@ -76,7 +76,7 @@ The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
 Shortcuts are remappable: open the Shortcuts tab, click a shortcut, and
 press a new combo. Esc keeps the old one, ⌫ disables that slot.
 Disable or re-enable a whole layout at once with the Enable/Disable all
-button beside each section header — your combos are parked aside and
+button beside each section header - your combos are parked aside and
 restored unchanged.
 
 If a shortcut is already owned by another app, that slot shows a warning in
@@ -92,14 +92,14 @@ you pick a free one.
   - Two quads occupied on one side + the half key → both quads are evicted.
   - A half occupied + a quad key on that side → the half window is evicted.
 - When every overlapping window fits into the footprint the requesting window
-  vacates, they **swap** instead — nobody is untiled. (Top left → occupied
+  vacates, they **swap** instead - nobody is untiled. (Top left → occupied
   bottom right exchanges the two windows; left half → occupied top right
   exchanges the half and the quad.) A swap is all-or-nothing: if any window
   refuses its move, the whole exchange is called off and every window returns
-  to its pre-swap frame — never a half-moved shuffle or two windows stacked
+  to its pre-swap frame - never a half-moved shuffle or two windows stacked
   in one tile. Shuffled windows that were expanded (⌥⇧⏎) come back to their
   tiles first; expanded windows the shuffle doesn't touch stay expanded.
-- Tiling a window into its own tile does nothing — no restore, no reassert.
+- Tiling a window into its own tile does nothing - no restore, no reassert.
 - Moving a window to a free slot **grows** the neighbor that can absorb the
   vacated cells exactly (two left sixths, top → middle third: the bottom
   sixth becomes the left third). A hole no neighbor merges into stays a
@@ -110,12 +110,12 @@ you pick a free one.
   tiled window's submenu to focus it, untile just that window, or tile the
   focused window into its slot.
 - **Drag a tiled window by its title bar**: past ~100pt of drag it untiles
-  right where you dropped it (the drop is the placement — no pre-tile
+  right where you dropped it (the drop is the placement - no pre-tile
   restore); a shorter drag snaps back into its tile. A single far jump
   (a programmatic move, not a hand drag) always snaps back.
 - Each monitor tiles independently: every display runs its own layout,
   occupancy, splitters, and undo history. Tiling, switching, swapping,
-  drag-resizing, and ⌃⌥⇧⌘Z on one monitor never disturb the other —
+  drag-resizing, and ⌃⌥⇧⌘Z on one monitor never disturb the other -
   the same tile can even be occupied on both at once. The menu groups
   tiled windows per display; Untile All and Reset Splitters act on the
   focused monitor only.
@@ -125,7 +125,7 @@ you pick a free one.
   untiled. Undo (⌃⌥⇧⌘Z) is one step, from anywhere. Safe to explore:
   destruction is always reversible.
 - Some apps refuse programmatic resizing. When that happens the window is
-  left alone and the menu says which app refused — state and screen never
+  left alone and the menu says which app refused - state and screen never
   silently disagree.
 
 ## Live resizing
@@ -133,7 +133,7 @@ you pick a free one.
 Drag any edge of a tiled window and the shared grid splitter moves with it;
 neighbors on the other side follow. Vertical and horizontal splitters are
 independent per column (quarters) or per third (sixths), so resizing one
-column never moves the other — and independent per monitor, so dragging
+column never moves the other - and independent per monitor, so dragging
 an edge on one display never moves tiles on another. **Reset Splitters**
 in the menu snaps the focused monitor's splitters back to even splits.
 
@@ -150,7 +150,7 @@ swift test           # layout-engine unit tests
 ### Running during development
 
 The easiest dev loop: run the binary from your terminal and grant **Terminal**
-(itself) Accessibility permission once — TCC attributes AX requests from
+(itself) Accessibility permission once - TCC attributes AX requests from
 subprocesses to the responsible process:
 
 ```bash

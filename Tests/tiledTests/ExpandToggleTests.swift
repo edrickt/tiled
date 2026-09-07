@@ -3,8 +3,8 @@ import XCTest
 @testable import tiled
 
 /// The ⌥⇧⏎ expand toggle: expands the focused window to fill its screen
-/// without disturbing the layout — a tiled window keeps its slot while
-/// expanded, exactly like focusing it — and retiles it on the second
+/// without disturbing the layout - a tiled window keeps its slot while
+/// expanded, exactly like focusing it - and retiles it on the second
 /// press. The fake gateway stands in for AX; expected bounds mirror the
 /// controller's screen-ownership rule so assertions never hardcode real
 /// display pixels.

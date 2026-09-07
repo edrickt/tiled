@@ -5,7 +5,7 @@ import CoreGraphics
 /// Handles are issued by the `WindowGateway` (one per live window, stable
 /// across calls) and never forged: the controller maps them to occupancy,
 /// pre-tile frames, and undo snapshots without ever seeing the underlying
-/// AX element. `Hashable` so records key on handles directly — no CF
+/// AX element. `Hashable` so records key on handles directly - no CF
 /// identity scans outside the live adapter.
 struct WindowHandle: Hashable {
     let id: Int
@@ -16,7 +16,7 @@ enum Liveness {
     case alive
     /// The window is gone (closed, app quit): safe to prune.
     case dead
-    /// Unknowable right now — the app was too busy to answer the probe.
+    /// Unknowable right now - the app was too busy to answer the probe.
     /// Treated as alive by every caller: pruning on a maybe would drop a
     /// live window from management, and the next real interaction re-probes.
     case unknown
@@ -24,8 +24,8 @@ enum Liveness {
 
 /// The single seam between Tiled and the macOS Accessibility framework.
 ///
-/// Everything the product needs from AX — focus, geometry, liveness,
-/// observation, activation, and permission state — goes through here.
+/// Everything the product needs from AX - focus, geometry, liveness,
+/// observation, activation, and permission state - goes through here.
 /// `LiveWindowGateway` is the production adapter; tests substitute an
 /// in-memory fake. Two adapters justify the seam.
 protocol WindowGateway: AnyObject {
@@ -47,7 +47,7 @@ protocol WindowGateway: AnyObject {
     func appName(of handle: WindowHandle) -> String?
     /// Accessibility permission state (process-wide).
     var isTrusted: Bool { get }
-    /// Registers the app with TCC's Accessibility list — no dialog. An
+    /// Registers the app with TCC's Accessibility list - no dialog. An
     /// app that never issues this call may not appear in System
     /// Settings' list at all, leaving only the manual "+" path. Idempotent.
     func registerAccessibilityInterest()

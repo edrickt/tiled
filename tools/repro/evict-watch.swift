@@ -12,7 +12,7 @@ import ApplicationServices
 //
 // Parking alternates between an arbitrary rect and the EXACT topLeft
 // tile rect: an exact park makes the placement write a no-op, which no
-// AX notification echoes — a known blind spot of write-time convergence
+// AX notification echoes - a known blind spot of write-time convergence
 // tracking.
 //
 // Usage: swift tools/repro/evict-watch.swift [iterations] [watchSeconds]
@@ -121,7 +121,7 @@ let untileMarkers = ["verify FAILED", "drag-untile", "place FAILED", "prune win"
 guard hostPID() != nil else { print("FATAL: host app not running"); exit(1) }
 
 // Clear latched modifiers (see drag-test note), then untile leftover
-// state from earlier runs — evict acts on the focused window only, so
+// state from earlier runs - evict acts on the focused window only, so
 // refocus HOSTA between presses.
 for _ in 0..<3 {
     if let w = hostWindows().first(where: { $0.title == "HOSTA" }) {
@@ -150,10 +150,10 @@ for iteration in 1...iterations {
     usleep(900_000)
 
     // Confirm the placement actually happened (otherwise the loop is
-    // testing nothing — hotkey didn't land, permission missing, etc.).
+    // testing nothing - hotkey didn't land, permission missing, etc.).
     let (_, newLog) = logTail(since: logOffset)
     guard newLog.contains("place win") else {
-        print("ITER \(iteration): FATAL no placement in log — hotkey/focus failed? log tail:")
+        print("ITER \(iteration): FATAL no placement in log - hotkey/focus failed? log tail:")
         print(newLog.suffix(400))
         exit(1)
     }
@@ -166,7 +166,7 @@ for iteration in 1...iterations {
     if exactPark {
         let dx = abs(tileFrame.minX - tlTile.minX), dy = abs(tileFrame.minY - tlTile.minY)
         if dx > tol || dy > tol {
-            print("ITER \(iteration): WARN exact-park offset dx=\(dx) dy=\(dy) — tile rect mismatch, fix tlTile")
+            print("ITER \(iteration): WARN exact-park offset dx=\(dx) dy=\(dy) - tile rect mismatch, fix tlTile")
         }
     }
 

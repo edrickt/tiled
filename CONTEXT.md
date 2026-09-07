@@ -25,7 +25,7 @@ A movable divider between tiles whose fraction the drag-resize loop updates; scr
 _Avoid_: divider, separator, boundary (the code name is GridBoundary)
 
 **Growth**:
-The no-gap follow-up to an uncontended move: cells a move vacates merge with exactly one adjacent slot into a whole slot, and that neighbor grows into them — exact-or-empty, the same rule as eviction's reflow. Two left sixths, top moving to the middle third: the bottom sixth becomes the left third.
+The no-gap follow-up to an uncontended move: cells a move vacates merge with exactly one adjacent slot into a whole slot, and that neighbor grows into them - exact-or-empty, the same rule as eviction's reflow. Two left sixths, top moving to the middle third: the bottom sixth becomes the left third.
 _Avoid_: expand (the ⌥⇧⏎ toggle), fill
 
 **Eviction**:
@@ -37,11 +37,11 @@ Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen 
 _Avoid_: maximize, zoom, fullscreen
 
 **Drag-out**:
-Untiling by dragging: a title-bar drag past the untile distance releases the slot and leaves the window where dropped — the drop is the placement, never a pre-tile restore. A shorter drag snaps back into the tile.
+Untiling by dragging: a title-bar drag past the untile distance releases the slot and leaves the window where dropped - the drop is the placement, never a pre-tile restore. A shorter drag snaps back into the tile.
 _Avoid_: drag-to-untile, fling
 
 **Swap**:
-Exchanging places: overlapping windows move into the footprint the requester vacates, nobody untiled. When that footprint has no room, every other window reflows into the cells the tile leaves behind instead — covering them exactly, so nobody is untiled and no empty space remains. A swap is all-or-nothing: any refused write calls off the whole exchange, every window back to its pre-swap frame.
+Exchanging places: overlapping windows move into the footprint the requester vacates, nobody untiled. When that footprint has no room, every other window reflows into the cells the tile leaves behind instead - covering them exactly, so nobody is untiled and no empty space remains. A swap is all-or-nothing: any refused write calls off the whole exchange, every window back to its pre-swap frame.
 _Avoid_: exchange, switch (which means layout switch)
 
 **Requester**:

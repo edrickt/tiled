@@ -5,8 +5,8 @@ import XCTest
 /// LayoutSwitchTests/ShuffleTests validate `plan()` against a hand-written
 /// copy of the controller's apply order. Here every (occupancy, request)
 /// pair from those same matrices is replayed through the real
-/// `TilingController.handle` — restore ordering, record lifecycle, commit,
-/// and cross-layout reset included — and the end state must match the pure
+/// `TilingController.handle` - restore ordering, record lifecycle, commit,
+/// and cross-layout reset included - and the end state must match the pure
 /// plan application exactly. Both requester kinds run: a fresh untiled
 /// window (tile/evict/switch paths) and an already-tiled window (swap and
 /// no-op paths, which only tiled requesters can produce).

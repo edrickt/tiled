@@ -4,7 +4,7 @@ import XCTest
 @testable import tiled
 
 /// Phase 3, slice A: the Shortcuts-tab recorder turns a keypress into an
-/// outcome. Pure function over synthesized NSEvents — no UI needed.
+/// outcome. Pure function over synthesized NSEvents - no UI needed.
 final class HotkeyRecorderTests: XCTestCase {
     private func keyDown(
         keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [],

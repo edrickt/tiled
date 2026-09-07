@@ -432,7 +432,7 @@ final class GridLayoutTests: XCTestCase {
 
     func testBoundariesSplitBothLayouts() {
         // Each layout must own at least one vertical and one horizontal
-        // draggable boundary, or that layout cannot be resized at all —
+        // draggable boundary, or that layout cannot be resized at all -
         // the exact failure mode sixths shipped with.
         let quarters: Set<GridBoundary> = [.columnSplit, .leftRowSplit, .rightRowSplit]
         let sixths: Set<GridBoundary> = [

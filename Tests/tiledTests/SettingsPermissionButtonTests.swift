@@ -4,7 +4,7 @@ import XCTest
 @testable import tiled
 
 /// Every Settings tab must lead with the fix when Accessibility is off:
-/// an explanation row whose button opens the Accessibility pane —
+/// an explanation row whose button opens the Accessibility pane -
 /// labeled identically to the launch explainer's button.
 final class SettingsPermissionButtonTests: XCTestCase {
     private var suiteName: String!

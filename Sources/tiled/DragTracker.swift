@@ -6,8 +6,8 @@ import Foundation
 ///
 /// Previously interleaved with placement records inside TilingController;
 /// the real bugs hid in how echo entries interacted with edge diffs, not
-/// in either alone. Now the whole loop — echo suppression, edge
-/// detection, splitter updates, apply coalescing — lives behind one
+/// in either alone. Now the whole loop - echo suppression, edge
+/// detection, splitter updates, apply coalescing - lives behind one
 /// interface and is testable through it with a fake gateway.
 ///
 /// Protocol: the controller feeds each gateway callback to
@@ -19,7 +19,7 @@ import Foundation
 ///
 /// Title-bar drags (origin-only changes) are tracked separately from
 /// edge drags: moved ticks stream in, and when they go silent the drag
-/// ended — past the untile distance the window untiles where dropped
+/// ended - past the untile distance the window untiles where dropped
 /// (via the `onUntile` callback), otherwise it snaps back into its slot
 /// rect. A single far jump is never a hand drag, so it snaps back too.
 final class DragTracker {
@@ -41,7 +41,7 @@ final class DragTracker {
         /// Occupants of one screen, for neighbor re-push. Nil falls back
         /// to `occupants()`.
         var occupantsOf: ((ScreenID) -> [Slot: WindowID])? = nil
-        /// The window's live frame, as the app reports it — unlike
+        /// The window's live frame, as the app reports it - unlike
         /// `frameOf`, which may prefer our last pushed target (intent)
         /// for edge diffing. No-op write detection must consult the live
         /// frame: intent says where we wanted the window, the live frame
@@ -90,7 +90,7 @@ final class DragTracker {
     /// Writes within this distance of the window's current frame are
     /// no-ops: the app changes nothing and emits no AX notification, so
     /// marking them expected would leave an echo entry that never
-    /// converges — and the late convergence check would read that silence
+    /// converges - and the late convergence check would read that silence
     /// as a silent ignore and evict an already-correct window. Skipped
     /// writes are success: state already agrees with the screen.
     static let noOpWriteTolerance: CGFloat = 1
@@ -99,7 +99,7 @@ final class DragTracker {
     /// so 1s swallows them with margin while barely extending the blind
     /// prefix on a drag-out that starts the instant a write lands (a real
     /// drag escapes the moment it leaves the tolerance radius anyway,
-    /// landing the splitter on its absolute position — only the untile
+    /// landing the splitter on its absolute position - only the untile
     /// distance, measured from the first escaped tick, can read short).
     private static let settleWindow: TimeInterval = 1
     /// Minimum edge travel that counts as a drag (below this is jitter).
@@ -200,7 +200,7 @@ final class DragTracker {
         // Total echo silence alone is not a silent ignore: apps that
         // round frames to an internal grid (Terminal rounds to character
         // cells) can absorb a write whose target sits within their
-        // rounding distance — the frame does not actually change, so no
+        // rounding distance - the frame does not actually change, so no
         // notification is emitted. Before calling it ignored, check the
         // live frame directly: within the echo tolerance of the target
         // means the write took effect (or needed no effect).
@@ -309,7 +309,7 @@ final class DragTracker {
                     let wasSettled = entry.settled
                     if !wasSettled {
                         // Write converged: keep swallowing close ticks
-                        // through the settle window instead of going live —
+                        // through the settle window instead of going live -
                         // the animation tail is still in flight, and its
                         // absolute positions must never reach the splitters.
                         entry.settled = true
@@ -324,7 +324,7 @@ final class DragTracker {
                     // the title bar, not animation settling (settling moves
                     // edges): track the drag so snapback/untile still work
                     // for grabs that start the instant a write lands.
-                    // Splitters stay untouched — processMove never moves
+                    // Splitters stay untouched - processMove never moves
                     // them, and the snapback rect is the grid truth.
                     if wasSettled, let previous = lastKnownFrames[id],
                         previous.size == frame.size, previous.origin != frame.origin
@@ -375,7 +375,7 @@ final class DragTracker {
     // MARK: Drag-out untile
 
     /// Tracks a title-bar drag: origin-only changes stream in as the user
-    /// moves the window. Each tick reschedules the drag-end debounce — so
+    /// moves the window. Each tick reschedules the drag-end debounce - so
     /// a mid-drag pause longer than the debounce ends the drag early
     /// (snapback or untile); continuing the drag re-tracks from the new
     /// frame. Hand drags stream ticks, so this only bites on real pauses.
@@ -394,9 +394,9 @@ final class DragTracker {
 
     /// A drag just ended (moved ticks went silent): untile past the
     /// untile distance, snap back otherwise. A single far tick snaps
-    /// back too — hand drags stream, one-shot programmatic jumps don't.
+    /// back too - hand drags stream, one-shot programmatic jumps don't.
     /// (Residual exposure: a programmatic move that arrives as several
-    /// ticks and travels far enough untiles — accepted, since such moves
+    /// ticks and travels far enough untiles - accepted, since such moves
     /// are rare and the window ends up untiled where it was put.)
     private func endDrag(id: WindowID) {
         guard let slot = context.slotOf(id), let drag = drags[id] else { return }
@@ -498,7 +498,7 @@ final class DragTracker {
         for (id, rect) in rects {
             // No-op writes are skipped, not pushed: nothing would change,
             // nothing would echo, and the pending convergence check would
-            // evict an already-correct window. Live frame, not intent —
+            // evict an already-correct window. Live frame, not intent -
             // intent equals the target by definition.
             if let live = context.liveFrameOf(id),
                 Self.close(live, rect, tolerance: Self.noOpWriteTolerance)

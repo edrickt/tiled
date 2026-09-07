@@ -4,7 +4,7 @@ import XCTest
 
 /// Controller-level bulk operations and bookkeeping: untile / untileAll /
 /// resetDividers / undoLastDisplacement driven through `TilingController` with
-/// the fake gateway. Pins the side effects the pure-state tests can't see —
+/// the fake gateway. Pins the side effects the pure-state tests can't see -
 /// restored frames, the one-step undo lifecycle, feedback callbacks, and
 /// notice clearing.
 final class ControllerBulkOperationTests: XCTestCase {
@@ -164,7 +164,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(controller.evictedCount, 1)
 
         // Switch #2 back to quarters: b is evicted. The old undo is NOT
-        // gone — history stacks, newest last.
+        // gone - history stacks, newest last.
         let c = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 400, height: 300))
         gateway.focused = c
         controller.handle(slot: .bottomRight)
@@ -179,7 +179,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(controller.state.slot(of: 3), nil, "requester c is untiled by undo")
         XCTAssertNotNil(
             controller.state.occupant(of: .sixthLeft),
-            "undo #2 returns b — not a — to its slot")
+            "undo #2 returns b - not a - to its slot")
         XCTAssertNil(controller.state.occupant(of: .topLeft))
         XCTAssertEqual(controller.state.tiledWindows.count, 1)
 
@@ -194,7 +194,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     func testUndoHistoryIsBoundedByDepthNotAmnesia() {
         // Seven destructive switches; the stack keeps the freshest five
         // and drops the two oldest. Walking back five times consumes
-        // everything — the sixth undo answers instead of reaching further.
+        // everything - the sixth undo answers instead of reaching further.
         var handles: [WindowHandle] = []
         for i in 0..<7 {
             let handle = gateway.addWindow(
@@ -289,7 +289,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .topLeft)
 
         // The window itself switches layouts twice (it is always the
-        // requester, never evicted): its record — and pre-tile frame —
+        // requester, never evicted): its record - and pre-tile frame -
         // must survive untouched, so untile returns it to where it started.
         gateway.focused = handle
         controller.handle(slot: .sixthLeft)
@@ -319,7 +319,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(controller.lastNotice, "Untiled 2 windows. Press ⌃⌥⇧⌘Z to undo.")
         controller.undoLastDisplacement()
         // Undo re-tiles each dissolved window into its slot (under fresh
-        // ids — untile-all cleared the records, so the executor reissues
+        // ids - untile-all cleared the records, so the executor reissues
         // them, exactly as it does for pruned undo handles). The
         // arrangement returns, and the chapter is consumed.
         XCTAssertNotNil(
@@ -373,7 +373,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         XCTAssertEqual(
             controller.lastTileError,
-            "Couldn't restore \u{201C}TestApp\u{201D} — it may still be sitting in its old tile.")
+            "Couldn't restore \u{201C}TestApp\u{201D} - it may still be sitting in its old tile.")
         XCTAssertNil(controller.state.slot(of: 1),
             "slot released even though the frame restore was refused")
     }
@@ -391,7 +391,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         XCTAssertEqual(
             controller.lastTileError,
-            "Couldn't restore 2 windows — they may still be sitting in their old tiles.")
+            "Couldn't restore 2 windows - they may still be sitting in their old tiles.")
         XCTAssertTrue(controller.state.occupants.isEmpty)
     }
 
@@ -405,7 +405,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .sixthLeft)
         XCTAssertNotNil(controller.lastNotice)
 
-        // Strict no-op: no state, error, or menu side effects — the
+        // Strict no-op: no state, error, or menu side effects - the
         // already-tiled feedback fires, but the notice survives untouched.
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
@@ -441,7 +441,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         XCTAssertEqual(controller.state.slot(of: 1), .topLeft,
             "the gateway reported success, so occupancy commits")
-        XCTAssertNil(controller.lastTileError, "no refusal — the write 'succeeded'")
+        XCTAssertNil(controller.lastTileError, "no refusal - the write 'succeeded'")
         XCTAssertTrue(feedbacks.isEmpty)
         XCTAssertEqual(gateway.frame(of: handle), original,
             "the app ignored the resize; screen and state disagree until the next assertion")
@@ -514,7 +514,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         XCTAssertEqual(
             controller.lastTileError,
-            "Couldn't move that window — the app refused to resize it.",
+            "Couldn't move that window - the app refused to resize it.",
             "the re-assertion refusal surfaces, never silence")
     }
 

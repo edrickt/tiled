@@ -33,7 +33,7 @@ final class FakeGatewayFidelityTests: XCTestCase {
 
     func testChainedHotkeyResolvesTheEnvironmentsFocusNotTheRequestedOne() {
         // The controller requests focus on the swap heir; if the system
-        // ignores the activation (focusChangesFocused = false — the real
+        // ignores the activation (focusChangesFocused = false - the real
         // adapter's semantics), the next hotkey must act on the window
         // that actually still has focus.
         gateway.focusChangesFocused = false
@@ -53,7 +53,7 @@ final class FakeGatewayFidelityTests: XCTestCase {
         XCTAssertEqual(controller.state.occupant(of: .topRight), a.id)
         XCTAssertEqual(gateway.focusCalls.last, b, "the controller still requests the heir")
 
-        // The next hotkey acts on a — the environment's actual focus —
+        // The next hotkey acts on a - the environment's actual focus -
         // not on b, the requested focus.
         controller.handle(slot: .bottomLeft)
         XCTAssertEqual(controller.state.occupant(of: .bottomLeft), a.id)
@@ -84,7 +84,7 @@ final class FakeGatewayFidelityTests: XCTestCase {
     func testSwapRollbackRestoresTheLiveFrameNotTheTileTarget() {
         // A window whose live frame drifted off-grid (an earlier clamp
         // or a trusted user nudge). When the swap is refused, rollback
-        // must restore the pre-swap live frame — not the tile rect it
+        // must restore the pre-swap live frame - not the tile rect it
         // was supposed to be at.
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         let b = gateway.addWindow(frame: CGRect(x: 400, y: 0, width: 400, height: 300))
