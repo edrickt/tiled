@@ -32,6 +32,10 @@ _Avoid_: displacement, removal
 A tiled requester trading tiles with the single window blocking its target: the blocker lands in the tile the requester vacated, nobody is untiled. The vacated tile must be disjoint from the target, or the request falls back to eviction.
 _Avoid_: exchange, trade, tile swap (in prose; the code name is `swap`)
 
+**Reflow**:
+Absorbing freed cells: when a tiled window leaves the layout (eviction, untile, drag-out, close) or moves, its freed cells merge with exactly one adjacent survivor into a whole slot, and that survivor grows into it — rightmost candidate wins ties. A hole no survivor merges into exactly stays empty; the requester and expanded windows never grow. One undo chapter covers the event and its reflow together.
+_Avoid_: growth, backfill, gap-filling (the code name is `reflow`)
+
 **Expand**:
 Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it.
 _Avoid_: maximize, zoom, fullscreen

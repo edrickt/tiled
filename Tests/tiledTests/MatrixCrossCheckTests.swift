@@ -12,8 +12,10 @@ import XCTest
 /// and no-op paths, which only tiled requesters can produce).
 final class MatrixCrossCheckTests: XCTestCase {
     /// The pure contract: evicted windows are removed before the requester
-    /// is committed. Cross-validated against the real controller by this
-    /// very test.
+    /// is committed, then the cells the event freed (eviction remainders,
+    /// the requester's vacated tile) reflow into the one survivor that
+    /// merges with them into a whole slot. Cross-validated against the
+    /// real controller by this very test.
     private func applyExpected(
         _ plan: TilePlan, requester: WindowID, target: Slot, to state: inout TilingState
     ) {
@@ -25,11 +27,25 @@ final class MatrixCrossCheckTests: XCTestCase {
                 state.commit(window: displaced, into: previous)
             }
             state.commit(window: requester, into: target)
-        case .tile(let evicting), .switchLayout(let evicting):
+        case .switchLayout(let evicting):
+            // A layout switch resets the space: no reflow.
             for evicted in evicting where evicted != requester {
                 state.remove(window: evicted)
             }
             state.commit(window: requester, into: target)
+        case .tile(let evicting):
+            var freed: Set<TileCell> = []
+            for evicted in evicting where evicted != requester {
+                if let slot = state.slot(of: evicted) { freed.formUnion(slot.cells) }
+                state.remove(window: evicted)
+            }
+            if let previous = state.slot(of: requester) {
+                freed.formUnion(previous.cells)
+            }
+            state.commit(window: requester, into: target)
+            for (window, grown) in state.reflow(freed: freed, excluding: [requester]) {
+                state.commit(window: window, into: grown)
+            }
         }
     }
 

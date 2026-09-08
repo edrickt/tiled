@@ -38,7 +38,7 @@ under **Tile Focused Window** in the menu bar menu.
 | ⌥⇧⌘H   | Left two-thirds    |
 | ⌥⇧⌘;   | Right two-thirds   |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
-| ⌃⌥⇧⌘Z   | Undo the last displacement (a layout switch, an eviction, or a swap, from anywhere) |
+| ⌃⌥⇧⌘Z   | Undo the last displacement (a layout switch, an eviction, a swap, or a reflow, from anywhere) |
 
 ### Expand (⌥⇧⏎)
 
@@ -60,7 +60,15 @@ below are the remappable ones.
 | ⌥⇧⌫  | Evict the focused window: untile it and restore its pre-tile frame  |
 
 Evicting restores the focused window to its pre-tile frame and releases
-its slot. Like Expand, this shortcut is fixed.
+its slot. The freed cells reflow: a neighboring tile that merges with
+them into a whole slot grows into it — evict the bottom-left sixth and
+the top-left sixth expands into the left third; free the middle third
+and the right third becomes the right two-thirds (the right side wins
+when both flanks could grow). The same reflow runs whenever a tiled
+window leaves the layout (untile, drag-out, closing the window) or moves
+to a free tile, and ⌃⌥⇧⌘Z undoes it together with the event that
+caused it. A hole no neighbor can merge into exactly stays empty.
+Like Expand, this shortcut is fixed.
 
 First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
 to tile it top-left, and you're going, with a miniature preview showing

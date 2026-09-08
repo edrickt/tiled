@@ -457,4 +457,81 @@ struct TilingState: Equatable {
             occupantBySlot[s] = nil
         }
     }
+
+    /// Reflow: decides which survivors absorb freed cells. When a tiled
+    /// window leaves the layout (eviction, untile, drag-out, close) or
+    /// moves, its freed cells merge with exactly one adjacent survivor
+    /// into a whole slot, and that survivor grows into it — the top-left
+    /// sixth whose bottom mate left becomes the left third, the right
+    /// third beside a freed middle third becomes the right two-thirds.
+    ///
+    /// Call after the window left the state: `freed` is what its slot
+    /// (or slot-minus-target, for a move) contributed, and every cell
+    /// still occupied — the requester's fresh tile included — blocks
+    /// every candidate. Exact-or-empty: a candidate's cells plus the
+    /// freed cells must form exactly one slot of the survivor's layout,
+    /// so reflow never grabs space nobody freed and never crosses
+    /// another window. A hole no survivor merges into exactly stays a
+    /// hole. One merge can ever apply per pass (every merge covers the
+    /// whole freed region, so two would overlap); the loop re-runs only
+    /// as cascade safety.
+    ///
+    /// `excluding` names windows that never grow: the requester that
+    /// just chose its slot (or it would absorb its own freed cells and
+    /// undo the move) and expanded windows (callers keep them covering
+    /// the layout). Ties — both third flanks merging into competing
+    /// two-thirds — prefer the right: the candidate whose grown slot
+    /// reaches furthest right wins, then the larger slot, then slot
+    /// declaration order for total determinism.
+    ///
+    /// Returns the placements (window -> grown slot); callers commit them
+    /// and write the frames, rolling back on refusal so state and screen
+    /// never disagree about who holds the freed cells.
+    func reflow(freed freedCells: Set<TileCell>, excluding: Set<WindowID> = [])
+        -> [WindowID: Slot]
+    {
+        var freed = freedCells
+        var occupants = occupantBySlot
+        // Cells still occupied are not free, whatever the caller passed;
+        // the requester's fresh tile blocks like any other window's.
+        freed.subtract(occupantBySlot.keys.flatMap { $0.cells })
+        for (slot, window) in occupantBySlot where excluding.contains(window) {
+            occupants[slot] = nil
+        }
+        var placements: [WindowID: Slot] = [:]
+        while !freed.isEmpty {
+            // The rightmost mergeable survivor: grown slot reaching
+            // furthest right wins, then larger, then declaration order.
+            let best = occupants
+                .compactMap { (slot: Slot, window: WindowID) -> (Slot, WindowID, Slot)? in
+                    let union = slot.cells.union(freed)
+                    guard
+                        let grown = Slot.allCases.first(where: {
+                            $0.layout == slot.layout && $0.cells == union
+                        })
+                    else { return nil }
+                    return (slot, window, grown)
+                }
+                .max { lhs, rhs in
+                    let left = lhs.2.geometry, right = rhs.2.geometry
+                    if left.columns.upperBound != right.columns.upperBound {
+                        return left.columns.upperBound < right.columns.upperBound
+                    }
+                    if lhs.2.cells.count != rhs.2.cells.count {
+                        return lhs.2.cells.count < rhs.2.cells.count
+                    }
+                    // Unreachable in practice (a grown slot determines
+                    // its window exactly), but total for determinism.
+                    let leftIndex = Slot.allCases.firstIndex(of: lhs.2) ?? 0
+                    let rightIndex = Slot.allCases.firstIndex(of: rhs.2) ?? 0
+                    return leftIndex > rightIndex
+                }
+            guard let (from, window, grown) = best else { break }
+            placements[window] = grown
+            occupants[from] = nil
+            occupants[grown] = window
+            freed.subtract(grown.cells)
+        }
+        return placements
+    }
 }
