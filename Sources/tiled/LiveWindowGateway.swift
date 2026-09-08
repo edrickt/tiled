@@ -61,7 +61,10 @@ final class LiveWindowGateway: WindowGateway {
 
     func liveness(of handle: WindowHandle) -> Liveness {
         guard let element = elements[handle] else { return .dead }
-        switch Self.probe(element) {
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(
+            element, kAXPositionAttribute as CFString, &value)
+        switch Self.liveness(forProbeError: error) {
         case .alive:
             return .alive
         case .unknown:
@@ -245,22 +248,20 @@ final class LiveWindowGateway: WindowGateway {
 
     // MARK: Liveness
 
-    /// Liveness probe outcome for one element.
-    private enum Probe { case alive, dead, unknown }
-
-    /// Cheap liveness probe: read the position attribute. A read that
-    /// names a gone element (invalid element, no window) is dead; a read
-    /// the app could not complete right now (`.cannotComplete`: busy,
-    /// beachballing, mid-launch) is unknown, never dead: dropping a live
-    /// window on a transient failure would untile it on the next prune.
-    private static func probe(_ element: AXUIElement) -> Probe {
-        var value: CFTypeRef?
-        switch AXUIElementCopyAttributeValue(
-            element, kAXPositionAttribute as CFString, &value)
-        {
+    /// Death standard for a liveness probe result, pure so it is
+    /// testable without AX. Only a gone element is dead: the window
+    /// closed or the app quit. Every other error is "cannot answer
+    /// right now" — a sleeping display answers position reads with
+    /// `.attributeUnsupported` (observed on live AX during a
+    /// display-sleep cycle, i.e. the lid-closed leg of a lid cycle), a
+    /// busy app with `.cannotComplete` or `.timeout` — and a maybe
+    /// must never untile: the prune timer would otherwise release
+    /// every slot while a laptop's lid is closed.
+    static func liveness(forProbeError error: AXError) -> Liveness {
+        switch error {
         case .success: return .alive
-        case .cannotComplete: return .unknown
-        default: return .dead
+        case .invalidUIElement: return .dead
+        default: return .unknown
         }
     }
 
