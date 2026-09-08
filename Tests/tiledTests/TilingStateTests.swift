@@ -70,6 +70,65 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(state.plan(window: b, into: .bottomLeft), .tile(evicting: []))
     }
 
+    // MARK: Tile swapping
+
+    func testTiledRequesterOverSingleBlockerSwaps() {
+        // The report's example: top-left and bottom-left sixths plus the
+        // right two-thirds. Tiling the top-left sixth into the middle
+        // third swaps with the two-thirds window instead of evicting it:
+        // the two-thirds window lands in the requester's vacated sixth.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthTopLeft)
+        state.commit(window: b, into: .sixthBottomLeft)
+        state.commit(window: c, into: .sixthsRightTwoThirds)
+        XCTAssertEqual(state.plan(window: a, into: .sixthMiddle), .swap(displaced: c))
+    }
+
+    func testTiledRequesterIntoExactOccupiedSlotSwaps() {
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        XCTAssertEqual(state.plan(window: a, into: .topRight), .swap(displaced: b))
+    }
+
+    func testUntiledRequesterOverSingleBlockerStillEvicts() {
+        // An untiled requester has no tile to offer, so there is nothing
+        // to swap with: eviction stands.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        XCTAssertEqual(state.plan(window: b, into: .topLeft), .tile(evicting: [a]))
+    }
+
+    func testTiledRequesterOverTwoBlockersEvictsBoth() {
+        // Only one window can take the requester's old tile; with two in
+        // the way the request degrades to an ordinary eviction.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthLeft)
+        state.commit(window: b, into: .sixthTopMiddle)
+        state.commit(window: c, into: .sixthBottomMiddle)
+        XCTAssertEqual(
+            state.plan(window: a, into: .sixthsLeftTwoThirds),
+            .tile(evicting: [b, c]))
+    }
+
+    func testTiledRequesterWhoseTileOverlapsTargetEvicts() {
+        // A swap needs a landing tile disjoint from the target: moving
+        // from Top Left to Left Half would stuff the displaced window
+        // inside the requester's new half, so eviction stands.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .bottomLeft)
+        XCTAssertEqual(state.plan(window: a, into: .leftHalf), .tile(evicting: [b]))
+    }
+
+    func testSwapRestoresNothing() {
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        XCTAssertEqual(
+            state.plan(window: a, into: .topRight).windowsToRestore(requester: a), [])
+    }
+
     // MARK: Moving within the layout
 
     func testWindowMovingToOverlappingSlotDoesNotEvictItself() {
@@ -487,6 +546,11 @@ final class TilingStateTests: XCTestCase {
             switch state.plan(window: window, into: slot) {
             case .noop:
                 break // no state change
+            case .swap(let displaced):
+                if let previous = state.slot(of: window) {
+                    state.commit(window: displaced, into: previous)
+                }
+                state.commit(window: window, into: slot)
             case .tile(let evicting), .switchLayout(let evicting):
                 for evicted in evicting { state.remove(window: evicted) }
                 state.commit(window: window, into: slot)
@@ -601,6 +665,11 @@ final class TilingStateTests: XCTestCase {
                     switch next.plan(window: window, into: target) {
                     case .noop:
                         break // no state change
+                    case .swap(let displaced):
+                        if let previous = next.slot(of: window) {
+                            next.commit(window: displaced, into: previous)
+                        }
+                        next.commit(window: window, into: target)
                     case .tile(let evicting), .switchLayout(let evicting):
                         for evicted in evicting { next.remove(window: evicted) }
                         next.commit(window: window, into: target)

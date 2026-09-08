@@ -131,6 +131,80 @@ final class PlanExecutor {
             }
             log("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
             return (outcome, state, records, nextID)
+        case .swap(let displaced):
+            // Both windows stay tiled: the displaced one takes the tile
+            // the requester vacates, the requester takes the target. The
+            // displaced window moves first, so a refusal anywhere leaves
+            // every window where it started.
+            guard let previous = state.slot(of: id),
+                let displacedOriginal = state.slot(of: displaced),
+                records[id] != nil, records[displaced] != nil
+            else {
+                // Degenerate plan (untiled requester or a window that
+                // vanished): degrade to the ordinary eviction path.
+                log("swap DEGENERATE win\(id) -> \(slot.rawValue); falling back to tile")
+                return execute(
+                    decision: .tile(evicting: [displaced]), requester: id, slot: slot,
+                    state: state, records: records, nextID: nextID,
+                    tracker: tracker, boundsOf: boundsOf, observe: observe,
+                    screenOf: screenOf, screen: screen)
+            }
+            // Snapshot before any commit: each entry carries its window's
+            // own former tile, so undo replays the swap backwards.
+            let snapshot = [(displaced, displacedOriginal), (id, previous)].compactMap {
+                (entryID, formerSlot) in
+                Self.snapshotEntry(
+                    for: entryID, state: state, records: records, fallback: formerSlot,
+                    screen: screenOf(entryID))
+            }
+            var outcome = Outcome()
+            state.commit(window: displaced, into: previous)
+            observe(displaced)
+            if !applyLayout(
+                for: displaced, state: state, records: records,
+                tracker: tracker, boundsOf: boundsOf, screen: screen)
+            {
+                // The refused write moved nothing on screen: the rollback
+                // is state-only, restoring both occupancies.
+                state.commit(window: displaced, into: displacedOriginal)
+                state.commit(window: id, into: previous)
+                log("swap FAILED displaced win\(displaced) -> \(previous.rawValue)")
+                let refusal = Self.refusal(for: displaced, records: records, gateway: gateway)
+                outcome.error = refusal.error
+                outcome.feedback = refusal.feedback
+                return (outcome, state, records, nextID)
+            }
+            state.commit(window: id, into: slot)
+            observe(id)
+            if !applyLayout(
+                for: id, state: state, records: records,
+                tracker: tracker, boundsOf: boundsOf, screen: screen)
+            {
+                // Roll the whole swap back: the displaced window's frame
+                // visibly moved, so it is written home; the requester was
+                // never written, so only its occupancy restores.
+                state.commit(window: displaced, into: displacedOriginal)
+                state.commit(window: id, into: previous)
+                applyLayout(
+                    for: displaced, state: state, records: records,
+                    tracker: tracker, boundsOf: boundsOf, screen: screen)
+                log("place FAILED win\(id) -> \(slot.rawValue); swap rolled back")
+                let refusal = Self.refusal(for: id, records: records, gateway: gateway)
+                outcome.error = refusal.error
+                outcome.feedback = refusal.feedback
+                return (outcome, state, records, nextID)
+            }
+            // A swap untiles nobody, but it does move a window the user
+            // didn't touch: the notice names it and its landing tile.
+            let displacedName = appName(for: displaced, records: records) ?? "That window"
+            outcome.notice =
+                "\(displacedName) moved to \(SlotPresentation.title(of: previous)) "
+                    + "to make room. Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+            outcome.snapshot = snapshot
+            outcome.requester = id
+            log(
+                "swap win\(id) -> \(slot.rawValue), win\(displaced) -> \(previous.rawValue)")
+            return (outcome, state, records, nextID)
         case .tile:
             let evicted = decision.windowsToRestore(requester: id)
             // Names resolve BEFORE the restore deletes the records:
@@ -278,6 +352,18 @@ final class PlanExecutor {
             head = "\(names[0]) and \(names.count - 1) more went back to where they were."
         }
         return head + " Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+    }
+
+    /// The refusal pair for a failed swap write: names the window whose
+    /// resize was refused (the displaced window on its move, the requester
+    /// on its own), matching the `place` refusal wording.
+    private static func refusal(
+        for id: WindowID, records: [WindowID: WindowRecord], gateway: WindowGateway
+    ) -> (error: String, feedback: TilingController.Feedback) {
+        let name = records[id].flatMap { gateway.appName(of: $0.handle) } ?? "That window"
+        return (
+            "\(name) couldn't be tiled: the app refused to resize it.",
+            .refused(windowName: name))
     }
 
     /// Places `id` into `slot`. Returns the refusal (error + feedback)

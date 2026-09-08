@@ -20,6 +20,11 @@ final class MatrixCrossCheckTests: XCTestCase {
         switch plan {
         case .noop:
             break
+        case .swap(let displaced):
+            if let previous = state.slot(of: requester) {
+                state.commit(window: displaced, into: previous)
+            }
+            state.commit(window: requester, into: target)
         case .tile(let evicting), .switchLayout(let evicting):
             for evicted in evicting where evicted != requester {
                 state.remove(window: evicted)

@@ -145,6 +145,104 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertNil(outcome.snapshot)
     }
 
+    // MARK: Swap
+
+    func testSwapMovesBothWindowsAndKeepsThemTiled() {
+        // The report's example: the top-left sixth swaps into the middle
+        // third with the right two-thirds window; nobody is untiled.
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .sixthTopLeft)
+        state.commit(window: b, into: .sixthsRightTwoThirds)
+        let aBounds = gateway.frame(of: handles[a]!)!
+        let bBounds = gateway.frame(of: handles[b]!)!
+
+        let outcome = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+
+        XCTAssertNil(outcome.error)
+        XCTAssertNil(outcome.feedback)
+        XCTAssertEqual(state.slot(of: a), .sixthMiddle)
+        XCTAssertEqual(
+            state.slot(of: b), .sixthTopLeft,
+            "the displaced window takes the tile the requester vacated")
+        XCTAssertEqual(
+            gateway.frame(of: handles[a]!),
+            tracker.grid.rect(for: .sixthMiddle, in: aBounds))
+        XCTAssertEqual(
+            gateway.frame(of: handles[b]!),
+            tracker.grid.rect(for: .sixthTopLeft, in: bBounds))
+    }
+
+    func testSwapKeepsBothPreTileFrames() {
+        let a = addWindow()
+        let b = addWindow()
+        let aFrame = CGRect(x: 5, y: 6, width: 300, height: 200)
+        let bFrame = CGRect(x: 7, y: 8, width: 280, height: 190)
+        gateway.setFrame(handles[a]!, to: aFrame)
+        gateway.setFrame(handles[b]!, to: bFrame)
+        records[a]?.preTileFrame = aFrame
+        records[b]?.preTileFrame = bFrame
+        state.commit(window: a, into: .sixthTopLeft)
+        state.commit(window: b, into: .sixthsRightTwoThirds)
+
+        _ = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+
+        XCTAssertEqual(records[a]?.preTileFrame, aFrame)
+        XCTAssertEqual(records[b]?.preTileFrame, bFrame)
+    }
+
+    func testSwapRefusalByDisplacedMovesNothing() {
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .sixthTopLeft)
+        state.commit(window: b, into: .sixthsRightTwoThirds)
+        gateway.refuseNextWrites(handles[b]!)
+
+        let outcome = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+
+        XCTAssertNotNil(outcome.error)
+        XCTAssertEqual(state.slot(of: a), .sixthTopLeft, "the requester stays put")
+        XCTAssertEqual(state.slot(of: b), .sixthsRightTwoThirds, "the displaced window stays put")
+        XCTAssertNil(outcome.snapshot)
+    }
+
+    func testSwapRefusalByRequesterRollsDisplacedBack() {
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .sixthTopLeft)
+        state.commit(window: b, into: .sixthsRightTwoThirds)
+        gateway.refuseNextWrites(handles[a]!)
+
+        let outcome = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+
+        XCTAssertNotNil(outcome.error)
+        XCTAssertEqual(state.slot(of: a), .sixthTopLeft)
+        XCTAssertEqual(state.slot(of: b), .sixthsRightTwoThirds, "rolled back to its own tile")
+    }
+
+    func testSwapNoticesAndSnapshotsBothForUndo() {
+        let a = addWindow()
+        let b = addWindow()
+        state.commit(window: a, into: .sixthTopLeft)
+        state.commit(window: b, into: .sixthsRightTwoThirds)
+
+        let outcome = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+
+        XCTAssertEqual(
+            outcome.notice,
+            "TestApp moved to Top Left Sixth to make room. "
+                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
+        XCTAssertEqual(outcome.requester, a)
+        let snapshot = try! XCTUnwrap(outcome.snapshot)
+        XCTAssertEqual(snapshot.count, 2, "both windows are undoable")
+        XCTAssertTrue(
+            snapshot.contains { $0.slot == .sixthsRightTwoThirds },
+            "the displaced window's undo entry names its own former tile")
+        XCTAssertTrue(
+            snapshot.contains { $0.slot == .sixthTopLeft },
+            "the requester's undo entry names its vacated tile")
+    }
+
     // MARK: Notice copy
 
     func testSwitchNoticeNamesLayoutCountAndUndoOffer() {

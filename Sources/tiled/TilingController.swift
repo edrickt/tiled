@@ -237,6 +237,12 @@ final class TilingController {
         // Clear this monitor's slate (not the focused one: the requester
         // may tile onto a background display while focus sits elsewhere).
         mutateSpace(screen) { $0.error = nil; $0.notice = nil }
+        // A swap moves the displaced window too: an expanded window
+        // coming out of a swap returns to earth in its new tile, exactly
+        // like the requester above.
+        if case .swap(let displaced) = decision {
+            collapseExpanded(displaced)
+        }
 
         let result = executor.execute(
             decision: decision, requester: id, slot: slot,
@@ -295,6 +301,7 @@ final class TilingController {
         let placed: [WindowID]
         switch decision {
         case .tile, .switchLayout: placed = [id]
+        case .swap(let displaced): placed = [id, displaced]
         case .noop: return
         }
         scheduleVerification(of: placed, on: screen)
@@ -751,11 +758,13 @@ final class TilingController {
         return spaceState(for: screen).slot(of: id)
     }
 
-    /// Undoes the freshest destructive tiling action: a layout switch or
-    /// an ordinary eviction. Both share one recovery path: the displaced
-    /// windows return to their slots, the requester to its pre-tile frame.
-    /// Consumes the entry it restores, so repeated ⌃⌥⇧⌘Z walks back
-    /// through history up to `undoDepth`: the stack, not amnesia, bounds
+    /// Undoes the freshest destructive tiling action: a layout switch, an
+    /// ordinary eviction, or a swap. All share one recovery path: the
+    /// displaced windows return to their slots, the requester to its
+    /// pre-tile frame (a swap's requester entry re-tiles it into its
+    /// vacated tile, swapping back). Consumes the entry it restores, so
+    /// repeated ⌃⌥⇧⌘Z walks back through history up to `undoDepth`: the
+    /// stack, not amnesia, bounds
     /// the past.
     func undoLastDisplacement() {
         undoLastDisplacement(on: focusedScreenID())

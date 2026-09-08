@@ -28,6 +28,10 @@ _Avoid_: divider, separator, boundary (the code name is GridBoundary)
 Untiling a window to make room, restoring its pre-tile frame; what `plan` returns when another window overlaps the requested slot.
 _Avoid_: displacement, removal
 
+**Swap**:
+A tiled requester trading tiles with the single window blocking its target: the blocker lands in the tile the requester vacated, nobody is untiled. The vacated tile must be disjoint from the target, or the request falls back to eviction.
+_Avoid_: exchange, trade, tile swap (in prose; the code name is `swap`)
+
 **Expand**:
 Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it.
 _Avoid_: maximize, zoom, fullscreen

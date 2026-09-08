@@ -354,6 +354,10 @@ typealias WindowID = Int
 enum TilePlan: Equatable {
     /// Place the window; the listed windows must be untiled (restored) first.
     case tile(evicting: [WindowID])
+    /// The requester is tiled and exactly one window overlaps the target:
+    /// the two swap tiles: the displaced window moves into the slot the
+    /// requester vacates; nobody is untiled or restored.
+    case swap(displaced: WindowID)
     /// The request targets a different layout than the active one: every
     /// tiled window is untiled (restored), the layout switches, and the
     /// requesting window is placed into the target slot.
@@ -379,7 +383,7 @@ extension TilePlan {
         switch self {
         case .tile(let evicting), .switchLayout(let evicting):
             return evicting.filter { $0 != requester }
-        case .noop:
+        case .swap, .noop:
             return []
         }
     }
@@ -410,8 +414,10 @@ struct TilingState: Equatable {
     }
 
     /// Decides what happens when `window` requests `slot`: the requester
-    /// owns `slot` after the move, and any window overlapping the target
-    /// is evicted (restored to its pre-tile frame).
+    /// owns `slot` after the move. A tiled requester swaps with a single
+    /// overlapping window (the displaced window takes the tile the
+    /// requester vacated); otherwise every overlapping window is evicted
+    /// (restored to its pre-tile frame).
     func plan(window: WindowID, into slot: Slot) -> TilePlan {
         if occupantBySlot[slot] == window { return .noop }
         if !occupantBySlot.isEmpty, slot.layout != activeLayout {
@@ -421,6 +427,17 @@ struct TilingState: Equatable {
             .filter { $0.value != window && $0.key.overlaps(slot) }
             .map(\.value)
             .sorted()
+        // Tile swap: the requester offers its own tile, so a single
+        // window in the way can take it instead of losing its tiling.
+        // The vacated tile must not overlap the target (the displaced
+        // window would land inside the requester's new tile), and more
+        // than one blocker (or an untiled requester with no tile to
+        // offer) falls back to eviction.
+        if blockers.count == 1, let previous = self.slot(of: window),
+            !previous.overlaps(slot)
+        {
+            return .swap(displaced: blockers[0])
+        }
         return .tile(evicting: blockers)
     }
 
