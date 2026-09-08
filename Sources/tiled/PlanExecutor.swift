@@ -47,6 +47,14 @@ final class PlanExecutor {
         /// frequent, silent eviction is exactly the case that needs it.
         var snapshot: [EvictedWindow]?
         var requester: WindowID?
+        /// Cells the placement freed (eviction remainders, the requester's
+        /// vacated tile) for the controller's reflow to hand to the
+        /// mergeable survivor. Nil when the placement or a restore failed:
+        /// the screen must agree with state before anyone grows into it.
+        /// The controller applies reflow, not this module, so there is
+        /// exactly one reflow applier; the requester and expanded windows
+        /// are excluded there.
+        var reflowFreed: Set<TileCell>?
     }
 
     private let gateway: WindowGateway
@@ -79,7 +87,6 @@ final class PlanExecutor {
         tracker: DragTracker, boundsOf: (CGRect) -> CGRect,
         observe: (WindowID) -> Void,
         screenOf: (WindowID) -> ScreenID? = { _ in nil },
-        isExpanded: (WindowID) -> Bool = { _ in false },
         screen: ScreenID? = nil
     ) -> (outcome: Outcome, state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID) {
         var state = state
@@ -232,70 +239,26 @@ final class PlanExecutor {
             outcome.error = placeResult.error
             outcome.feedback = placeResult.feedback
             reportRestoreFailures(restoreFailures, error: &outcome.error)
-            // Reflow: the cells the event freed (eviction remainders, the
-            // requester's old tile) flow into the one survivor that
-            // merges with them into a whole slot. Skipped when the
-            // placement or a restore failed: the screen must agree with
-            // state before anyone grows into it. The requester and
-            // expanded windows never grow (see `TilingState.reflow`).
-            var reflowEntries: [EvictedWindow] = []
             if placeResult.error == nil, restoreFailures.isEmpty {
-                // The freed region: every cell the evicted windows and
-                // the requester's vacated tile held. Cells the requester
-                // now covers drop out inside `reflow` (they are occupied
-                // again), so only true remainders reach the survivors.
+                // Hand the freed region to the controller: it owns the one
+                // reflow applier, which drops the cells the requester
+                // covers again (they are occupied, so only true remainders
+                // reach the survivors) and grows the one mergeable
+                // survivor, folding its undo entries into this chapter.
                 var freed = Set(evictedSlots.flatMap { $0.cells })
                 if let previous {
                     freed.formUnion(previous.cells)
                 }
-                let skip = Set([id] + evicted + state.tiledWindows.filter(isExpanded))
-                let placements = state.reflow(freed: freed, excluding: skip)
-                for (wid, target) in placements.sorted(by: { $0.key < $1.key }) {
-                    guard let record = records[wid], let old = state.slot(of: wid)
-                    else { continue }
-                    state.commit(window: wid, into: target)
-                    observe(wid)
-                    if applyLayout(
-                        for: wid, state: state, records: records,
-                        tracker: tracker, boundsOf: boundsOf, screen: screen)
-                    {
-                        reflowEntries.append(EvictedWindow(
-                            handle: record.handle, slot: old,
-                            preTileFrame: record.preTileFrame, screen: screenOf(wid)))
-                    } else {
-                        // The grown write was refused: roll the survivor
-                        // back so state and screen agree, and say so.
-                        state.commit(window: wid, into: old)
-                        applyLayout(
-                            for: wid, state: state, records: records,
-                            tracker: tracker, boundsOf: boundsOf, screen: screen)
-                        let name = appName(for: wid, records: records) ?? "That window"
-                        if outcome.error == nil {
-                            outcome.error =
-                                "\(name) couldn't grow into the freed space: the app refused to resize it."
-                            outcome.feedback = .refused(windowName: name)
-                        }
-                        log("reflow FAILED win\(wid) -> \(target.rawValue)")
-                        break
-                    }
-                }
+                outcome.reflowFreed = freed
             }
             if placeResult.error == nil, restoreFailures.isEmpty, !evicted.isEmpty {
                 // Ordinary eviction gets the same narrative as a layout
                 // switch: a notice naming the displaced app plus the shared
                 // one-step undo. The switch was never special; it was
                 // just the first destruction anyone bothered to narrate.
-                // Reflow entries share the chapter: undo restores the
-                // survivors too, back to the pre-event world.
-                outcome.snapshot = snapshot + reflowEntries
+                outcome.snapshot = snapshot
                 outcome.requester = id
                 outcome.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
-            } else if !reflowEntries.isEmpty {
-                // A move with no eviction still displaced the survivor
-                // that absorbed the vacated tile: that displacement is
-                // the undo chapter (the requester's move itself is not).
-                outcome.snapshot = reflowEntries
-                outcome.requester = nil
             }
             return (outcome, state, records, nextID)
         }
