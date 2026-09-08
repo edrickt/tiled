@@ -88,9 +88,10 @@ you pick a free one.
   - A half occupied + a quad key on that side → the half window is evicted.
 - **Swap:** a tiled window tiling into a slot blocked by exactly one other
   tiled window swaps with it instead of evicting: the blocker moves into the
-  tile the requester vacated, and both stay tiled. (With more than one
-  window in the way, or from an untiled window, the request evicts as
-  above.) Undo swaps back.
+  tile the requester vacated, and both stay tiled. Focus follows the
+  displaced window into the tile it landed in. (With more than one window in
+  the way, or from an untiled window, the request evicts as above, and focus
+  stays put.) Undo swaps back.
 - Tiling a window into its own tile does nothing: no restore, no reassert.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.

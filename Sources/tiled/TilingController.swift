@@ -269,6 +269,15 @@ final class TilingController {
             forgetWindow(evicted)
         }
         let outcome = result.outcome
+        // A swap leaves the user's attention on the window that took the
+        // requester's old tile: focus follows the displaced window. The
+        // degenerate fallback (a plain eviction) deletes its record, so
+        // the guard keeps focus untouched there and after refusals.
+        if case .swap(let displaced) = decision, outcome.error == nil,
+            let record = records[displaced]
+        {
+            gateway.focus(record.handle)
+        }
         if let feedback = outcome.feedback {
             onFeedback?(feedback)
         }

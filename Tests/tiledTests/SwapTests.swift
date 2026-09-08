@@ -77,6 +77,50 @@ final class SwapTests: XCTestCase {
             "the notice offers the undo")
     }
 
+    func testSwapLeavesFocusOnDisplacedWindow() {
+        // The report's follow-up: right half + top-left quad + bottom-left
+        // quad; tiling the top-left quad into the right half swaps with
+        // the half window, and focus follows the half window into the
+        // tile it landed in.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        gateway.focused = b
+        controller.handle(slot: .bottomLeft)
+        let c = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = c
+        controller.handle(slot: .rightHalf)
+
+        gateway.focused = a
+        controller.handle(slot: .rightHalf)
+
+        XCTAssertEqual(controller.state.slot(of: 1), .rightHalf)
+        XCTAssertEqual(controller.state.slot(of: 3), .topLeft)
+        XCTAssertEqual(
+            gateway.focusCalls.last, c,
+            "focus follows the displaced window, not the requester")
+        XCTAssertEqual(gateway.focused, c)
+    }
+
+    func testEvictionKeepsFocusAlone() {
+        // Only a swap moves focus: an untiled requester evicting the
+        // window in its way leaves the user's attention alone.
+        let b = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .rightHalf)
+        let a = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        gateway.focused = a
+
+        controller.handle(slot: .rightHalf)
+
+        XCTAssertEqual(controller.state.slot(of: 2), .rightHalf)
+        XCTAssertNil(controller.state.slot(of: 1), "b was evicted")
+        XCTAssertTrue(
+            gateway.focusCalls.isEmpty,
+            "no focus call for the eviction itself")
+    }
+
     func testSwapUndoSwapsBack() {
         let (a, _, c) = tileSixthsSession()
         gateway.focused = a
