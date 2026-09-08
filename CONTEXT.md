@@ -36,6 +36,10 @@ _Avoid_: exchange, trade, tile swap (in prose; the code name is `swap`)
 Absorbing freed cells: when a tiled window leaves the layout (eviction, untile, drag-out, close) or moves, its freed cells merge with exactly one adjacent survivor into a whole slot, and that survivor grows into it — rightmost candidate wins ties. A hole no survivor merges into exactly stays empty; the requester and expanded windows never grow. One undo chapter covers the event and its reflow together.
 _Avoid_: growth, backfill, gap-filling (the code name is `reflow`)
 
+**Re-house**:
+Keeping an evictee tiled: when an eviction leaves exactly one whole slot free, the evicted window re-tiles into it (the middle third making room for the right two-thirds moves into the free top-left sixth) instead of being untiled; a region that is not exactly one slot falls back to untile-and-restore. Its undo entry returns it to the slot it was evicted from.
+_Avoid_: relocation, re-assignment, re-seat
+
 **Expand**:
 Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it.
 _Avoid_: maximize, zoom, fullscreen

@@ -105,7 +105,9 @@ final class SwapTests: XCTestCase {
 
     func testEvictionKeepsFocusAlone() {
         // Only a swap moves focus: an untiled requester evicting the
-        // window in its way leaves the user's attention alone.
+        // window in its way leaves the user's attention alone. The
+        // victim itself is re-housed: the request leaves exactly the
+        // left half free, so it re-tiles there instead of untangling.
         let b = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = b
         controller.handle(slot: .rightHalf)
@@ -115,7 +117,9 @@ final class SwapTests: XCTestCase {
         controller.handle(slot: .rightHalf)
 
         XCTAssertEqual(controller.state.slot(of: 2), .rightHalf)
-        XCTAssertNil(controller.state.slot(of: 1), "b was evicted")
+        XCTAssertEqual(
+            controller.state.slot(of: 1), .leftHalf,
+            "the evicted window re-tiles into the one slot left free")
         XCTAssertTrue(
             gateway.focusCalls.isEmpty,
             "no focus call for the eviction itself")

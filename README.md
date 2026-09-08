@@ -60,7 +60,10 @@ below are the remappable ones.
 | ⌥⇧⌫  | Evict the focused window: untile it and restore its pre-tile frame  |
 
 Evicting restores the focused window to its pre-tile frame and releases
-its slot. The freed cells reflow: a neighboring tile that merges with
+its slot. When a tiling request evicts a window and leaves exactly one
+whole slot free, the victim re-tiles into that slot instead (the middle
+third making room for the right two-thirds moves into the top-left sixth)
+and only untangles when no single slot fits. The freed cells reflow: a neighboring tile that merges with
 them into a whole slot grows into it — evict the bottom-left sixth and
 the top-left sixth expands into the left third; free the middle third
 and the right third becomes the right two-thirds (the right side wins

@@ -55,6 +55,11 @@ final class PlanExecutor {
         /// exactly one reflow applier; the requester and expanded windows
         /// are excluded there.
         var reflowFreed: Set<TileCell>?
+        /// A lone evicted window that was re-housed instead of untiled:
+        /// still tiled, in the one slot the request left free. The
+        /// controller must not forget it, and its convergence is
+        /// verified like any placement.
+        var rehoused: WindowID?
     }
 
     private let gateway: WindowGateway
@@ -87,6 +92,7 @@ final class PlanExecutor {
         tracker: DragTracker, boundsOf: (CGRect) -> CGRect,
         observe: (WindowID) -> Void,
         screenOf: (WindowID) -> ScreenID? = { _ in nil },
+        isExpanded: (WindowID) -> Bool = { _ in false },
         screen: ScreenID? = nil
     ) -> (outcome: Outcome, state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID) {
         var state = state
@@ -224,13 +230,25 @@ final class PlanExecutor {
             // freed region the survivors may absorb.
             let evictedSlots = evicted.compactMap { state.slot(of: $0) }
             let previous = state.slot(of: id)
+            // Re-house: a lone evictee need not lose its tiling. If the
+            // cells the request leaves free form exactly one whole slot,
+            // the victim re-tiles into it instead of untangling (the
+            // middle third evicted by the right two-thirds moves into
+            // the free top-left sixth). Expanded windows skip it: they
+            // come back to earth by untangling, not by moving.
+            var rehouse: (window: WindowID, home: Slot)?
+            if evicted.count == 1, !isExpanded(evicted[0]),
+                let home = state.rehousingHome(evicting: evicted[0], for: slot)
+            {
+                rehouse = (evicted[0], home)
+            }
             let snapshot = evicted.compactMap { evictedID in
                 Self.snapshotEntry(
                     for: evictedID, state: state, records: records, fallback: slot,
                     screen: screenOf(evictedID))
             }
             let restoreFailures = restore(
-                decision.windowsToRestore(requester: id),
+                evicted.filter { $0 != rehouse?.window },
                 state: &state, records: &records, tracker: tracker)
             let placeResult = place(
                 window: id, into: slot, state: &state, records: &records,
@@ -239,6 +257,27 @@ final class PlanExecutor {
             outcome.error = placeResult.error
             outcome.feedback = placeResult.feedback
             reportRestoreFailures(restoreFailures, error: &outcome.error)
+            // Re-house commit: once the requester sits, the victim moves
+            // into the one free slot and stays tiled. A refused write
+            // falls back to the plain eviction (restore its pre-tile
+            // frame), so the outcome never lies about what happened.
+            if let (wid, home) = rehouse {
+                state.commit(window: wid, into: home)
+                if applyLayout(
+                    for: wid, state: state, records: records,
+                    tracker: tracker, boundsOf: boundsOf, screen: screen)
+                {
+                    outcome.rehoused = wid
+                    let name = appName(for: wid, records: records) ?? "That window"
+                    outcome.notice =
+                        "\(name) moved to \(SlotPresentation.title(of: home)) to make room. "
+                            + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+                } else {
+                    _ = restoreWindow(
+                        id: wid, state: &state, records: &records, tracker: tracker)
+                    log("rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
+                }
+            }
             if placeResult.error == nil, restoreFailures.isEmpty {
                 // Hand the freed region to the controller: it owns the one
                 // reflow applier, which drops the cells the requester
@@ -256,9 +295,13 @@ final class PlanExecutor {
                 // switch: a notice naming the displaced app plus the shared
                 // one-step undo. The switch was never special; it was
                 // just the first destruction anyone bothered to narrate.
+                // A re-house already narrated itself (the victim moved,
+                // nobody went back).
                 outcome.snapshot = snapshot
                 outcome.requester = id
-                outcome.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
+                if outcome.notice == nil {
+                    outcome.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
+                }
             }
             return (outcome, state, records, nextID)
         }

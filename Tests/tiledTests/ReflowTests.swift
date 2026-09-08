@@ -180,6 +180,74 @@ final class ReflowTests: XCTestCase {
             state.reflow(freed: Slot.sixthBottomLeft.cells, excluding: [a]),
             [:])
     }
+    // MARK: Re-house (an eviction keeps its victim tiled when one slot fits)
+
+    func testEvicteeReHousesIntoTheOneFreeSlot() {
+        // Bottom-left sixth, middle third, right third; the right
+        // two-thirds request evicts the middle third — and the cells
+        // left free are exactly the top-left sixth, so the victim
+        // re-tiles there instead of untangling.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthBottomLeft)
+        state.commit(window: b, into: .sixthMiddle)
+        state.commit(window: c, into: .sixthRight)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: b, for: .sixthsRightTwoThirds),
+            .sixthTopLeft)
+    }
+
+    func testNoFreeSlotLeavesTheEvictionAlone() {
+        // The right two-thirds request over top-left, middle, right,
+        // bottom-left, bottom-right (evicting the right third) covers
+        // the whole board: nothing is left free, so the victim untiles
+        // to its pre-tile frame.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthTopLeft)
+        state.commit(window: b, into: .sixthMiddle)
+        state.commit(window: c, into: .sixthRight)
+        state.commit(window: d, into: .sixthBottomLeft)
+        state.commit(window: 5, into: .sixthBottomRight)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: c, for: .sixthsRightTwoThirds),
+            nil)
+    }
+
+    func testEvicteeReHousesWhenTheRequesterAbsorbsItsOtherCells() {
+        // The middle third -> right two-thirds evicts the right third;
+        // the requester absorbs the middle's cells, and the free region
+        // is exactly the top-left sixth — the victim re-tiles there.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthBottomLeft)
+        state.commit(window: b, into: .sixthMiddle)
+        state.commit(window: c, into: .sixthRight)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: c, for: .sixthsRightTwoThirds),
+            .sixthTopLeft)
+    }
+
+    func testTwoFreeSlotsLeaveTheEvictionAlone() {
+        // Evicting the bottom-right quad for a top-left requester leaves
+        // BOTH the top-right and bottom-left quads free — not one whole
+        // slot, so there is no unambiguous home and no re-house.
+        var state = TilingState()
+        state.commit(window: a, into: .bottomRight)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: a, for: .topLeft),
+            nil)
+    }
+
+    func testQuartersEvicteeReHousesAcrossTheBoard() {
+        // The left half request over top-left, top-right, bottom-left
+        // evicts the bottom-left quad; the cells left free are exactly
+        // the bottom-right quad, so the victim re-tiles there.
+        var state = TilingState()
+        state.commit(window: a, into: .topLeft)
+        state.commit(window: b, into: .topRight)
+        state.commit(window: c, into: .bottomLeft)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: c, for: .leftHalf),
+            .bottomRight)
+    }
 }
 
 // MARK: Controller wiring (through the fake gateway)
@@ -328,6 +396,80 @@ extension ReflowTests {
         controller.pruneDeadWindows()
 
         XCTAssertEqual(controller.state.slot(of: 1), .sixthLeft)
+    }
+
+    // MARK: Re-house through the controller (the report's scenarios)
+
+    /// Bottom-left sixth (b), middle third (m), right third (r), tiled
+    /// in that order; each window starts from a distinct floating frame.
+    private func tileBottomLeftMiddleRight()
+        -> (b: WindowHandle, m: WindowHandle, r: WindowHandle)
+    {
+        let b = gateway.addWindow(frame: CGRect(x: 50, y: 500, width: 700, height: 400))
+        gateway.focused = b
+        controller.handle(slot: .sixthBottomLeft)
+        let m = gateway.addWindow(frame: CGRect(x: 600, y: 200, width: 600, height: 500))
+        gateway.focused = m
+        controller.handle(slot: .sixthMiddle)
+        let r = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 500, height: 400))
+        gateway.focused = r
+        controller.handle(slot: .sixthRight)
+        return (b, m, r)
+    }
+
+    func testMiddleThirdToRightTwoThirdsReHousesRightThird() {
+        // The middle third window takes the right two-thirds: the right
+        // third is evicted, and the one slot left free is the top-left
+        // sixth, so it re-tiles there instead of untangling.
+        let (_, m, r) = tileBottomLeftMiddleRight()
+
+        gateway.focused = m
+        controller.handle(slot: .sixthsRightTwoThirds)
+
+        XCTAssertEqual(controller.state.slot(of: 2), .sixthsRightTwoThirds)
+        XCTAssertEqual(
+            controller.state.slot(of: 3), .sixthTopLeft,
+            "the evicted right third re-tiles into the free top-left sixth")
+        XCTAssertEqual(controller.state.slot(of: 1), .sixthBottomLeft)
+        XCTAssertEqual(gateway.frame(of: r), expectedRect(.sixthTopLeft, for: r))
+        XCTAssertTrue(controller.lastNotice?.contains("moved to") ?? false)
+    }
+
+    func testRightThirdToRightTwoThirdsReHousesMiddleThird() {
+        // The right third window takes the right two-thirds: the middle
+        // third is evicted, and the one slot left free is the top-left
+        // sixth, so it re-tiles there instead of floating under the
+        // requester's new tile.
+        let (b, m, r) = tileBottomLeftMiddleRight()
+
+        gateway.focused = r
+        controller.handle(slot: .sixthsRightTwoThirds)
+
+        XCTAssertEqual(controller.state.slot(of: 3), .sixthsRightTwoThirds)
+        XCTAssertEqual(
+            controller.state.slot(of: 2), .sixthTopLeft,
+            "the evicted middle third re-tiles into the free top-left sixth")
+        XCTAssertEqual(controller.state.slot(of: 1), .sixthBottomLeft)
+        XCTAssertEqual(gateway.frame(of: m), expectedRect(.sixthTopLeft, for: m))
+        XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthBottomLeft, for: b))
+    }
+
+    func testReHouseUndoRestoresTheVictimsOwnSlot() {
+        let (b, m, r) = tileBottomLeftMiddleRight()
+        gateway.focused = r
+        controller.handle(slot: .sixthsRightTwoThirds)
+
+        controller.undoLastDisplacement()
+
+        XCTAssertEqual(
+            controller.state.slot(of: 2), .sixthMiddle,
+            "the re-housed window returns to the slot it was evicted from")
+        XCTAssertEqual(gateway.frame(of: m), expectedRect(.sixthMiddle, for: m))
+        XCTAssertTrue(controller.state.slot(of: 3) == nil, "the requester untiles")
+        XCTAssertEqual(
+            gateway.frame(of: r), CGRect(x: 100, y: 100, width: 500, height: 400),
+            "restored to its pre-tile frame")
+        XCTAssertEqual(controller.state.slot(of: 1), .sixthBottomLeft)
     }
 
     func testExpandedSurvivorNeverGrows() {

@@ -458,6 +458,27 @@ struct TilingState: Equatable {
         }
     }
 
+    /// The slot a lone evicted window can move into instead of losing
+    /// its tiling: once the requester takes `target`, the cells left free
+    /// form a region; when that region is exactly one whole slot of the
+    /// target's layout, the evictee re-tiles into it (the middle third
+    /// making room for the right two-thirds moves into the free top-left
+    /// sixth). Exact-or-empty, like reflow: a region that is not exactly
+    /// one slot (two quarters, an L-shape, nothing) leaves the eviction
+    /// untouched, so the window untiles to its pre-tile frame instead —
+    /// there is no unambiguous home to guess. The region may include
+    /// cells that were free before the request: the evictee has nowhere
+    /// else to go, and a whole free slot is a whole free slot.
+    func rehousingHome(evicting evictee: WindowID, for target: Slot) -> Slot? {
+        guard let current = slot(of: evictee), current.overlaps(target) else { return nil }
+        var occupied = target.cells
+        for (slot, window) in occupantBySlot where window != evictee {
+            occupied.formUnion(slot.cells)
+        }
+        let free = Set(TileCell.allCases).subtracting(occupied)
+        return Slot.allCases.first { $0.layout == target.layout && $0.cells == free }
+    }
+
     /// Reflow: decides which survivors absorb freed cells. When a tiled
     /// window leaves the layout (eviction, untile, drag-out, close) or
     /// moves, its freed cells merge with exactly one adjacent survivor

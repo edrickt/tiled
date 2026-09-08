@@ -34,8 +34,17 @@ final class MatrixCrossCheckTests: XCTestCase {
             }
             state.commit(window: requester, into: target)
         case .tile(let evicting):
+            let others = evicting.filter { $0 != requester }
+            // Re-house: a lone evictee stays tiled when the cells left
+            // free form exactly one whole slot (mirrors the executor).
+            var rehouse: (window: WindowID, home: Slot)?
+            if others.count == 1,
+                let home = state.rehousingHome(evicting: others[0], for: target)
+            {
+                rehouse = (others[0], home)
+            }
             var freed: Set<TileCell> = []
-            for evicted in evicting where evicted != requester {
+            for evicted in others {
                 if let slot = state.slot(of: evicted) { freed.formUnion(slot.cells) }
                 state.remove(window: evicted)
             }
@@ -43,7 +52,12 @@ final class MatrixCrossCheckTests: XCTestCase {
                 freed.formUnion(previous.cells)
             }
             state.commit(window: requester, into: target)
-            for (window, grown) in state.reflow(freed: freed, excluding: [requester]) {
+            if let (window, home) = rehouse {
+                state.commit(window: window, into: home)
+            }
+            for (window, grown) in state.reflow(
+                freed: freed, excluding: Set([requester] + others))
+            {
                 state.commit(window: window, into: grown)
             }
         }

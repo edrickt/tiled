@@ -251,6 +251,7 @@ final class TilingController {
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
             observe: { [weak self] in self?.observe(window: $0) },
             screenOf: { [weak self] in self?.spaceOf(window: $0) },
+            isExpanded: { [weak self] in self?.expanded[$0] != nil },
             screen: screen)
         setSpaceState(result.state, for: screen)
         records = result.records
@@ -261,12 +262,15 @@ final class TilingController {
         if result.outcome.error == nil, result.state.slot(of: id) != nil {
             setSpaceOwnership(id, screen)
         }
+        let outcome = result.outcome
         // Evicted windows were restored by the executor: expansion died
-        // with the pre-tile frame write that restored them.
-        for evicted in decision.windowsToRestore(requester: id) {
+        // with the pre-tile frame write that restored them. A re-housed
+        // window is the exception: it stayed tiled in the slot the
+        // request left free, so its record and observation survive.
+        for evicted in decision.windowsToRestore(requester: id)
+        where evicted != outcome.rehoused {
             forgetWindow(evicted)
         }
-        var outcome = result.outcome
         // Reflow: the cells the event freed (eviction remainders, the
         // requester's vacated tile) flow into the one survivor that
         // merges with them into a whole slot. Skipped when the placement
@@ -303,6 +307,9 @@ final class TilingController {
             // rolls back. Cancelled by the next placement's scheduling
             // (a newer write supersedes) and by forget paths.
             scheduleVerification(of: decision, requester: id, on: screen)
+            if let rehoused = outcome.rehoused {
+                scheduleVerification(of: [rehoused], on: screen)
+            }
         }
         syncLegacySurface(focus: screen)
         // The reflow's survivors share the event's undo chapter: undo
