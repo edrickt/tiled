@@ -11,32 +11,32 @@ Tile the focused window. Tiling a window into its own tile is a no-op (it
 stays exactly where it is). Every shortcut also exists as a menu item
 under **Tile Focused Window** in the menu bar menu.
 
-### Quarters (hold ⌥⇧)
+### Quarters (hold ⌥⇧⌘)
 
-| Key   | Tile          |
-|-------|---------------|
-| ⌥⇧U   | Top left      |
-| ⌥⇧O   | Top right     |
-| ⌥⇧M   | Bottom left   |
-| ⌥⇧.   | Bottom right  |
-| ⌥⇧J   | Left half     |
-| ⌥⇧L   | Right half    |
+| Key    | Tile          |
+|--------|---------------|
+| ⌥⇧⌘U   | Top left      |
+| ⌥⇧⌘O   | Top right     |
+| ⌥⇧⌘M   | Bottom left   |
+| ⌥⇧⌘.   | Bottom right  |
+| ⌥⇧⌘J   | Left half     |
+| ⌥⇧⌘L   | Right half    |
 
-### Sixths (hold ⌥⇧⌘)
+### Sixths (hold ⌥⇧)
 
-| Key    | Tile               |
-|--------|--------------------|
-| ⌥⇧⌘U   | Top left sixth     |
-| ⌥⇧⌘I   | Top middle sixth   |
-| ⌥⇧⌘O   | Top right sixth    |
-| ⌥⇧⌘M   | Bottom left sixth  |
-| ⌥⇧⌘,   | Bottom middle sixth|
-| ⌥⇧⌘.   | Bottom right sixth |
-| ⌥⇧⌘J   | Left third         |
-| ⌥⇧⌘K   | Middle third       |
-| ⌥⇧⌘L   | Right third        |
-| ⌥⇧⌘H   | Left two-thirds    |
-| ⌥⇧⌘;   | Right two-thirds   |
+| Key   | Tile               |
+|-------|--------------------|
+| ⌥⇧U   | Top left sixth     |
+| ⌥⇧I   | Top middle sixth   |
+| ⌥⇧O   | Top right sixth    |
+| ⌥⇧M   | Bottom left sixth  |
+| ⌥⇧,   | Bottom middle sixth|
+| ⌥⇧.   | Bottom right sixth |
+| ⌥⇧J   | Left third         |
+| ⌥⇧K   | Middle third       |
+| ⌥⇧L   | Right third        |
+| ⌥⇧H   | Left two-thirds    |
+| ⌥⇧;   | Right two-thirds   |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
 | ⌃⌥⇧⌘Z   | Undo the last displacement (a layout switch, an eviction, a swap, or a reflow, from anywhere) |
 

@@ -341,13 +341,13 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testHotkeys() {
-        // Quarters keep the bare ⌥⇧ keys; sixths add ⌘ on the requested keys.
+        // Sixths keep the bare ⌥⇧ keys; quarters add ⌘ on the requested keys.
         let shiftOption = UInt32(shiftKey | optionKey)
         let withCommand = UInt32(shiftKey | optionKey | cmdKey)
         for slot in Slot.allCases {
             switch slot.layout {
-            case .quarters: XCTAssertEqual(slot.modifiers, shiftOption, "\(slot.rawValue)")
-            case .sixths: XCTAssertEqual(slot.modifiers, withCommand, "\(slot.rawValue)")
+            case .quarters: XCTAssertEqual(slot.modifiers, withCommand, "\(slot.rawValue)")
+            case .sixths: XCTAssertEqual(slot.modifiers, shiftOption, "\(slot.rawValue)")
             }
         }
         let expected: [(Slot, UInt32)] = [

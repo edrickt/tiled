@@ -75,15 +75,15 @@ final class HotkeyServiceTests: XCTestCase {
     }
 
     func testQuartersAndSixthsModifierSets() {
-        // Quarters use ⌥⇧; sixths add ⌘. Shared keycodes across layouts
+        // Quarters add ⌘; sixths use ⌥⇧. Shared keycodes across layouts
         // (U/O/M/., J/L) are disambiguated by the modifier set.
         for slot in Slot.allCases where slot.layout == .quarters {
             XCTAssertEqual(
-                slot.modifiers, UInt32(shiftKey | optionKey), "\(slot.rawValue)")
+                slot.modifiers, UInt32(shiftKey | optionKey | cmdKey), "\(slot.rawValue)")
         }
         for slot in Slot.allCases where slot.layout == .sixths {
             XCTAssertEqual(
-                slot.modifiers, UInt32(shiftKey | optionKey | cmdKey), "\(slot.rawValue)")
+                slot.modifiers, UInt32(shiftKey | optionKey), "\(slot.rawValue)")
         }
     }
 

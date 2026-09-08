@@ -154,8 +154,8 @@ final class WelcomeTab: NSObject {
         sixthsCaption.widthAnchor.constraint(equalToConstant: 160).isActive = true
 
         let sixthsLabel = NSTextField(wrappingLabelWithString:
-            "Sixths work the same way: three columns instead of two. Hold ⌥⇧⌘ with the sixths keys; " +
-            "the full list lives in Settings → Shortcuts.")
+            "Sixths work the same way: three columns instead of two. Hold ⌥⇧ with the sixths keys " +
+            "(⌥⇧⌘ tiles quarters); the full list lives in Settings → Shortcuts.")
         sixthsLabel.textColor = .secondaryLabelColor
         sixthsLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stack.addArrangedSubview(sixthsLabel)

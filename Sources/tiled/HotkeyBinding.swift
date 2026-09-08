@@ -161,7 +161,7 @@ enum SlotPresentation {
 }
 
 /// Persists per-slot hotkey bindings in UserDefaults. Missing entries fall
-/// back to the factory defaults (today's fixed ⌥⇧ / ⌥⇧⌘ set), so a fresh
+/// back to the factory defaults (today's fixed ⌥⇧⌘ / ⌥⇧ set), so a fresh
 /// install behaves exactly like the current hardcoded build.
 final class HotkeyStore {
     /// What `apply` decided.

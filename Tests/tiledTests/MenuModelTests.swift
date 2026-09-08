@@ -252,7 +252,7 @@ final class MenuModelTests: XCTestCase {
             .init(id: 7, slot: .leftHalf, appName: "Safari"),
         ]))
         let row = model.first { $0.title.contains("Left Half") }!
-        XCTAssertEqual(row.title, "Left Half · Safari (⌥⇧J)")
+        XCTAssertEqual(row.title, "Left Half · Safari (⌥⇧⌘J)")
         XCTAssertEqual(row.action, nil, "the row itself doesn't act")
         XCTAssertEqual(row.children?.map(\.title), [
             "Untile This Window", "Focus Safari", "Tile Focused Window Here",

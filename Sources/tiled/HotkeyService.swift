@@ -2,11 +2,11 @@ import Carbon.HIToolbox
 import Foundation
 
 extension Slot {
-    /// Modifier set for this slot's hotkey: quarters use ⌥⇧, sixths add ⌘.
+    /// Modifier set for this slot's hotkey: quarters add ⌘, sixths use ⌥⇧.
     var modifiers: UInt32 {
         switch layout {
-        case .quarters: UInt32(shiftKey | optionKey)
-        case .sixths: UInt32(shiftKey | optionKey | cmdKey)
+        case .quarters: UInt32(shiftKey | optionKey | cmdKey)
+        case .sixths: UInt32(shiftKey | optionKey)
         }
     }
 

@@ -3,7 +3,7 @@ import XCTest
 @testable import tiled
 
 /// Phase 1: per-slot remappable hotkeys. Bindings persist in UserDefaults;
-/// factory defaults are today's fixed set (Quarters = ⌥⇧, Sixths = ⌥⇧⌘).
+/// factory defaults are today's fixed set (Quarters = ⌥⇧⌘, Sixths = ⌥⇧).
 final class HotkeyBindingTests: XCTestCase {
     private var suiteName: String { "tiledTests-\(UUID().uuidString)" }
 
@@ -18,14 +18,14 @@ final class HotkeyBindingTests: XCTestCase {
         // hardcoded labels the menu and cheatsheet showed before custom
         // bindings existed.
         let expected: [Slot: String] = [
-            .topLeft: "⌥⇧U", .topRight: "⌥⇧O", .bottomLeft: "⌥⇧M",
-            .bottomRight: "⌥⇧.", .leftHalf: "⌥⇧J", .rightHalf: "⌥⇧L",
-            .sixthTopLeft: "⌥⇧⌘U", .sixthTopMiddle: "⌥⇧⌘I",
-            .sixthTopRight: "⌥⇧⌘O", .sixthBottomLeft: "⌥⇧⌘M",
-            .sixthBottomMiddle: "⌥⇧⌘,", .sixthBottomRight: "⌥⇧⌘.",
-            .sixthLeft: "⌥⇧⌘J", .sixthMiddle: "⌥⇧⌘K",
-            .sixthRight: "⌥⇧⌘L", .sixthsLeftTwoThirds: "⌥⇧⌘H",
-            .sixthsRightTwoThirds: "⌥⇧⌘;",
+            .topLeft: "⌥⇧⌘U", .topRight: "⌥⇧⌘O", .bottomLeft: "⌥⇧⌘M",
+            .bottomRight: "⌥⇧⌘.", .leftHalf: "⌥⇧⌘J", .rightHalf: "⌥⇧⌘L",
+            .sixthTopLeft: "⌥⇧U", .sixthTopMiddle: "⌥⇧I",
+            .sixthTopRight: "⌥⇧O", .sixthBottomLeft: "⌥⇧M",
+            .sixthBottomMiddle: "⌥⇧,", .sixthBottomRight: "⌥⇧.",
+            .sixthLeft: "⌥⇧J", .sixthMiddle: "⌥⇧K",
+            .sixthRight: "⌥⇧L", .sixthsLeftTwoThirds: "⌥⇧H",
+            .sixthsRightTwoThirds: "⌥⇧;",
         ]
         for slot in Slot.allCases {
             XCTAssertEqual(
