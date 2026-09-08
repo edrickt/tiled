@@ -1,11 +1,9 @@
 #!/bin/bash
-# Builds Tiled.app (release) and installs it into /Applications,
-# replacing any previous copy. Quits a running instance first so the
-# bundle isn't replaced out from under it.
+# Builds Tiled.app (release) and installs it into /Applications.
+# Quits any running instance, removes the installed app first, then
+# builds and installs a fresh copy — nothing is replaced in place.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-
-./scripts/make-app.sh
 
 if pgrep -fq "Tiled.app/Contents/MacOS/Tiled"; then
     echo "Quitting running Tiled…"
@@ -20,7 +18,15 @@ if pgrep -fq "\.build/(debug|release)/tiled"; then
     sleep 1
 fi
 
-rm -rf "/Applications/Tiled.app"
+# Remove the installed app up front: the install is always from
+# scratch, never an in-place bundle replacement.
+if [ -d "/Applications/Tiled.app" ]; then
+    echo "Removing /Applications/Tiled.app…"
+    rm -rf "/Applications/Tiled.app"
+fi
+
+./scripts/make-app.sh
+
 cp -R "build/Tiled.app" "/Applications/Tiled.app"
 echo "Installed /Applications/Tiled.app"
 
