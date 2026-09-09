@@ -287,12 +287,12 @@ final class TilingController {
             setSpaceOwnership(id, screen)
         }
         let outcome = result.outcome
-        // Evicted windows were restored by the executor: expansion died
-        // with the pre-tile frame write that restored them. A re-housed
+        // Restored-not-re-housed windows: untiled for good. A re-housed
         // window is the exception: it stayed tiled in the slot the
         // request left free, so its record and observation survive.
-        for evicted in decision.windowsToRestore(requester: id)
-        where evicted != outcome.rehoused {
+        let restored = decision.windowsToRestore(requester: id)
+            .filter { $0 != outcome.rehoused }
+        for evicted in restored {
             forgetWindow(evicted)
         }
         // Reflow: the cells the event freed (eviction remainders, the
@@ -308,10 +308,7 @@ final class TilingController {
         }
         // Restored windows sit BELOW the arrangement they left: an
         // evictee returns to its pre-tile frame and must never cover the
-        // occupants that stayed (or the requester). No focus change. A
-        // re-housed window stays tiled, so there is nothing to raise.
-        let restored = decision.windowsToRestore(requester: id)
-            .filter { $0 != outcome.rehoused }
+        // occupants that stayed (or the requester). No focus change.
         if !restored.isEmpty {
             raiseOccupants(on: screen)
         }
@@ -674,8 +671,7 @@ final class TilingController {
             forgetWindow(id)
             // A window closed while tiled is a leave like any other:
             // its cells flow to the mergeable survivor.
-            pushUndo(snapshot: reflow(slot?.cells ?? [], excluding: [], on: screen), requester: nil, on: screen)
-            raiseOccupants(on: screen)
+            pushLeaveUndo(slot: slot, on: screen)
         }
         // A recovered probe or a vanished record clears the pending
         // death: only windows still reading dead stay marked.
@@ -692,12 +688,23 @@ final class TilingController {
 
 
     private func raiseOccupants(on screen: ScreenID?) {
+        // Expanded windows are non-evicted too: they cover the layout
+        // while holding their slots, and the evictee sits below them.
         for (_, id) in spaceState(for: screen).occupants
             .sorted(by: { $0.key.rawValue < $1.key.rawValue })
         {
-            guard expanded[id] == nil, let record = records[id] else { continue }
+            guard let record = records[id] else { continue }
             gateway.raise(record.handle)
         }
+    }
+
+    /// The shared tail of every leave-with-reflow path: the freed cells
+    /// flow to the mergeable survivor, and the survivor is raised above
+    /// the window that just left — one helper so the invariant lives in
+    /// one place and no leave path forgets the raise.
+    private func pushLeaveUndo(slot: Slot?, on screen: ScreenID?) {
+        pushUndo(snapshot: reflow(slot?.cells ?? [], excluding: [], on: screen), requester: nil, on: screen)
+        raiseOccupants(on: screen)
     }
 
     // MARK: Bulk operations
@@ -1084,8 +1091,7 @@ final class TilingController {
         if let failure = restoreOne(id).failure {
             reportRestoreFailures([failure])
         }
-        pushUndo(snapshot: reflow(slot?.cells ?? [], excluding: [], on: screen), requester: nil, on: screen)
-        raiseOccupants(on: screen)
+        pushLeaveUndo(slot: slot, on: screen)
         syncLegacySurface(focus: screen)
         onChange?()
     }
@@ -1109,8 +1115,7 @@ final class TilingController {
             reportRestoreFailures([failure])
         }
         if reflowing {
-            pushUndo(snapshot: reflow(slot?.cells ?? [], excluding: [], on: screen), requester: nil, on: screen)
-            raiseOccupants(on: screen)
+            pushLeaveUndo(slot: slot, on: screen)
         }
         onChange?()
     }
@@ -1285,8 +1290,7 @@ final class TilingController {
         mutateSpace(screen) { $0.error = nil; $0.notice = nil }
         let slot = slotOfWindow(id)
         forgetWindow(id)
-        pushUndo(snapshot: reflow(slot?.cells ?? [], excluding: [], on: screen), requester: nil, on: screen)
-        raiseOccupants(on: screen)
+        pushLeaveUndo(slot: slot, on: screen)
         dbg("drag-untile win\(id)")
         onChange?()
     }

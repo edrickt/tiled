@@ -84,6 +84,25 @@ final class EvictTests: XCTestCase {
         }
     }
 
+    func testEvictedWindowSitsBelowAnExpandedSurvivor() {
+        // An expanded window still holds its slot and is non-evicted:
+        // the evictee sits below it too, even though reflow never moves
+        // the expanded window.
+        let a = addFocusedWindow()
+        controller.handle(slot: .sixthTopLeft)
+        let b = addFocusedWindow()
+        controller.handle(slot: .sixthBottomLeft)
+        gateway.focused = a
+        controller.handleExpandToggle()   // a covers the layout, keeps its slot
+        XCTAssertTrue(gateway.raiseCalls.isEmpty, "expanding raises nothing")
+
+        gateway.focused = b
+        controller.handleEvict()
+
+        XCTAssertEqual(gateway.raiseCalls, [a], "the expanded survivor is raised")
+        XCTAssertEqual(gateway.zOrder.last, a, "the expanded survivor ends above the evictee")
+    }
+
     func testEvictUntilesFocusedAndRestoresPreTileFrame() {
         let handle = addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
         let original = gateway.frame(of: handle)!
