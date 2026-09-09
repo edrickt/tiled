@@ -31,6 +31,59 @@ final class EvictTests: XCTestCase {
         return handle
     }
 
+    func testEvictedWindowSitsBelowTheGrownSurvivor() {
+        // Two stacked left sixths; evicting the bottom lets the top one
+        // grow into the freed cells. The restored window must land
+        // BELOW the survivor, not on top of it.
+        let a = addFocusedWindow()
+        controller.handle(slot: .sixthTopLeft)
+        let b = addFocusedWindow()
+        controller.handle(slot: .sixthBottomLeft)
+        XCTAssertEqual(gateway.zOrder, [a, b])
+
+        controller.handleEvict()   // evicts b (focused); a grows
+
+        XCTAssertEqual(gateway.raiseCalls, [a], "the survivor is raised over the evictee")
+        XCTAssertEqual(gateway.zOrder, [b, a], "the survivor ends above the evictee")
+    }
+
+    func testEvicteeFromTileRequestSitsBelowOccupants() {
+        // A tiling request that truly evicts (every slot filled, so no
+        // re-house is possible) must leave the evictee below every
+        // remaining tiled window.
+        let slots: [Slot] = [
+            .sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+            .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight,
+        ]
+        var handles: [WindowHandle] = []
+        for slot in slots {
+            let handle = addFocusedWindow()
+            controller.handle(slot: slot)
+            handles.append(handle)
+        }
+        XCTAssertEqual(controller.state.tiledWindows.count, 6)
+
+        // A seventh window requests the occupied bottom-left sixth:
+        // its occupant (handles[3]) is evicted for real.
+        let requester = addFocusedWindow()
+        gateway.focused = requester
+        controller.handle(slot: .sixthBottomLeft)
+        let evictee = handles[3]
+
+        XCTAssertEqual(controller.occupant(of: .sixthBottomLeft, on: nil) ?? 0, 7,
+                       "the requester holds the slot")
+        guard let evicteeIndex = gateway.zOrder.firstIndex(of: evictee) else {
+            return XCTFail("the evictee stays in the z-order model")
+        }
+        for (slot, id) in controller.state.occupants {
+            let handle = gateway.issued[id - 1]
+            guard let index = gateway.zOrder.firstIndex(of: handle) else { continue }
+            XCTAssertLessThan(
+                evicteeIndex, index,
+                "\(slot.rawValue): every tiled window sits above the evictee")
+        }
+    }
+
     func testEvictUntilesFocusedAndRestoresPreTileFrame() {
         let handle = addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
         let original = gateway.frame(of: handle)!

@@ -43,8 +43,15 @@ final class FakeWindowGateway: WindowGateway {
         nextID += 1
         windows[handle] = Window(frame: frame, appName: appName)
         issued.append(handle)
+        zOrder.append(handle)
         return handle
     }
+
+    /// Raise calls in order (the controller's z-order side effects).
+    private(set) var raiseCalls: [WindowHandle] = []
+    /// Window z-order, back to front. `addWindow` appends (newest on
+    /// top, like the real WindowServer); `raise` moves to the front.
+    private(set) var zOrder: [WindowHandle] = []
 
     /// The fake has no focus model: tests declare the focused window.
     var focused: WindowHandle?
@@ -104,6 +111,14 @@ final class FakeWindowGateway: WindowGateway {
     func focus(_ handle: WindowHandle) {
         focusCalls.append(handle)
         if focusChangesFocused { focused = handle }
+    }
+
+    func raise(_ handle: WindowHandle) {
+        raiseCalls.append(handle)
+        if let index = zOrder.firstIndex(of: handle) {
+            zOrder.remove(at: index)
+            zOrder.append(handle)
+        }
     }
 
     func appName(of handle: WindowHandle) -> String? {

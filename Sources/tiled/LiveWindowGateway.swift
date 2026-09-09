@@ -182,6 +182,14 @@ final class LiveWindowGateway: WindowGateway {
         NSRunningApplication(processIdentifier: pid)?.activate()
     }
 
+    /// Raises the window above its siblings without focusing it. Best
+    /// effort: not every app supports the AXRaise action, and a z-order
+    /// nicety must never surface as an error.
+    func raise(_ handle: WindowHandle) {
+        guard let element = elements[handle] else { return }
+        AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    }
+
     func appName(of handle: WindowHandle) -> String? {
         pids[handle].flatMap {
             NSRunningApplication(processIdentifier: $0)?.localizedName

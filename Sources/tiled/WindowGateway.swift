@@ -43,6 +43,10 @@ protocol WindowGateway: AnyObject {
     func observe(_ handle: WindowHandle, onChange: @escaping () -> Void)
     /// Brings the window forward without disturbing layout.
     func focus(_ handle: WindowHandle)
+    /// Raises the window above its siblings without focusing it: the
+    /// z-order nicety that keeps a restored evictee below the survivors
+    /// that grew into its cells. Best-effort; failures are non-fatal.
+    func raise(_ handle: WindowHandle)
     /// Owning app's display name, for user-visible messages.
     func appName(of handle: WindowHandle) -> String?
     /// Accessibility permission state (process-wide).
