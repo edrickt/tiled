@@ -232,10 +232,10 @@ for w in hostWindows() {
 }
 usleep(400_000)
 
-// MARK: S1 - default quarters
+// MARK: S1 - tile four quarters
 
 doTile("HOSTA", "TL"); doTile("HOSTB", "BL"); doTile("HOSTC", "TR"); doTile("HOSTD", "BR")
-verify("S1 tile four quarters (default grid)")
+verify("S1 tile four quarters")
 
 // MARK: S2 - column drag via BL right edge
 
