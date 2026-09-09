@@ -25,7 +25,8 @@ final class PerMonitorTests: XCTestCase {
         super.setUp()
         gateway = FakeWindowGateway()
         controller = TilingController(
-            gateway: gateway, pruneInterval: nil, screens: { [Self.left, Self.right] })
+            gateway: gateway, pruneInterval: nil,
+            screens: { [Self.left, Self.right] }, deathConfirmation: 0)
     }
 
     private var leftID: ScreenID { Self.left.id }

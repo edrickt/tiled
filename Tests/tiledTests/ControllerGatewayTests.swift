@@ -18,6 +18,9 @@ final class ControllerGatewayTests: XCTestCase {
     private var verifyFires: [() -> Void] = []
     /// How many scheduled verifications were cancelled (superseded).
     private var verifyCancels = 0
+    /// Injectable clock for the death-confirmation window (the transient
+    /// tests advance it instead of waiting on real time).
+    private var clock: Date = Date()
 
     override func setUp() {
         super.setUp()
@@ -38,7 +41,12 @@ final class ControllerGatewayTests: XCTestCase {
             scheduleVerify: { [weak self] fire in
                 self?.verifyFires.append(fire)
                 return { self?.verifyCancels += 1 }
-            })
+            },
+            // Tests drive death directly: no confirmation window, so a
+            // killed handle prunes on the first call (the transient-death
+            // tests build their own controller with the real window).
+            deathConfirmation: 0,
+            now: { [self] in clock })
     }
 
     // MARK: Hotkey entry point
@@ -242,6 +250,82 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(
             controller.state.slot(of: 1), .topLeft,
             "an unanswerable probe must never prune a live window")
+    }
+
+    func testUnreadableFrameIsNotASilentIgnore() {
+        // The lid-close transition: a placement lands, then the frame
+        // read starts failing for the live window (observed on live AX:
+        // `verify FAILED … rolled back` fired 3.5s after placement, mid
+        // lid cycle). An unreadable live frame is can't-judge, never a
+        // silent ignore — the rollback untiled the window.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        gateway.hideFrames.insert(handle)
+
+        verifyFires.forEach { $0() }
+
+        XCTAssertEqual(
+            controller.state.slot(of: 1), .topLeft,
+            "an unreadable frame must not roll the placement back")
+    }
+
+    func testTransientDeathDoesNotPruneTiledWindows() {
+        // The lid-close transient: AX answers `.invalidUIElement` for live
+        // windows during display teardown (observed on live AX: three
+        // tiled windows all pruned by one tick during a lid cycle). One
+        // dead probe is a maybe; the slot only releases once death is
+        // confirmed across the confirmation window.
+        let transient = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            scheduleDragEnd: { _ in {} }, scheduleVerify: { _ in {} },
+            now: { [self] in clock })
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        transient.handle(slot: .topLeft)
+        gateway.probeDead.insert(handle)
+
+        transient.pruneDeadWindows()
+        XCTAssertEqual(
+            transient.state.slot(of: 1), .topLeft,
+            "one dead probe is a maybe, never an eviction")
+
+        // Still dead but inside the window: still a maybe.
+        clock = clock.addingTimeInterval(1)
+        transient.pruneDeadWindows()
+        XCTAssertEqual(
+            transient.state.slot(of: 1), .topLeft,
+            "death inside the confirmation window does not release the slot")
+
+        // The transient recovers (the lid reopens, probes answer again).
+        gateway.probeDead.remove(handle)
+        transient.pruneDeadWindows()
+        XCTAssertEqual(
+            transient.state.slot(of: 1), .topLeft,
+            "a recovered probe clears the pending death")
+    }
+
+    func testConfirmedDeathPrunes() {
+        // A probe that stays dead across the confirmation window is a
+        // real death: the slot releases on the next tick.
+        let timed = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            scheduleDragEnd: { _ in {} }, scheduleVerify: { _ in {} },
+            now: { [self] in clock })
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        timed.handle(slot: .topLeft)
+        gateway.probeDead.insert(handle)
+
+        timed.pruneDeadWindows()
+        XCTAssertEqual(timed.state.slot(of: 1), .topLeft, "first sighting only marks")
+
+        clock = clock.addingTimeInterval(4)
+        timed.pruneDeadWindows()
+        XCTAssertNil(
+            timed.state.slot(of: 1),
+            "death confirmed across the window releases the slot")
     }
 
     // MARK: No-op re-push convergence

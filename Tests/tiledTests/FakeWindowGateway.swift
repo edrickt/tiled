@@ -60,6 +60,7 @@ final class FakeWindowGateway: WindowGateway {
 
     func frame(of handle: WindowHandle) -> CGRect? {
         guard let window = windows[handle], window.alive else { return nil }
+        if hideFrames.contains(handle) { return nil }
         return window.frame
     }
 
@@ -81,9 +82,17 @@ final class FakeWindowGateway: WindowGateway {
     /// cannot answer the probe): alive for every other purpose, never
     /// pruned.
     var busy: Set<WindowHandle> = []
+    /// Handles whose liveness probe reports dead while the window lives:
+    /// the lid-close transient, where AX answers `.invalidUIElement` for
+    /// live windows during the display teardown (observed on live AX).
+    var probeDead: Set<WindowHandle> = []
+    /// Handles whose frame reads fail while the window lives: the same
+    /// lid-close transient on the frame-read path.
+    var hideFrames: Set<WindowHandle> = []
 
     func liveness(of handle: WindowHandle) -> Liveness {
         guard let window = windows[handle] else { return .dead }
+        if probeDead.contains(handle) { return .dead }
         if !window.alive { return .dead }
         return busy.contains(handle) ? .unknown : .alive
     }

@@ -203,9 +203,18 @@ final class DragTracker {
         // rounding distance: the frame does not actually change, so no
         // notification is emitted. Before calling it ignored, check the
         // live frame directly: within the echo tolerance of the target
-        // means the write took effect (or needed no effect).
-        if let live = context.liveFrameOf(id),
-            Self.framesClose(entry.frame, live, tolerance: Self.echoTolerance)
+        // means the write took effect (or needed no effect). An
+        // UNREADABLE live frame is also not a silent ignore: it is a
+        // can't-judge. During a lid close/open the frame read fails for
+        // live windows, and judging that as ignored rolled fresh
+        // placements back (observed on live AX); benefit of the doubt
+        // applies — the next write re-verifies.
+        guard let live = context.liveFrameOf(id) else {
+            expectedFrames[id] = nil
+            log("convergence win\(id): live frame unreadable, skipping")
+            return nil
+        }
+        if Self.framesClose(entry.frame, live, tolerance: Self.echoTolerance)
         {
             expectedFrames[id] = nil
             log("convergence win\(id): silent but at target (live=\(live))")

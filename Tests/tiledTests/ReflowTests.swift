@@ -18,7 +18,7 @@ final class ReflowTests: XCTestCase {
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
-        controller = TilingController(gateway: gateway, pruneInterval: nil)
+        controller = TilingController(gateway: gateway, pruneInterval: nil, deathConfirmation: 0)
     }
 
     // MARK: Pure reflow rules (TilingState)

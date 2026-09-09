@@ -117,6 +117,26 @@ final class TilingController {
     private var pruneTimer: Timer?
     private var screenObserver: NSObjectProtocol?
 
+    /// Death must be confirmed across this window before a slot
+    /// releases: a liveness probe that reads dead can be a transient,
+    /// not a death. During a laptop lid close, AX answers
+    /// `.invalidUIElement` for LIVE windows while the display tears
+    /// down (observed on live AX: three tiled windows all pruned by
+    /// one tick mid-transition) — the same error a genuinely closed
+    /// window returns, so the error code alone cannot distinguish
+    /// gone from unreachable. Requiring the dead reading to persist
+    /// across `deathConfirmation` seconds (two prune ticks) lets a
+    /// transient recover — the machine sleeps before a second tick
+    /// can run, and on wake the probes answer again — while a really
+    /// dead window releases its slot on the next tick.
+    private let deathConfirmation: TimeInterval
+    /// Clock for the confirmation window. Injectable so tests advance
+    /// time instead of waiting on real seconds.
+    private let now: () -> Date
+    /// First dead-probe sighting per window. Cleared when the probe
+    /// recovers or the record goes away.
+    private var deadSince: [WindowID: Date] = [:]
+
     /// Called after any state change (for menu refresh).
     var onChange: (() -> Void)?
 
@@ -159,11 +179,15 @@ final class TilingController {
         pruneInterval: TimeInterval? = 5.0,
         scheduleDragEnd: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         scheduleVerify: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleVerifyOnMain,
-        screens: ScreenProvider? = nil
+        screens: ScreenProvider? = nil,
+        deathConfirmation: TimeInterval = 3.0,
+        now: @escaping () -> Date = Date.init
     ) {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
         self.scheduleVerify = scheduleVerify
+        self.deathConfirmation = deathConfirmation
+        self.now = now
         self.screens = screens ?? { NSScreen.screens.enumerated().map { ScreenInfo(appKit: $0.element, index: $0.offset) } }
         // Windows closed while tiled otherwise linger as ghosts until the
         // next hotkey; release their slots within seconds instead.
@@ -625,8 +649,17 @@ final class TilingController {
     /// confirmed deaths prune: a busy app's unanswerable probe is unknown,
     /// and pruning on a maybe would untile a live window.
     func pruneDeadWindows() {
-        for (id, record) in records where gateway.liveness(of: record.handle) == .dead {
-            dbg("prune win\(id): dead handle, releasing slot")
+        let dead = records.filter { gateway.liveness(of: $0.value.handle) == .dead }
+        let timestamp = now()
+        for (id, record) in dead {
+            let first = deadSince[id] ?? timestamp
+            guard timestamp.timeIntervalSince(first) >= deathConfirmation else {
+                deadSince[id] = first
+                dbg("prune win\(id): dead handle, awaiting confirmation")
+                continue
+            }
+            deadSince[id] = nil
+            dbg("prune win\(id): dead handle confirmed, releasing slot")
             let slot = slotOfWindow(id)
             let screen = spaceOf(window: id)
             forgetWindow(id)
@@ -634,6 +667,10 @@ final class TilingController {
             // its cells flow to the mergeable survivor.
             pushUndo(snapshot: reflow(slot?.cells ?? [], excluding: [], on: screen), requester: nil, on: screen)
         }
+        // A recovered probe or a vanished record clears the pending
+        // death: only windows still reading dead stay marked.
+        let deadIDs = Set(dead.map(\.key))
+        deadSince = deadSince.filter { deadIDs.contains($0.key) }
     }
 
     /// Clears error/notice state: every user-initiated tiling action
@@ -1242,6 +1279,7 @@ final class TilingController {
     private func forgetWindow(_ id: WindowID) {
         cancelVerification(id)
         records[id] = nil
+        deadSince[id] = nil
         tracker.forget(id)
         if let screen = spaceOf(window: id) {
             var s = spaceState(for: screen)

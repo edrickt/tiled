@@ -28,6 +28,13 @@ final class LiveWindowGateway: WindowGateway {
     /// window dies (probed via `isAlive`) so handles never dangle.
     private var elements: [WindowHandle: AXUIElement] = [:]
     private var pids: [WindowHandle: pid_t] = [:]
+    /// Last successfully-read frame per handle: the geometry a death
+    /// confirmation matches against. Window element identity is useless
+    /// for that check — after a display teardown a held element stops
+    /// comparing equal (CFEqual) to the app's fresh reference for the
+    /// same window (observed on live AX: `listed=no` while the app
+    /// listed every window) — but the window's frame is stable.
+    private var lastFrames: [WindowHandle: CGRect] = [:]
     /// Observer per pid; registrations outlive untiled records and can
     /// never be unregistered, so they are created once and shared.
     private var observers: [pid_t: AXObserver] = [:]
@@ -50,7 +57,9 @@ final class LiveWindowGateway: WindowGateway {
 
     func frame(of handle: WindowHandle) -> CGRect? {
         guard let element = elements[handle] else { return nil }
-        return Self.frame(of: element)
+        guard let frame = Self.frame(of: element) else { return nil }
+        lastFrames[handle] = frame
+        return frame
     }
 
     @discardableResult
@@ -60,24 +69,64 @@ final class LiveWindowGateway: WindowGateway {
     }
 
     func liveness(of handle: WindowHandle) -> Liveness {
-        guard let element = elements[handle] else { return .dead }
+        guard let element = elements[handle], let pid = pids[handle] else { return .dead }
         var value: CFTypeRef?
-        let error = AXUIElementCopyAttributeValue(
+        let probeError = AXUIElementCopyAttributeValue(
             element, kAXPositionAttribute as CFString, &value)
-        switch Self.liveness(forProbeError: error) {
-        case .alive:
-            return .alive
-        case .unknown:
-            // A busy app fails the probe without being gone: keep the
-            // element registered so the window never falls out of
-            // management on a maybe.
-            return .unknown
-        case .dead:
+        guard probeError != .success else { return .alive }
+        // The probe failed — but a failure can be a transient. Across a
+        // lid close/open, window-level probes fail (.invalidUIElement on
+        // held refs, .attributeUnsupported on fresh refs) for LIVE
+        // windows; the app element keeps answering and still lists them.
+        // Death is therefore confirmed against the app's own window
+        // list, never from the window probe alone.
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
+        var listRef: CFTypeRef?
+        let listError = AXUIElementCopyAttributeValue(
+            app, kAXWindowsAttribute as CFString, &listRef)
+        let list = listRef as? [AXUIElement] ?? []
+        // Geometry membership, not element identity: a listed window
+        // whose frame matches the last read frame means the window is
+        // alive. During the teardown listed windows' frame reads fail
+        // too, so membership stays undeterminable — a maybe, never a
+        // death. Absence is only confirmed when the app answers and at
+        // least one listed frame reads and none matches.
+        var match: Bool?
+        if let cached = lastFrames[handle] {
+            let readFrames = list.compactMap { Self.frame(of: $0) }
+            if readFrames.contains(where: { Self.framesClose($0, cached) }) {
+                match = true
+            } else if list.isEmpty || readFrames.count == list.count {
+                // Every listed frame read and none matched (or the app
+                // lists nothing at all): the window is really gone.
+                match = false
+            }
+            // Some listed frames unreadable: undeterminable — a maybe.
+        }
+        let verdict = Self.liveness(
+            probeError: probeError, appWindowsError: listError, appWindowMatch: match)
+        if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+            NSLog("Tiled: [DEBUG-lv] win handle %ld probe=%d appList err=%d count=%ld match=%@ → %@",
+                  handle.id, probeError.rawValue, listError.rawValue,
+                  list.count,
+                  match.map { $0 ? "yes" : "no" } ?? "unknown",
+                  verdict == .alive ? "alive" : verdict == .dead ? "dead" : "unknown")
+        }
+        if verdict == .dead {
             elements[handle] = nil
             pids[handle] = nil
             changeHandlers[handle] = nil
-            return .dead
+            lastFrames[handle] = nil
         }
+        return verdict
+    }
+
+    /// Frames within a point of each other: the cached last-read frame
+    /// and a fresh read of the same window differ only by rounding.
+    private static func framesClose(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX - b.minX) < 1 && abs(a.minY - b.minY) < 1
+            && abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
     }
 
     func observe(_ handle: WindowHandle, onChange: @escaping () -> Void) {
@@ -248,21 +297,21 @@ final class LiveWindowGateway: WindowGateway {
 
     // MARK: Liveness
 
-    /// Death standard for a liveness probe result, pure so it is
-    /// testable without AX. Only a gone element is dead: the window
-    /// closed or the app quit. Every other error is "cannot answer
-    /// right now" — a sleeping display answers position reads with
-    /// `.attributeUnsupported` (observed on live AX during a
-    /// display-sleep cycle, i.e. the lid-closed leg of a lid cycle), a
-    /// busy app with `.cannotComplete` or `.timeout` — and a maybe
-    /// must never untile: the prune timer would otherwise release
-    /// every slot while a laptop's lid is closed.
-    static func liveness(forProbeError error: AXError) -> Liveness {
-        switch error {
-        case .success: return .alive
-        case .invalidUIElement: return .dead
-        default: return .unknown
-        }
+    /// Death standard for a failed liveness probe, confirmed against
+    /// the app element's window list, pure so it is testable without
+    /// AX. A failed window probe is a maybe: live windows fail it all
+    /// through a lid close/open (see `liveness(of:)`). Death requires
+    /// the app to confirm: the app element itself is stale (the app
+    /// quit), or the app answers and no listed window matches the
+    /// window's last read frame. A frame match, or an undeterminable
+    /// check (nil), stays unknown: a maybe never untiles.
+    static func liveness(
+        probeError: AXError, appWindowsError: AXError, appWindowMatch: Bool?
+    ) -> Liveness {
+        if probeError == .success { return .alive }
+        if appWindowsError == .invalidUIElement { return .dead }
+        if appWindowsError == .success, appWindowMatch == false { return .dead }
+        return .unknown
     }
 
     // MARK: Geometry

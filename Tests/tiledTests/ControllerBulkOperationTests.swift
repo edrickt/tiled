@@ -19,7 +19,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
-        controller = TilingController(gateway: gateway, pruneInterval: nil)
+        controller = TilingController(gateway: gateway, pruneInterval: nil, deathConfirmation: 0)
         controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
         controller.onChange = { [weak self] in self?.changeCount += 1 }
     }
@@ -537,7 +537,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         // bypass by driving pruneDeadWindows directly.
         let gateway = FakeWindowGateway()
         var changes = 0
-        let timed = TilingController(gateway: gateway, pruneInterval: 0.05)
+        let timed = TilingController(gateway: gateway, pruneInterval: 0.05, deathConfirmation: 0)
         timed.onChange = { changes += 1 }
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle

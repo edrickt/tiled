@@ -15,28 +15,63 @@ import ApplicationServices
 final class AXLivenessTests: XCTestCase {
     func testSuccessIsAlive() {
         XCTAssertEqual(
-            LiveWindowGateway.liveness(forProbeError: .success), .alive)
+            LiveWindowGateway.liveness(
+                probeError: .success, appWindowsError: .success, appWindowMatch: true),
+            .alive)
     }
 
-    func testInvalidElementIsDead() {
-        // The real death signal: the element reference is gone because
-        // the window closed or the app quit.
+    func testAppGoneIsDead() {
+        // The app element itself is stale: the app quit, so its windows
+        // are gone with it.
+        for probeError: AXError in [.invalidUIElement, .attributeUnsupported] {
+            XCTAssertEqual(
+                LiveWindowGateway.liveness(
+                    probeError: probeError, appWindowsError: .invalidUIElement,
+                    appWindowMatch: nil),
+                .dead, "\(probeError)")
+        }
+    }
+
+    func testNoListedWindowMatchingTheLastFrameIsDead() {
+        // The app answers, every listed window's frame reads, and none
+        // matches the window's last read frame: it really closed.
         XCTAssertEqual(
-            LiveWindowGateway.liveness(forProbeError: .invalidUIElement), .dead)
+            LiveWindowGateway.liveness(
+                probeError: .invalidUIElement, appWindowsError: .success,
+                appWindowMatch: false),
+            .dead)
     }
 
-    func testDisplaySleepErrorsAreNeverDead() {
-        // .attributeUnsupported is what a sleeping display actually
-        // returns (observed on live AX); it must read as "unknown",
-        // never as death.
-        let transient: [AXError] = [
-            .attributeUnsupported, .cannotComplete,
+    func testTransientProbeFailuresAreNeverDead() {
+        // The lid-cycle evidence: while window-level probes fail
+        // (.invalidUIElement on held refs, .attributeUnsupported on fresh
+        // refs), the app element keeps answering `.success` — but element
+        // identity is useless there (a held ref stops comparing equal to
+        // the app's fresh ref for the same window, observed live as
+        // `listed=no`), so confirmation is geometric: a listed frame
+        // matching the last read frame means alive, and undeterminable
+        // membership (frame reads failing mid-teardown) is a maybe. A
+        // maybe never untiles.
+        let probeErrors: [AXError] = [
+            .invalidUIElement, .attributeUnsupported, .cannotComplete,
             .failure, .apiDisabled, .noValue, .notImplemented,
         ]
-        for error in transient {
+        for probeError in probeErrors {
             XCTAssertEqual(
-                LiveWindowGateway.liveness(forProbeError: error), .unknown,
-                "\(error) is transient or unprovable: a maybe never untiles")
+                LiveWindowGateway.liveness(
+                    probeError: probeError, appWindowsError: .success,
+                    appWindowMatch: true),
+                .unknown, "\(probeError): matching frame is alive")
+            XCTAssertEqual(
+                LiveWindowGateway.liveness(
+                    probeError: probeError, appWindowsError: .success,
+                    appWindowMatch: nil),
+                .unknown, "\(probeError): undeterminable match is a maybe")
+            XCTAssertEqual(
+                LiveWindowGateway.liveness(
+                    probeError: probeError, appWindowsError: .cannotComplete,
+                    appWindowMatch: nil),
+                .unknown, "\(probeError): unanswerable app is a maybe")
         }
     }
 }

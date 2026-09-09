@@ -324,9 +324,23 @@ final class DragTrackerTests: XCTestCase {
         tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
         XCTAssertNil(tracker.convergence(for: 1), "consumed entry: inconclusive")
 
-        // Total silence: ignored.
-        tile(2, .topRight, frame: CGRect(x: 840, y: 500, width: 840, height: 500))
-        XCTAssertEqual(tracker.convergence(for: 2), .ignored)
+        // Total silence with an answerable live frame far from target:
+        // ignored — the write never took effect.
+        let ignoring = makeTracker(liveFrameOf: { _ in
+            CGRect(x: 4000, y: 4000, width: 840, height: 500)
+        })
+        tile(2, .topRight, frame: CGRect(x: 840, y: 500, width: 840, height: 500),
+             tracker: ignoring)
+        XCTAssertEqual(ignoring.convergence(for: 2), .ignored)
+
+        // Total silence with an UNREADABLE live frame: inconclusive.
+        // During a lid close/open the frame read fails for live windows;
+        // judging that as ignored rolled fresh placements back
+        // (observed on live AX).
+        tile(4, .bottomRight, frame: CGRect(x: 840, y: 0, width: 840, height: 500))
+        XCTAssertNil(
+            tracker.convergence(for: 4),
+            "an unreadable live frame is can't-judge, not ignored")
 
         // A converging tick settles the entry: converged.
         tile(3, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
