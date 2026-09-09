@@ -407,10 +407,12 @@ struct TilingState: Equatable {
     var tiledWindows: [WindowID] { Array(Set(occupantBySlot.values)) }
 
     /// The layout currently on screen: the layout of any tiled window, or
-    /// quarters when the space is empty (quarters hotkeys tile without a
-    /// reset on first use).
+    /// sixths when the space is empty — the layout a fresh space starts
+    /// in (its hotkeys tile without a reset on first use; a quarters
+    /// request on the empty space is still a plain tile: nothing to
+    /// leave).
     var activeLayout: LayoutKind {
-        occupantBySlot.keys.first.map(\.layout) ?? .quarters
+        occupantBySlot.keys.first.map(\.layout) ?? .sixths
     }
 
     /// Decides what happens when `window` requests `slot`: the requester

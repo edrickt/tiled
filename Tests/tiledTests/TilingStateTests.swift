@@ -448,8 +448,8 @@ final class TilingStateTests: XCTestCase {
 
     // MARK: Layout switching
 
-    func testActiveLayoutDefaultsToQuarters() {
-        XCTAssertEqual(TilingState().activeLayout, .quarters)
+    func testActiveLayoutDefaultsToSixths() {
+        XCTAssertEqual(TilingState().activeLayout, .sixths)
     }
 
     func testCrossLayoutRequestResetsAndSwitches() {

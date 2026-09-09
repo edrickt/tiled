@@ -1000,7 +1000,7 @@ final class TilingController {
 
     /// One monitor's layout (nil = focused monitor's space).
     func activeLayout(on screen: ScreenID?) -> LayoutKind {
-        space(for: screen)?.state.activeLayout ?? .quarters
+        space(for: screen)?.state.activeLayout ?? .sixths
     }
 
     /// One monitor's occupancy (nil = focused monitor's space).

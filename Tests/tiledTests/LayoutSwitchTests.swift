@@ -119,7 +119,7 @@ final class LayoutSwitchTests: XCTestCase {
     // MARK: Empty space never switches
 
     func testEmptySpaceNeverSwitches() {
-        // The empty space defaults to quarters, but even a sixths request
+        // The empty space defaults to sixths, but even a quarters request
         // is a plain tile: there is nothing to evict and no layout to leave.
         for slot in Slot.allCases {
             XCTAssertEqual(
@@ -130,7 +130,7 @@ final class LayoutSwitchTests: XCTestCase {
 
     func testFirstTileIntoSixthsSetsLayoutWithoutEviction() {
         var state = TilingState()
-        XCTAssertEqual(state.activeLayout, .quarters)
+        XCTAssertEqual(state.activeLayout, .sixths)
         XCTAssertEqual(state.plan(window: 7, into: .sixthTopLeft), .tile(evicting: []))
         state.commit(window: 7, into: .sixthTopLeft)
         XCTAssertEqual(state.occupants, [.sixthTopLeft: 7])
@@ -138,13 +138,13 @@ final class LayoutSwitchTests: XCTestCase {
         assertHealthy(state, context: "first tile sixths")
     }
 
-    func testEmptiedSpaceReturnsToQuartersDefault() {
+    func testEmptiedSpaceReturnsToDefault() {
         var state = TilingState()
-        state.commit(window: 1, into: .sixthMiddle)
-        XCTAssertEqual(state.activeLayout, .sixths)
+        state.commit(window: 1, into: .topLeft)
+        XCTAssertEqual(state.activeLayout, .quarters)
         state.remove(window: 1)
         XCTAssertTrue(state.occupants.isEmpty)
-        XCTAssertEqual(state.activeLayout, .quarters)
+        XCTAssertEqual(state.activeLayout, .sixths)
         // And a quarters tile from there is again a plain tile.
         XCTAssertEqual(state.plan(window: 2, into: .topLeft), .tile(evicting: []))
     }
