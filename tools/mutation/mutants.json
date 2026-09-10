@@ -1,0 +1,182 @@
+[
+ [
+  "TilingController.swift",
+  "undo depth cap shrunk 5 -> 2",
+  "fileprivate static let undoDepth = 5",
+  "fileprivate static let undoDepth = 2"
+ ],
+ [
+  "PlanExecutor.swift",
+  "swap write-home deleted (screen/state diverge)",
+  "                state.commit(window: displaced, into: displacedOriginal)\n                state.commit(window: id, into: previous)\n                applyLayout(\n                    for: displaced, state: state, records: records,\n                    tracker: tracker, boundsOf: boundsOf, screen: screen)\n                log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
+  "                state.commit(window: displaced, into: displacedOriginal)\n                state.commit(window: id, into: previous)\n                log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")"
+ ],
+ [
+  "TilingController.swift",
+  "expanded windows re-pushed as tile occupants",
+  "space(for: screen)?.state.occupants.filter { expanded[$0.value] == nil } ?? [:]",
+  "space(for: screen)?.state.occupants ?? [:]"
+ ],
+ [
+  "TilingController.swift",
+  "refusal message always plural",
+  "        count == 1\n            ? \"Couldn't move that window: the app refused to resize it.\"\n            : \"Couldn't move \\(count) windows: an app refused to resize.\"",
+  "        false\n            ? \"Couldn't move that window: the app refused to resize it.\"\n            : \"Couldn't move \\(count) windows: an app refused to resize.\""
+ ],
+ [
+  "Layout.swift",
+  "rehousingHome guard drops the overlap requirement",
+  "guard let current = slot(of: evictee), current.overlaps(target) else { return nil }",
+  "guard let current = slot(of: evictee) else { return nil }"
+ ],
+ [
+  "TilingController.swift",
+  "reflow rollback skipped (state keeps grown slot)",
+  "            var rolled = spaceState(for: screen)\n            for move in moves { rolled.commit(window: move.window, into: move.from) }\n            setSpaceState(rolled, for: screen)",
+  "            var rolled = spaceState(for: screen)\n            for move in moves { rolled.commit(window: move.window, into: move.from) }"
+ ],
+ [
+  "DragTracker.swift",
+  "per-screen restoreDividers no-op",
+  "    func restoreDividers(_ saved: GridLayout, for screen: ScreenID) {\n        grids[screen] = saved\n    }",
+  "    func restoreDividers(_ saved: GridLayout, for screen: ScreenID) {\n    }"
+ ],
+ [
+  "Layout.swift",
+  "swap rule accepts overlapping previous tile",
+  "            !previous.overlaps(slot)",
+  "            previous.overlaps(slot)"
+ ],
+ [
+  "Layout.swift",
+  "swap with more than one blocker",
+  "        if blockers.count == 1, let previous = self.slot(of: window),",
+  "        if blockers.count >= 1, let previous = self.slot(of: window),"
+ ],
+ [
+  "Layout.swift",
+  "empty space defaults to quarters",
+  "occupantBySlot.keys.first.map(\\.layout) ?? .sixths",
+  "occupantBySlot.keys.first.map(\\.layout) ?? .quarters"
+ ],
+ [
+  "Layout.swift",
+  "windowsToRestore keeps the requester (self-evicts)",
+  "            return evicting.filter { $0 != requester }",
+  "            return evicting"
+ ],
+ [
+  "Layout.swift",
+  "reflow tie-break prefers LEFT (spec: rightmost wins)",
+  "return left.columns.upperBound < right.columns.upperBound",
+  "return left.columns.upperBound > right.columns.upperBound"
+ ],
+ [
+  "Layout.swift",
+  "reflow ignores the requester exclusion (self-growth)",
+  "        for (slot, window) in occupantBySlot where excluding.contains(window) {",
+  "        for (slot, window) in occupantBySlot where false {"
+ ],
+ [
+  "Layout.swift",
+  "rehousingHome relaxed exact-or-empty to subset",
+  "return Slot.allCases.first { $0.layout == target.layout && $0.cells == free }",
+  "return Slot.allCases.first { $0.layout == target.layout && $0.cells.isSubset(of: free) }"
+ ],
+ [
+  "Layout.swift",
+  "Slot.overlaps uses || instead of &&",
+  "        geometry.columns.overlaps(other.geometry.columns)\n            && geometry.rows.overlaps(other.geometry.rows)",
+  "        geometry.columns.overlaps(other.geometry.columns)\n            || geometry.rows.overlaps(other.geometry.rows)"
+ ],
+ [
+  "Layout.swift",
+  "splitter sibling gap inverted (splitters may cross)",
+  "            clamped = max(clamped, self[keyPath: lower] + 0.01)",
+  "            clamped = max(clamped, self[keyPath: lower] - 0.01)"
+ ],
+ [
+  "Layout.swift",
+  "update() reports no change for real moves (>0.5 threshold)",
+  "        guard abs(clamped - current) > 0.001 else { return false }",
+  "        guard abs(clamped - current) > 0.5 else { return false }"
+ ],
+ [
+  "Layout.swift",
+  "sixths right splitter loses its left sibling",
+  "        self == .sixthsRightSplit ? \\.sixthsLeftSplit : nil",
+  "        self == .sixthsLeftSplit ? \\.sixthsLeftSplit : nil"
+ ],
+ [
+  "TilingController.swift",
+  "death needs 63s+ of dead probes to confirm",
+  "guard timestamp.timeIntervalSince(first) >= deathConfirmation else {",
+  "guard timestamp.timeIntervalSince(first) >= deathConfirmation + 60 else {"
+ ],
+ [
+  "PlanExecutor.swift",
+  "failed displaced swap write is NOT rolled back",
+  "                state.commit(window: displaced, into: displacedOriginal)\n                state.commit(window: id, into: previous)\n                log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")",
+  "                log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")"
+ ],
+ [
+  "PlanExecutor.swift",
+  "rehouse ignores expanded-window exclusion",
+  "            if evicted.count == 1, !isExpanded(evicted[0]),",
+  "            if evicted.count == 1,"
+ ],
+ [
+  "PlanExecutor.swift",
+  "reflowFreed drops the vacated tile",
+  "                if let previous {\n                    freed.formUnion(previous.cells)\n                }",
+  "                if false, let previous {\n                    freed.formUnion(previous.cells)\n                }"
+ ],
+ [
+  "DragTracker.swift",
+  "untile drag distance 100 -> 10000",
+  "private static let untileDragDistance: CGFloat = 100",
+  "private static let untileDragDistance: CGFloat = 10000"
+ ],
+ [
+  "DragTracker.swift",
+  "stale-write window widened to 3600s",
+  "} else if context.now().timeIntervalSince(entry.date) > Self.staleWrite {",
+  "} else if context.now().timeIntervalSince(entry.date) > Self.staleWrite + 3600 {"
+ ],
+ [
+  "Layout.swift",
+  "commit does not release the window's old slots",
+  "        for s in Slot.allCases where occupantBySlot[s] == window {\n            occupantBySlot[s] = nil\n        }\n        occupantBySlot[slot] = window",
+  "        occupantBySlot[slot] = window"
+ ],
+ [
+  "Layout.swift",
+  "GridLayout.update drops the positivity guard",
+  "guard bounds.width > 0, bounds.height > 0, position.isFinite else { return false }",
+  "guard position.isFinite else { return false }"
+ ],
+ [
+  "Layout.swift",
+  "sixths column clamp widened to the screen edge",
+  "static let sixthsColumnClamp: ClosedRange<CGFloat> = 0.1...0.9",
+  "static let sixthsColumnClamp: ClosedRange<CGFloat> = 0.02...0.98"
+ ],
+ [
+  "Layout.swift",
+  "right-column top edges ride the left row splitter",
+  "        let yTop = horizontalLinePosition(\n            g.rows.lowerBound, columns: g.columns, in: g.layout, bounds: bounds)",
+  "        let yTop = horizontalLinePosition(\n            g.rows.lowerBound, columns: 0..<4, in: g.layout, bounds: bounds)"
+ ],
+ [
+  "SettingsShortcutsTab.swift",
+  "bulk labels not refreshed after a recorder commit",
+  "        // The tab is deliberately not rebuilt here: the button that just\n        // committed is the one the reader is looking at. The bulk labels\n        // still have to follow the binding that changed.\n        refreshBulkButtons()\n    }",
+  "    }"
+ ],
+ [
+  "AppDelegate.swift",
+  "status icon gated by the menu diff again",
+  "        return RefreshPlan(redrawIcon: iconChanged, rebuildMenu: menuChanged)",
+  "        return RefreshPlan(redrawIcon: menuChanged && iconChanged, rebuildMenu: menuChanged)"
+ ]
+]

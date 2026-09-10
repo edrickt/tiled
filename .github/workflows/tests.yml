@@ -1,0 +1,40 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    # The unit suite is hermetic: fake gateway, injected clocks, no AX.
+    # It runs headless and is the gate for every change.
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Unit tests
+        run: swift test
+
+      # The live end-to-end repro suite is NOT run here: it needs a logged-in
+      # GUI session, Accessibility permission for the runner, and it moves the
+      # real cursor. Run it locally before a release:
+      #     scripts/run-repro.sh
+      - name: Coverage summary
+        if: always()
+        run: |
+          swift test --enable-code-coverage >/dev/null 2>&1 || true
+          BIN=.build/debug/tiledPackageTests.xctest/Contents/MacOS/tiledPackageTests
+          PROF=.build/debug/codecov/default.profdata
+          if [[ -f "$BIN" && -f "$PROF" ]]; then
+            xcrun llvm-cov report "$BIN" -instr-profile="$PROF" \
+              -ignore-filename-regex='(Tests|\.build)' | tail -30
+          fi

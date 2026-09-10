@@ -164,6 +164,42 @@ certificate) so TCC remembers the grant.
 
 Quitting Tiled leaves your windows where they are.
 
+## Testing
+
+Three layers, from hermetic to physical:
+
+| Layer | Command | Needs |
+|-------|---------|-------|
+| Unit suite (470 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
+| Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
+| Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~10s per mutant |
+
+The unit suite drives the pure engine through `FakeWindowGateway`, with
+clocks, schedulers, and the display set injected — nothing touches the OS,
+so it is deterministic and parallel-safe. The live adapter (`LiveWindowGateway`)
+is only exercised by `scripts/run-repro.sh`, which launches the app plus a
+throwaway `host` app and drives real clicks, drags, and global hotkeys. Run
+that before a release; it cannot run in CI (it moves the real cursor and needs
+a TCC grant).
+
+```
+swift test                              # the gate for every change
+./scripts/run-repro.sh                  # pre-release live check
+./scripts/run-repro.sh tools/repro/driver.swift   # smaller focused driver
+python3 tools/mutation/mutate.py        # verify the suite still catches bugs
+python3 tools/mutation/mutate.py --list # show the injected-bug table
+```
+
+`tools/mutation` answers the question a green suite cannot ask itself:
+would these tests notice if the code stopped working? Each entry in
+`tools/mutation/mutants.json` is a plausible bug injected into `Sources/tiled`;
+a mutant that survives is a test gap. It exits non-zero on any survivor, so
+it can gate a release branch. Sources are restored from memory after each
+run, so uncommitted work is safe.
+
+CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
+
 ## Status / roadmap
 
 - [x] Menu bar app (LSUIElement), Accessibility permission flow
