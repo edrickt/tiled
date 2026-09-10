@@ -28,6 +28,10 @@ final class ShortcutsTab: NSObject {
     var onOpenAccessibilitySettings: (() -> Void)?
 
     private var recorderButtons: [Slot: RecorderButton] = [:]
+    /// The per-section bulk buttons, so a binding change that does not
+    /// rebuild the view (the recorder's clear or a recorded combo) can
+    /// still refresh their labels. See `refreshBulkButtons`.
+    private var bulkButtons: [LayoutKind: NSButton] = [:]
     private var conflictLabel: NSTextField!
     private var permissionRow: NSStackView?
     private var resetButton: NSButton!
@@ -167,9 +171,40 @@ final class ShortcutsTab: NSObject {
         for (slot, button) in recorderButtons {
             button.showBinding(hotkeyStore.binding(for: slot))
         }
+        refreshBulkButtons()
         refreshPermissionState()
         clearConflict()
         surfaceHotkeyFailures()
+    }
+
+    /// Keeps each section's bulk button honest.
+    ///
+    /// The label is what the user decides on; the branch is re-read from
+    /// the store at click time. Every path that changes a binding without
+    /// rebuilding the view must therefore refresh the label too, or the
+    /// button reads "Disable all" while performing an enable: clearing a
+    /// slot with ⌫ adds a disabled slot to the section, and recording
+    /// into the last disabled one removes it.
+    private func refreshBulkButtons() {
+        for (layout, button) in bulkButtons {
+            let presentation = bulkPresentation(for: layout)
+            button.title = presentation.title
+            button.toolTip = presentation.toolTip
+        }
+    }
+
+    /// The bulk button's label and tooltip for one section's current
+    /// state. One source for the two places that render it (the header
+    /// build and the refresh), so a refreshed button can never disagree
+    /// with a freshly built one.
+    private func bulkPresentation(for layout: LayoutKind) -> (title: String, toolTip: String) {
+        let name = layout == .quarters ? "Quarters" : "Sixths"
+        let count = Slot.allCases.filter { $0.layout == layout }.count
+        return sectionHasDisabledSlot(layout)
+            ? ("Enable all \(count)",
+               "Restores parked combos; slots edited while disabled keep their edits")
+            : ("Disable all \(count)",
+               "Disable every \(name) shortcut (keeps defaults for re-enable)")
     }
 
     /// Surfaces cross-app registration failures beside the recorder rows.
@@ -211,6 +246,7 @@ final class ShortcutsTab: NSObject {
     /// so stale buttons never outlive their views.
     func reset() {
         recorderButtons = [:]
+        bulkButtons = [:]
     }
 
     private func shortcutRow(for slot: Slot) -> NSView {
@@ -292,15 +328,14 @@ final class ShortcutsTab: NSObject {
         // unbordered gray text reads disabled, but this is the section's
         // second live control, and it must look like one.
         let bulk = NSButton(
-            title: sectionHasDisabledSlot(layout) ? "Enable all \(count)" : "Disable all \(count)",
+            title: bulkPresentation(for: layout).title,
             target: self, action: #selector(sectionBulkToggled(_:)))
         bulk.bezelStyle = .rounded
         bulk.controlSize = .small
         bulk.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         bulk.identifier = NSUserInterfaceItemIdentifier("bulk-\(layout.rawValue)")
-        bulk.toolTip = sectionHasDisabledSlot(layout)
-            ? "Restores parked combos; slots edited while disabled keep their edits"
-            : "Disable every \(name) shortcut (keeps defaults for re-enable)"
+        bulk.toolTip = bulkPresentation(for: layout).toolTip
+        bulkButtons[layout] = bulk
         row.addArrangedSubview(bulk)
         return row
     }
@@ -534,6 +569,10 @@ final class ShortcutsTab: NSObject {
                 NSLog("Tiled: %@", message)
             }
         }
+        // The tab is deliberately not rebuilt here: the button that just
+        // committed is the one the reader is looking at. The bulk labels
+        // still have to follow the binding that changed.
+        refreshBulkButtons()
     }
 
     /// VoiceOver announcement for recorder state changes (arm, silent

@@ -182,6 +182,24 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         return nil
     }
 
+    private func findRecorder(slot: Slot, in view: NSView) -> RecorderButton? {
+        if let button = view as? RecorderButton, button.slot == slot { return button }
+        for subview in view.subviews {
+            if let hit = findRecorder(slot: slot, in: subview) { return hit }
+        }
+        return nil
+    }
+
+    private func keyDown(
+        keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []
+    ) -> NSEvent {
+        NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: modifiers,
+            timestamp: 0, windowNumber: 0, context: nil,
+            characters: "", charactersIgnoringModifiers: "",
+            isARepeat: false, keyCode: keyCode)!
+    }
+
     func testEnableAllKeepsEditsMadeWhileDisabled() {
         let tab = makeTab()
         var view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
@@ -237,5 +255,66 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         XCTAssertEqual(
             store.binding(for: .topRight), before,
             "unedited slots restore their parked combos verbatim")
+    }
+
+    /// The bulk button states the action it will take, but decides that
+    /// action from the store at click time. A recorder commit changes the
+    /// section without rebuilding the view, so the installed label has to
+    /// follow — otherwise it reads "Disable all 6" and then enables.
+    func testRecorderClearFlipsTheInstalledBulkButtonToEnable() {
+        let tab = makeTab()
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let bulk = findButton(
+            identifier: "bulk-quarters", titledPrefix: "Disable all", in: view)
+        else { return XCTFail("expected a Disable-all bulk button") }
+        guard let recorder = findRecorder(slot: .topLeft, in: view)
+        else { return XCTFail("expected a Top Left recorder") }
+
+        // ⌫ while recording disables the slot: the same edit the bulk
+        // button performs, one slot at a time.
+        recorder.performClick(nil)
+        XCTAssertTrue(recorder.isRecording, "the click arms the recorder")
+        _ = recorder.routeRecordedEvent(keyDown(keyCode: UInt16(kVK_Delete)))
+
+        XCTAssertNil(store.binding(for: .topLeft).keyCode, "the clear landed")
+        XCTAssertTrue(
+            bulk.title.hasPrefix("Enable all"),
+            "the installed bulk button must state the action it will take, got \(bulk.title)")
+        XCTAssertEqual(
+            bulk.toolTip,
+            "Restores parked combos; slots edited while disabled keep their edits")
+
+        // The label is not just cosmetic: the click it is about to
+        // receive really does enable.
+        bulk.performClick(nil)
+        XCTAssertNotNil(
+            store.binding(for: .topLeft).keyCode,
+            "the button labelled Enable all enabled the section")
+    }
+
+    func testRecordingIntoTheLastDisabledSlotFlipsTheBulkButtonToDisable() {
+        // Top Left is the only disabled Quarters slot, so the section
+        // reads "Enable all 6". Recording a combo into it leaves no
+        // disabled slot, and the installed button must flip the other way.
+        store.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: .topLeft)
+        let tab = makeTab()
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let bulk = findButton(
+            identifier: "bulk-quarters", titledPrefix: "Enable all", in: view)
+        else { return XCTFail("expected an Enable-all bulk button") }
+        guard let recorder = findRecorder(slot: .topLeft, in: view)
+        else { return XCTFail("expected a Top Left recorder") }
+
+        recorder.performClick(nil)
+        _ = recorder.routeRecordedEvent(
+            keyDown(keyCode: UInt16(kVK_ANSI_K), modifiers: [.option, .shift, .command]))
+
+        XCTAssertNotNil(store.binding(for: .topLeft).keyCode, "the recorded combo landed")
+        XCTAssertTrue(
+            bulk.title.hasPrefix("Disable all"),
+            "no disabled slot remains, so the installed button must offer Disable, got \(bulk.title)")
+        XCTAssertEqual(
+            bulk.toolTip,
+            "Disable every Quarters shortcut (keeps defaults for re-enable)")
     }
 }
