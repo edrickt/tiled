@@ -218,6 +218,17 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertNotNil(outcome.error)
         XCTAssertEqual(state.slot(of: a), .sixthTopLeft)
         XCTAssertEqual(state.slot(of: b), .sixthsRightTwoThirds, "rolled back to its own tile")
+        // The displaced window's first write succeeded, so it visibly sits
+        // in the requester's vacated tile unless the rollback writes it
+        // home. State alone cannot see that: an unwritten rollback leaves
+        // screen and state disagreeing while this test stays green.
+        let stale = tracker.grid(for: nil).rect(
+            for: .sixthTopLeft, in: CGRect(x: 0, y: 0, width: 800, height: 600))
+        let home = tracker.grid(for: nil).rect(
+            for: .sixthsRightTwoThirds, in: stale)
+        XCTAssertEqual(
+            gateway.frame(of: handles[b]!), home,
+            "the displaced window is written back to its own tile")
     }
 
     func testSwapNoticesAndSnapshotsBothForUndo() {

@@ -266,4 +266,52 @@ final class ExpandToggleTests: XCTestCase {
         controller.handleExpandToggle()
         XCTAssertEqual(gateway.frame(of: handle), bounds(for: original))
     }
+
+    /// A drag-resize coalesces a re-push of the dragged monitor's
+    /// neighbors. An expanded window is not one of them: it covers the
+    /// layout rather than occupying its slot, so the re-push must never
+    /// yank it back down to the tile it keeps in state.
+    func testDragResizeDoesNotRePushAnExpandedWindowIntoItsSlot() {
+        // Deterministic single display: the re-push must land on known
+        // geometry, not the host's real screen.
+        let screen = ScreenInfo(
+            id: ScreenID(rawValue: 0),
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            name: "Display 1")
+        let gateway = FakeWindowGateway()
+        let controller = TilingController(
+            gateway: gateway, pruneInterval: nil, screens: { [screen] })
+
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .sixthTopLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .sixthBottomLeft)
+
+        gateway.focused = a
+        controller.handleExpandToggle()
+        let expandedFrame = gateway.frame(of: a)!
+        XCTAssertEqual(expandedFrame, screen.visibleFrame, "A covers the display")
+
+        // Drag B's top edge (the shared row splitter): the tracker
+        // coalesces a neighbor re-push onto the next main-queue tick.
+        var echo = gateway.frame(of: b)!
+        echo.size.height -= 10
+        gateway.simulateChange(b, to: echo)
+        var dragged = gateway.frame(of: b)!
+        dragged.size.height -= 60
+        gateway.simulateChange(b, to: dragged)
+        controller.mouseLifted()
+
+        let pushed = XCTestExpectation(description: "drag re-push tick")
+        DispatchQueue.main.async {
+            XCTAssertEqual(
+                gateway.frame(of: a), expandedFrame,
+                "the expanded window is not a re-push target: it stays covering the layout")
+            pushed.fulfill()
+        }
+        wait(for: [pushed], timeout: 1.0)
+    }
 }

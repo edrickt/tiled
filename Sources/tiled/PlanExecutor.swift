@@ -549,10 +549,4 @@ final class PlanExecutor {
     private func appName(for id: WindowID, records: [WindowID: WindowRecord]) -> String? {
         records[id].flatMap { gateway.appName(of: $0.handle) }
     }
-
-    private static func refusalMessage(count: Int) -> String {
-        count == 1
-            ? "Couldn't move that window: the app refused to resize it."
-            : "Couldn't move \(count) windows: an app refused to resize."
-    }
 }

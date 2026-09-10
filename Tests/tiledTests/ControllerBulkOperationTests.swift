@@ -193,8 +193,10 @@ final class ControllerBulkOperationTests: XCTestCase {
 
     func testUndoHistoryIsBoundedByDepthNotAmnesia() {
         // Seven destructive switches; the stack keeps the freshest five
-        // and drops the two oldest. Walking back five times consumes
-        // everything; the sixth undo answers instead of reaching further.
+        // and drops the two oldest — exactly five chapters survive, not
+        // fewer. Walking back five times consumes all of them; the sixth
+        // undo answers instead of reaching further, and a stack that kept
+        // a sixth chapter would answer it instead of `.nothingToUndo`.
         var handles: [WindowHandle] = []
         for i in 0..<7 {
             let handle = gateway.addWindow(
@@ -204,8 +206,16 @@ final class ControllerBulkOperationTests: XCTestCase {
             controller.handle(slot: i.isMultiple(of: 2) ? .topLeft : .sixthLeft)
         }
         XCTAssertTrue(controller.canUndoDisplacement)
-        for _ in 0..<5 {
+        // Each of the five oldest deletions is gone, so each undo must
+        // consume a real chapter. Asserting only the end state (stack
+        // empty) also passed with a depth-2 stack, where three of these
+        // five calls were silent no-ops.
+        for index in 1...5 {
+            feedbacks.removeAll()
             controller.undoLastDisplacement()
+            XCTAssertTrue(
+                feedbacks.isEmpty,
+                "undo #\(index) answered .nothingToUndo: the depth-5 history lost a chapter")
         }
         XCTAssertFalse(
             controller.canUndoDisplacement,
@@ -516,6 +526,37 @@ final class ControllerBulkOperationTests: XCTestCase {
             controller.lastTileError,
             "Couldn't move that window: the app refused to resize it.",
             "the re-assertion refusal surfaces, never silence")
+    }
+
+    func testResetDividersReportsRefusalsInPlural() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+        // Move the splitter so reset has real writes to perform.
+        var echo = gateway.frame(of: a)!
+        echo.size.width -= 10
+        gateway.simulateChange(a, to: echo)
+        var dragged = gateway.frame(of: a)!
+        dragged.size.width -= 60
+        gateway.simulateChange(a, to: dragged)
+        XCTAssertNotEqual(controller.grid.columnSplit, 0.5)
+
+        // Two apps refuse at once: the refusal names the count instead of
+        // reusing the singular sentence. Both windows must actually be
+        // written — a window already on its tile rect is skipped as a
+        // no-op — so park them far from any tile first.
+        let farAway = CGRect(x: -9_999, y: -9_999, width: 1, height: 1)
+        gateway.simulateSilentChange(a, to: farAway)
+        gateway.simulateSilentChange(b, to: farAway)
+        gateway.refuseNextWrites(a)
+        gateway.refuseNextWrites(b)
+        controller.resetDividers()
+
+        XCTAssertEqual(
+            controller.lastTileError,
+            "Couldn't move 2 windows: an app refused to resize.")
     }
 
     // MARK: Ghost cleanup & screen changes

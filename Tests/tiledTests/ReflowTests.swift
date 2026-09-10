@@ -236,6 +236,35 @@ final class ReflowTests: XCTestCase {
             nil)
     }
 
+    func testEvicteeThatDoesNotOverlapTheTargetNeverReHouses() {
+        // The guard is defensive: plan execution only offers blockers,
+        // which overlap the target by construction. The pure rule still
+        // refuses to guess for a disjoint evictee, even when the cells
+        // left free happen to form exactly one whole slot (here the
+        // bottom-right quad the evictee itself holds): re-housing it
+        // would move a window that never stood in the requester's way.
+        var state = TilingState()
+        state.commit(window: a, into: .bottomRight)
+        state.commit(window: b, into: .topRight)
+        state.commit(window: c, into: .bottomLeft)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: a, for: .topLeft),
+            nil)
+    }
+
+    func testFreeRegionThatIsNotAWholeSlotNeverReHouses() {
+        // The target's guard passes (the evictee overlaps the target),
+        // but the cells left free — the left sixth's two cells plus one
+        // cell of the middle sixth — are three cells, not one whole slot:
+        // nothing to re-house into.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthTopRight)
+        state.commit(window: b, into: .sixthTopMiddle)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: a, for: .sixthRight),
+            nil)
+    }
+
     func testQuartersEvicteeReHousesAcrossTheBoard() {
         // The left half request over top-left, top-right, bottom-left
         // evicts the bottom-left quad; the cells left free are exactly
@@ -285,6 +314,32 @@ extension ReflowTests {
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthLeft, for: b))
         XCTAssertTrue(controller.state.slot(of: 1) == nil, "the evicted window is untiled")
         XCTAssertEqual(gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 600))
+    }
+
+    func testRefusedReflowWriteRollsTheSurvivorBack() {
+        // A refused grow write must not leave state and screen
+        // disagreeing about who holds the freed cells: the survivor keeps
+        // the slot it held, stays on its old frame, and no undo chapter is
+        // written for a reflow that never happened.
+        let (a, b, _) = tileLeftColumnAndRightThird()
+        let survivorFrame = gateway.frame(of: b)!
+
+        gateway.refuseNextWrites(b)
+        gateway.focused = a
+        controller.handleEvict()
+
+        XCTAssertEqual(
+            controller.state.slot(of: 2), .sixthBottomLeft,
+            "the survivor keeps its slot when its grow write is refused")
+        XCTAssertEqual(
+            gateway.frame(of: b), survivorFrame,
+            "the refused write left the survivor on its old frame")
+        XCTAssertNotNil(
+            controller.lastTileError,
+            "the refusal surfaces in the menu instead of passing silently")
+        XCTAssertFalse(
+            controller.canUndoDisplacement,
+            "a reflow that did not happen writes no undo chapter")
     }
 
     func testEvictHotkeyPrefersRightFlank() {
