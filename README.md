@@ -134,9 +134,12 @@ you pick a free one.
   it ("Switched to Sixths · 3 windows untiled. Undo (⌃⌥⇧⌘Z) is one step,
   from anywhere. Safe to explore: destruction is always reversible.
 - A display change (unplug, rearrange, resolution) re-asserts every visible
-  canvas immediately. Hidden Spaces are marked stale instead: Tiled never
-  writes an off-Space window, because an AX resize can pull it onto the
-  visible Space. Swiping back re-asserts that Space against the new bounds.
+  canvas immediately. Canvas identity follows the physical monitor's
+  CoreGraphics display number, so reordering screens never moves a monitor's
+  arrangement to another display. Hidden Spaces are marked stale instead:
+  Tiled never writes an off-Space window, because an AX resize can pull it
+  onto the visible Space. Swiping back re-asserts that Space against the new
+  bounds.
 - Some apps refuse programmatic resizing. When that happens the window is
   left alone and the menu says which app refused, so state and screen never
   silently disagree.
@@ -187,7 +190,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (483 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (496 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~10s per mutant |

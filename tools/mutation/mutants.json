@@ -190,5 +190,11 @@
   "hidden canvas treated as visible (reflow writes off-Space windows)",
   "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen, let id = space.space else { return true }\n        return activeSpaceID(on: screen) == id\n    }",
   "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        true\n    }"
+ ],
+ [
+  "DisplaySpace.swift",
+  "live screen identity falls back to provider order",
+  "            id: ScreenID(displayID: displayID, fallbackIndex: index),",
+  "            id: ScreenID(rawValue: index),"
  ]
 ]

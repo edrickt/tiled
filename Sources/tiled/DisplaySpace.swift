@@ -1,11 +1,27 @@
 import CoreGraphics
 
-/// Stable identity for one display. The live provider derives these from
-/// screen order; tests inject their own. Per-display tiling state keys on
+/// Stable identity for one display. Live screens use their CoreGraphics
+/// display number, so a canvas follows the physical monitor when the
+/// provider's order changes; tests and display-less environments use the
+/// injected value or the provider index. Per-display tiling state keys on
 /// this alongside the macOS Space, so each monitor runs an independent
 /// layout.
 struct ScreenID: Hashable {
     let rawValue: Int
+
+    /// Identity for injected/headless display sets, where there is no
+    /// CoreGraphics display number to key on.
+    init(rawValue: Int) {
+        self.rawValue = rawValue
+    }
+
+    /// Identity for a live display: its CoreGraphics display number when
+    /// the OS reports one. Screens without a number (headless test
+    /// doubles) fall back to the provider's list index, the only
+    /// identity then available.
+    init(displayID: CGDirectDisplayID, fallbackIndex: Int) {
+        self.rawValue = displayID == 0 ? fallbackIndex : Int(displayID)
+    }
 }
 
 /// Identity of one macOS Mission Control Space: the desktop a user
@@ -35,8 +51,9 @@ struct TilingSpaceKey: Hashable {
 /// One display's geometry for tiling: full frame plus visible frame
 /// (excluding menu bar and Dock). AppKit-free so tests inject synthetic
 /// multi-monitor setups without attached displays. `displayID` lets the
-/// live gateway map a canvas key back to the window server's Space
-/// table; tests leave it 0 when Space identity is not under test.
+/// live gateway map a canvas key back to the window server's Space table
+/// and gives the live `id` a stable physical-display identity; tests
+/// leave it 0 when Space identity is not under test.
 struct ScreenInfo {
     let id: ScreenID
     let frame: CGRect
@@ -67,15 +84,16 @@ typealias ScreenProvider = () -> [ScreenInfo]
 import AppKit
 
 extension ScreenInfo {
-    /// One entry per live display: stable order (mirroring
-    /// `NSScreen.screens`), so a monitor's `ScreenID` survives calls
-    /// within one configuration. `displayID` is the CoreGraphics display
-    /// number the window server's Space table keys on.
+    /// One entry per live display. The `ScreenID` comes from the
+    /// CoreGraphics display number, so a monitor's canvas survives
+    /// `NSScreen.screens` reordering; `index` is only the fallback for
+    /// screens the OS cannot number. `displayID` is also the key the
+    /// window server's Space table uses.
     init(appKit screen: NSScreen, index: Int) {
         let displayID = (screen.deviceDescription[
             NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
         self.init(
-            id: ScreenID(rawValue: index),
+            id: ScreenID(displayID: displayID, fallbackIndex: index),
             frame: screen.frame,
             visibleFrame: screen.visibleFrame,
             name: screen.localizedName,
