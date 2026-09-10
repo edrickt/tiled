@@ -190,26 +190,32 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (496 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (507 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~10s per mutant |
 
 The unit suite drives the pure engine through `FakeWindowGateway`, with
-clocks, schedulers, and the display set injected — nothing touches the OS,
-so it is deterministic and parallel-safe. The live adapter (`LiveWindowGateway`)
-is only exercised by `scripts/run-repro.sh`, which launches the app plus a
-throwaway `host` app and drives real clicks, drags, and global hotkeys. Run
-that before a release; it cannot run in CI (it moves the real cursor and needs
-a TCC grant).
+clocks, schedulers, and the display set injected; only a few live-screen
+identity checks touch AppKit. The live adapter (`LiveWindowGateway`) is
+exercised by `scripts/run-repro.sh`, which launches the app plus a throwaway
+`host` app and drives real clicks, drags, and global hotkeys. The multi-display
+suite checks same-slot coexistence, per-monitor moves, and splitter isolation
+on two attached displays; unplug/replug, rearrange, and Mission Control
+validation stays in the accompanying manual checklist. Run these before a
+release; they cannot run in CI (they move the real cursor and need a TCC grant).
 
 ```
 swift test                              # the gate for every change
 ./scripts/run-repro.sh                  # pre-release live check
+./scripts/run-repro.sh tools/repro/multi-display-suite.swift  # two displays
 ./scripts/run-repro.sh tools/repro/driver.swift   # smaller focused driver
 python3 tools/mutation/mutate.py        # verify the suite still catches bugs
 python3 tools/mutation/mutate.py --list # show the injected-bug table
 ```
+
+See `tools/repro/multi-display-checklist.md` for the physical display-change
+checks the suite cannot drive.
 
 `tools/mutation` answers the question a green suite cannot ask itself:
 would these tests notice if the code stopped working? Each entry in

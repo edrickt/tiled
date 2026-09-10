@@ -98,8 +98,8 @@
  [
   "Layout.swift",
   "update() reports no change for real moves (>0.5 threshold)",
-  "        guard abs(clamped - current) > 0.001 else { return false }",
-  "        guard abs(clamped - current) > 0.5 else { return false }"
+  "        guard abs(self[keyPath: boundary.fraction] - fraction) > 0.001 else { return false }",
+  "        guard abs(self[keyPath: boundary.fraction] - fraction) > 0.5 else { return false }"
  ],
  [
   "Layout.swift",
@@ -196,5 +196,23 @@
   "live screen identity falls back to provider order",
   "            id: ScreenID(displayID: displayID, fallbackIndex: index),",
   "            id: ScreenID(rawValue: index),"
+ ],
+ [
+  "Layout.swift",
+  "left two-thirds resize leaves the hidden divider uncentered",
+  "            return (dragged, .sixthsLeftSplit, dragged / 2)",
+  "            return (dragged, .sixthsLeftSplit, dragged)"
+ ],
+ [
+  "Layout.swift",
+  "right two-thirds resize leaves the hidden divider uncentered",
+  "            return (dragged, .sixthsRightSplit, (dragged + 1) / 2)",
+  "            return (dragged, .sixthsRightSplit, dragged)"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "display UUID matching becomes case-sensitive",
+  "                if string.caseInsensitiveCompare(identifier) == .orderedSame {",
+  "                if string == identifier {"
  ]
 ]
