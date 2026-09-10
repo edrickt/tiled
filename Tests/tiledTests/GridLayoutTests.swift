@@ -807,10 +807,13 @@ final class GridLayoutTests: XCTestCase {
             XCTAssertTrue(
                 grid.update(boundary: boundary, toPosition: center + 60, in: bounds),
                 "\(boundary) ignored a 60pt drag")
-            // Sixths dividers clamp against each other, so read back loosely.
+            // A +60pt nudge whose read-back is allowed ±60pt cannot fail:
+            // the range covers the unmoved position too. None of these
+            // boundaries clamp against a sibling at this offset, so the
+            // shift is exact.
             XCTAssertEqual(
                 grid.position(of: boundary, in: bounds), center + 60,
-                accuracy: 60, "\(boundary) position mismatch")
+                accuracy: 0.001, "\(boundary) position mismatch")
         }
     }
 
@@ -945,5 +948,176 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(
             grid.rect(for: .bottomRight, in: second),
             CGRect(x: -960, y: 0, width: 960, height: 540))
+    }
+
+    // MARK: Cross-model sweep: cells and pixels must agree
+
+    /// Deterministic xorshift64*: the sweep must be reproducible, so a
+    /// failure is a fixed input to re-run and debug, never a one-off.
+    private struct SeededRandom {
+        private var state: UInt64
+
+        init(seed: UInt64) { state = seed }
+
+        mutating func next() -> Double {
+            state ^= state >> 12
+            state ^= state << 25
+            state ^= state >> 27
+            let value = state &* 0x2545_F491_4F6C_DD1D
+            return Double(value >> 11) * (1.0 / 9_007_199_254_740_992.0)
+        }
+
+        mutating func fraction(in range: ClosedRange<CGFloat>) -> CGFloat {
+            range.lowerBound + CGFloat(next()) * (range.upperBound - range.lowerBound)
+        }
+    }
+
+    /// Splitter configurations the sweep runs over: the defaults, the
+    /// clamp extremes of both layouts, the tightest sibling gap the drag
+    /// path can produce, and a deterministic spread. These are the corners
+    /// the fixed-fraction tables elsewhere in this file never reach.
+    private func sweepConfigurations() -> [(name: String, grid: GridLayout)] {
+        var configurations: [(name: String, grid: GridLayout)] = [
+            ("defaults", GridLayout())
+        ]
+
+        var clamped = GridLayout()
+        clamped.columnSplit = GridLayout.columnClamp.lowerBound
+        clamped.leftRowSplit = GridLayout.rowClamp.lowerBound
+        clamped.rightRowSplit = GridLayout.rowClamp.upperBound
+        clamped.sixthsLeftSplit = GridLayout.sixthsColumnClamp.lowerBound
+        clamped.sixthsRightSplit = GridLayout.sixthsColumnClamp.upperBound
+        clamped.sixthsLeftRowSplit = GridLayout.rowClamp.upperBound
+        clamped.sixthsMiddleRowSplit = GridLayout.rowClamp.lowerBound
+        clamped.sixthsRightRowSplit = GridLayout.rowClamp.upperBound
+        configurations.append(("clamp extremes", clamped))
+
+        var tightGap = GridLayout()
+        tightGap.sixthsLeftSplit = 0.4
+        tightGap.sixthsRightSplit = 0.41 // the 0.01 minimum update() enforces
+        configurations.append(("tightest sibling gap", tightGap))
+
+        var random = SeededRandom(seed: 0x7ED_1ED)
+        for index in 0..<8 {
+            var grid = GridLayout()
+            grid.columnSplit = random.fraction(in: GridLayout.columnClamp)
+            grid.leftRowSplit = random.fraction(in: GridLayout.rowClamp)
+            grid.rightRowSplit = random.fraction(in: GridLayout.rowClamp)
+            grid.sixthsLeftSplit = random.fraction(in: 0.1...0.5)
+            grid.sixthsRightSplit = random.fraction(in: (grid.sixthsLeftSplit + 0.01)...0.9)
+            grid.sixthsLeftRowSplit = random.fraction(in: GridLayout.rowClamp)
+            grid.sixthsMiddleRowSplit = random.fraction(in: GridLayout.rowClamp)
+            grid.sixthsRightRowSplit = random.fraction(in: GridLayout.rowClamp)
+            configurations.append(("random #\(index)", grid))
+        }
+        return configurations
+    }
+
+    private let sweepBounds: [(name: String, bounds: CGRect)] = [
+        ("offset-origin", CGRect(x: 100, y: 50, width: 1000, height: 800)),
+        ("negative-origin", CGRect(x: -1920, y: -200, width: 1920, height: 1080)),
+        ("small", CGRect(x: 0, y: 0, width: 320, height: 200)),
+    ]
+
+    private func overlapArea(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        let intersection = a.intersection(b)
+        return intersection.isNull ? 0 : intersection.width * intersection.height
+    }
+
+    func testClampRangesAreTheDocumentedLiterals() {
+        // Pinned as literals, not against the constants being tested. The
+        // clamp-edge assertions elsewhere compare to
+        // `GridLayout.sixthsColumnClamp` itself, so widening the range
+        // satisfies every one of them while letting a divider sit on the
+        // screen edge (a zero-width third). The drag tests pin the row
+        // literals for the same reason.
+        XCTAssertEqual(GridLayout.columnClamp, 0.15...0.85)
+        XCTAssertEqual(GridLayout.rowClamp, 0.2...0.8)
+        XCTAssertEqual(GridLayout.sixthsColumnClamp, 0.1...0.9)
+    }
+
+    func testSweepConfigurationsAreDistinct() {
+        // A guard on the guard: a degenerate generator (one fraction for
+        // every configuration) would let the sweep below pass vacuously.
+        let grids = sweepConfigurations().map(\.grid)
+        XCTAssertGreaterThan(
+            Set(grids.map(\.columnSplit)).count, 4,
+            "the sweep must vary the quarters column splitter")
+        XCTAssertGreaterThan(
+            Set(grids.map(\.sixthsRightSplit)).count, 4,
+            "the sweep must vary the sixths splitter")
+    }
+
+    func testRectsAndCellsAgreeOnOverlapWithinEachLayout() {
+        // The model's central claim: a slot's cells and its rect are two
+        // views of one span, so two slots of the same layout overlap in
+        // cell terms exactly when their rects share positive area. This is
+        // the only assertion that ties the combinatorial model (which
+        // plans, evicts, and reflows) to the pixel model (which is what
+        // the user sees), and it is what catches a wrong refinement index
+        // or divider assignment at non-default splitter positions.
+        //
+        // Same layout only, deliberately. The two layouts keep independent
+        // dividers, so a quarters edge at 0.2 and a sixths edge at 0.9 can
+        // put two cell-disjoint slots on top of each other; the shared
+        // refinement is topological, not metric. Cross-layout agreement is
+        // not a property the design has, so asserting it would be wrong.
+        for (configName, grid) in sweepConfigurations() {
+            for (boundsName, bounds) in sweepBounds {
+                for layout in [LayoutKind.quarters, LayoutKind.sixths] {
+                    let slots = Slot.allCases.filter { $0.layout == layout }
+                    let rects = slots.map { grid.rect(for: $0, in: bounds) }
+                    for i in slots.indices {
+                        for j in slots.indices where j > i {
+                            let cellOverlap = slots[i].overlaps(slots[j])
+                            let pixelOverlap = overlapArea(rects[i], rects[j]) > 1e-9
+                            XCTAssertEqual(
+                                cellOverlap, pixelOverlap,
+                                "\(configName)/\(boundsName): " +
+                                "\(slots[i].rawValue) vs \(slots[j].rawValue)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testEachLayoutsPartitionTilesItsBoundsExactly() {
+        // Containment plus a matching area sum, together with the pairwise
+        // non-overlap above, is an exact tiling: no leak past the screen,
+        // no double-booked pixel, no gap between neighbors. Every rect
+        // (including the middle sixth and the middle third) is covered.
+        let partitions: [(name: String, slots: [Slot])] = [
+            ("quarters quads", [.topLeft, .topRight, .bottomLeft, .bottomRight]),
+            ("quarters halves", [.leftHalf, .rightHalf]),
+            ("sixths corners", [
+                .sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+                .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight,
+            ]),
+            ("sixths thirds", [.sixthLeft, .sixthMiddle, .sixthRight]),
+        ]
+        for (configName, grid) in sweepConfigurations() {
+            for (boundsName, bounds) in sweepBounds {
+                for partition in partitions {
+                    var area: CGFloat = 0
+                    for slot in partition.slots {
+                        let rect = grid.rect(for: slot, in: bounds)
+                        XCTAssertTrue(
+                            bounds.insetBy(dx: -1e-6, dy: -1e-6).contains(rect),
+                            "\(configName)/\(boundsName): \(slot.rawValue) escapes its bounds: \(rect)")
+                        XCTAssertGreaterThan(
+                            rect.width, 0,
+                            "\(configName)/\(boundsName): \(slot.rawValue) has no width")
+                        XCTAssertGreaterThan(
+                            rect.height, 0,
+                            "\(configName)/\(boundsName): \(slot.rawValue) has no height")
+                        area += rect.width * rect.height
+                    }
+                    XCTAssertEqual(
+                        area, bounds.width * bounds.height, accuracy: 1e-6,
+                        "\(configName)/\(boundsName): \(partition.name) do not tile the screen")
+                }
+            }
+        }
     }
 }
