@@ -21,6 +21,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// redraws when windows come and go within one layout, not just when
     /// the layout itself flips 2×2 ↔ 3×2.
     private var lastIconSnapshot: StatusIcon.Snapshot?
+    /// App activation moves focus, and focus picks the display the status
+    /// icon depicts and the window the menu rows describe. The
+    /// controller's change callback only runs for tiling actions, so
+    /// without this the menu bar can keep describing the app the user
+    /// just left until the next tile.
+    private var activationObserver: NSObjectProtocol?
+
+    deinit {
+        if let activationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
@@ -28,6 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onFeedback = { [weak self] feedback in
             DispatchQueue.main.async { self?.signalFeedback(feedback) }
         }
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in self?.refreshMenu() }
         if !settings.hideMenuBarIcon {
             setupStatusItem()
         }
@@ -312,13 +328,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + "\(snapshot.filled.count) of \(total) slots occupied"
     }
 
-    /// Redraws the status icon when its snapshot moved: a layout switch
-    /// or a window tiled/untiled within one layout. Called from
-    /// refreshMenu, which fires on every state change.
-    private func updateStatusIcon() {
+    /// Renders a snapshot on the status button. Whether to redraw is the
+    /// refresh plan's decision; this only draws. Called from `refreshMenu`
+    /// (every state change) and from `menuNeedsUpdate` as the menu opens.
+    private func drawStatusIcon(_ snapshot: StatusIcon.Snapshot) {
         guard let button = statusItem?.button else { return }
-        let snapshot = iconSnapshot()
-        guard lastIconSnapshot != snapshot || button.image == nil else { return }
         button.image = Self.statusIcon(snapshot)
         lastIconSnapshot = snapshot
     }
@@ -335,21 +349,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// What one refresh pass must do.
+    ///
+    /// Extracted pure because the two halves are independent, and the
+    /// hazard is in the ordering: the status icon reads focus-scoped state
+    /// (the focused display's occupancy) that the menu snapshot
+    /// deliberately aggregates across every display, so a focus move can
+    /// change the glyph while leaving the menu snapshot equal. The glyph
+    /// must therefore drive its own redraw, never ride the menu diff. An
+    /// icon change alone never justifies rebuilding the menu, and an open
+    /// menu defers both: rebuilding mid-open flickers or dismisses it, and
+    /// the close handler runs a fresh pass.
+    struct RefreshPlan: Equatable {
+        let redrawIcon: Bool
+        let rebuildMenu: Bool
+    }
+
+    static func refreshPlan(
+        menuChanged: Bool, iconChanged: Bool, menuOpen: Bool
+    ) -> RefreshPlan {
+        guard !menuOpen else { return RefreshPlan(redrawIcon: false, rebuildMenu: false) }
+        return RefreshPlan(redrawIcon: iconChanged, rebuildMenu: menuChanged)
+    }
+
     private func refreshMenu(force: Bool = false) {
         // Destructive outcomes stay in the menu (notice + undo row), not
         // on screen: tiling feedback never pops a panel over the workspace.
         // Rebuilding the menu while it's open flickers or dismisses it;
-        // the menuDidClose rebuild picks up whatever changed meanwhile.
-        guard !menuOpen else { return }
+        // the close handler picks up whatever changed meanwhile.
+        //
         // Diff before building: drag-resize fires change callbacks every
         // runloop tick, and the permission poll fires once a second, but
         // the menu only cares about state, warnings, and window rows.
         // Building an NSMenu with submenus on every tick is pure waste.
         let snapshot = menuSnapshot()
-        if !force, snapshot == lastMenuSnapshot, statusItem?.menu != nil { return }
+        let icon = iconSnapshot()
+        let plan = Self.refreshPlan(
+            menuChanged: force || snapshot != lastMenuSnapshot || statusItem?.menu == nil,
+            iconChanged: lastIconSnapshot != icon || statusItem?.button?.image == nil,
+            menuOpen: menuOpen)
+        if plan.redrawIcon { drawStatusIcon(icon) }
+        guard plan.rebuildMenu else { return }
         lastMenuSnapshot = snapshot
         statusItem?.menu = menu(from: snapshot)
-        updateStatusIcon()
     }
 
     private func menu() -> NSMenu {
@@ -362,10 +404,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
+        populate(menu, from: snapshot)
+        return menu
+    }
+
+    /// Fills an existing menu from a snapshot. Shared by the build path
+    /// (a fresh NSMenu) and the open path (an in-place update), so the two
+    /// can never render different rows.
+    private func populate(_ menu: NSMenu, from snapshot: MenuModel.Snapshot) {
+        menu.removeAllItems()
         for model in MenuModel.items(snapshot: snapshot, binding: { hotkeyStore.binding(for: $0) }) {
             menu.addItem(makeItem(model))
         }
-        return menu
     }
 
     /// One immutable pass over the app state the menu reads.
@@ -819,6 +869,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         menuOpen = true
+    }
+
+    /// Refreshes the rows in place as the menu opens.
+    ///
+    /// Focus moves with no tiling action at all (click another window),
+    /// and the rows' enabled state, undo title, and status line all read
+    /// the focused window; the icon reads the focused display. Nothing
+    /// else fires on that transition, so the open is the last point where
+    /// the menu can still be made to describe the window the user is
+    /// looking at. Replacing `statusItem.menu` here would be too late —
+    /// AppKit has already retained the menu it is about to show — so the
+    /// same menu is emptied and refilled, which is what this delegate call
+    /// is for (menuWillOpen explicitly must not restructure).
+    ///
+    /// Deliberately not gated on `menuOpen`: AppKit does not document
+    /// whether this runs before or after menuWillOpen, and the update must
+    /// not depend on that order.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statusItem?.menu else { return }
+        let snapshot = menuSnapshot()
+        populate(menu, from: snapshot)
+        lastMenuSnapshot = snapshot
+        let icon = iconSnapshot()
+        if lastIconSnapshot != icon { drawStatusIcon(icon) }
     }
 
     func menuDidClose(_ menu: NSMenu) {

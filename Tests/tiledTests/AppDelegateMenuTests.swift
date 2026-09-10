@@ -122,6 +122,39 @@ final class AppDelegateMenuTests: XCTestCase {
         ])
     }
 
+    // MARK: Refresh ordering (refreshPlan)
+
+    func testIconChangeRedrawsWithoutRebuildingTheMenu() {
+        // The status icon reads the focused display's occupancy, which the
+        // menu snapshot deliberately aggregates across displays: a focus
+        // move can change the glyph while the menu snapshot is identical.
+        // The glyph must not ride the menu diff, or it freezes on the
+        // display the user left until the next tiling action.
+        let plan = AppDelegate.refreshPlan(
+            menuChanged: false, iconChanged: true, menuOpen: false)
+
+        XCTAssertTrue(plan.redrawIcon, "an icon-only change still redraws the glyph")
+        XCTAssertFalse(plan.rebuildMenu, "an icon-only change never rebuilds the menu")
+    }
+
+    func testOpenMenuDefersBothHalvesOfTheRefresh() {
+        // Rebuilding while the menu is open flickers or dismisses it; the
+        // close handler runs a fresh pass.
+        let plan = AppDelegate.refreshPlan(
+            menuChanged: true, iconChanged: true, menuOpen: true)
+
+        XCTAssertFalse(plan.redrawIcon)
+        XCTAssertFalse(plan.rebuildMenu)
+    }
+
+    func testMenuChangeRebuildsAndRedrawsTheIcon() {
+        let plan = AppDelegate.refreshPlan(
+            menuChanged: true, iconChanged: true, menuOpen: false)
+
+        XCTAssertTrue(plan.redrawIcon)
+        XCTAssertTrue(plan.rebuildMenu)
+    }
+
     // MARK: Action wiring (menuWiring)
 
     func testEveryActionWiresItsSelectorAndRepresentedObject() {
