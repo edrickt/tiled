@@ -2,8 +2,8 @@
 
 A native macOS window manager. Tile windows into quarters (2×2 plus halves)
 or sixths (3×2 grid plus thirds and two-thirds), with global hotkeys or from
-the menu bar. Dragging a tiled window's edge resizes it live; neighbors
-sharing the edge follow.
+the menu bar. Dragging a tiled window's edge resizes it live; the
+neighbors sharing the edge resize when the mouse button is released.
 
 ## Hotkeys
 

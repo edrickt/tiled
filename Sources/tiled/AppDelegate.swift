@@ -3,7 +3,8 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let gateway = LiveWindowGateway()
-    private lazy var controller = TilingController(gateway: gateway)
+    private lazy var controller = TilingController(
+        gateway: gateway, observeMouseUp: TilingController.observeLeftMouseUp)
     private let hotkeyStore = HotkeyStore()
     private var hotkeys: HotkeyService?
     private var permissionTimer: Timer?

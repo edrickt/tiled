@@ -174,6 +174,7 @@ final class DragTrackerTests: XCTestCase {
         var moved = CGRect(x: 0, y: 0, width: 840, height: 500)
         moved.size.height -= 80
         tracker.handleChange(id: 2, frame: moved)
+        tracker.mouseLifted()
 
         let expectation = XCTestExpectation(description: "coalesced push")
         DispatchQueue.main.async {
@@ -191,6 +192,141 @@ final class DragTrackerTests: XCTestCase {
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 1.0)
+    }
+
+    // MARK: Deferred neighbor re-push
+
+    func testResizeDefersNeighborPushUntilMouseUp() {
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        tile(2, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
+
+        var first = CGRect(x: 0, y: 0, width: 840, height: 500)
+        first.size.height -= 10
+        tracker.handleChange(id: 2, frame: first)
+        var moved = CGRect(x: 0, y: 0, width: 840, height: 500)
+        moved.size.height -= 80
+        tracker.handleChange(id: 2, frame: moved)
+
+        // The splitter commits live, but nothing pushes while the button
+        // is down: the tiles wait for the click to lift.
+        XCTAssertEqual(tracker.grid.leftRowSplit, 0.8, accuracy: 0.001)
+        let duringDrag = XCTestExpectation(description: "no push mid-drag")
+        DispatchQueue.main.async {
+            XCTAssertTrue(
+                self.pushed.isEmpty,
+                "no tile resizes while the mouse button is down")
+            duringDrag.fulfill()
+        }
+        wait(for: [duringDrag], timeout: 1.0)
+
+        // Mouse-up: the whole grid commits at once.
+        tracker.mouseLifted()
+        let lifted = XCTestExpectation(description: "coalesced push on mouse-up")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.pushed.count, 1)
+            XCTAssertNil(self.pushed.first?.rects[2], "dragged window never re-pushed")
+            // Window 1's live frame (0,500,840,500) is its own bounds
+            // (identity boundsOf). TopLeft under the dragged grid:
+            // mid line at 500 + 0.8·500 = 900, left column 420 wide,
+            // top strip 500·(1−0.8) = 100 tall.
+            XCTAssertEqual(
+                self.pushed.first?.rects[1], CGRect(x: 0, y: 900, width: 420, height: 100),
+                "neighbor gets the exact new rect")
+            lifted.fulfill()
+        }
+        wait(for: [lifted], timeout: 1.0)
+    }
+
+    func testMouseUpWithoutPendingResizeIsNoOp() {
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        tracker.mouseLifted()
+
+        let expectation = XCTestExpectation(description: "no push")
+        DispatchQueue.main.async {
+            XCTAssertTrue(self.pushed.isEmpty, "a click commits nothing on its own")
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+
+    func testTrailingTickAfterMouseUpWaitsForTheNextOne() {
+        // AX can stream the drag's final frame after the mouse-up fired:
+        // that tick re-arms the pending apply (splitter already moved),
+        // and the next mouse-up anywhere commits it. Documented residual:
+        // one stale neighbor layout between the trailing tick and the
+        // next click. Needs a fixed boundsOf: with the frame-as-bounds
+        // rig every drag position clamps to the same splitter, and a
+        // trailing tick that produces no grid change correctly re-arms
+        // nothing.
+        let bounds = CGRect(x: 0, y: 0, width: 1680, height: 1019)
+        let tracker = DragTracker(
+            context: DragTracker.Context(
+                slotOf: { [weak self] in self?.slots[$0] },
+                frameOf: { [weak self] in
+                    guard let handle = self?.handles[$0] else { return nil }
+                    return self?.gateway.frame(of: handle)
+                },
+                boundsOf: { _ in bounds },
+                occupants: { [weak self] in self?.occupants ?? [:] },
+                now: { [weak self] in self?.now ?? Date() }),
+            apply: { [weak self] rects, excluding in
+                self?.pushed.append((rects, excluding))
+                return 0
+            },
+            onUntile: { [weak self] in self?.untiled.append($0) },
+            scheduleDragEnd: { [weak self] fire in
+                self?.dragEndFires.append(fire)
+                return {}
+            })
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 519, width: 840, height: 500), tracker: tracker)
+        tile(2, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500), tracker: tracker)
+
+        // Echo tick (swallowed), then a real edge drag: the top edge of
+        // the bottom-left window drops to 450 in fixed screen bounds.
+        var echo = CGRect(x: 0, y: 0, width: 840, height: 500)
+        echo.size.height -= 10
+        tracker.handleChange(id: 2, frame: echo)
+        var dragged = CGRect(x: 0, y: 0, width: 840, height: 500)
+        dragged.size.height -= 50
+        tracker.handleChange(id: 2, frame: dragged)
+        let firstSplit = tracker.grid.leftRowSplit
+        XCTAssertGreaterThan(firstSplit, 0.4)
+        tracker.mouseLifted()
+
+        let first = XCTestExpectation(description: "mouse-up push")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.pushed.count, 1)
+            first.fulfill()
+        }
+        wait(for: [first], timeout: 1.0)
+
+        // The drag's final frame trails the mouse-up: a new splitter
+        // fraction, no push of its own.
+        var trailing = CGRect(x: 0, y: 0, width: 840, height: 500)
+        trailing.size.height -= 80
+        tracker.handleChange(id: 2, frame: trailing)
+        XCTAssertNotEqual(
+            tracker.grid.leftRowSplit, firstSplit,
+            "the trailing tick moved the splitter further")
+        let afterTrailing = XCTestExpectation(description: "no push from the trailing tick alone")
+        DispatchQueue.main.async {
+            XCTAssertEqual(
+                self.pushed.count, 1,
+                "the trailing tick waits for the next mouse-up")
+            afterTrailing.fulfill()
+        }
+        wait(for: [afterTrailing], timeout: 1.0)
+
+        tracker.mouseLifted()
+        let second = XCTestExpectation(description: "next mouse-up commits the trailing tick")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.pushed.count, 2, "the trailing tick's grid committed")
+            XCTAssertNotEqual(
+                self.pushed[0].rects[1], self.pushed[1].rects[1],
+                "the second push carries the trailing grid, not the first")
+            second.fulfill()
+        }
+        wait(for: [second], timeout: 1.0)
     }
 
     // MARK: Drag-out untile
@@ -270,6 +406,7 @@ final class DragTrackerTests: XCTestCase {
         dragTicks(1, size: size, to: [(0, 500), (30, 530)])
         // The user switches to an edge drag: size changes mid-drag.
         tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 400, width: 840, height: 600))
+        tracker.mouseLifted()
         dragEndFires.last?()
 
         XCTAssertTrue(untiled.isEmpty, "the drag was abandoned for a resize")
@@ -378,6 +515,7 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertEqual(
             tracker.grid.leftRowSplit, 0.8, accuracy: 0.001,
             "stale entry cleared; 330/330 clamps to the row-split maximum")
+        tracker.mouseLifted()
         let expectation = XCTestExpectation(description: "coalesced apply after stale")
         DispatchQueue.main.async {
             XCTAssertEqual(self.pushed.count, 1)

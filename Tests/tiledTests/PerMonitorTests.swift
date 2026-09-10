@@ -221,6 +221,7 @@ final class PerMonitorTests: XCTestCase {
         var dragged = gateway.frame(of: leftNeighbor)!
         dragged.size.height -= 60
         gateway.simulateChange(leftNeighbor, to: dragged)
+        controller.mouseLifted()
 
         let expectation = XCTestExpectation(description: "neighbor re-push")
         DispatchQueue.main.async {

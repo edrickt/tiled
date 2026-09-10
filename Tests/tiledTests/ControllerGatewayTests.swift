@@ -152,6 +152,10 @@ final class ControllerGatewayTests: XCTestCase {
         gateway.focused = bottom
         gateway.simulateChange(bottom, to: moved)
 
+        // The splitter commits live; the neighbor re-push waits for the
+        // mouse-up the real loop gets from the global event monitor.
+        controller.mouseLifted()
+
         let expectation = XCTestExpectation(description: "coalesced apply")
         DispatchQueue.main.async {
             // The dragged window keeps its frame (source of truth); the
@@ -426,6 +430,7 @@ final class ControllerGatewayTests: XCTestCase {
         var dragged = bFrame
         dragged.size.height += 100 // top edge (maxY) rises; bottom stays
         gateway.simulateChange(b, to: dragged)
+        controller.mouseLifted()
 
         // The re-push is coalesced onto the next runloop tick.
         let pushed = XCTestExpectation(description: "coalesced push")

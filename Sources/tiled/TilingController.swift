@@ -181,7 +181,8 @@ final class TilingController {
         scheduleVerify: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleVerifyOnMain,
         screens: ScreenProvider? = nil,
         deathConfirmation: TimeInterval = 3.0,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        observeMouseUp: (@escaping () -> Void) -> Void = { _ in }
     ) {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
@@ -222,6 +223,11 @@ final class TilingController {
             self.applyAll()
             self.onChange?()
         }
+        // Mouse-up commits the deferred neighbor re-pushes of an edge
+        // drag (see DragTracker.mouseLifted). AppDelegate wires the
+        // production monitor; the no-op default keeps tests from
+        // installing real event monitors.
+        observeMouseUp { [weak self] in self?.mouseLifted() }
     }
 
     deinit {
@@ -961,6 +967,27 @@ final class TilingController {
     }
 
     // MARK: Live resize (observe & compensate)
+
+    /// The user released the mouse button: commit every splitter move an
+    /// in-progress edge drag made, re-pushing the neighbor tiles the new
+    /// grid implies. Wired from the production mouse-up monitor; tests
+    /// call it directly.
+    func mouseLifted() {
+        tracker.mouseLifted()
+    }
+
+    /// Production mouse-up registrar: global monitors deliver clicks that
+    /// go to other apps — where window-edge drags live — and the local
+    /// monitor covers clicks this process receives. Both forward the
+    /// event untouched; the handler itself filters (no pending resize is
+    /// a no-op). Needs the same accessibility permission as AX.
+    static func observeLeftMouseUp(_ fire: @escaping () -> Void) {
+        NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { _ in fire() }
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { event in
+            fire()
+            return event
+        }
+    }
 
     /// Registers the gateway's change handler and feeds callbacks to the
     /// tracker. Element identity and dedupe live behind the seam; echo,

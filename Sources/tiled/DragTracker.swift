@@ -17,6 +17,15 @@ import Foundation
 /// native drag. Writes are bookkept as expected frames so our own echoes
 /// don't recurse.
 ///
+/// Edge drags resize only the dragged window while the button is down:
+/// splitter fractions commit live, but the neighbor re-pushes wait for
+/// mouse-up (`mouseLifted`, wired by the controller's global event
+/// monitor). Resizing the tiles under a held button fights the drag and
+/// rewrites frames the user is still steering; on release the whole
+/// grid commits at once. A resize tick that trails the mouse-up (AX
+/// streams the drag's final frame) re-arms the pending apply, and the
+/// next mouse-up anywhere commits it.
+///
 /// Title-bar drags (origin-only changes) are tracked separately from
 /// edge drags: moved ticks stream in, and when they go silent the drag
 /// ended: past the untile distance the window untiles where dropped
@@ -85,6 +94,10 @@ final class DragTracker {
     private var applyScheduled = false
     private var pendingRects: [WindowID: CGRect] = [:]
     private var pendingExclusion: WindowID?
+    /// Edge drags with splitter moves awaiting mouse-up, keyed by screen.
+    /// The splitter fractions already committed; only the neighbor
+    /// re-push they imply waits for the click to lift (see `mouseLifted`).
+    private var pendingResizeApplies: [ScreenID?: WindowID] = [:]
 
     private static let echoTolerance: CGFloat = 32
     /// Writes within this distance of the window's current frame are
@@ -467,6 +480,24 @@ final class DragTracker {
             }
         }
         if changed {
+            // The splitter moved now, but the neighbors it will displace
+            // wait for mouse-up: pushing tiles while the button is down
+            // fights the drag the user is still steering.
+            pendingResizeApplies[context.screenOf(id)] = id
+        }
+    }
+
+    // MARK: Mouse-up commit
+
+    /// The user released the mouse button: commit every deferred neighbor
+    /// re-push at once, so the tiles around a resized window resize on
+    /// the click lifting, never under it. A trailing resize tick re-arms
+    /// its screen's entry; the next mouse-up anywhere commits it.
+    func mouseLifted() {
+        guard !pendingResizeApplies.isEmpty else { return }
+        let pending = pendingResizeApplies
+        pendingResizeApplies = [:]
+        for id in pending.values {
             scheduleApply(excluding: id)
         }
     }
