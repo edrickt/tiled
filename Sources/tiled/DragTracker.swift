@@ -42,14 +42,15 @@ final class DragTracker {
         /// fast-forward past the stale-write window without waiting on a
         /// real 3-second timeout.
         var now: () -> Date = Date.init
-        /// Screen owning a tiled window (its tiling space). Nil = legacy
-        /// single-space mode: the shared `grid` serves everyone, and all
-        /// per-screen paths fall back to it. The controller wires this to
-        /// its occupancy lookup; tests that never set it keep one grid.
-        var screenOf: (WindowID) -> ScreenID? = { _ in nil }
-        /// Occupants of one screen, for neighbor re-push. Nil falls back
+        /// Canvas owning a tiled window (its display plus Mission
+        /// Control Space). Nil = legacy single-canvas mode: the shared
+        /// `grid` serves everyone, and all per-canvas paths fall back to
+        /// it. The controller wires this to its occupancy lookup; tests
+        /// that never set it keep one grid.
+        var spaceOf: (WindowID) -> TilingSpaceKey? = { _ in nil }
+        /// Occupants of one canvas, for neighbor re-push. Nil falls back
         /// to `occupants()`.
-        var occupantsOf: ((ScreenID) -> [Slot: WindowID])? = nil
+        var occupantsOf: ((TilingSpaceKey) -> [Slot: WindowID])? = nil
         /// The window's live frame, as the app reports it; unlike
         /// `frameOf`, which may prefer our last pushed target (intent)
         /// for edge diffing. No-op write detection must consult the live
@@ -59,16 +60,16 @@ final class DragTracker {
     }
 
     private(set) var grid = GridLayout()
-    /// Per-screen splitter sets. Only populated when `screenOf` resolves:
-    /// each monitor drags its own dividers, so a resize on one display
-    /// never moves tiles on another.
-    private var grids: [ScreenID: GridLayout] = [:]
+    /// Per-canvas splitter sets. Only populated when `spaceOf` resolves:
+    /// each monitor's each Space drags its own dividers, so a resize on
+    /// one canvas never moves tiles on another.
+    private var grids: [TilingSpaceKey: GridLayout] = [:]
 
-    /// Splitter set for `screen` (defaults when untouched). Nil selects
+    /// Splitter set for `space` (defaults when untouched). Nil selects
     /// the legacy shared grid.
-    func grid(for screen: ScreenID?) -> GridLayout {
-        guard let screen else { return grid }
-        return grids[screen] ?? GridLayout()
+    func grid(for space: TilingSpaceKey?) -> GridLayout {
+        guard let space else { return grid }
+        return grids[space] ?? GridLayout()
     }
     private let context: Context
     /// Pushes computed rects (excluding the dragged window); reports refusals.
@@ -94,10 +95,10 @@ final class DragTracker {
     private var applyScheduled = false
     private var pendingRects: [WindowID: CGRect] = [:]
     private var pendingExclusion: WindowID?
-    /// Edge drags with splitter moves awaiting mouse-up, keyed by screen.
+    /// Edge drags with splitter moves awaiting mouse-up, keyed by canvas.
     /// The splitter fractions already committed; only the neighbor
     /// re-push they imply waits for the click to lift (see `mouseLifted`).
-    private var pendingResizeApplies: [ScreenID?: WindowID] = [:]
+    private var pendingResizeApplies: [TilingSpaceKey?: WindowID] = [:]
 
     private static let echoTolerance: CGFloat = 32
     /// Writes within this distance of the window's current frame are
@@ -249,12 +250,12 @@ final class DragTracker {
         clearDrag(id)
     }
 
-    /// Writes `updated` as `screen`'s splitter set (nil selects the
+    /// Writes `updated` as `space`'s splitter set (nil selects the
     /// legacy shared grid). The diff against the previous frame's grid
-    /// decides the drag, mirroring the single-space read path.
-    func setGrid(_ updated: GridLayout, for screen: ScreenID?) {
-        if let screen {
-            grids[screen] = updated
+    /// decides the drag, mirroring the single-canvas read path.
+    func setGrid(_ updated: GridLayout, for space: TilingSpaceKey?) {
+        if let space {
+            grids[space] = updated
         } else {
             grid = updated
         }
@@ -273,12 +274,12 @@ final class DragTracker {
         return previous
     }
 
-    /// Snaps one screen's splitters back to defaults. Returns that
-    /// screen's displaced fractions as the caller's one-step restore.
+    /// Snaps one canvas's splitters back to defaults. Returns that
+    /// canvas's displaced fractions as the caller's one-step restore.
     @discardableResult
-    func resetDividers(for screen: ScreenID) -> GridLayout {
-        let previous = grid(for: screen)
-        grids[screen] = GridLayout()
+    func resetDividers(for space: TilingSpaceKey) -> GridLayout {
+        let previous = grid(for: space)
+        grids[space] = GridLayout()
         return previous
     }
 
@@ -288,16 +289,16 @@ final class DragTracker {
         grid = saved
     }
 
-    /// Restores one screen's parked splitter fractions.
-    func restoreDividers(_ saved: GridLayout, for screen: ScreenID) {
-        grids[screen] = saved
+    /// Restores one canvas's parked splitter fractions.
+    func restoreDividers(_ saved: GridLayout, for space: TilingSpaceKey) {
+        grids[space] = saved
     }
 
-    /// Rect for `id`'s slot under its screen's grid. Nil when the window
+    /// Rect for `id`'s slot under its canvas's grid. Nil when the window
     /// has no slot (untiled) or no readable frame.
     func rect(for id: WindowID) -> CGRect? {
         guard let slot = context.slotOf(id), let frame = context.frameOf(id) else { return nil }
-        return grid(for: context.screenOf(id)).rect(for: slot, in: context.boundsOf(frame))
+        return grid(for: context.spaceOf(id)).rect(for: slot, in: context.boundsOf(frame))
     }
 
     // MARK: Change entry point
@@ -428,7 +429,7 @@ final class DragTracker {
             drag.lastFrame.origin.y - drag.startFrame.origin.y)
         log("dragend win\(id) ticks=\(drag.ticks) distance=\(distance)")
         guard distance > Self.untileDragDistance, drag.ticks >= 2 else {
-            let rect = grid(for: context.screenOf(id)).rect(for: slot, in: context.boundsOf(drag.lastFrame))
+            let rect = grid(for: context.spaceOf(id)).rect(for: slot, in: context.boundsOf(drag.lastFrame))
             log("dragend win\(id) snapback -> \(rect)")
             schedule(rects: [id: rect], excluding: nil)
             return
@@ -471,19 +472,19 @@ final class DragTracker {
             // The dragged window's own edge is the source of truth; skip it
             // below so we never fight an in-progress native drag.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
-            let screen = context.screenOf(id)
-            var screenGrid = grid(for: screen)
-            if screenGrid.update(boundary: boundary, toPosition: position, in: bounds) {
-                setGrid(screenGrid, for: screen)
+            let space = context.spaceOf(id)
+            var spaceGrid = grid(for: space)
+            if spaceGrid.update(boundary: boundary, toPosition: position, in: bounds) {
+                setGrid(spaceGrid, for: space)
                 changed = true
-                log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(screenGrid)")
+                log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(spaceGrid)")
             }
         }
         if changed {
             // The splitter moved now, but the neighbors it will displace
             // wait for mouse-up: pushing tiles while the button is down
             // fights the drag the user is still steering.
-            pendingResizeApplies[context.screenOf(id)] = id
+            pendingResizeApplies[context.spaceOf(id)] = id
         }
     }
 
@@ -492,7 +493,7 @@ final class DragTracker {
     /// The user released the mouse button: commit every deferred neighbor
     /// re-push at once, so the tiles around a resized window resize on
     /// the click lifting, never under it. A trailing resize tick re-arms
-    /// its screen's entry; the next mouse-up anywhere commits it.
+    /// its canvas's entry; the next mouse-up anywhere commits it.
     func mouseLifted() {
         guard !pendingResizeApplies.isEmpty else { return }
         let pending = pendingResizeApplies
@@ -504,7 +505,7 @@ final class DragTracker {
 
     // MARK: Coalescing
 
-    /// Recomputes every occupant's rect under its screen's grid, except
+    /// Recomputes every occupant's rect under its canvas's grid, except
     /// the dragged window, and schedules one push per runloop tick.
     func reassertAll(occupants: [Slot: WindowID], excluding: WindowID? = nil) {
         var rects: [WindowID: CGRect] = [:]
@@ -516,7 +517,7 @@ final class DragTracker {
             if lastKnownFrames[occupant] == nil {
                 lastKnownFrames[occupant] = frame
             }
-            rects[occupant] = grid(for: context.screenOf(occupant)).rect(
+            rects[occupant] = grid(for: context.spaceOf(occupant)).rect(
                 for: slot, in: context.boundsOf(frame))
         }
         schedule(rects: rects, excluding: excluding)
@@ -525,10 +526,11 @@ final class DragTracker {
     private func scheduleApply(excluding id: WindowID) {
         // Neighbor rects are computed now, pushed on the next tick: the
         // dragged window keeps moving under the user's hand meanwhile.
-        // Only the dragged window's screen re-pushes: neighbors on other
-        // monitors keep their frames, so a resize never crosses displays.
-        if let screen = context.screenOf(id), let occupantsOf = context.occupantsOf {
-            reassertAll(occupants: occupantsOf(screen), excluding: id)
+        // Only the dragged window's canvas re-pushes: neighbors on other
+        // displays and Spaces keep their frames, so a resize never
+        // crosses canvases.
+        if let space = context.spaceOf(id), let occupantsOf = context.occupantsOf {
+            reassertAll(occupants: occupantsOf(space), excluding: id)
             return
         }
         reassertAll(occupants: context.occupants(), excluding: id)

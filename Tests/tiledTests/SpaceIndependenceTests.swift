@@ -1,0 +1,347 @@
+import AppKit
+import CoreGraphics
+import XCTest
+
+@testable import tiled
+
+/// Mission Control Space independence: every display's every Space is
+/// its own tiling canvas. Swiping to another Space (the three-finger
+/// swipe up) never disturbs another Space's layout, occupancy, splitters,
+/// undo history, or notices, and screen changes while a Space is hidden
+/// are re-asserted when it comes back. Driven through `TilingController`
+/// with the fake gateway plus scripted active-Space state.
+final class SpaceIndependenceTests: XCTestCase {
+    private static let displayID: CGDirectDisplayID = 42
+    private static let otherDisplayID: CGDirectDisplayID = 43
+
+    private static let display = ScreenInfo(
+        id: ScreenID(rawValue: 1),
+        frame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+        name: "Display 1",
+        displayID: displayID)
+    private static let otherDisplay = ScreenInfo(
+        id: ScreenID(rawValue: 2),
+        frame: CGRect(x: 1920, y: 0, width: 1920, height: 1080),
+        visibleFrame: CGRect(x: 1920, y: 0, width: 1920, height: 1080),
+        name: "Display 2",
+        displayID: otherDisplayID)
+
+    private static let spaceA = SpaceID(rawValue: 101)
+    private static let spaceB = SpaceID(rawValue: 102)
+    private static let spaceC = SpaceID(rawValue: 103)
+
+    private var gateway: FakeWindowGateway!
+    private var controller: TilingController!
+    private var currentScreens: [ScreenInfo] = []
+
+    override func setUp() {
+        super.setUp()
+        gateway = FakeWindowGateway()
+        currentScreens = [Self.display]
+        gateway.activeSpaces = [Self.displayID: Self.spaceA]
+        controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { [self] in currentScreens },
+            deathConfirmation: 0)
+    }
+
+    @discardableResult
+    private func addFocusedWindow(
+        frame: CGRect = CGRect(x: 100, y: 100, width: 800, height: 600)
+    ) -> WindowHandle {
+        let handle = gateway.addWindow(frame: frame)
+        gateway.focused = handle
+        return handle
+    }
+
+    /// Swipes to `space` on `display`, as the workspace notification
+    /// would report it.
+    private func switchTo(_ space: SpaceID, on display: CGDirectDisplayID = displayID) {
+        gateway.activeSpaces[display] = space
+        gateway.simulateSpaceChange()
+    }
+
+    // MARK: Independent canvases
+
+    func testSameSlotCoexistsInTwoSpacesOnOneDisplay() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        switchTo(Self.spaceB)
+        XCTAssertNil(
+            controller.occupant(of: .topLeft, on: Self.display.id),
+            "the fresh Space has its own empty occupancy")
+        let b = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.display.id), b.id)
+        let target = GridLayout().rect(for: .topLeft, in: Self.display.visibleFrame)
+        XCTAssertEqual(gateway.frame(of: a), target, "the hidden Space keeps its tile")
+        XCTAssertEqual(gateway.frame(of: b), target)
+
+        switchTo(Self.spaceA)
+        XCTAssertEqual(
+            controller.occupant(of: .topLeft, on: Self.display.id), a.id,
+            "swiping back restores the first Space's arrangement")
+    }
+
+    func testEachSpaceRunsItsOwnLayout() {
+        addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        switchTo(Self.spaceB)
+        addFocusedWindow()
+        controller.handle(slot: .sixthTopLeft)
+
+        XCTAssertEqual(controller.activeLayout(on: Self.display.id), .sixths)
+        switchTo(Self.spaceA)
+
+        XCTAssertEqual(
+            controller.activeLayout(on: Self.display.id), .quarters,
+            "the first Space kept quarters while the second used sixths")
+        XCTAssertNotNil(controller.occupant(of: .topLeft, on: Self.display.id))
+        XCTAssertNil(controller.occupant(of: .sixthTopLeft, on: Self.display.id))
+    }
+
+    func testLayoutSwitchOnlyDissolvesItsOwnSpace() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = addFocusedWindow()
+        controller.handle(slot: .topRight)
+        XCTAssertEqual(controller.state(on: Self.display.id).tiledWindows.count, 2)
+
+        switchTo(Self.spaceB)
+        let c = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let d = addFocusedWindow()
+        controller.handle(slot: .topRight)
+        // The cross-layout request resets only this canvas: d is untiled,
+        // c retiles into the new layout, and the other Space is untouched.
+        gateway.focused = c
+        controller.handle(slot: .sixthTopLeft)
+
+        XCTAssertEqual(controller.activeLayout(on: Self.display.id), .sixths)
+        XCTAssertEqual(controller.state(on: Self.display.id).slot(of: c.id), .sixthTopLeft)
+        XCTAssertNil(
+            controller.state(on: Self.display.id).slot(of: d.id),
+            "the layout switch untiled only this Space's other window")
+        XCTAssertNotNil(controller.lastNotice)
+
+        switchTo(Self.spaceA)
+        XCTAssertEqual(controller.activeLayout(on: Self.display.id), .quarters)
+        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.display.id), a.id)
+        XCTAssertEqual(controller.occupant(of: .topRight, on: Self.display.id), b.id)
+    }
+
+    func testSameSlotCoexistsAcrossSpacesAndDisplays() {
+        currentScreens = [Self.display, Self.otherDisplay]
+        gateway.activeSpaces = [
+            Self.displayID: Self.spaceA,
+            Self.otherDisplayID: Self.spaceA,
+        ]
+        let left = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let right = addFocusedWindow(
+            frame: CGRect(x: 2000, y: 100, width: 800, height: 600))
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.display.id), left.id)
+        XCTAssertEqual(
+            controller.occupant(of: .topLeft, on: Self.otherDisplay.id), right.id,
+            "the same window-server Space id on two displays still keys two canvases")
+
+        // A layout switch on the right display's Space leaves the left
+        // display's same-id canvas alone.
+        gateway.focused = right
+        controller.handle(slot: .sixthTopLeft)
+        XCTAssertEqual(controller.activeLayout(on: Self.otherDisplay.id), .sixths)
+        XCTAssertEqual(controller.activeLayout(on: Self.display.id), .quarters)
+        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.display.id), left.id)
+    }
+
+    // MARK: Focus and menu scoping
+
+    func testSpaceSwitchReportsTheFocusedCanvasChange() {
+        addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        var reports = 0
+        controller.onFocusedSpaceChange = { reports += 1 }
+
+        switchTo(Self.spaceB)
+        XCTAssertEqual(reports, 1, "the first callback resolves the starting canvas")
+        XCTAssertEqual(
+            controller.activeLayout, .sixths,
+            "the shared surface follows the newly visible canvas")
+        XCTAssertTrue(controller.state.occupants.isEmpty)
+
+        switchTo(Self.spaceB)
+        XCTAssertEqual(reports, 1, "re-reporting the same Space is not a canvas change")
+
+        switchTo(Self.spaceA)
+        XCTAssertEqual(reports, 2, "swiping back redraws the glyph for the other layout")
+        XCTAssertEqual(controller.activeLayout, .quarters)
+        XCTAssertNotNil(controller.state.occupant(of: .topLeft))
+    }
+
+    func testSpaceSwitchOnAnotherDisplayRefreshesTheMenuButNotTheGlyph() {
+        currentScreens = [Self.display, Self.otherDisplay]
+        gateway.activeSpaces = [
+            Self.displayID: Self.spaceA,
+            Self.otherDisplayID: Self.spaceB,
+        ]
+        let left = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        var iconReports = 0
+        var menuReports = 0
+        controller.onFocusedSpaceChange = { iconReports += 1 }
+        // Resolve the starting canvas first: an unobserved controller
+        // reports the first focus event because it has never compared.
+        gateway.simulateFocusChange()
+        XCTAssertEqual(iconReports, 1)
+
+        controller.onChange = { menuReports += 1 }
+
+        // The right display swipes to another Space; keyboard focus and
+        // the glyph stay on the left display.
+        gateway.activeSpaces[Self.otherDisplayID] = Self.spaceC
+        gateway.simulateSpaceChange()
+
+        XCTAssertEqual(iconReports, 1, "the focused canvas did not change")
+        XCTAssertGreaterThan(menuReports, 0, "the menu aggregates visible canvases")
+        XCTAssertEqual(controller.focusedScreen, Self.display.id)
+        XCTAssertEqual(controller.focusedTilingSpace.space, Self.spaceA)
+        XCTAssertEqual(gateway.focused, left)
+    }
+
+    func testHiddenSpaceWindowsStayManagedButLeaveTheMenu() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        switchTo(Self.spaceB)
+        let b = addFocusedWindow()
+        controller.handle(slot: .sixthTopLeft)
+
+        XCTAssertEqual(controller.tiledWindowsInfo.map(\.id), [b.id])
+        XCTAssertEqual(
+            controller.allTiledWindowsInfo().map(\.id), [b.id],
+            "hidden-Space windows are not rows in the visible menu")
+
+        // A hidden window still prunes when it closes: management follows
+        // the window, not the currently shown Space.
+        gateway.kill(a)
+        controller.pruneDeadWindows()
+        switchTo(Self.spaceA)
+        XCTAssertNil(controller.state(on: Self.display.id).slot(of: a.id))
+        XCTAssertEqual(controller.state(on: Self.display.id).occupants, [:])
+
+        switchTo(Self.spaceB)
+        XCTAssertEqual(controller.occupant(of: .sixthTopLeft, on: Self.display.id), b.id)
+    }
+
+    // MARK: Per-canvas undo and splitters
+
+    func testUndoHistoryIsPerSpace() {
+        addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let challenger = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        XCTAssertTrue(controller.canUndoDisplacement)
+
+        var feedbacks: [TilingController.Feedback] = []
+        controller.onFeedback = { feedbacks.append($0) }
+        switchTo(Self.spaceB)
+
+        XCTAssertFalse(controller.canUndoDisplacement, "a fresh Space has no history")
+        controller.undoLastDisplacement()
+        guard case .nothingToUndo = feedbacks.first else {
+            return XCTFail("expected .nothingToUndo in the fresh Space, got \(feedbacks)")
+        }
+
+        switchTo(Self.spaceA)
+        XCTAssertTrue(
+            controller.canUndoDisplacement,
+            "the first Space's chapter survived the round trip")
+        controller.undoLastDisplacement()
+        XCTAssertNotNil(controller.occupant(of: .topLeft, on: Self.display.id))
+        XCTAssertNil(controller.state(on: Self.display.id).slot(of: challenger.id))
+    }
+
+    func testSplittersAreIndependentPerSpace() {
+        let handle = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        // Drag TL's right edge: echo tick, then escape.
+        var echo = gateway.frame(of: handle)!
+        echo.size.width -= 10
+        gateway.simulateChange(handle, to: echo)
+        var dragged = gateway.frame(of: handle)!
+        dragged.size.width -= 60
+        gateway.simulateChange(handle, to: dragged)
+        let moved = controller.grid(on: Self.display.id).columnSplit
+        XCTAssertNotEqual(moved, 0.5)
+
+        switchTo(Self.spaceB)
+        XCTAssertEqual(
+            controller.grid(on: Self.display.id), GridLayout(),
+            "the second Space starts from the default splitters")
+
+        switchTo(Self.spaceA)
+        XCTAssertEqual(
+            controller.grid(on: Self.display.id).columnSplit, moved, accuracy: 0.001,
+            "the first Space kept the dragged splitter")
+    }
+
+    func testCloseInHiddenSpaceReflowsOnReturnWithoutWritingFirst() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = addFocusedWindow()
+        controller.handle(slot: .bottomLeft)
+
+        switchTo(Self.spaceB)
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let frameBefore = gateway.frame(of: b)!
+        gateway.kill(a)
+        controller.pruneDeadWindows()
+
+        XCTAssertEqual(
+            controller.state(in: keyA).slot(of: b.id), .leftHalf,
+            "the freed cells reflow in hidden-state logically")
+        XCTAssertEqual(
+            gateway.frame(of: b), frameBefore,
+            "the hidden canvas is not written: an off-Space resize can pull the window forward")
+
+        switchTo(Self.spaceA)
+        XCTAssertEqual(
+            gateway.frame(of: b),
+            GridLayout().rect(for: .leftHalf, in: Self.display.visibleFrame),
+            "the deferred reflow is written when the Space becomes visible")
+    }
+
+    // MARK: Display-change reassertion
+
+    func testScreenChangeWhileHiddenReassertsWhenTheSpaceReturns() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        // Resolution changes while the user is on another Space: the
+        // hidden canvas must not be written in the dark.
+        switchTo(Self.spaceB)
+        let resized = ScreenInfo(
+            id: Self.display.id,
+            frame: CGRect(x: 0, y: 0, width: 1280, height: 720),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1280, height: 720),
+            name: Self.display.name,
+            displayID: Self.displayID)
+        currentScreens = [resized]
+        NotificationCenter.default.post(
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+
+        switchTo(Self.spaceA)
+        XCTAssertEqual(
+            gateway.frame(of: a),
+            GridLayout().rect(for: .topLeft, in: resized.visibleFrame),
+            "swiping back re-asserts the hidden canvas against the new bounds")
+    }
+}

@@ -8,14 +8,14 @@
  [
   "PlanExecutor.swift",
   "swap write-home deleted (screen/state diverge)",
-  "                state.commit(window: displaced, into: displacedOriginal)\n                state.commit(window: id, into: previous)\n                applyLayout(\n                    for: displaced, state: state, records: records,\n                    tracker: tracker, boundsOf: boundsOf, screen: screen)\n                log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
+  "                state.commit(window: displaced, into: displacedOriginal)\n                state.commit(window: id, into: previous)\n                applyLayout(\n                    for: displaced, state: state, records: records,\n                    tracker: tracker, boundsOf: boundsOf, space: space)\n                log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
   "                state.commit(window: displaced, into: displacedOriginal)\n                state.commit(window: id, into: previous)\n                log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")"
  ],
  [
   "TilingController.swift",
   "expanded windows re-pushed as tile occupants",
-  "space(for: screen)?.state.occupants.filter { expanded[$0.value] == nil } ?? [:]",
-  "space(for: screen)?.state.occupants ?? [:]"
+  "self.space(for: space)?.state.occupants.filter { expanded[$0.value] == nil } ?? [:]",
+  "self.space(for: space)?.state.occupants ?? [:]"
  ],
  [
   "TilingController.swift",
@@ -32,14 +32,14 @@
  [
   "TilingController.swift",
   "reflow rollback skipped (state keeps grown slot)",
-  "            var rolled = spaceState(for: screen)\n            for move in moves { rolled.commit(window: move.window, into: move.from) }\n            setSpaceState(rolled, for: screen)",
-  "            var rolled = spaceState(for: screen)\n            for move in moves { rolled.commit(window: move.window, into: move.from) }"
+  "            var rolled = spaceState(for: space)\n            for move in moves { rolled.commit(window: move.window, into: move.from) }\n            setSpaceState(rolled, for: space)",
+  "            var rolled = spaceState(for: space)\n            for move in moves { rolled.commit(window: move.window, into: move.from) }"
  ],
  [
   "DragTracker.swift",
   "per-screen restoreDividers no-op",
-  "    func restoreDividers(_ saved: GridLayout, for screen: ScreenID) {\n        grids[screen] = saved\n    }",
-  "    func restoreDividers(_ saved: GridLayout, for screen: ScreenID) {\n    }"
+  "    func restoreDividers(_ saved: GridLayout, for space: TilingSpaceKey) {\n        grids[space] = saved\n    }",
+  "    func restoreDividers(_ saved: GridLayout, for space: TilingSpaceKey) {\n    }"
  ],
  [
   "Layout.swift",
@@ -178,5 +178,17 @@
   "status icon gated by the menu diff again",
   "        return RefreshPlan(redrawIcon: iconChanged, rebuildMenu: menuChanged)",
   "        return RefreshPlan(redrawIcon: menuChanged && iconChanged, rebuildMenu: menuChanged)"
+ ],
+ [
+  "TilingController.swift",
+  "canvas key drops the Mission Control Space (Spaces share a layout)",
+  "        return TilingSpaceKey(\n            screen: resolved, space: activeSpaceID(on: resolved))",
+  "        return TilingSpaceKey(\n            screen: resolved, space: nil)"
+ ],
+ [
+  "TilingController.swift",
+  "hidden canvas treated as visible (reflow writes off-Space windows)",
+  "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen, let id = space.space else { return true }\n        return activeSpaceID(on: screen) == id\n    }",
+  "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        true\n    }"
  ]
 ]

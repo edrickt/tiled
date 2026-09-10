@@ -22,12 +22,13 @@ enum Liveness {
     case unknown
 }
 
-/// The single seam between Tiled and the macOS Accessibility framework.
+/// The single seam between Tiled and the OS window layer.
 ///
-/// Everything the product needs from AX (focus, geometry, liveness,
-/// observation, activation, and permission state) goes through here.
-/// `LiveWindowGateway` is the production adapter; tests substitute an
-/// in-memory fake. Two adapters justify the seam.
+/// Everything the product needs from the window server (focus, geometry,
+/// liveness, observation, activation, permission state, and Mission
+/// Control Space identity) goes through here. `LiveWindowGateway` is the
+/// production adapter; tests substitute an in-memory fake. Two adapters
+/// justify the seam.
 protocol WindowGateway: AnyObject {
     /// The currently focused window, if any.
     func focusedWindow() -> WindowHandle?
@@ -41,6 +42,22 @@ protocol WindowGateway: AnyObject {
     func liveness(of handle: WindowHandle) -> Liveness
     /// Calls `onChange` on resize/move. Dedupes repeat registrations.
     func observe(_ handle: WindowHandle, onChange: @escaping () -> Void)
+    /// Calls `onChange` when the frontmost application's focused window
+    /// changes: the keyboard-focus move that picks which display's layout
+    /// the status icon depicts. Replaces any previous handler. The live
+    /// adapter re-targets as applications activate; the fake exposes
+    /// `simulateFocusChange` for tests.
+    func observeFocusChanges(_ onChange: @escaping () -> Void)
+    /// The Mission Control Space shown on `display` right now, or nil
+    /// when the window server cannot say (a display-less environment,
+    /// or a future OS without the private Space table). Nil keeps the
+    /// old per-display behavior: one layout per monitor.
+    func activeSpace(on display: CGDirectDisplayID) -> SpaceID?
+    /// Calls `onChange` when the active Space changes on any display:
+    /// the swipe that swaps which canvas is on screen. Replaces any
+    /// previous handler. The live adapter observes the workspace
+    /// notification; the fake exposes `simulateSpaceChange` for tests.
+    func observeSpaceChanges(_ onChange: @escaping () -> Void)
     /// Brings the window forward without disturbing layout.
     func focus(_ handle: WindowHandle)
     /// Raises the window above its siblings without focusing it: the

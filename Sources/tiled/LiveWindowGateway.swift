@@ -1,15 +1,42 @@
 import AppKit
 import ApplicationServices
+import CoreGraphics
+
+/// The private window-server Space table. These symbols live in
+/// SkyLight/CoreGraphics on every macOS that has Mission Control; they
+/// are resolved with `dlsym` so a future OS that drops them degrades to
+/// per-display tiling instead of failing to launch.
+private typealias CGSDefaultConnectionFn = @convention(c) () -> Int32
+private typealias CGSCopyManagedDisplaySpacesFn =
+    @convention(c) (Int32) -> Unmanaged<CFArray>?
+
+private enum CGS {
+    static let handle: UnsafeMutableRawPointer? =
+        dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY)
+        ?? dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY)
+
+    static let defaultConnection: CGSDefaultConnectionFn? = symbol(
+        "_CGSDefaultConnection", as: CGSDefaultConnectionFn.self)
+    static let copyManagedDisplaySpaces: CGSCopyManagedDisplaySpacesFn? = symbol(
+        "CGSCopyManagedDisplaySpaces", as: CGSCopyManagedDisplaySpacesFn.self)
+
+    private static func symbol<T>(_ name: String, as type: T.Type) -> T? {
+        guard let handle, let pointer = dlsym(handle, name) else { return nil }
+        return unsafeBitCast(pointer, to: T.self)
+    }
+}
 
 /// Thin wrapper over the Accessibility API: permissions, focused window,
 /// frame read/write. All coordinate conversion lives here.
-/// The production `WindowGateway`: macOS Accessibility, behind the seam.
+/// The production `WindowGateway`: macOS Accessibility plus the private
+/// window-server Space table, behind the seam.
 ///
 /// Owns every framework detail the controller must never see: AX element
 /// identity, AppKit/AX coordinate conversion, AXObserver registration
-/// with its refcon plumbing, and app activation. Issues one stable
-/// `WindowHandle` per live window so the controller keys records on
-/// handles, never on `AXUIElement`s.
+/// with its refcon plumbing, app activation, and the display-to-Space
+/// lookup that makes each Mission Control Space an independent canvas.
+/// Issues one stable `WindowHandle` per live window so the controller
+/// keys records on handles, never on `AXUIElement`s.
 final class LiveWindowGateway: WindowGateway {
     /// The single live instance (AXObserver callbacks carry no user data).
     static weak var active: LiveWindowGateway?
@@ -43,9 +70,59 @@ final class LiveWindowGateway: WindowGateway {
     private var observedElements: Set<UInt> = []
     /// Change handler per observed handle.
     private var changeHandlers: [WindowHandle: () -> Void] = [:]
+    /// Focus observer for the frontmost application: its key-window
+    /// changes move which display's layout the status icon depicts.
+    /// Separate from the per-window resize observers so an app with no
+    /// managed windows still reports focus moves.
+    private var focusObserver: AXObserver?
+    private var focusObserverPID: pid_t?
+    private var focusObserverElement: AXUIElement?
+    private var focusChangeHandler: (() -> Void)?
+    /// Re-targets `focusObserver` when a different app becomes frontmost.
+    private var activeAppObserver: NSObjectProtocol?
+    /// Space-change observer: swiping to another Space must rebuild the
+    /// menu and, when the focused display changed canvas, the glyph.
+    private var spaceChangeHandler: (() -> Void)?
+    private var spaceChangeObserver: NSObjectProtocol?
+    /// Display-to-Space cache, refreshed on a short interval and
+    /// invalidated by the workspace notification, so one menu build
+    /// never walks the window-server Space table once per row.
+    private var spaceCache: [CGDirectDisplayID: SpaceID] = [:]
+    private var spaceCacheStamp: Date?
 
     init() {
         LiveWindowGateway.active = self
+        activeAppObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            let activated = notification.userInfo?[
+                NSWorkspace.applicationUserInfoKey
+            ] as? NSRunningApplication
+            self?.retargetFocusObserver(to: activated)
+        }
+        spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            // One main-queue hop: the notification can arrive while the
+            // window server is still committing the switch, and the
+            // Space table must answer with the newly visible Space.
+            DispatchQueue.main.async {
+                self?.spaceCacheStamp = nil
+                self?.spaceChangeHandler?()
+            }
+        }
+    }
+
+    deinit {
+        if let activeAppObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(activeAppObserver)
+        }
+        if let spaceChangeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserver)
+        }
+        releaseFocusObserver()
     }
 
     // MARK: WindowGateway
@@ -175,6 +252,174 @@ final class LiveWindowGateway: WindowGateway {
         }
     }
 
+    func observeFocusChanges(_ onChange: @escaping () -> Void) {
+        focusChangeHandler = onChange
+        retargetFocusObserver()
+    }
+
+    func activeSpace(on display: CGDirectDisplayID) -> SpaceID? {
+        guard display != 0 else { return nil }
+        refreshSpaceCacheIfNeeded()
+        return spaceCache[display]
+    }
+
+    func observeSpaceChanges(_ onChange: @escaping () -> Void) {
+        spaceChangeHandler = onChange
+    }
+
+    /// Cache lifetime for the Space table. Long enough to collapse a
+    /// menu build's repeated per-row lookups, short enough that a Space
+    /// the workspace notification missed cannot misdirect a hotkey.
+    private static let spaceCacheLifetime: TimeInterval = 0.1
+
+    private func refreshSpaceCacheIfNeeded() {
+        if let stamp = spaceCacheStamp,
+            Date().timeIntervalSince(stamp) < Self.spaceCacheLifetime
+        { return }
+        spaceCacheStamp = Date()
+        spaceCache = Self.currentSpaces()
+    }
+
+    /// One pass over the window server's managed-display Space table:
+    /// display UUID -> id of the Space currently shown there. Empty when
+    /// the private symbols are unavailable, which keeps every canvas
+    /// keyed by display (the old behavior).
+    private static func currentSpaces() -> [CGDirectDisplayID: SpaceID] {
+        guard
+            let connection = CGS.defaultConnection?(),
+            let displays = CGS.copyManagedDisplaySpaces?(connection)?
+                .takeRetainedValue() as? [[String: Any]]
+        else { return [:] }
+        var spaces: [CGDirectDisplayID: SpaceID] = [:]
+        for display in displays {
+            let identifier = display["Display Identifier"] as? String
+            guard
+                let current = display["Current Space"] as? [String: Any],
+                let space = spaceID(from: current["id64"])
+            else { continue }
+            if let displayID = displayID(identifier: identifier, among: displays) {
+                spaces[displayID] = space
+            }
+        }
+        return spaces
+    }
+
+    /// Window-server Space ids bridge as numbers; accept every numeric
+    /// shape the table has used across releases.
+    private static func spaceID(from value: Any?) -> SpaceID? {
+        if let number = value as? NSNumber { return SpaceID(rawValue: number.uint64Value) }
+        if let value = value as? UInt64 { return SpaceID(rawValue: value) }
+        if let value = value as? Int64 { return SpaceID(rawValue: UInt64(bitPattern: value)) }
+        if let string = value as? String, let raw = UInt64(string) {
+            return SpaceID(rawValue: raw)
+        }
+        return nil
+    }
+
+    /// Map a Space-table entry back to its CoreGraphics display. The
+    /// table identifies displays by UUID (or "Main" for the menu-bar
+    /// display); both round-trip through the same UUID the public
+    /// CGDisplay APIs produce, so there is no index guessing.
+    private static func displayID(
+        identifier: String?, among displays: [[String: Any]]
+    ) -> CGDirectDisplayID? {
+        if let identifier {
+            for displayID in displayIDs() {
+                guard
+                    let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?
+                        .takeRetainedValue()
+                else { continue }
+                let string = CFUUIDCreateString(nil, uuid) as String
+                if string.caseInsensitiveCompare(identifier) == .orderedSame {
+                    return displayID
+                }
+            }
+            if identifier == "Main" { return CGMainDisplayID() }
+        }
+        // Unknown identifier shapes: a single-display machine is
+        // unambiguous, and guessing there is safer than dropping Space
+        // identity on an OS that renamed the key.
+        if displays.count == 1, let only = displayIDs().first { return only }
+        return nil
+    }
+
+    /// Every attached CoreGraphics display, for UUID mapping and the
+    /// unambiguous single-display fallback.
+    private static func displayIDs() -> [CGDirectDisplayID] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else {
+            return [CGMainDisplayID()]
+        }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else {
+            return [CGMainDisplayID()]
+        }
+        return Array(ids.prefix(Int(count)))
+    }
+
+    /// Moves the focus observer to `application` (the just-activated app,
+    /// when the activation notification names one) or the current
+    /// frontmost application. AX cannot observe the system-wide element
+    /// (it does not support notifications), so following focus means
+    /// observing each frontmost app's `kAXFocusedWindowChangedNotification`.
+    /// App activation re-targets; same-app window focus changes arrive on
+    /// the callback.
+    private func retargetFocusObserver(to application: NSRunningApplication? = nil) {
+        guard focusChangeHandler != nil else { return }
+        guard
+            let frontmost = application ?? NSWorkspace.shared.frontmostApplication,
+            frontmost.processIdentifier > 0
+        else {
+            releaseFocusObserver()
+            return
+        }
+        let pid = frontmost.processIdentifier
+        guard pid != focusObserverPID else { return }
+        releaseFocusObserver()
+
+        var created: AXObserver?
+        let createResult = AXObserverCreate(pid, Self.focusObserverCallback, &created)
+        guard createResult == .success, let observer = created else {
+            NSLog(
+                "tiled: AXObserverCreate failed for focus on pid %d (%d)",
+                pid, createResult.rawValue)
+            return
+        }
+        let appElement = AXUIElementCreateApplication(pid)
+        Self.applyMessagingTimeout(appElement)
+        let addResult = AXObserverAddNotification(
+            observer, appElement, kAXFocusedWindowChangedNotification as CFString, nil)
+        guard addResult == .success else {
+            NSLog(
+                "tiled: could not observe focused window on pid %d (%d)",
+                pid, addResult.rawValue)
+            return
+        }
+        focusObserver = observer
+        focusObserverPID = pid
+        focusObserverElement = appElement
+        CFRunLoopAddSource(
+            CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer),
+            CFRunLoopMode.commonModes)
+    }
+
+    /// Drops the current focus observer and its runloop source. Called
+    /// when the frontmost app changes and from `deinit`.
+    private func releaseFocusObserver() {
+        if let observer = focusObserver {
+            if let appElement = focusObserverElement {
+                AXObserverRemoveNotification(
+                    observer, appElement, kAXFocusedWindowChangedNotification as CFString)
+            }
+            CFRunLoopRemoveSource(
+                CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer),
+                CFRunLoopMode.commonModes)
+        }
+        focusObserver = nil
+        focusObserverPID = nil
+        focusObserverElement = nil
+    }
+
     func focus(_ handle: WindowHandle) {
         guard let element = elements[handle], let pid = pids[handle] else { return }
         AXUIElementSetAttributeValue(
@@ -236,6 +481,13 @@ final class LiveWindowGateway: WindowGateway {
         guard let gateway = LiveWindowGateway.active else { return }
         gateway.handleAXNotification(
             notification: notification as String, element: element)
+    }
+
+    /// Focus arrives on its own observer, not `observerCallback`: its
+    /// element is an application element, not a registered window, so the
+    /// window-handle routing would never match it.
+    private static let focusObserverCallback: AXObserverCallback = { _, _, _, _ in
+        LiveWindowGateway.active?.focusChangeHandler?()
     }
 
     /// Routes an AX notification to the registered handler of whichever

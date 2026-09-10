@@ -113,16 +113,30 @@ you pick a free one.
 - Use **Untile All** in the menu to restore every tiled window, or open a
   tiled window's submenu to focus it, untile just that window, or tile the
   focused window into its slot.
-- Each monitor tiles independently: every display runs its own layout,
-  occupancy, splitters, and undo history. Tiling, switching, drag-resizing,
-  and ⌃⌥⇧⌘Z on one monitor never disturb the other; the same tile can
-  even be occupied on both at once. The menu groups tiled windows per
-  display; Untile All and Reset Splitters act on the focused monitor only.
-- Quarters and sixths are mutually exclusive per monitor: requesting a slot in
-  the other layout untiles every tiled window on that monitor and switches layouts. The menu
-  names the switch and how to undo it ("Switched to Sixths · 3 windows
-  untiled. Undo (⌃⌥⇧⌘Z) is one step, from anywhere. Safe to explore:
-  destruction is always reversible.
+- Each canvas tiles independently, where a canvas is one display's one
+  Mission Control Space. Every Space you reach by swiping up with three
+  fingers has its own layout, occupancy, splitters, undo history, and
+  notices, and so does every display: the same tile can be occupied in
+  several Spaces and on several displays at once. Tiling, switching,
+  drag-resizing, and ⌃⌥⇧⌘Z on one canvas never disturb another; Untile
+  All and Reset Splitters act on the focused canvas only. (Where the
+  window server withholds a Space id, Tiled falls back to one canvas per
+  display rather than guessing.)
+- The menu-bar glyph and the menu's rows follow the focused window's
+  display and Space. Swiping to another Space (or focusing a window on
+  another display) redraws the glyph (2×2 or 3×2) and its occupancy for
+  the canvas that just became visible, even though there was no tiling
+  action. Windows parked in hidden Spaces stay tiled and keep their
+  history; they simply wait off-menu until you swipe back.
+- Quarters and sixths are mutually exclusive per canvas: requesting a slot
+  in the other layout untiles every tiled window on that canvas and
+  switches that canvas's layout. The menu names the switch and how to undo
+  it ("Switched to Sixths · 3 windows untiled. Undo (⌃⌥⇧⌘Z) is one step,
+  from anywhere. Safe to explore: destruction is always reversible.
+- A display change (unplug, rearrange, resolution) re-asserts every visible
+  canvas immediately. Hidden Spaces are marked stale instead: Tiled never
+  writes an off-Space window, because an AX resize can pull it onto the
+  visible Space. Swiping back re-asserts that Space against the new bounds.
 - Some apps refuse programmatic resizing. When that happens the window is
   left alone and the menu says which app refused, so state and screen never
   silently disagree.
@@ -133,8 +147,9 @@ Drag any edge of a tiled window and the shared grid splitter moves with it;
 neighbors on the other side follow. Vertical and horizontal splitters are
 independent per column (quarters) or per third (sixths), so resizing one
 column never moves the other, and the same independence holds between
-monitors, so dragging an edge on one display never moves tiles on another. **Reset Splitters**
-in the menu snaps the focused monitor's splitters back to even splits.
+monitors and Spaces, so dragging an edge on one canvas never moves tiles on
+another. **Reset Splitters** in the menu snaps the focused canvas's
+splitters back to even splits.
 
 ## Building & running
 
@@ -170,7 +185,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (470 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (483 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~10s per mutant |
@@ -211,6 +226,7 @@ CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
 - [x] Sixths layout (3×2 grid, thirds, two-thirds)
 - [x] Visible failure states (hotkey conflicts, apps refusing resize)
 - [x] Display-change reassertion + automatic cleanup of closed windows
+- [x] Per-Space layouts (Mission Control desktops independent per display)
 - [x] Drag-out (short drag snaps back, long drag untiles in place)
 - [ ] Owned overlay resize handles
 - [x] Remappable shortcuts

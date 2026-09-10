@@ -12,15 +12,15 @@ struct WindowRecord {
 
 /// A window evicted by a layout switch, enabling one-step undo.
 /// Records are rebuilt from live handles on undo; dead windows are skipped.
-/// `screen` tags the tiling space the window returns to: undo retiles
-/// per-monitor, so a restored window lands on the display it left.
+/// `space` tags the tiling canvas the window returns to: undo retiles
+/// per display and per Space, so a restored window lands on the canvas
+/// it left. Nil = legacy snapshots (pre-per-monitor), restored into the
+/// requester's canvas.
 struct EvictedWindow {
     let handle: WindowHandle
     let slot: Slot
     let preTileFrame: CGRect
-    /// Nil = legacy single-space snapshots (pre-per-monitor), restored
-    /// into the requester's space.
-    var screen: ScreenID? = nil
+    var space: TilingSpaceKey? = nil
 }
 
 /// Executes tiling plans: the branch interaction of tile / switch
@@ -81,19 +81,19 @@ final class PlanExecutor {
     /// for pruned undo handles happens on the local copy via `nextID`,
     /// so it stays visible to the rest of the call.
     ///
-    /// `screen` names the tiling space every placement belongs to (the
-    /// plan was decided over one space's state, so all its windows share
-    /// one display): every slot-rect write derives from that screen's
-    /// splitter grid. Nil (headless tests and legacy snapshots) selects
-    /// the legacy shared grid.
+    /// `space` names the tiling canvas every placement belongs to (the
+    /// plan was decided over one Space's state, so all its windows share
+    /// one display and Space): every slot-rect write derives from that
+    /// canvas's splitter grid. Nil (headless tests and legacy snapshots)
+    /// selects the legacy shared grid.
     func execute(
         decision: TilePlan, requester id: WindowID, slot: Slot,
         state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID,
         tracker: DragTracker, boundsOf: (CGRect) -> CGRect,
         observe: (WindowID) -> Void,
-        screenOf: (WindowID) -> ScreenID? = { _ in nil },
+        spaceOf: (WindowID) -> TilingSpaceKey? = { _ in nil },
         isExpanded: (WindowID) -> Bool = { _ in false },
-        screen: ScreenID? = nil
+        space: TilingSpaceKey? = nil
     ) -> (outcome: Outcome, state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID) {
         var state = state
         var records = records
@@ -116,13 +116,13 @@ final class PlanExecutor {
             let snapshot = evicted.compactMap { evictedID in
                 Self.snapshotEntry(
                     for: evictedID, state: state, records: records, fallback: slot,
-                    screen: screenOf(evictedID))
+                    space: spaceOf(evictedID))
             }
             let restoreFailures = restore(
                 evicted, state: &state, records: &records, tracker: tracker)
             let placeResult = place(
                 window: id, into: slot, state: &state, records: &records,
-                tracker: tracker, boundsOf: boundsOf, observe: observe, screen: screen)
+                tracker: tracker, boundsOf: boundsOf, observe: observe, space: space)
             var outcome = Outcome()
             if records[id] == nil {
                 // `place` bailed (no record): nothing to snapshot.
@@ -161,7 +161,7 @@ final class PlanExecutor {
                     decision: .tile(evicting: [displaced]), requester: id, slot: slot,
                     state: state, records: records, nextID: nextID,
                     tracker: tracker, boundsOf: boundsOf, observe: observe,
-                    screenOf: screenOf, screen: screen)
+                    spaceOf: spaceOf, space: space)
             }
             // Snapshot before any commit: each entry carries its window's
             // own former tile, so undo replays the swap backwards.
@@ -169,14 +169,14 @@ final class PlanExecutor {
                 (entryID, formerSlot) in
                 Self.snapshotEntry(
                     for: entryID, state: state, records: records, fallback: formerSlot,
-                    screen: screenOf(entryID))
+                    space: spaceOf(entryID))
             }
             var outcome = Outcome()
             state.commit(window: displaced, into: previous)
             observe(displaced)
             if !applyLayout(
                 for: displaced, state: state, records: records,
-                tracker: tracker, boundsOf: boundsOf, screen: screen)
+                tracker: tracker, boundsOf: boundsOf, space: space)
             {
                 // The refused write moved nothing on screen: the rollback
                 // is state-only, restoring both occupancies.
@@ -192,7 +192,7 @@ final class PlanExecutor {
             observe(id)
             if !applyLayout(
                 for: id, state: state, records: records,
-                tracker: tracker, boundsOf: boundsOf, screen: screen)
+                tracker: tracker, boundsOf: boundsOf, space: space)
             {
                 // Roll the whole swap back: the displaced window's frame
                 // visibly moved, so it is written home; the requester was
@@ -201,7 +201,7 @@ final class PlanExecutor {
                 state.commit(window: id, into: previous)
                 applyLayout(
                     for: displaced, state: state, records: records,
-                    tracker: tracker, boundsOf: boundsOf, screen: screen)
+                    tracker: tracker, boundsOf: boundsOf, space: space)
                 log("place FAILED win\(id) -> \(slot.rawValue); swap rolled back")
                 let refusal = Self.refusal(for: id, records: records, gateway: gateway)
                 outcome.error = refusal.error
@@ -245,14 +245,14 @@ final class PlanExecutor {
             let snapshot = evicted.compactMap { evictedID in
                 Self.snapshotEntry(
                     for: evictedID, state: state, records: records, fallback: slot,
-                    screen: screenOf(evictedID))
+                    space: spaceOf(evictedID))
             }
             let restoreFailures = restore(
                 evicted.filter { $0 != rehouse?.window },
                 state: &state, records: &records, tracker: tracker)
             let placeResult = place(
                 window: id, into: slot, state: &state, records: &records,
-                tracker: tracker, boundsOf: boundsOf, observe: observe, screen: screen)
+                tracker: tracker, boundsOf: boundsOf, observe: observe, space: space)
             var outcome = Outcome()
             outcome.error = placeResult.error
             outcome.feedback = placeResult.feedback
@@ -265,7 +265,7 @@ final class PlanExecutor {
                 state.commit(window: wid, into: home)
                 if applyLayout(
                     for: wid, state: state, records: records,
-                    tracker: tracker, boundsOf: boundsOf, screen: screen)
+                    tracker: tracker, boundsOf: boundsOf, space: space)
                 {
                     outcome.rehoused = wid
                     let name = appName(for: wid, records: records) ?? "That window"
@@ -352,17 +352,17 @@ final class PlanExecutor {
             // count it restored. Rewriting an identical frame is not just
             // wasteful: on a settling window it re-arms echo tracking
             // and risks a phantom drag-out. The grid is the destination
-            // screen's, not the legacy shared one.
+            // canvas's, not the legacy shared one.
             if let record = records[id],
                let slot = state.slot(of: id),
                let current = gateway.frame(of: record.handle),
-               current == tracker.grid(for: entry.screen).rect(for: slot, in: boundsOf(current))
+               current == tracker.grid(for: entry.space).rect(for: slot, in: boundsOf(current))
             {
                 log("undo SKIP-WRITE win\(id) already placed")
                 restored += 1
             } else if applyLayout(
                 for: id, state: state, records: records,
-                tracker: tracker, boundsOf: boundsOf, screen: entry.screen)
+                tracker: tracker, boundsOf: boundsOf, space: entry.space)
             {
                 restored += 1
             } else {
@@ -391,12 +391,12 @@ final class PlanExecutor {
     /// only the switch branch knows the requested slot.
     private static func snapshotEntry(
         for evictedID: WindowID, state: TilingState, records: [WindowID: WindowRecord],
-        fallback: Slot, screen: ScreenID? = nil
+        fallback: Slot, space: TilingSpaceKey? = nil
     ) -> EvictedWindow? {
         records[evictedID].map {
             EvictedWindow(
                 handle: $0.handle, slot: state.slot(of: evictedID) ?? fallback,
-                preTileFrame: $0.preTileFrame, screen: screen)
+                preTileFrame: $0.preTileFrame, space: space)
         }
     }
 
@@ -440,7 +440,7 @@ final class PlanExecutor {
         window id: WindowID, into slot: Slot,
         state: inout TilingState, records: inout [WindowID: WindowRecord],
         tracker: DragTracker, boundsOf: (CGRect) -> CGRect,
-        observe: (WindowID) -> Void, screen: ScreenID?
+        observe: (WindowID) -> Void, space: TilingSpaceKey?
     ) -> (error: String?, feedback: TilingController.Feedback?) {
         guard var record = records[id] else { return (nil, nil) }
         if state.slot(of: id) == nil {
@@ -454,7 +454,7 @@ final class PlanExecutor {
         observe(id)
         if !applyLayout(
             for: id, state: state, records: records,
-            tracker: tracker, boundsOf: boundsOf, screen: screen)
+            tracker: tracker, boundsOf: boundsOf, space: space)
         {
             // The window refused the frame (some apps ignore AX resizes):
             // roll back occupancy so state and screen agree, and say so.
@@ -517,7 +517,7 @@ final class PlanExecutor {
         }
     }
 
-    /// Applies `id`'s slot rect on `screen` (the tiling space the plan
+    /// Applies `id`'s slot rect on `space` (the tiling canvas the plan
     /// belongs to; nil selects the legacy shared grid). Returns whether
     /// the gateway write succeeded (some windows refuse
     /// resizes). The tracker bookkeeps the write for echo suppression.
@@ -525,12 +525,12 @@ final class PlanExecutor {
     private func applyLayout(
         for id: WindowID, state: TilingState,
         records: [WindowID: WindowRecord],
-        tracker: DragTracker, boundsOf: (CGRect) -> CGRect, screen: ScreenID?
+        tracker: DragTracker, boundsOf: (CGRect) -> CGRect, space: TilingSpaceKey?
     ) -> Bool {
         guard let record = records[id], let slot = state.slot(of: id) else { return false }
         let current = gateway.frame(of: record.handle) ?? record.preTileFrame
         let bounds = boundsOf(current)
-        let target = tracker.grid(for: screen).rect(for: slot, in: bounds)
+        let target = tracker.grid(for: space).rect(for: slot, in: bounds)
         // A no-op write changes nothing observable: skip it and count
         // success. Writing anyway would draw no echo, and the caller's
         // late convergence check would evict an already-correct window.

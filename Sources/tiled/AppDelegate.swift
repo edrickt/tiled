@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
         controller.onChange = { [weak self] in self?.refreshMenu() }
+        controller.onFocusedSpaceChange = { [weak self] in self?.refreshFocusedDisplay() }
         controller.onFeedback = { [weak self] feedback in
             DispatchQueue.main.async { self?.signalFeedback(feedback) }
         }
@@ -141,6 +142,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         service.settingsHandler = { [weak self] in self?.showSettings(nil) }
         service.undoHandler = { [weak self] in self?.performUndoSwitch() }
         hotkeys = service
+        // Focus moving to another window can change which display drives
+        // the glyph with no tiling action at all. The gateway re-targets
+        // as apps activate; this subscribes now that AX is trusted.
+        controller.observeFocus()
         refreshMenu()
         // Permission-grant teaching moment: the user waited at the
         // highest-friction step with no picture of the product, so open
@@ -181,18 +186,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// One immutable pass over the state the icon reads: the active
-    /// layout plus which icon cells are covered. Occupancy keyed by slot
-    /// (the pure input `StatusIcon Snapshot` needs) derives from the
-    /// controller's window rows; expanded windows keep their slot (an
-    /// expanded window still owns its tile), so they still light it.
-    /// Multi-monitor: the focused display's space drives the glyph, so
-    /// the icon always depicts the layout the next hotkey acts on.
+    /// layout plus which icon cells are covered. The focused canvas
+    /// (display plus Mission Control Space) is resolved once and both
+    /// reads scope to that key, so focus moving between the two lookups
+    /// can never mix two canvases' geometry and occupancy. Expanded
+    /// windows keep their slot (an expanded window still owns its tile),
+    /// so they still light it. The focused canvas drives the glyph, so
+    /// the icon depicts the layout the next hotkey acts on, whether the
+    /// user got there by focusing another display or swiping Spaces.
     private func iconSnapshot() -> StatusIcon.Snapshot {
-        var occupants: [Slot: WindowID] = [:]
-        for info in controller.focusedTiledWindowsInfo {
-            occupants[info.slot] = info.id
-        }
-        return StatusIcon.snapshot(layout: controller.activeLayout, occupants: occupants)
+        let space = controller.focusedTilingSpace
+        return StatusIcon.snapshot(
+            layout: controller.activeLayout(in: space),
+            occupants: controller.state(in: space).occupants)
     }
 
     /// The menu-bar glyph states the product's core idea twice over: the
@@ -335,6 +341,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button else { return }
         button.image = Self.statusIcon(snapshot)
         lastIconSnapshot = snapshot
+    }
+
+    /// Focus moved between windows, displays, or Mission Control Spaces
+    /// with no tiling action: redraw only the glyph. The menu aggregates
+    /// every canvas and is rebuilt from a fresh snapshot when it opens,
+    /// so there is nothing to push here; rebuilding it from an AX
+    /// callback would be churn. An open menu defers, exactly like
+    /// `refreshPlan`, and `menuDidClose` catches up.
+    private func refreshFocusedDisplay() {
+        guard !menuOpen, statusItem != nil else { return }
+        let icon = iconSnapshot()
+        guard lastIconSnapshot != icon || statusItem?.button?.image == nil else { return }
+        drawStatusIcon(icon)
     }
 
     /// Toggles the menu-bar icon live when the Settings checkbox changes.
@@ -873,9 +892,10 @@ extension AppDelegate: NSMenuDelegate {
 
     /// Refreshes the rows in place as the menu opens.
     ///
-    /// Focus moves with no tiling action at all (click another window),
-    /// and the rows' enabled state, undo title, and status line all read
-    /// the focused window; the icon reads the focused display. Nothing
+    /// Focus moves with no tiling action at all (click another window,
+    /// swipe another Space), and the rows' enabled state, undo title, and
+    /// status line all read the focused window; the icon reads the
+    /// focused canvas. Nothing
     /// else fires on that transition, so the open is the last point where
     /// the menu can still be made to describe the window the user is
     /// looking at. Replacing `statusItem.menu` here would be too late —

@@ -108,6 +108,37 @@ final class FakeWindowGateway: WindowGateway {
         changeHandlers[handle] = onChange
     }
 
+    private var focusChangeHandler: (() -> Void)?
+
+    func observeFocusChanges(_ onChange: @escaping () -> Void) {
+        focusChangeHandler = onChange
+    }
+
+    /// Test control: simulates the frontmost app's focused window moving.
+    func simulateFocusChange() {
+        focusChangeHandler?()
+    }
+
+    /// Mission Control Space currently shown per display. Empty means
+    /// "unknown", so keys fall back to per-display behavior.
+    var activeSpaces: [CGDirectDisplayID: SpaceID] = [:]
+
+    func activeSpace(on display: CGDirectDisplayID) -> SpaceID? {
+        activeSpaces[display]
+    }
+
+    private var spaceChangeHandler: (() -> Void)?
+
+    func observeSpaceChanges(_ onChange: @escaping () -> Void) {
+        spaceChangeHandler = onChange
+    }
+
+    /// Test control: simulates swiping to another Space on any display.
+    /// Mutate `activeSpaces` first.
+    func simulateSpaceChange() {
+        spaceChangeHandler?()
+    }
+
     func focus(_ handle: WindowHandle) {
         focusCalls.append(handle)
         if focusChangesFocused { focused = handle }

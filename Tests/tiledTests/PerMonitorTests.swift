@@ -77,6 +77,61 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertEqual(controller.activeLayout, .quarters)
     }
 
+    func testFocusedScreenScopesLayoutAndOccupancyToFocusedDisplay() {
+        // The status icon is one glyph but two monitors can run different
+        // layouts. Resolving the focused screen once and reading that
+        // monitor's layout/occupancy is what keeps the glyph true to the
+        // display the user is working on.
+        let left = tileOnLeft()
+        controller.handle(slot: .topLeft)
+        let right = tileOnRight()
+        controller.handle(slot: .sixthLeft)
+
+        gateway.focused = left
+        XCTAssertEqual(controller.focusedScreen, leftID)
+        XCTAssertEqual(controller.activeLayout(on: controller.focusedScreen), .quarters)
+        XCTAssertEqual(
+            controller.state(on: controller.focusedScreen).occupants,
+            [.topLeft: 1])
+
+        gateway.focused = right
+        XCTAssertEqual(controller.focusedScreen, rightID)
+        XCTAssertEqual(controller.activeLayout(on: controller.focusedScreen), .sixths)
+        XCTAssertEqual(
+            controller.state(on: controller.focusedScreen).occupants,
+            [.sixthLeft: 2])
+    }
+
+    func testFocusObserverReportsOnlyWhenFocusedDisplayMoves() {
+        let left = tileOnLeft()
+        controller.handle(slot: .topLeft)
+        let right = tileOnRight()
+        controller.handle(slot: .sixthLeft)
+
+        var reports = 0
+        controller.onFocusedSpaceChange = { reports += 1 }
+
+        gateway.focused = left
+        gateway.simulateFocusChange()
+        XCTAssertEqual(reports, 1, "the first callback resolves the starting display")
+
+        gateway.focused = right
+        gateway.simulateFocusChange()
+        XCTAssertEqual(reports, 2, "focus landing on another display redraws the glyph")
+
+        // A different untiled window on the same display leaves the
+        // glyph's layout and occupancy untouched, so no report.
+        let sameDisplay = gateway.addWindow(
+            frame: CGRect(x: 2100, y: 200, width: 300, height: 200))
+        gateway.focused = sameDisplay
+        gateway.simulateFocusChange()
+        XCTAssertEqual(reports, 2)
+
+        gateway.focused = left
+        gateway.simulateFocusChange()
+        XCTAssertEqual(reports, 3)
+    }
+
     func testCrossLayoutRequestOnlySwitchesItsOwnMonitor() {
         tileOnLeft()
         controller.handle(slot: .topLeft)
