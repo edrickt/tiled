@@ -689,6 +689,93 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(grid.sixthsLeftSplit, 1.0 / 3.0, accuracy: 0.0001)
     }
 
+    // MARK: Two-thirds resize symmetry
+
+    func testResizingLeftTwoThirdsCentersItsHiddenThirdDivider() {
+        // A left two-thirds window occupies the left and middle thirds.
+        // Resizing its movable right edge must also move the hidden
+        // divider between those thirds, so both planted thirds stay equal.
+        var grid = GridLayout()
+        XCTAssertTrue(
+            grid.update(
+                edge: .right, of: .sixthsLeftTwoThirds,
+                toPosition: bounds.minX + 0.78 * bounds.width, in: bounds))
+        XCTAssertEqual(grid.sixthsRightSplit, 0.78, accuracy: 0.001)
+        XCTAssertEqual(grid.sixthsLeftSplit, 0.39, accuracy: 0.001)
+
+        let twoThirds = grid.rect(for: .sixthsLeftTwoThirds, in: bounds)
+        let hiddenDivider = grid.position(of: .sixthsLeftSplit, in: bounds)
+        XCTAssertEqual(
+            hiddenDivider - twoThirds.minX, twoThirds.maxX - hiddenDivider,
+            accuracy: 0.001, "the hidden divider must bisect the two-thirds window")
+    }
+
+    func testResizingRightTwoThirdsCentersItsHiddenThirdDivider() {
+        // Mirror: a right two-thirds window's movable left edge also
+        // recenters the hidden divider between its two planted thirds.
+        var grid = GridLayout()
+        XCTAssertTrue(
+            grid.update(
+                edge: .left, of: .sixthsRightTwoThirds,
+                toPosition: bounds.minX + 0.24 * bounds.width, in: bounds))
+        XCTAssertEqual(grid.sixthsLeftSplit, 0.24, accuracy: 0.001)
+        XCTAssertEqual(grid.sixthsRightSplit, 0.62, accuracy: 0.001)
+
+        let twoThirds = grid.rect(for: .sixthsRightTwoThirds, in: bounds)
+        let hiddenDivider = grid.position(of: .sixthsRightSplit, in: bounds)
+        XCTAssertEqual(
+            hiddenDivider - twoThirds.minX, twoThirds.maxX - hiddenDivider,
+            accuracy: 0.001, "the hidden divider must bisect the two-thirds window")
+    }
+
+    func testResizingTwoThirdsMovesBothDividersAtomically() {
+        // The inner divider and the dragged edge move together, so the
+        // existing sibling minimum cannot block a two-thirds window from
+        // shrinking (or a right two-thirds from growing in one jump).
+        var left = GridLayout()
+        left.sixthsLeftSplit = 0.4
+        left.sixthsRightSplit = 0.8
+        XCTAssertTrue(
+            left.update(
+                edge: .right, of: .sixthsLeftTwoThirds,
+                toPosition: bounds.minX + 0.2 * bounds.width, in: bounds))
+        XCTAssertEqual(left.sixthsRightSplit, 0.2, accuracy: 0.001)
+        XCTAssertEqual(left.sixthsLeftSplit, 0.1, accuracy: 0.001)
+
+        var right = GridLayout()
+        right.sixthsLeftSplit = 0.2
+        right.sixthsRightSplit = 0.6
+        XCTAssertTrue(
+            right.update(
+                edge: .left, of: .sixthsRightTwoThirds,
+                toPosition: bounds.minX + 0.8 * bounds.width, in: bounds))
+        XCTAssertEqual(right.sixthsLeftSplit, 0.8, accuracy: 0.001)
+        XCTAssertEqual(right.sixthsRightSplit, 0.9, accuracy: 0.001)
+    }
+
+    func testTwoThirdsResizeClampsTheDraggedEdgeButNotTheDerivedDivider() {
+        // The derived inner divider is not the drag target, so the drag
+        // clamp bounds only the outer edge. It still stays strictly inside
+        // the two-thirds span (and the screen) at both extremes.
+        var left = GridLayout()
+        left.update(
+            edge: .right, of: .sixthsLeftTwoThirds,
+            toPosition: bounds.minX, in: bounds)
+        XCTAssertEqual(left.sixthsRightSplit, GridLayout.sixthsColumnClamp.lowerBound)
+        XCTAssertEqual(left.sixthsLeftSplit, 0.05, accuracy: 0.001)
+        XCTAssertGreaterThan(left.sixthsLeftSplit, 0)
+        XCTAssertLessThan(left.sixthsLeftSplit, left.sixthsRightSplit)
+
+        var right = GridLayout()
+        right.update(
+            edge: .left, of: .sixthsRightTwoThirds,
+            toPosition: bounds.maxX, in: bounds)
+        XCTAssertEqual(right.sixthsLeftSplit, GridLayout.sixthsColumnClamp.upperBound)
+        XCTAssertEqual(right.sixthsRightSplit, 0.95, accuracy: 0.001)
+        XCTAssertGreaterThan(right.sixthsRightSplit, right.sixthsLeftSplit)
+        XCTAssertLessThan(right.sixthsRightSplit, 1)
+    }
+
     func testDragSixthsMiddleRowEdgeLeavesOtherColumnsUntouched() {
         // Per-column row dividers like quarters: dragging the middle
         // column's horizontal edge moves only that column's corners.

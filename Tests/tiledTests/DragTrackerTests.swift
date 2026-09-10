@@ -90,6 +90,40 @@ final class DragTrackerTests: XCTestCase {
             })
     }
 
+    /// A tracker wired to a fixed screen rect, so absolute frames read as
+    /// real splitter fractions instead of each frame becoming its own
+    /// bounds like the default frame-as-bounds test rig.
+    private func makeTracker(bounds: CGRect) -> DragTracker {
+        DragTracker(
+            context: DragTracker.Context(
+                slotOf: { [weak self] in self?.slots[$0] },
+                frameOf: { [weak self] in
+                    guard let handle = self?.handles[$0] else { return nil }
+                    return self?.gateway.frame(of: handle)
+                },
+                boundsOf: { _ in bounds },
+                occupants: { [weak self] in self?.occupants ?? [:] },
+                now: { [weak self] in self?.now ?? Date() }),
+            apply: { [weak self] rects, excluding in
+                self?.pushed.append((rects, excluding))
+                return 0
+            },
+            onUntile: { [weak self] in self?.untiled.append($0) },
+            scheduleDragEnd: { [weak self] fire in
+                self?.dragEndFires.append(fire)
+                return {}
+            })
+    }
+
+    /// Streams a real edge drag: a close echo tick is swallowed, then the
+    /// far frame escapes the tolerance radius and reaches the splitters.
+    private func drag(_ id: WindowID, from frame: CGRect, to target: CGRect, tracker: DragTracker) {
+        var echo = frame
+        echo.size.width += min(8, abs(target.width - frame.width))
+        tracker.handleChange(id: id, frame: echo)
+        tracker.handleChange(id: id, frame: target)
+    }
+
     // MARK: Echo suppression
 
     func testConvergingTickIsSwallowed() {
@@ -119,6 +153,63 @@ final class DragTrackerTests: XCTestCase {
         // (0,400,840,600): raw fraction 0, clamped to the row minimum.
         XCTAssertEqual(tracker.grid.leftRowSplit, 0.2, accuracy: 0.001,
             "bottom edge at 400/600 clamps to the row-split minimum")
+    }
+
+    func testResizingLeftTwoThirdsCentersItsHiddenDivider() {
+        let screen = CGRect(x: 0, y: 0, width: 1680, height: 1019)
+        let tracker = makeTracker(bounds: screen)
+        let tiled = GridLayout().rect(for: .sixthsLeftTwoThirds, in: screen)
+        tile(1, .sixthsLeftTwoThirds, frame: tiled, tracker: tracker)
+
+        var resized = tiled
+        resized.size.width = 0.78 * screen.width
+        drag(1, from: tiled, to: resized, tracker: tracker)
+
+        XCTAssertEqual(
+            tracker.grid(for: nil).sixthsRightSplit, 0.78, accuracy: 0.001,
+            "the dragged edge lands where the user put it")
+        XCTAssertEqual(
+            tracker.grid(for: nil).sixthsLeftSplit, 0.39, accuracy: 0.001,
+            "the hidden divider bisects the resized two-thirds window")
+    }
+
+    func testResizingRightTwoThirdsCentersItsHiddenDivider() {
+        let screen = CGRect(x: 0, y: 0, width: 1680, height: 1019)
+        let tracker = makeTracker(bounds: screen)
+        let tiled = GridLayout().rect(for: .sixthsRightTwoThirds, in: screen)
+        tile(1, .sixthsRightTwoThirds, frame: tiled, tracker: tracker)
+
+        var resized = tiled
+        resized.origin.x = 0.22 * screen.width
+        resized.size.width = screen.maxX - resized.minX
+        drag(1, from: tiled, to: resized, tracker: tracker)
+
+        XCTAssertEqual(tracker.grid(for: nil).sixthsLeftSplit, 0.22, accuracy: 0.001)
+        XCTAssertEqual(
+            tracker.grid(for: nil).sixthsRightSplit, 0.61, accuracy: 0.001,
+            "the hidden divider bisects the resized right two-thirds window")
+    }
+
+    func testResizingTheAdjacentThirdAlsoCentersTheTwoThirdsHiddenDivider() {
+        // The third's edge and the two-thirds window's edge are the same
+        // splitter; grabbing either one resizes both windows and must keep
+        // the two-thirds window's hidden divider centered.
+        let screen = CGRect(x: 0, y: 0, width: 1680, height: 1019)
+        let tracker = makeTracker(bounds: screen)
+        let leftTwo = GridLayout().rect(for: .sixthsLeftTwoThirds, in: screen)
+        let rightThird = GridLayout().rect(for: .sixthRight, in: screen)
+        tile(1, .sixthsLeftTwoThirds, frame: leftTwo, tracker: tracker)
+        tile(2, .sixthRight, frame: rightThird, tracker: tracker)
+
+        var resized = rightThird
+        resized.origin.x = 0.7 * screen.width
+        resized.size.width = screen.maxX - resized.minX
+        drag(2, from: rightThird, to: resized, tracker: tracker)
+
+        XCTAssertEqual(tracker.grid(for: nil).sixthsRightSplit, 0.7, accuracy: 0.001)
+        XCTAssertEqual(
+            tracker.grid(for: nil).sixthsLeftSplit, 0.35, accuracy: 0.001,
+            "the two-thirds window still reads as two equal thirds")
     }
 
     func testCornerDragMovesTwoBoundariesInOneChange() {

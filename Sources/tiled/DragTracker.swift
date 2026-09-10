@@ -473,8 +473,13 @@ final class DragTracker {
             // below so we never fight an in-progress native drag.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
             let space = context.spaceOf(id)
+            let centered = centeredTwoThirds(
+                on: boundary, draggedSlot: slot, in: space)
             var spaceGrid = grid(for: space)
-            if spaceGrid.update(boundary: boundary, toPosition: position, in: bounds) {
+            if spaceGrid.update(
+                boundary: boundary, toPosition: position, in: bounds,
+                centeringTwoThirds: centered)
+            {
                 setGrid(spaceGrid, for: space)
                 changed = true
                 log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(spaceGrid)")
@@ -485,6 +490,36 @@ final class DragTracker {
             // wait for mouse-up: pushing tiles while the button is down
             // fights the drag the user is still steering.
             pendingResizeApplies[context.spaceOf(id)] = id
+        }
+    }
+
+    /// The occupied two-thirds window whose hidden one-thirds divider
+    /// must follow `boundary`, if any. Dragging the two-thirds window's
+    /// own outer edge counts directly; so does dragging the adjacent
+    /// third's facing edge, since that is the same splitter resizing both
+    /// windows. Any other boundary leaves the two-thirds divider alone.
+    private func centeredTwoThirds(
+        on boundary: GridBoundary, draggedSlot: Slot, in space: TilingSpaceKey?
+    ) -> Slot? {
+        if draggedSlot == .sixthsLeftTwoThirds, boundary == .sixthsRightSplit {
+            return draggedSlot
+        }
+        if draggedSlot == .sixthsRightTwoThirds, boundary == .sixthsLeftSplit {
+            return draggedSlot
+        }
+        let occupants: [Slot: WindowID]
+        if let space, let occupantsOf = context.occupantsOf {
+            occupants = occupantsOf(space)
+        } else {
+            occupants = context.occupants()
+        }
+        switch boundary {
+        case .sixthsRightSplit:
+            return occupants[.sixthsLeftTwoThirds] != nil ? .sixthsLeftTwoThirds : nil
+        case .sixthsLeftSplit:
+            return occupants[.sixthsRightTwoThirds] != nil ? .sixthsRightTwoThirds : nil
+        default:
+            return nil
         }
     }
 

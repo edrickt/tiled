@@ -99,6 +99,16 @@ enum Slot: String, CaseIterable {
     /// Which layout this slot belongs to.
     var layout: LayoutKind { geometry.layout }
 
+    /// True for the sixths slots that span two thirds of the screen.
+    /// Their span hides a one-thirds divider, which is kept centered
+    /// when the slot's movable outer edge is resized.
+    var isTwoThirds: Bool {
+        switch self {
+        case .sixthsLeftTwoThirds, .sixthsRightTwoThirds: true
+        default: false
+        }
+    }
+
     /// The cells this slot covers: its span of the shared refinement.
     var cells: Set<TileCell> {
         var covered: Set<TileCell> = []
@@ -285,14 +295,51 @@ struct GridLayout: Equatable {
     /// bounds or non-finite positions: a zero-size frame would divide by
     /// zero and poison a splitter with ±inf/NaN, corrupting every rect
     /// derived from it afterwards.
+    ///
+    /// `centeringTwoThirds` names the occupied two-thirds window a drag
+    /// is resizing, when there is one. Its movable outer edge and the
+    /// hidden one-thirds divider inside it move together to the divider's
+    /// midpoint, so a resized two-thirds window still reads as two equal
+    /// one-thirds. The pair is updated atomically: the usual sibling
+    /// minimum exists to keep independent splitters from crossing, but a
+    /// two-thirds window's own outer edge and the divider that defines
+    /// its equal halves must both move or neither can.
     @discardableResult
     mutating func update(
-        boundary: GridBoundary, toPosition position: CGFloat, in bounds: CGRect
+        boundary: GridBoundary, toPosition position: CGFloat, in bounds: CGRect,
+        centeringTwoThirds slot: Slot? = nil
     ) -> Bool {
         guard bounds.width > 0, bounds.height > 0, position.isFinite else { return false }
         let origin = boundary.axis == .vertical ? bounds.minX : bounds.minY
         let span = boundary.axis == .vertical ? bounds.width : bounds.height
         let raw = (position - origin) / span
+        if let slot, let symmetry = Self.twoThirdsSymmetry(
+            for: slot, moving: boundary, to: raw)
+        {
+            var changed = write(boundary, to: symmetry.dragged)
+            if write(symmetry.companion, to: symmetry.companionFraction) {
+                changed = true
+            }
+            return changed
+        }
+        return updateIndependently(boundary, to: raw)
+    }
+
+    /// Moves `slot`'s edge through the same splitter math as `update`,
+    /// including the inner-divider symmetry for two-thirds slots.
+    @discardableResult
+    mutating func update(
+        edge: TileEdge, of slot: Slot, toPosition position: CGFloat, in bounds: CGRect
+    ) -> Bool {
+        guard let boundary = Self.boundary(edge: edge, slot: slot) else { return false }
+        return update(
+            boundary: boundary, toPosition: position, in: bounds,
+            centeringTwoThirds: slot.isTwoThirds ? slot : nil)
+    }
+
+    /// The ordinary independent-splitter update: clamp the dragged
+    /// fraction to its own range, then keep it from crossing its sibling.
+    private mutating func updateIndependently(_ boundary: GridBoundary, to raw: CGFloat) -> Bool {
         var clamped = min(max(raw, boundary.clamp.lowerBound), boundary.clamp.upperBound)
         // Sibling ordering: a splitter can never cross the one beside it.
         if let lower = boundary.lowerSibling {
@@ -301,10 +348,39 @@ struct GridLayout: Equatable {
         if let upper = boundary.upperSibling {
             clamped = min(clamped, self[keyPath: upper] - 0.01)
         }
-        let current = self[keyPath: boundary.fraction]
-        guard abs(clamped - current) > 0.001 else { return false }
-        self[keyPath: boundary.fraction] = clamped
+        return write(boundary, to: clamped)
+    }
+
+    /// Stores `fraction` if it differs meaningfully. Returns whether it
+    /// did. NaN is impossible here: callers guard non-finite input and
+    /// all derived fractions are arithmetic on finite clamped values.
+    private mutating func write(_ boundary: GridBoundary, to fraction: CGFloat) -> Bool {
+        guard abs(self[keyPath: boundary.fraction] - fraction) > 0.001 else { return false }
+        self[keyPath: boundary.fraction] = fraction
         return true
+    }
+
+    /// The coupled fractions for resizing a two-thirds window: the dragged
+    /// outer edge still honors its own drag clamp, while the hidden inner
+    /// divider becomes the midpoint of the resulting span. The inner
+    /// divider is derived, not dragged, so its own static clamp and
+    /// sibling minimum do not apply; the formulas keep it strictly
+    /// between the slot's fixed screen edge and the dragged edge for
+    /// every clamped drag.
+    private static func twoThirdsSymmetry(
+        for slot: Slot, moving boundary: GridBoundary, to raw: CGFloat
+    ) -> (dragged: CGFloat, companion: GridBoundary, companionFraction: CGFloat)? {
+        let dragged = min(max(raw, boundary.clamp.lowerBound), boundary.clamp.upperBound)
+        switch (slot, boundary) {
+        case (.sixthsLeftTwoThirds, .sixthsRightSplit):
+            // Left two-thirds spans [screen left, R]; line 1 bisects it.
+            return (dragged, .sixthsLeftSplit, dragged / 2)
+        case (.sixthsRightTwoThirds, .sixthsLeftSplit):
+            // Right two-thirds spans [L, screen right]; line 3 bisects it.
+            return (dragged, .sixthsRightSplit, (dragged + 1) / 2)
+        default:
+            return nil
+        }
     }
 
     /// Screen-space x of vertical refinement line `index` within `bounds`.

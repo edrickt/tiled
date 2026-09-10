@@ -179,6 +179,34 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(self.controller.grid.leftRowSplit, expectedSplit, accuracy: 0.01)
     }
 
+    func testResizingTwoThirdsThroughItsAdjacentThirdCentersHiddenDivider() {
+        // A left two-thirds window and the right third share the right
+        // splitter. Dragging the third's left edge resizes the two-thirds
+        // too, so the hidden divider inside it still has to bisect the
+        // resized two-thirds span.
+        let twoThirds = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = twoThirds
+        controller.handle(slot: .sixthsLeftTwoThirds)
+        let third = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = third
+        controller.handle(slot: .sixthRight)
+
+        var echo = gateway.frame(of: third)!
+        echo.origin.x += 5
+        echo.size.width -= 5
+        gateway.simulateChange(third, to: echo)
+        var moved = echo
+        moved.origin.x -= 80
+        moved.size.width += 80
+        gateway.simulateChange(third, to: moved)
+
+        XCTAssertEqual(
+            controller.grid.sixthsLeftSplit,
+            controller.grid.sixthsRightSplit / 2,
+            accuracy: 0.01,
+            "the hidden divider stays at the midpoint of the resized two-thirds window")
+    }
+
     // MARK: Drag-out untile
 
     /// Tiles the window and streams a title-bar drag: an echo seed tick,

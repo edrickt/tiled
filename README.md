@@ -148,8 +148,10 @@ neighbors on the other side follow. Vertical and horizontal splitters are
 independent per column (quarters) or per third (sixths), so resizing one
 column never moves the other, and the same independence holds between
 monitors and Spaces, so dragging an edge on one canvas never moves tiles on
-another. **Reset Splitters** in the menu snaps the focused canvas's
-splitters back to even splits.
+another. A two-thirds window resizes as two equal one-thirds: the hidden
+splitter inside it follows its outer edge, staying at the midpoint.
+**Reset Splitters** in the menu snaps the focused canvas's splitters back
+to even splits.
 
 ## Building & running
 
