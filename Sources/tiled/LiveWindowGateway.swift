@@ -280,33 +280,53 @@ final class LiveWindowGateway: WindowGateway {
         spaceCache = Self.currentSpaces()
     }
 
-    /// One pass over the window server's managed-display Space table:
-    /// display UUID -> id of the Space currently shown there. Empty when
-    /// the private symbols are unavailable, which keeps every canvas
-    /// keyed by display (the old behavior).
+    /// One pass over the live window server's managed-display Space
+    /// table: display UUID -> id of the Space currently shown there.
+    /// Empty when the private symbols are unavailable, which keeps every
+    /// canvas keyed by display (the old behavior).
     private static func currentSpaces() -> [CGDirectDisplayID: SpaceID] {
         guard
             let connection = CGS.defaultConnection?(),
             let displays = CGS.copyManagedDisplaySpaces?(connection)?
                 .takeRetainedValue() as? [[String: Any]]
         else { return [:] }
+        return spaces(
+            from: displays,
+            displayIDs: displayIDs(),
+            mainDisplayID: CGMainDisplayID(),
+            uuidString: uuidString(for:))
+    }
+
+    /// Pure core of the Space-table parse. Injecting the table, display
+    /// list, and UUID lookup keeps the release-dependent table shapes
+    /// unit-testable without window-server symbols or attached displays.
+    static func spaces(
+        from displays: [[String: Any]],
+        displayIDs: [CGDirectDisplayID],
+        mainDisplayID: CGDirectDisplayID,
+        uuidString: (CGDirectDisplayID) -> String?
+    ) -> [CGDirectDisplayID: SpaceID] {
         var spaces: [CGDirectDisplayID: SpaceID] = [:]
         for display in displays {
             let identifier = display["Display Identifier"] as? String
             guard
                 let current = display["Current Space"] as? [String: Any],
-                let space = spaceID(from: current["id64"])
+                let space = spaceID(from: current["id64"]),
+                let displayID = displayID(
+                    identifier: identifier,
+                    among: displays,
+                    displayIDs: displayIDs,
+                    mainDisplayID: mainDisplayID,
+                    uuidString: uuidString)
             else { continue }
-            if let displayID = displayID(identifier: identifier, among: displays) {
-                spaces[displayID] = space
-            }
+            spaces[displayID] = space
         }
         return spaces
     }
 
     /// Window-server Space ids bridge as numbers; accept every numeric
     /// shape the table has used across releases.
-    private static func spaceID(from value: Any?) -> SpaceID? {
+    static func spaceID(from value: Any?) -> SpaceID? {
         if let number = value as? NSNumber { return SpaceID(rawValue: number.uint64Value) }
         if let value = value as? UInt64 { return SpaceID(rawValue: value) }
         if let value = value as? Int64 { return SpaceID(rawValue: UInt64(bitPattern: value)) }
@@ -320,27 +340,37 @@ final class LiveWindowGateway: WindowGateway {
     /// table identifies displays by UUID (or "Main" for the menu-bar
     /// display); both round-trip through the same UUID the public
     /// CGDisplay APIs produce, so there is no index guessing.
-    private static func displayID(
-        identifier: String?, among displays: [[String: Any]]
+    static func displayID(
+        identifier: String?,
+        among displays: [[String: Any]],
+        displayIDs: [CGDirectDisplayID],
+        mainDisplayID: CGDirectDisplayID,
+        uuidString: (CGDirectDisplayID) -> String?
     ) -> CGDirectDisplayID? {
         if let identifier {
-            for displayID in displayIDs() {
-                guard
-                    let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?
-                        .takeRetainedValue()
-                else { continue }
-                let string = CFUUIDCreateString(nil, uuid) as String
+            for displayID in displayIDs {
+                guard let string = uuidString(displayID) else { continue }
                 if string.caseInsensitiveCompare(identifier) == .orderedSame {
                     return displayID
                 }
             }
-            if identifier == "Main" { return CGMainDisplayID() }
+            if identifier == "Main" { return mainDisplayID }
         }
         // Unknown identifier shapes: a single-display machine is
         // unambiguous, and guessing there is safer than dropping Space
         // identity on an OS that renamed the key.
-        if displays.count == 1, let only = displayIDs().first { return only }
+        if displays.count == 1, let only = displayIDs.first { return only }
         return nil
+    }
+
+    /// The UUID string CoreGraphics publishes for a live display, the
+    /// same identity the managed-display Space table writes down.
+    private static func uuidString(for displayID: CGDirectDisplayID) -> String? {
+        guard
+            let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?
+                .takeRetainedValue()
+        else { return nil }
+        return CFUUIDCreateString(nil, uuid) as String
     }
 
     /// Every attached CoreGraphics display, for UUID mapping and the
