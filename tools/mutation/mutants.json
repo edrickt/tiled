@@ -244,5 +244,11 @@
   "derived surface tracks focus instead of the canvas that acted",
   "        surfaceSpace = space ?? focusedSpaceKey()",
   "        surfaceSpace = focusedSpaceKey()"
+ ],
+ [
+  "PlanExecutor.swift",
+  "degenerate swap fallback forgets which windows are expanded (re-houses an expanded evictee)",
+  "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, working: Working(state: state, records: records),\n                execution: execution)",
+  "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, working: Working(state: state, records: records),\n                execution: Execution(\n                    tracker: execution.tracker, boundsOf: execution.boundsOf,\n                    observe: execution.observe, spaceOf: execution.spaceOf,\n                    isExpanded: { _ in false }, space: execution.space))"
  ]
 ]

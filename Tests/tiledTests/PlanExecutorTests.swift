@@ -44,9 +44,10 @@ final class PlanExecutorTests: XCTestCase {
         return id
     }
 
-    private func run(_ decision: TilePlan, requester: WindowID, slot: Slot)
-        -> (PlanExecutor.Outcome, TilingState, [WindowID: WindowRecord], WindowID)
-    {
+    private func run(
+        _ decision: TilePlan, requester: WindowID, slot: Slot,
+        isExpanded: @escaping (WindowID) -> Bool = { _ in false }
+    ) -> (PlanExecutor.Outcome, TilingState, [WindowID: WindowRecord], WindowID) {
         executor.execute(
             decision: decision, requester: requester, slot: slot,
             state: state, records: records, nextID: nextID,
@@ -55,7 +56,8 @@ final class PlanExecutorTests: XCTestCase {
             observe: { [weak self] id in
                 guard let handle = self?.records[id]?.handle else { return }
                 self?.gateway.observe(handle, onChange: {})
-            })
+            },
+            isExpanded: isExpanded)
     }
 
     private func commit(_ result: (PlanExecutor.Outcome, TilingState, [WindowID: WindowRecord], WindowID))
@@ -252,6 +254,48 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertTrue(
             snapshot.contains { $0.slot == .sixthTopLeft },
             "the requester's undo entry names its vacated tile")
+    }
+
+    /// A swap plan whose requester is not tiled degrades to a plain
+    /// eviction. That fallback must carry the real expanded-window
+    /// closure: with one that always answers false, a re-house would move
+    /// an expanded evictee into the freed slot while it still covers the
+    /// layout. Expanded windows come back to earth by untangling instead.
+    func testDegenerateSwapNeverRehousesAnExpandedEvictee() {
+        let blocker = addWindow()
+        let requester = addWindow()
+        state.commit(window: blocker, into: .topLeft)
+
+        // The requester holds no slot, so `.swap` is degenerate; the top
+        // left overlaps the left half, so the blocker is evicted; and the
+        // cells left free are exactly the right half, which is the slot a
+        // re-house would have used.
+        let outcome = commit(
+            run(
+                .swap(displaced: blocker), requester: requester, slot: .leftHalf,
+                isExpanded: { $0 == blocker }))
+
+        XCTAssertNil(
+            outcome.rehoused,
+            "an expanded evictee is never re-housed, degenerate swap or not")
+        XCTAssertNil(state.slot(of: blocker), "the expanded blocker untangles")
+        XCTAssertEqual(state.slot(of: requester), .leftHalf)
+    }
+
+    /// The same shape without the expansion: the lone evictee is re-housed
+    /// into the one whole slot the request left free, so the assertion
+    /// above is the expanded-window exclusion and not a broken re-house.
+    func testDegenerateSwapRehousesAnUnexpandedEvictee() {
+        let blocker = addWindow()
+        let requester = addWindow()
+        state.commit(window: blocker, into: .topLeft)
+
+        let outcome = commit(
+            run(.swap(displaced: blocker), requester: requester, slot: .leftHalf))
+
+        XCTAssertEqual(outcome.rehoused, blocker, "the lone evictee stays tiled")
+        XCTAssertEqual(state.slot(of: blocker), .rightHalf)
+        XCTAssertEqual(state.slot(of: requester), .leftHalf)
     }
 
     // MARK: Notice copy

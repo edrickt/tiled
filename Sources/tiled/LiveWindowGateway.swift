@@ -682,7 +682,12 @@ final class LiveWindowGateway: WindowGateway {
             let axOrigin = readPoint(element, positionAttribute),
             let size = readSize(element, sizeAttribute)
         else { return nil }
-        let primaryTop = NSScreen.screens.first?.frame.maxY ?? (axOrigin.y + size.height)
+        // The y-flip needs the primary screen's top edge: with no screen
+        // reported there is no coordinate space to convert into, and the
+        // old guess (`axOrigin.y + size.height`) silently flattened every
+        // frame's y to 0. An unreadable frame is the honest answer, and
+        // every caller already treats nil as "unknown".
+        guard let primaryTop = NSScreen.screens.first?.frame.maxY else { return nil }
         return appKitFrame(axOrigin: axOrigin, size: size, primaryTop: primaryTop)
     }
 
@@ -696,7 +701,10 @@ final class LiveWindowGateway: WindowGateway {
     /// top-left (always inside the visible frame) never clamps.
     @discardableResult
     private static func setFrame(_ element: AXUIElement, to nsFrame: CGRect) -> Bool {
-        let primaryTop = NSScreen.screens.first?.frame.maxY ?? nsFrame.maxY
+        // Same reasoning as the read path: with no screen there is no
+        // coordinate space to convert into, so refuse the write rather
+        // than place the window at a guessed position.
+        guard let primaryTop = NSScreen.screens.first?.frame.maxY else { return false }
         guard
             let sizeValue = sizeValue(CGSize(width: nsFrame.width, height: nsFrame.height)),
             let positionValue = pointValue(axTopLeft(of: nsFrame, primaryTop: primaryTop))

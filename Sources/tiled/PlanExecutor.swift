@@ -209,19 +209,17 @@ final class PlanExecutor {
             records[id] != nil, records[displaced] != nil
         else {
             // Degenerate plan (untiled requester or a window that
-            // vanished): degrade to the ordinary eviction path.
+            // vanished): degrade to the ordinary eviction path, with the
+            // real closure set. An `isExpanded` that always answers false
+            // would let a re-house pick up an expanded evictee, which the
+            // documented rule forbids: an expanded window comes back to
+            // earth by untangling, never by moving into the freed slot
+            // while it still covers the layout.
             log("swap DEGENERATE win\(id) -> \(slot.rawValue); falling back to tile")
-            // The original call omitted `isExpanded`, so the fallback
-            // ran with the parameter default (`{ _ in false }`).
-            // Preserved rather than silently changed.
-            let fallback = Execution(
-                tracker: execution.tracker, boundsOf: execution.boundsOf,
-                observe: execution.observe, spaceOf: execution.spaceOf,
-                isExpanded: { _ in false }, space: execution.space)
             return applyTile(
                 .tile(evicting: [displaced]), requester: id,
                 slot: slot, working: Working(state: state, records: records),
-                execution: fallback)
+                execution: execution)
         }
         // Snapshot before any commit: each entry carries its window's
         // own former tile, so undo replays the swap backwards.
