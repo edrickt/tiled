@@ -226,5 +226,17 @@
   "already-registered notification read as failure (retry never converges)",
   "            status == .success || status == .notificationAlreadyRegistered",
   "            status == .success"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "forgetting a process drops every process's keys",
+  "            let keys = registeredKeys.filter { $0.value == pid }.map(\\.key)",
+  "            let keys = registeredKeys.map(\\.key)"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "forgetting a process keeps its observer belief (stale observer reused forever)",
+  "        mutating func forget(pid: pid_t) -> [UInt] {\n            observerPIDs.remove(pid)",
+  "        mutating func forget(pid: pid_t) -> [UInt] {\n            _ = pid"
  ]
 ]

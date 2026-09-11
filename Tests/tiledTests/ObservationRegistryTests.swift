@@ -112,4 +112,49 @@ final class ObservationRegistryTests: XCTestCase {
                 "\(status) must not read as registered")
         }
     }
+
+    // MARK: Forgetting a process
+
+    /// A process leaving drops its keys and its observer belief, and
+    /// nothing else: another app's windows are still observed.
+    func testForgetDropsOnlyThatPIDsKeys() {
+        var registry = LiveWindowGateway.ObservationRegistry()
+        _ = registry.begin(key: 1, pid: 100)
+        registry.finish(key: 1, pid: 100, outcome: .registered)
+        _ = registry.begin(key: 2, pid: 200)
+        registry.finish(key: 2, pid: 200, outcome: .registered)
+
+        XCTAssertEqual(registry.forget(pid: 100), [1])
+        XCTAssertFalse(registry.isObserved(key: 1))
+        XCTAssertTrue(registry.isObserved(key: 2))
+    }
+
+    /// Forgetting clears the pid's observer belief, so a window from that
+    /// app arriving later creates a fresh observer instead of taking the
+    /// reuse path and finding the dropped object there.
+    func testForgetClearsTheObserverBelief() {
+        var registry = LiveWindowGateway.ObservationRegistry()
+        _ = registry.begin(key: 1, pid: 100)
+        registry.finish(key: 1, pid: 100, outcome: .registered)
+
+        _ = registry.forget(pid: 100)
+        XCTAssertEqual(registry.begin(key: 2, pid: 100), .createObserver)
+    }
+
+    func testForgetLeavesTheOtherPIDsObserverIntact() {
+        var registry = LiveWindowGateway.ObservationRegistry()
+        _ = registry.begin(key: 1, pid: 100)
+        registry.finish(key: 1, pid: 100, outcome: .registered)
+        _ = registry.begin(key: 2, pid: 200)
+        registry.finish(key: 2, pid: 200, outcome: .registered)
+
+        _ = registry.forget(pid: 100)
+        XCTAssertEqual(registry.begin(key: 3, pid: 200), .register)
+    }
+
+    func testForgetWithNothingRegisteredIsHarmless() {
+        var registry = LiveWindowGateway.ObservationRegistry()
+        XCTAssertEqual(registry.forget(pid: 100), [])
+        XCTAssertEqual(registry.begin(key: 1, pid: 100), .createObserver)
+    }
 }

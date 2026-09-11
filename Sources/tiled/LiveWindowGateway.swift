@@ -82,6 +82,11 @@ final class LiveWindowGateway: WindowGateway {
     private var focusChangeHandler: (() -> Void)?
     /// Re-targets `focusObserver` when a different app becomes frontmost.
     private var activeAppObserver: NSObjectProtocol?
+    /// Drops a quit app's shared observer. Window death alone cannot
+    /// catch this: an app that quits with every window untiled leaves no
+    /// handle to probe, and its observer and runloop source would
+    /// otherwise outlive it for the life of the session.
+    private var appTerminationObserver: NSObjectProtocol?
     /// Space-change observer: swiping to another Space must rebuild the
     /// menu and, when the focused display changed canvas, the glyph.
     private var spaceChangeHandler: (() -> Void)?
@@ -103,6 +108,17 @@ final class LiveWindowGateway: WindowGateway {
             ] as? NSRunningApplication
             self?.retargetFocusObserver(to: activated)
         }
+        appTerminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            let terminated = notification.userInfo?[
+                NSWorkspace.applicationUserInfoKey
+            ] as? NSRunningApplication
+            guard let pid = terminated?.processIdentifier else { return }
+            if pid == self?.focusObserverPID { self?.releaseFocusObserver() }
+            self?.pruneObserver(for: pid)
+        }
         spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil, queue: .main
@@ -120,6 +136,9 @@ final class LiveWindowGateway: WindowGateway {
     deinit {
         if let activeAppObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(activeAppObserver)
+        }
+        if let appTerminationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(appTerminationObserver)
         }
         if let spaceChangeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserver)
@@ -197,8 +216,31 @@ final class LiveWindowGateway: WindowGateway {
             pids[handle] = nil
             changeHandlers[handle] = nil
             lastFrames[handle] = nil
+            // The last managed window of a process takes its shared
+            // observer with it; a process still holding one keeps it.
+            if !pids.values.contains(pid) { pruneObserver(for: pid) }
         }
         return verdict
+    }
+
+    /// Drops a pid's shared observer once nothing is left to observe:
+    /// the runloop source comes off the main runloop and the registry
+    /// forgets which pids and element keys it was serving. The observer's
+    /// elements are already gone by the time this runs (that is the
+    /// condition), so there is no notification left to unregister: what
+    /// would leak is the observer object and its runloop source, which
+    /// the runloop retains forever once added.
+    private func pruneObserver(for pid: pid_t) {
+        let keys = registry.forget(pid: pid)
+        guard let observer = observers[pid] else { return }
+        CFRunLoopRemoveSource(
+            CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer),
+            CFRunLoopMode.commonModes)
+        observers[pid] = nil
+        if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+            NSLog("Tiled: [DEBUG-obs] pruned observer for pid %d (%d keys)",
+                  pid, keys.count)
+        }
     }
 
     /// Frames within a point of each other: the cached last-read frame
@@ -816,6 +858,17 @@ final class LiveWindowGateway: WindowGateway {
 
         /// Whether the element's change notifications are registered.
         func isObserved(key: UInt) -> Bool { registeredKeys[key] != nil }
+
+        /// Forgets a pid's observer and returns the element keys that were
+        /// registered on it, so the caller can drop the object they were
+        /// served by. Other pids keep their keys and their observer: this
+        /// is a process leaving, not a registry reset.
+        mutating func forget(pid: pid_t) -> [UInt] {
+            observerPIDs.remove(pid)
+            let keys = registeredKeys.filter { $0.value == pid }.map(\.key)
+            for key in keys { registeredKeys[key] = nil }
+            return keys
+        }
     }
 
     // MARK: Geometry (pure conversions, unit-tested without AX)
