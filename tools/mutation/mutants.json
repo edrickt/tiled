@@ -238,5 +238,11 @@
   "forgetting a process keeps its observer belief (stale observer reused forever)",
   "        mutating func forget(pid: pid_t) -> [UInt] {\n            observerPIDs.remove(pid)",
   "        mutating func forget(pid: pid_t) -> [UInt] {\n            _ = pid"
+ ],
+ [
+  "TilingController.swift",
+  "derived surface tracks focus instead of the canvas that acted",
+  "        surfaceSpace = space ?? focusedSpaceKey()",
+  "        surfaceSpace = focusedSpaceKey()"
  ]
 ]

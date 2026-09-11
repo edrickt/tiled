@@ -399,4 +399,27 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertNil(controller.state(on: rightID).slot(of: 2))
         XCTAssertEqual(controller.occupant(of: .topLeft, on: leftID), 1)
     }
+
+    /// The derived surface reports the canvas an action touched, not the
+    /// display the user happens to be focused on. Every write form above
+    /// moves focus with the window it tiles, so this is the case that
+    /// distinguishes "the canvas that acted" from "the focused canvas":
+    /// a screen-scoped action on the unfocused monitor.
+    func testSurfaceReportsTheActedCanvasNotTheFocusedDisplay() {
+        let left = tileOnLeft()
+        controller.handle(slot: .topLeft)
+        tileOnRight()
+        controller.handle(slot: .topLeft)
+        gateway.focused = left
+
+        controller.untileAll(on: rightID)
+
+        XCTAssertTrue(
+            controller.state.occupants.isEmpty,
+            "the surface reports the right canvas, the one that just acted")
+        XCTAssertEqual(
+            controller.occupant(of: .topLeft, on: leftID), 1,
+            "the left canvas is untouched")
+        XCTAssertNil(controller.occupant(of: .topLeft, on: rightID))
+    }
 }

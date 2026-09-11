@@ -46,11 +46,19 @@ final class TilingController {
     private let screens: ScreenProvider
     /// Per-canvas tiling spaces: each display's each Mission Control
     /// Space runs its own occupancy, splitters (owned by the tracker),
-    /// undo chapters, and transient notices. The legacy `state` / `grid`
-    /// surface below mirrors the focused canvas so menus and existing
-    /// tests keep working.
+    /// undo chapters, and transient notices. The `state` / `grid` surface
+    /// below is derived from one canvas at a time, so menus and existing
+    /// tests keep working without a second copy of anything.
     private var spaces: [TilingSpaceKey: CanvasState] = [:]
-    private(set) var state = TilingState()
+    /// The canvas the derived `state` surface reports: the one the last
+    /// action touched, else the focused canvas. Only the *key* is stored;
+    /// the occupancy is read from the canvas on demand, so the surface
+    /// cannot go stale or become a second owner of state `CanvasState`
+    /// already holds.
+    private var surfaceSpace: TilingSpaceKey?
+    var state: TilingState {
+        spaceState(for: surfaceSpace ?? focusedSpaceKey())
+    }
     /// Current grid. Source of truth lives in the tracker; this mirrors
     /// it for tests and menus that read `controller.grid`.
     var grid: GridLayout { tracker.grid(for: focusedSpaceKey()) }
@@ -283,7 +291,7 @@ final class TilingController {
         }
         hasResolvedFocusedSpace = true
         lastFocusedSpace = key
-        syncLegacySurface(focus: key)
+        noteSurfaceCanvas(key)
         onFocusedSpaceChange?()
     }
 
@@ -298,7 +306,7 @@ final class TilingController {
         if !hasResolvedFocusedSpace || key != lastFocusedSpace {
             hasResolvedFocusedSpace = true
             lastFocusedSpace = key
-            syncLegacySurface(focus: key)
+            noteSurfaceCanvas(key)
             onFocusedSpaceChange?()
         }
         onChange?()
@@ -428,7 +436,7 @@ final class TilingController {
                 scheduleVerification(of: [rehoused], on: key)
             }
         }
-        syncLegacySurface(focus: key)
+        noteSurfaceCanvas(key)
         // The reflow's survivors share the event's undo chapter: undo
         // restores the pre-event world in one ⌃⇧⌘Z (a move with no
         // eviction has no chapter of its own, so the reflow starts one).
@@ -499,7 +507,7 @@ final class TilingController {
             }
         }
         onFeedback?(.refused(windowName: name))
-        syncLegacySurface(focus: errorSpace)
+        noteSurfaceCanvas(errorSpace)
         onChange?()
         dbg("verify FAILED win\(id): silent ignore, rolled back")
     }
@@ -876,7 +884,7 @@ final class TilingController {
                 $0.undoStack[$0.undoStack.count - 1] = (snapshot: snapshot, requester: nil)
             }
         }
-        syncLegacySurface(focus: space)
+        noteSurfaceCanvas(space)
         onChange?()
     }
 
@@ -1055,7 +1063,7 @@ final class TilingController {
         // A nil requester with an empty snapshot (untile-all chapter
         // whose windows all died) still consumes the entry: nothing to
         // restore, standard error above.
-        syncLegacySurface(focus: space)
+        noteSurfaceCanvas(space)
         onChange?()
     }
 
@@ -1261,7 +1269,7 @@ final class TilingController {
             reportRestoreFailures([failure])
         }
         pushLeaveUndo(slot: slot, on: space)
-        syncLegacySurface(focus: space)
+        noteSurfaceCanvas(space)
         onChange?()
     }
 
@@ -1505,7 +1513,7 @@ final class TilingController {
         }
         spaceOwnership[id] = nil
         expanded[id] = nil
-        syncLegacySurface(focus: nil)
+        noteSurfaceCanvas(nil)
     }
 
     private static func refusalMessage(count: Int) -> String {
@@ -1538,9 +1546,6 @@ final class TilingController {
 
     private func setSpaceState(_ state: TilingState, for space: TilingSpaceKey) {
         mutateSpace(space) { $0.state = state }
-        if space == focusedSpaceKey() {
-            self.state = state
-        }
     }
 
     /// Owning canvas of a tiled window (nil when untiled/unknown).
@@ -1653,14 +1658,13 @@ final class TilingController {
         expanded[id] = nil
     }
 
-    /// Mirrors the focused canvas's occupancy onto the legacy `state`
-    /// surface that existing tests read. The canvas's undo chapters,
-    /// splitters, notices, and errors are read through `focusedCanvas()`
-    /// and the tracker, so they are not copied here. `focus` names the
-    /// canvas that just changed; nil re-resolves from the focused window.
-    private func syncLegacySurface(focus space: TilingSpaceKey?) {
-        let key = space ?? focusedSpaceKey()
-        let current = spaces[key] ?? CanvasState()
-        state = current.state
+    /// Reports which canvas the derived `state` surface describes: the
+    /// one that just changed. `space` nil re-resolves to the focused
+    /// canvas, which is what a focus change should show. Nothing is
+    /// copied: the occupancy is read from the canvas when asked, so a
+    /// mutation path that forgets this call leaves the surface pointing
+    /// at a canvas, never at a stale snapshot of one.
+    private func noteSurfaceCanvas(_ space: TilingSpaceKey?) {
+        surfaceSpace = space ?? focusedSpaceKey()
     }
 }
