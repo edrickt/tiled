@@ -72,6 +72,27 @@ final class PlanExecutor {
 
     // MARK: Execution
 
+    /// The pair a plan branch commits against: occupancy plus window
+    /// records, handed to a branch and returned by it. Value semantics are
+    /// what make a half-rolled-back branch safe to hand back at all.
+    struct Working {
+        var state: TilingState
+        var records: [WindowID: WindowRecord]
+    }
+
+    /// Everything a plan branch needs that is not the decision itself:
+    /// the gateway work it performs and the canvas it belongs to, bundled
+    /// so each branch names what it acts on instead of repeating ten
+    /// parameters.
+    struct Execution {
+        let tracker: DragTracker
+        let boundsOf: (CGRect) -> CGRect
+        let observe: (WindowID) -> Void
+        let spaceOf: (WindowID) -> TilingSpaceKey?
+        let isExpanded: (WindowID) -> Bool
+        let space: TilingSpaceKey?
+    }
+
     /// Commits `decision` for `requester` into `slot`. Takes state,
     /// records, and the next id by value and returns the updated copies
     /// alongside the outcome: holding `inout` across the call would trip
@@ -81,6 +102,12 @@ final class PlanExecutor {
     /// for pruned undo handles happens on the local copy via `nextID`,
     /// so it stays visible to the rest of the call.
     ///
+    /// This is only the dispatcher: each plan kind commits in its own
+    /// `applySwitchLayout` / `applySwap` / `applyTile`, which take the
+    /// same `Working` by value and hand it back, so a branch that rolled
+    /// part-way back returns a consistent pair rather than a shared
+    /// object it half-mutated.
+    ///
     /// `space` names the tiling canvas every placement belongs to (the
     /// plan was decided over one Space's state, so all its windows share
     /// one display and Space): every slot-rect write derives from that
@@ -89,14 +116,182 @@ final class PlanExecutor {
     func execute(
         decision: TilePlan, requester id: WindowID, slot: Slot,
         state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID,
-        tracker: DragTracker, boundsOf: (CGRect) -> CGRect,
-        observe: (WindowID) -> Void,
-        spaceOf: (WindowID) -> TilingSpaceKey? = { _ in nil },
-        isExpanded: (WindowID) -> Bool = { _ in false },
+        tracker: DragTracker, boundsOf: @escaping (CGRect) -> CGRect,
+        observe: @escaping (WindowID) -> Void,
+        spaceOf: @escaping (WindowID) -> TilingSpaceKey? = { _ in nil },
+        isExpanded: @escaping (WindowID) -> Bool = { _ in false },
         space: TilingSpaceKey? = nil
     ) -> (outcome: Outcome, state: TilingState, records: [WindowID: WindowRecord], nextID: WindowID) {
-        var state = state
-        var records = records
+        let working = Working(state: state, records: records)
+        let execution = Execution(
+            tracker: tracker, boundsOf: boundsOf, observe: observe,
+            spaceOf: spaceOf, isExpanded: isExpanded, space: space)
+        let committed: (outcome: Outcome, working: Working)
+        switch decision {
+        case .noop:
+            // Unreachable: callers guard noop first.
+            return (Outcome(), state, records, nextID)
+        case .switchLayout:
+            committed = applySwitchLayout(
+                decision, requester: id, slot: slot,
+                working: working, execution: execution)
+        case .swap(let displaced):
+            committed = applySwap(
+                displaced, decision: decision, requester: id, slot: slot,
+                working: working, execution: execution)
+        case .tile:
+            committed = applyTile(
+                decision, requester: id, slot: slot,
+                working: working, execution: execution)
+        }
+        return (committed.outcome, committed.working.state, committed.working.records, nextID)
+    }
+
+    /// The layout-switch branch: the requester moves rather than evicting,
+    /// so everyone else in the way is restored first (restoring the
+    /// requester would delete its record and the placement would bail).
+    private func applySwitchLayout(
+        _ decision: TilePlan, requester id: WindowID, slot: Slot,
+        working: Working, execution: Execution
+    ) -> (outcome: Outcome, working: Working) {
+        var state = working.state
+        var records = working.records
+        // The requester moves rather than evicts: restore everyone
+        // else first (restoring it would delete its record, so `place`
+        // would bail and the window would merely untile). Its old tile
+        // is vacated by the commit inside `place`.
+        let evicted = decision.windowsToRestore(requester: id)
+        let snapshot = evicted.compactMap { evictedID in
+            Self.snapshotEntry(
+                for: evictedID, state: state, records: records, fallback: slot,
+                space: execution.spaceOf(evictedID))
+        }
+        let restoreFailures = restore(
+            evicted, state: &state, records: &records, tracker: execution.tracker)
+        let placeResult = place(
+            window: id, into: slot, state: &state, records: &records,
+            tracker: execution.tracker, boundsOf: execution.boundsOf, observe: execution.observe, space: execution.space)
+        var outcome = Outcome()
+        if records[id] == nil {
+            // `place` bailed (no record): nothing to snapshot.
+            reportRestoreFailures(restoreFailures, error: &outcome.error)
+        } else if placeResult.error == nil, restoreFailures.isEmpty, !evicted.isEmpty {
+            let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
+            // Narrate the event AND the recovery: the notice is the
+            // hotkey user's only record of a mass-untile, and the
+            // undo row may sit below the fold. One sentence, one
+            // cue: no menu-title splicing, just the combo.
+            outcome.notice =
+                "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. " +
+                "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+            outcome.snapshot = snapshot
+            outcome.requester = id
+        } else {
+            outcome.error = placeResult.error
+            outcome.feedback = placeResult.feedback
+            reportRestoreFailures(restoreFailures, error: &outcome.error)
+        }
+        log("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
+        return (outcome, Working(state: state, records: records))
+    }
+
+    /// The swap branch: both windows stay tiled, the displaced one taking
+    /// the tile the requester vacates. The displaced window moves first, so
+    /// a refusal anywhere leaves every window where it started.
+    private func applySwap(
+        _ displaced: WindowID, decision: TilePlan, requester id: WindowID, slot: Slot,
+        working: Working, execution: Execution
+    ) -> (outcome: Outcome, working: Working) {
+        var state = working.state
+        let records = working.records
+        guard let previous = state.slot(of: id),
+            let displacedOriginal = state.slot(of: displaced),
+            records[id] != nil, records[displaced] != nil
+        else {
+            // Degenerate plan (untiled requester or a window that
+            // vanished): degrade to the ordinary eviction path.
+            log("swap DEGENERATE win\(id) -> \(slot.rawValue); falling back to tile")
+            // The original call omitted `isExpanded`, so the fallback
+            // ran with the parameter default (`{ _ in false }`).
+            // Preserved rather than silently changed.
+            let fallback = Execution(
+                tracker: execution.tracker, boundsOf: execution.boundsOf,
+                observe: execution.observe, spaceOf: execution.spaceOf,
+                isExpanded: { _ in false }, space: execution.space)
+            return applyTile(
+                .tile(evicting: [displaced]), requester: id,
+                slot: slot, working: Working(state: state, records: records),
+                execution: fallback)
+        }
+        // Snapshot before any commit: each entry carries its window's
+        // own former tile, so undo replays the swap backwards.
+        let snapshot = [(displaced, displacedOriginal), (id, previous)].compactMap {
+            (entryID, formerSlot) in
+            Self.snapshotEntry(
+                for: entryID, state: state, records: records, fallback: formerSlot,
+                space: execution.spaceOf(entryID))
+        }
+        var outcome = Outcome()
+        state.commit(window: displaced, into: previous)
+        execution.observe(displaced)
+        if !applyLayout(
+            for: displaced, state: state, records: records,
+            tracker: execution.tracker, boundsOf: execution.boundsOf, space: execution.space)
+        {
+            // The refused write moved nothing on screen: the rollback
+            // is state-only, restoring both occupancies.
+            state.commit(window: displaced, into: displacedOriginal)
+            state.commit(window: id, into: previous)
+            log("swap FAILED displaced win\(displaced) -> \(previous.rawValue)")
+            let refusal = Self.refusal(for: displaced, records: records, gateway: gateway)
+            outcome.error = refusal.error
+            outcome.feedback = refusal.feedback
+            return (outcome, Working(state: state, records: records))
+        }
+        state.commit(window: id, into: slot)
+        execution.observe(id)
+        if !applyLayout(
+            for: id, state: state, records: records,
+            tracker: execution.tracker, boundsOf: execution.boundsOf, space: execution.space)
+        {
+            // Roll the whole swap back: the displaced window's frame
+            // visibly moved, so it is written home; the requester was
+            // never written, so only its occupancy restores.
+            state.commit(window: displaced, into: displacedOriginal)
+            state.commit(window: id, into: previous)
+            applyLayout(
+                for: displaced, state: state, records: records,
+                tracker: execution.tracker, boundsOf: execution.boundsOf, space: execution.space)
+            log("place FAILED win\(id) -> \(slot.rawValue); swap rolled back")
+            let refusal = Self.refusal(for: id, records: records, gateway: gateway)
+            outcome.error = refusal.error
+            outcome.feedback = refusal.feedback
+            return (outcome, Working(state: state, records: records))
+        }
+        // A swap untiles nobody, but it does move a window the user
+        // didn't touch: the notice names it and its landing tile.
+        let displacedName = appName(for: displaced, records: records) ?? "That window"
+        outcome.notice =
+            "\(displacedName) moved to \(SlotPresentation.title(of: previous)) "
+                + "to make room. Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+        outcome.snapshot = snapshot
+        outcome.requester = id
+        log(
+            "swap win\(id) -> \(slot.rawValue), win\(displaced) -> \(previous.rawValue)")
+        return (outcome, Working(state: state, records: records))
+    }
+
+    /// The tile branch: evict whoever overlaps, place the requester, and
+    /// re-house a lone evictee into the one whole slot the request left
+    /// free. Hands the freed cells to the controller, which owns the one
+    /// reflow applier.
+    private func applyTile(
+        _ decision: TilePlan, requester id: WindowID, slot: Slot,
+        working: Working, execution: Execution
+    ) -> (outcome: Outcome, working: Working) {
+        var state = working.state
+        var records = working.records
+        let evicted = decision.windowsToRestore(requester: id)
         // The eviction notice names the displaced app when known: the
         // user's first question after a surprise eviction is "where did
         // Safari go?"; a count answers bookkeeping, not memory. One
@@ -104,209 +299,90 @@ final class PlanExecutor {
         let evictionNames = { [self] (evicted: [WindowID]) in
             evicted.compactMap { appName(for: $0, records: records) }
         }
-        switch decision {
-        case .noop:
-            return (Outcome(), state, records, nextID) // unreachable: callers guard noop first
-        case .switchLayout:
-            // The requester moves rather than evicts: restore everyone
-            // else first (restoring it would delete its record, so `place`
-            // would bail and the window would merely untile). Its old tile
-            // is vacated by the commit inside `place`.
-            let evicted = decision.windowsToRestore(requester: id)
-            let snapshot = evicted.compactMap { evictedID in
-                Self.snapshotEntry(
-                    for: evictedID, state: state, records: records, fallback: slot,
-                    space: spaceOf(evictedID))
-            }
-            let restoreFailures = restore(
-                evicted, state: &state, records: &records, tracker: tracker)
-            let placeResult = place(
-                window: id, into: slot, state: &state, records: &records,
-                tracker: tracker, boundsOf: boundsOf, observe: observe, space: space)
-            var outcome = Outcome()
-            if records[id] == nil {
-                // `place` bailed (no record): nothing to snapshot.
-                reportRestoreFailures(restoreFailures, error: &outcome.error)
-            } else if placeResult.error == nil, restoreFailures.isEmpty, !evicted.isEmpty {
-                let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
-                // Narrate the event AND the recovery: the notice is the
-                // hotkey user's only record of a mass-untile, and the
-                // undo row may sit below the fold. One sentence, one
-                // cue: no menu-title splicing, just the combo.
+        // Names resolve BEFORE the restore deletes the records:
+        // `restoreWindow` nils each record as it frees the slot, so
+        // naming after would degrade every eviction to a count.
+        let evictedNames = evictionNames(evicted)
+        // Slots leave the state before reflow sees them: the evicted
+        // slots and the requester's vacated tile together form the
+        // freed region the survivors may absorb.
+        let evictedSlots = evicted.compactMap { state.slot(of: $0) }
+        let previous = state.slot(of: id)
+        // Re-house: a lone evictee need not lose its tiling. If the
+        // cells the request leaves free form exactly one whole slot,
+        // the victim re-tiles into it instead of untangling (the
+        // middle third evicted by the right two-thirds moves into
+        // the free top-left sixth). Expanded windows skip it: they
+        // come back to earth by untangling, not by moving.
+        var rehouse: (window: WindowID, home: Slot)?
+        if evicted.count == 1, !execution.isExpanded(evicted[0]),
+            let home = state.rehousingHome(evicting: evicted[0], for: slot)
+        {
+            rehouse = (evicted[0], home)
+        }
+        let snapshot = evicted.compactMap { evictedID in
+            Self.snapshotEntry(
+                for: evictedID, state: state, records: records, fallback: slot,
+                space: execution.spaceOf(evictedID))
+        }
+        let restoreFailures = restore(
+            evicted.filter { $0 != rehouse?.window },
+            state: &state, records: &records, tracker: execution.tracker)
+        let placeResult = place(
+            window: id, into: slot, state: &state, records: &records,
+            tracker: execution.tracker, boundsOf: execution.boundsOf, observe: execution.observe, space: execution.space)
+        var outcome = Outcome()
+        outcome.error = placeResult.error
+        outcome.feedback = placeResult.feedback
+        reportRestoreFailures(restoreFailures, error: &outcome.error)
+        // Re-house commit: once the requester sits, the victim moves
+        // into the one free slot and stays tiled. A refused write
+        // falls back to the plain eviction (restore its pre-tile
+        // frame), so the outcome never lies about what happened.
+        if let (wid, home) = rehouse {
+            state.commit(window: wid, into: home)
+            if applyLayout(
+                for: wid, state: state, records: records,
+                tracker: execution.tracker, boundsOf: execution.boundsOf, space: execution.space)
+            {
+                outcome.rehoused = wid
+                let name = appName(for: wid, records: records) ?? "That window"
                 outcome.notice =
-                    "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. " +
-                    "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
-                outcome.snapshot = snapshot
-                outcome.requester = id
+                    "\(name) moved to \(SlotPresentation.title(of: home)) to make room. "
+                        + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
             } else {
-                outcome.error = placeResult.error
-                outcome.feedback = placeResult.feedback
-                reportRestoreFailures(restoreFailures, error: &outcome.error)
+                _ = restoreWindow(
+                    id: wid, state: &state, records: &records, tracker: execution.tracker)
+                log("rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
             }
-            log("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
-            return (outcome, state, records, nextID)
-        case .swap(let displaced):
-            // Both windows stay tiled: the displaced one takes the tile
-            // the requester vacates, the requester takes the target. The
-            // displaced window moves first, so a refusal anywhere leaves
-            // every window where it started.
-            guard let previous = state.slot(of: id),
-                let displacedOriginal = state.slot(of: displaced),
-                records[id] != nil, records[displaced] != nil
-            else {
-                // Degenerate plan (untiled requester or a window that
-                // vanished): degrade to the ordinary eviction path.
-                log("swap DEGENERATE win\(id) -> \(slot.rawValue); falling back to tile")
-                return execute(
-                    decision: .tile(evicting: [displaced]), requester: id, slot: slot,
-                    state: state, records: records, nextID: nextID,
-                    tracker: tracker, boundsOf: boundsOf, observe: observe,
-                    spaceOf: spaceOf, space: space)
+        }
+        if placeResult.error == nil, restoreFailures.isEmpty {
+            // Hand the freed region to the controller: it owns the one
+            // reflow applier, which drops the cells the requester
+            // covers again (they are occupied, so only true remainders
+            // reach the survivors) and grows the one mergeable
+            // survivor, folding its undo entries into this chapter.
+            var freed = Set(evictedSlots.flatMap { $0.cells })
+            if let previous {
+                freed.formUnion(previous.cells)
             }
-            // Snapshot before any commit: each entry carries its window's
-            // own former tile, so undo replays the swap backwards.
-            let snapshot = [(displaced, displacedOriginal), (id, previous)].compactMap {
-                (entryID, formerSlot) in
-                Self.snapshotEntry(
-                    for: entryID, state: state, records: records, fallback: formerSlot,
-                    space: spaceOf(entryID))
-            }
-            var outcome = Outcome()
-            state.commit(window: displaced, into: previous)
-            observe(displaced)
-            if !applyLayout(
-                for: displaced, state: state, records: records,
-                tracker: tracker, boundsOf: boundsOf, space: space)
-            {
-                // The refused write moved nothing on screen: the rollback
-                // is state-only, restoring both occupancies.
-                state.commit(window: displaced, into: displacedOriginal)
-                state.commit(window: id, into: previous)
-                log("swap FAILED displaced win\(displaced) -> \(previous.rawValue)")
-                let refusal = Self.refusal(for: displaced, records: records, gateway: gateway)
-                outcome.error = refusal.error
-                outcome.feedback = refusal.feedback
-                return (outcome, state, records, nextID)
-            }
-            state.commit(window: id, into: slot)
-            observe(id)
-            if !applyLayout(
-                for: id, state: state, records: records,
-                tracker: tracker, boundsOf: boundsOf, space: space)
-            {
-                // Roll the whole swap back: the displaced window's frame
-                // visibly moved, so it is written home; the requester was
-                // never written, so only its occupancy restores.
-                state.commit(window: displaced, into: displacedOriginal)
-                state.commit(window: id, into: previous)
-                applyLayout(
-                    for: displaced, state: state, records: records,
-                    tracker: tracker, boundsOf: boundsOf, space: space)
-                log("place FAILED win\(id) -> \(slot.rawValue); swap rolled back")
-                let refusal = Self.refusal(for: id, records: records, gateway: gateway)
-                outcome.error = refusal.error
-                outcome.feedback = refusal.feedback
-                return (outcome, state, records, nextID)
-            }
-            // A swap untiles nobody, but it does move a window the user
-            // didn't touch: the notice names it and its landing tile.
-            let displacedName = appName(for: displaced, records: records) ?? "That window"
-            outcome.notice =
-                "\(displacedName) moved to \(SlotPresentation.title(of: previous)) "
-                    + "to make room. Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+            outcome.reflowFreed = freed
+        }
+        if placeResult.error == nil, restoreFailures.isEmpty, !evicted.isEmpty {
+            // Ordinary eviction gets the same narrative as a layout
+            // switch: a notice naming the displaced app plus the shared
+            // one-step undo. The switch was never special; it was
+            // just the first destruction anyone bothered to narrate.
+            // A re-house already narrated itself (the victim moved,
+            // nobody went back).
             outcome.snapshot = snapshot
             outcome.requester = id
-            log(
-                "swap win\(id) -> \(slot.rawValue), win\(displaced) -> \(previous.rawValue)")
-            return (outcome, state, records, nextID)
-        case .tile:
-            let evicted = decision.windowsToRestore(requester: id)
-            // Names resolve BEFORE the restore deletes the records:
-            // `restoreWindow` nils each record as it frees the slot, so
-            // naming after would degrade every eviction to a count.
-            let evictedNames = evictionNames(evicted)
-            // Slots leave the state before reflow sees them: the evicted
-            // slots and the requester's vacated tile together form the
-            // freed region the survivors may absorb.
-            let evictedSlots = evicted.compactMap { state.slot(of: $0) }
-            let previous = state.slot(of: id)
-            // Re-house: a lone evictee need not lose its tiling. If the
-            // cells the request leaves free form exactly one whole slot,
-            // the victim re-tiles into it instead of untangling (the
-            // middle third evicted by the right two-thirds moves into
-            // the free top-left sixth). Expanded windows skip it: they
-            // come back to earth by untangling, not by moving.
-            var rehouse: (window: WindowID, home: Slot)?
-            if evicted.count == 1, !isExpanded(evicted[0]),
-                let home = state.rehousingHome(evicting: evicted[0], for: slot)
-            {
-                rehouse = (evicted[0], home)
+            if outcome.notice == nil {
+                outcome.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
             }
-            let snapshot = evicted.compactMap { evictedID in
-                Self.snapshotEntry(
-                    for: evictedID, state: state, records: records, fallback: slot,
-                    space: spaceOf(evictedID))
-            }
-            let restoreFailures = restore(
-                evicted.filter { $0 != rehouse?.window },
-                state: &state, records: &records, tracker: tracker)
-            let placeResult = place(
-                window: id, into: slot, state: &state, records: &records,
-                tracker: tracker, boundsOf: boundsOf, observe: observe, space: space)
-            var outcome = Outcome()
-            outcome.error = placeResult.error
-            outcome.feedback = placeResult.feedback
-            reportRestoreFailures(restoreFailures, error: &outcome.error)
-            // Re-house commit: once the requester sits, the victim moves
-            // into the one free slot and stays tiled. A refused write
-            // falls back to the plain eviction (restore its pre-tile
-            // frame), so the outcome never lies about what happened.
-            if let (wid, home) = rehouse {
-                state.commit(window: wid, into: home)
-                if applyLayout(
-                    for: wid, state: state, records: records,
-                    tracker: tracker, boundsOf: boundsOf, space: space)
-                {
-                    outcome.rehoused = wid
-                    let name = appName(for: wid, records: records) ?? "That window"
-                    outcome.notice =
-                        "\(name) moved to \(SlotPresentation.title(of: home)) to make room. "
-                            + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
-                } else {
-                    _ = restoreWindow(
-                        id: wid, state: &state, records: &records, tracker: tracker)
-                    log("rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
-                }
-            }
-            if placeResult.error == nil, restoreFailures.isEmpty {
-                // Hand the freed region to the controller: it owns the one
-                // reflow applier, which drops the cells the requester
-                // covers again (they are occupied, so only true remainders
-                // reach the survivors) and grows the one mergeable
-                // survivor, folding its undo entries into this chapter.
-                var freed = Set(evictedSlots.flatMap { $0.cells })
-                if let previous {
-                    freed.formUnion(previous.cells)
-                }
-                outcome.reflowFreed = freed
-            }
-            if placeResult.error == nil, restoreFailures.isEmpty, !evicted.isEmpty {
-                // Ordinary eviction gets the same narrative as a layout
-                // switch: a notice naming the displaced app plus the shared
-                // one-step undo. The switch was never special; it was
-                // just the first destruction anyone bothered to narrate.
-                // A re-house already narrated itself (the victim moved,
-                // nobody went back).
-                outcome.snapshot = snapshot
-                outcome.requester = id
-                if outcome.notice == nil {
-                    outcome.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
-                }
-            }
-            return (outcome, state, records, nextID)
         }
+        return (outcome, Working(state: state, records: records))
     }
-
     /// Undoes a layout switch: restores the requester to its pre-tile
     /// frame and returns every surviving evicted window to its slot.
     /// Returns the notice or error for the controller to apply.

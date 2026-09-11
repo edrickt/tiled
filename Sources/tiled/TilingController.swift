@@ -327,15 +327,22 @@ final class TilingController {
 
     // MARK: Hotkey entry point
 
-    func handle(slot: Slot) {
+    /// The requester for a slot hotkey and the canvas the request belongs
+    /// to: prunes dead windows first, then resolves the focused window to
+    /// its registry id. Nil (with feedback) when nothing is focused.
+    private func requesterAndCanvas(for slot: Slot) -> (id: WindowID, key: TilingSpaceKey)? {
         pruneDeadWindows()
         guard let handle = gateway.focusedWindow() else {
             dbg("no focused window for \(slot.rawValue)")
             onFeedback?(.noFocusedWindow)
-            return
+            return nil
         }
         let id = windowID(for: handle)
-        let key = spaceKeyForRequester(id, handle: handle)
+        return (id, spaceKeyForRequester(id, handle: handle))
+    }
+
+    func handle(slot: Slot) {
+        guard let (id, key) = requesterAndCanvas(for: slot) else { return }
         // An expanded window getting a slot hotkey comes back to earth
         // first: its own slot becomes the strict no-op below; a different
         // slot retiles from the collapsed state.
@@ -381,7 +388,19 @@ final class TilingController {
         if result.outcome.error == nil, result.state.slot(of: id) != nil {
             setSpaceOwnership(id, key)
         }
-        let outcome = result.outcome
+        settle(decision, outcome: result.outcome, requester: id, on: key)
+    }
+
+    /// Everything after a committed plan: untiled windows give up their
+    /// records, the cells the event freed reflow into one survivor,
+    /// restored windows sit below the arrangement, a swap's displaced
+    /// window takes focus, and the event is narrated, verified, noted on
+    /// the surface, and made undoable. One chapter per event, so a single
+    /// ⌃⌥⇧⌘Z puts back everything this function settled.
+    private func settle(
+        _ decision: TilePlan, outcome: PlanExecutor.Outcome,
+        requester id: WindowID, on key: TilingSpaceKey
+    ) {
         // Restored-not-re-housed windows: untiled for good. A re-housed
         // window is the exception: it stayed tiled in the slot the
         // request left free, so its record and observation survive.

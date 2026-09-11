@@ -8,8 +8,8 @@
  [
   "PlanExecutor.swift",
   "swap write-home deleted (screen/state diverge)",
-  "                state.commit(window: displaced, into: displacedOriginal)\n                state.commit(window: id, into: previous)\n                applyLayout(\n                    for: displaced, state: state, records: records,\n                    tracker: tracker, boundsOf: boundsOf, space: space)\n                log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
-  "                state.commit(window: displaced, into: displacedOriginal)\n                state.commit(window: id, into: previous)\n                log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")"
+  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            applyLayout(\n                for: displaced, state: state, records: records,\n                tracker: execution.tracker, boundsOf: execution.boundsOf, space: execution.space)\n            log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
+  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")"
  ],
  [
   "TilingController.swift",
@@ -116,20 +116,20 @@
  [
   "PlanExecutor.swift",
   "failed displaced swap write is NOT rolled back",
-  "                state.commit(window: displaced, into: displacedOriginal)\n                state.commit(window: id, into: previous)\n                log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")",
-  "                log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")"
+  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")",
+  "            log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")"
  ],
  [
   "PlanExecutor.swift",
   "rehouse ignores expanded-window exclusion",
-  "            if evicted.count == 1, !isExpanded(evicted[0]),",
-  "            if evicted.count == 1,"
+  "        if evicted.count == 1, !execution.isExpanded(evicted[0]),",
+  "        if evicted.count == 1,"
  ],
  [
   "PlanExecutor.swift",
   "reflowFreed drops the vacated tile",
-  "                if let previous {\n                    freed.formUnion(previous.cells)\n                }",
-  "                if false, let previous {\n                    freed.formUnion(previous.cells)\n                }"
+  "            if let previous {\n                freed.formUnion(previous.cells)\n            }",
+  "            if false, let previous {\n                freed.formUnion(previous.cells)\n            }"
  ],
  [
   "DragTracker.swift",
