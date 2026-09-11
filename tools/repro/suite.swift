@@ -82,7 +82,11 @@ func hotkey(_ slot: String) {
     let src = CGEventSource(stateID: .hidSystemState)
     for down in [true, false] {
         let e = CGEvent(keyboardEventSource: src, virtualKey: keyFor[slot]!, keyDown: down)
-        e?.flags = [.maskAlternate, .maskShift]
+        // Quarters are ⌥⇧⌘ + key; ⌥⇧ + the same key is the sixths family,
+        // and both families use these keys. This suite models quarters
+        // only (see `quads` / `gridRect`), so Command is required: without
+        // it the app tiles sixths and every geometry check fails.
+        e?.flags = [.maskAlternate, .maskShift, .maskCommand]
         post(e)
     }
 }
@@ -100,7 +104,12 @@ func axRect(_ appkit: CGRect) -> CGRect {
 
 var tiled: [String: String] = [:]        // title -> slot
 var preTile: [String: CGRect] = [:]      // title -> AX frame captured at first tile
-var col: CGFloat = 0.5, row: CGFloat = 0.5
+var col: CGFloat = 0.5
+// One column split, but a row split per column: the app keeps
+// `leftRowSplit` and `rightRowSplit` apart, so dragging the left
+// column's row divider never moves the right column's. A single shared
+// `row` here made every later scenario drift from the app on purpose.
+var rowL: CGFloat = 0.5, rowR: CGFloat = 0.5
 
 let quads: [String: Set<String>] = [
     "TL": ["tl"], "TR": ["tr"], "BL": ["bl"], "BR": ["br"],
@@ -110,6 +119,7 @@ func overlaps(_ a: String, _ b: String) -> Bool { !quads[a]!.isDisjoint(with: qu
 
 func gridRect(_ slot: String) -> CGRect {
     let x = vf.minX + col * vf.width
+    let row = (slot == "TR" || slot == "BR") ? rowR : rowL
     let y = vf.minY + row * vf.height
     let r: CGRect
     switch slot {
@@ -130,6 +140,12 @@ func actualFrame(_ t: String) -> CGRect? {
 
 func untileMirror(_ t: String) { tiled[t] = nil }
 
+/// Whether a frame is one of the grid's slot rects under the current
+/// splitters. A window the app still has tiled reports one of these.
+func isOnGrid(_ f: CGRect) -> Bool {
+    ["TL", "TR", "BL", "BR", "LH", "RH"].contains { close(f, gridRect($0)) }
+}
+
 func doTile(_ t: String, _ slot: String) {
     let wasTiled = tiled[t] != nil
     let preFrame = actualFrame(t)
@@ -142,7 +158,14 @@ func doTile(_ t: String, _ slot: String) {
     for (other, s) in tiled where other != t && overlaps(s, slot) {
         untileMirror(other)
     }
-    if !wasTiled, let f = preFrame { preTile[t] = f }
+    // Only a really-floating frame becomes a restore target. This mirror
+    // models eviction, but not the app's swap (the blocker stays tiled in
+    // the vacated tile) or its re-house (a lone evictee stays tiled in
+    // the freed slot), so it can believe a window is floating while the
+    // app still has it on the grid. Recording a grid rect here would
+    // assert, at the next eviction, a restore the app correctly never
+    // performs.
+    if !wasTiled, let f = preFrame, !isOnGrid(f) { preTile[t] = f }
     tiled[t] = slot
 }
 
@@ -168,6 +191,19 @@ func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
     }
     usleep(600_000)
 
+    // End the simulated drag with a real release. The controller defers
+    // neighbour resizes until the click lifts (`mouseLifted`, wired to a
+    // global left-mouse-up monitor), so nothing moves under a held
+    // button: without a release the splitter advances and the windows
+    // stay exactly where they were. The press is posted too, so the app
+    // sees a real click gesture rather than a bare up event.
+    if let f = actualFrame(t) {
+        let c = CGPoint(x: f.midX, y: f.midY)
+        post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: c, mouseButton: .left))
+        post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: c, mouseButton: .left))
+        usleep(700_000)
+    }
+
     // mirror splitter updates from the final frame
     guard let fin = actualFrame(t) else { return }
     func clamp(_ v: CGFloat, _ r: ClosedRange<CGFloat>) -> CGFloat { min(max(v, r.lowerBound), r.upperBound) }
@@ -178,7 +214,8 @@ func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
         col = clamp((fin.minX - vf.minX) / vf.width, 0.15...0.85)
     case ("TL", "bottom"), ("BL", "top"), ("TR", "bottom"), ("BR", "top"):
         let appkitY = primaryTop - (edge == "top" ? fin.minY : fin.maxY)
-        row = clamp((appkitY - vf.minY) / vf.height, 0.2...0.8)
+        let value = clamp((appkitY - vf.minY) / vf.height, 0.2...0.8)
+        if slot == "TR" || slot == "BR" { rowR = value } else { rowL = value }
     default:
         break // screen edges: no splitter
     }
@@ -267,10 +304,10 @@ verify("S6b column recovered to \(col)")
 
 // MARK: S7 - screen edges must be inert
 
-let colSaved = col, rowSaved = row
+let colSaved = col, rowLSaved = rowL, rowRSaved = rowR
 dragEdge("HOSTA", "left", 40)
 dragEdge("HOSTB", "bottom", -40)
-if col == colSaved && row == rowSaved {
+if col == colSaved && rowL == rowLSaved && rowR == rowRSaved {
     pass += 1; print("PASS S7 screen-edge drags did not move splitters")
 } else {
     fail += 1; print(">>>> FAILED S7: splitters moved on screen-edge drag")
@@ -305,8 +342,8 @@ verify("S10c A retiled into resized left half")
 // MARK: S11 - moving a tiled window is inert (v1), grid intact
 
 simulateMove("HOSTA", by: CGSize(width: 60, height: 40))
-let colMoved = col, rowMoved = row
-if col == colMoved && row == rowMoved {
+let colMoved = col, rowLMoved = rowL, rowRMoved = rowR
+if col == colMoved && rowL == rowLMoved && rowR == rowRMoved {
     pass += 1; print("PASS S11a title-bar move did not move splitters")
 } else {
     fail += 1; print(">>>> FAILED S11a")
