@@ -214,5 +214,17 @@
   "display UUID matching becomes case-sensitive",
   "                if string.caseInsensitiveCompare(identifier) == .orderedSame {",
   "                if string == identifier {"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "failed notification registration remembered as observed (window loses drag-resize for good)",
+  "            case .registrationFailed:\n                observerPIDs.insert(pid)",
+  "            case .registrationFailed:\n                registeredKeys[key] = pid\n                observerPIDs.insert(pid)"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "already-registered notification read as failure (retry never converges)",
+  "            status == .success || status == .notificationAlreadyRegistered",
+  "            status == .success"
  ]
 ]

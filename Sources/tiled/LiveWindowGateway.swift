@@ -65,9 +65,11 @@ final class LiveWindowGateway: WindowGateway {
     /// Observer per pid; registrations outlive untiled records and can
     /// never be unregistered, so they are created once and shared.
     private var observers: [pid_t: AXObserver] = [:]
-    /// Handles with notifications registered (CFHash keyed; dedupe, since
-    /// re-tiling must not double-register).
-    private var observedElements: Set<UInt> = []
+    /// Which elements have change notifications registered, and which
+    /// processes already own a shared observer (CFHash keyed; dedupe, since
+    /// re-tiling must not double-register). The adapter performs the AX
+    /// calls; this decides what a registration request needs.
+    private var registry = ObservationRegistry()
     /// Change handler per observed handle.
     private var changeHandlers: [WindowHandle: () -> Void] = [:]
     /// Focus observer for the frontmost application: its key-window
@@ -211,45 +213,68 @@ final class LiveWindowGateway: WindowGateway {
         changeHandlers[handle] = onChange
         let key = UInt(CFHash(element))
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
-            NSLog("Tiled: [DEBUG-obs] observe win%d pid=%d key=%lu already=%d",
-                  handle.id, pid, key, observedElements.contains(key) ? 1 : 0)
+            NSLog("Tiled: [DEBUG-obs] observe win%d pid=%d key=%lu observed=%d",
+                  handle.id, pid, key, registry.isObserved(key: key) ? 1 : 0)
         }
-        guard !observedElements.contains(key) else { return }
-        observedElements.insert(key)
+        switch registry.begin(key: key, pid: pid) {
+        case .skip:
+            return
 
-        let observer: AXObserver
-        if let existing = observers[pid] {
-            observer = existing
-        } else {
+        case .createObserver:
             var created: AXObserver?
             let result = AXObserverCreate(
                 pid, Self.observerCallback, &created)
             guard result == .success, let newObserver = created else {
-                observedElements.remove(key)
+                registry.finish(key: key, pid: pid, outcome: .observerUnavailable)
                 NSLog(
                     "tiled: AXObserverCreate failed for pid %d (%d)", pid,
                     result.rawValue)
                 return
             }
-            observer = newObserver
-            observers[pid] = observer
+            observers[pid] = newObserver
             CFRunLoopAddSource(
-                CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer),
+                CFRunLoopGetMain(), AXObserverGetRunLoopSource(newObserver),
                 CFRunLoopMode.commonModes)
-        }
+            registerChanges(
+                on: newObserver, element: element, pid: pid, key: key)
 
+        case .register:
+            guard let observer = observers[pid] else {
+                // The registry believed this pid had an observer and the
+                // object is gone: forget the belief so the next attempt
+                // creates one instead of failing here forever.
+                registry.finish(key: key, pid: pid, outcome: .observerUnavailable)
+                return
+            }
+            registerChanges(on: observer, element: element, pid: pid, key: key)
+        }
+    }
+
+    /// Registers the resize and move notifications for one element, then
+    /// reports how the attempt ended. Only a landed registration is
+    /// remembered: a window whose notifications could not be registered
+    /// stays retryable, instead of losing drag-resize for the rest of the
+    /// session with nothing on screen to say so.
+    private func registerChanges(
+        on observer: AXObserver, element: AXUIElement, pid: pid_t, key: UInt
+    ) {
+        var failure: AXError?
         for name in [kAXWindowResizedNotification, kAXWindowMovedNotification] {
             let status = AXObserverAddNotification(
                 observer, element, name as CFString, nil)
             if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
                 NSLog("Tiled: [DEBUG-obs] add %@ on pid %d (%d)", name as String, pid, status.rawValue)
             }
-            if status != .success {
+            if !ObservationRegistry.addSucceeded(status) {
+                failure = status
                 NSLog(
                     "tiled: could not observe %@ on pid %d (%d)", name as String, pid,
                     status.rawValue)
             }
         }
+        registry.finish(
+            key: key, pid: pid,
+            outcome: failure == nil ? .registered : .registrationFailed)
     }
 
     func observeFocusChanges(_ onChange: @escaping () -> Void) {
@@ -710,6 +735,87 @@ final class LiveWindowGateway: WindowGateway {
             }
             return lastError
         }
+    }
+
+    // MARK: AXObserver registration (pure policy, unit-tested without AX)
+
+    /// Bookkeeping for per-window change notifications. The adapter owns
+    /// the AX objects; this decides what a registration request needs and
+    /// remembers what the objects cannot answer: which element keys are
+    /// observed (re-tiling must not double-register) and which processes
+    /// own a shared observer (registrations outlive untiled records, so an
+    /// observer is created once per pid and reused).
+    ///
+    /// Only a *landed* registration counts as observed. Remembering an
+    /// attempt that failed would lock that window out of drag-resize for
+    /// the life of the process: the next `observe` for the same element
+    /// would read it as already registered, return without doing anything,
+    /// and nothing on screen would say so.
+    struct ObservationRegistry {
+        /// What the adapter must do for a registration request.
+        enum Step: Equatable {
+            /// Observed already, or an attempt is still in flight.
+            case skip
+            /// The pid has no observer yet: create one, then register.
+            case createObserver
+            /// The pid's shared observer exists: register on it.
+            case register
+        }
+
+        /// How the AX calls for one attempt turned out.
+        enum Outcome: Equatable {
+            /// Every notification is in place: remember the key.
+            case registered
+            /// The observer exists, but at least one notification could not
+            /// be registered. Forget the attempt, so a later `observe`
+            /// retries, and keep the observer shareable.
+            case registrationFailed
+            /// There was no observer to register on (creation failed, or the
+            /// object was already gone). Forget the attempt and the pid's
+            /// observer, so the retry creates one.
+            case observerUnavailable
+        }
+
+        private var observerPIDs: Set<pid_t> = []
+        private var registeredKeys: [UInt: pid_t] = [:]
+        private var pendingKeys: Set<UInt> = []
+
+        /// Whether `AXObserverAddNotification` left the notification in
+        /// place. `.notificationAlreadyRegistered` counts: the retry after
+        /// a partial failure re-adds what the first attempt already landed,
+        /// and reading that as failure would retry forever.
+        static func addSucceeded(_ status: AXError) -> Bool {
+            status == .success || status == .notificationAlreadyRegistered
+        }
+
+        /// Decides the step for `key` on `pid` and marks the attempt
+        /// pending, so a re-entrant `observe` (the same element requested
+        /// twice before the AX calls return) cannot double-register.
+        mutating func begin(key: UInt, pid: pid_t) -> Step {
+            guard registeredKeys[key] == nil, !pendingKeys.contains(key) else {
+                return .skip
+            }
+            pendingKeys.insert(key)
+            return observerPIDs.contains(pid) ? .register : .createObserver
+        }
+
+        /// Records how the attempt ended and releases the key's pending
+        /// slot, so a key that failed can be attempted again.
+        mutating func finish(key: UInt, pid: pid_t, outcome: Outcome) {
+            pendingKeys.remove(key)
+            switch outcome {
+            case .registered:
+                registeredKeys[key] = pid
+                observerPIDs.insert(pid)
+            case .registrationFailed:
+                observerPIDs.insert(pid)
+            case .observerUnavailable:
+                observerPIDs.remove(pid)
+            }
+        }
+
+        /// Whether the element's change notifications are registered.
+        func isObserved(key: UInt) -> Bool { registeredKeys[key] != nil }
     }
 
     // MARK: Geometry (pure conversions, unit-tested without AX)
