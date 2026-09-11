@@ -91,6 +91,33 @@ func hotkey(_ slot: String) {
     }
 }
 
+func pressUndo() {
+    let src = CGEventSource(stateID: .hidSystemState)
+    // ⌃⌥⇧⌘Z: the app's fixed undo, global so it works from anywhere.
+    for down in [true, false] {
+        let e = CGEvent(keyboardEventSource: src, virtualKey: 6, keyDown: down)
+        e?.flags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
+        post(e)
+    }
+}
+
+/// Evicts a tiled window with the app's ⌥⇧⌫: it leaves the grid and
+/// returns to its pre-tile frame, which `verify` then asserts.
+@discardableResult
+func evict(_ t: String) -> Bool {
+    guard tiled[t] != nil else { return false }
+    focus(t)
+    let src = CGEventSource(stateID: .hidSystemState)
+    for down in [true, false] {
+        let e = CGEvent(keyboardEventSource: src, virtualKey: 51, keyDown: down) // ⌫
+        e?.flags = [.maskAlternate, .maskShift]
+        post(e)
+    }
+    usleep(900_000)
+    untileMirror(t)
+    return true
+}
+
 // MARK: screen metrics
 
 let screen = NSScreen.screens[0]
@@ -115,6 +142,12 @@ let quads: [String: Set<String>] = [
     "TL": ["tl"], "TR": ["tr"], "BL": ["bl"], "BR": ["br"],
     "LH": ["tl", "bl"], "RH": ["tr", "br"],
 ]
+/// The slots whose cells can exactly equal a free region, in declaration
+/// order (the app picks the first match the same way). Quarters is the
+/// refinement's 4-cell quotient — left/right by top/bottom — which is
+/// faithful here because every slot is a union of these cells.
+let quadSlots = ["TL", "TR", "BL", "BR", "LH", "RH"]
+let allQuadCells: Set<String> = ["tl", "tr", "bl", "br"]
 func overlaps(_ a: String, _ b: String) -> Bool { !quads[a]!.isDisjoint(with: quads[b]!) }
 
 func gridRect(_ slot: String) -> CGRect {
@@ -155,16 +188,46 @@ func doTile(_ t: String, _ slot: String) {
     if tiled[t] == slot { // same-tile re-press is a no-op
         return
     }
-    for (other, s) in tiled where other != t && overlaps(s, slot) {
+    let blockers = tiled.filter { $0.key != t && overlaps($0.value, slot) }
+
+    // Swap: the requester is already tiled, exactly one window blocks the
+    // target, and the tile it vacates is disjoint from the target. Nobody
+    // is untiled: the blocker takes the vacated tile and focus follows it.
+    if wasTiled, blockers.count == 1, !overlaps(tiled[t]!, slot) {
+        let (blocked, _) = blockers.first!
+        tiled[blocked] = tiled[t]!
+        tiled[t] = slot
+        return
+    }
+
+    // Re-house is decided before anything moves, exactly as the app does
+    // it: the cells nobody occupies — the target plus every other
+    // window's tile, with the requester still in the tile it is leaving —
+    // must be exactly one whole slot, and a lone evictee moves into it
+    // instead of untangling. Two evictees never re-house.
+    var rehouse: (window: String, home: String)?
+    if blockers.count == 1 {
+        let evictee = blockers.first!.key
+        var occupied = quads[slot]!
+        for (other, s) in tiled where other != t && other != evictee {
+            occupied.formUnion(quads[s]!)
+        }
+        let free = allQuadCells.subtracting(occupied)
+        if let home = quadSlots.first(where: { quads[$0] == free }) {
+            rehouse = (evictee, home)
+        }
+    }
+
+    for (other, _) in blockers {
         untileMirror(other)
     }
-    // Only a really-floating frame becomes a restore target. This mirror
-    // models eviction, but not the app's swap (the blocker stays tiled in
-    // the vacated tile) or its re-house (a lone evictee stays tiled in
-    // the freed slot), so it can believe a window is floating while the
-    // app still has it on the grid. Recording a grid rect here would
-    // assert, at the next eviction, a restore the app correctly never
-    // performs.
+    if let (evictee, home) = rehouse {
+        tiled[evictee] = home
+    }
+    // Only a really-floating frame becomes a restore target: a grid rect
+    // means the app still has the window tiled (the mirror can lag the
+    // app), and recording it would later assert a restore the app
+    // correctly never performs.
     if !wasTiled, let f = preFrame, !isOnGrid(f) { preTile[t] = f }
     tiled[t] = slot
 }
@@ -385,6 +448,56 @@ for i in 1...3 {
     doTile("HOSTC", "TR") // no-op re-press: layout untouched
     verify("S15 iteration \(i)")
 }
+
+// MARK: S16 - swap: a lone blocker takes the vacated tile
+
+// HOSTD was closed in S12a and never comes back, so the board holds A, B,
+// and C. Clearing first makes the arrangement explicit rather than a
+// leftover of S15, and the evictions also assert that each window returns
+// to its pre-tile frame.
+evict("HOSTA"); evict("HOSTB"); evict("HOSTC")
+verify("S16a board cleared: A, B, C each back at their pre-tile frames")
+doTile("HOSTA", "TL"); doTile("HOSTB", "BL")
+verify("S16b A in TL, B in BL")
+
+// A is tiled, exactly one window blocks BL, and the tile A vacates (TL)
+// is disjoint from BL, so this swaps: nobody is untiled and B takes the
+// vacated TL. A second blocker, an untiled requester, or a vacated tile
+// overlapping the target would evict instead (S14a, S17c, S18b).
+doTile("HOSTA", "BL")
+verify("S16c swap: A in BL, B in TL, nobody evicted")
+
+// MARK: S17 - re-house: a lone evictee stays tiled
+
+evict("HOSTA"); evict("HOSTB"); evict("HOSTC")
+doTile("HOSTA", "TL"); doTile("HOSTB", "BR")
+verify("S17a A in TL, B in BR")
+
+// C taking the left half overlaps only A (B sits bottom-right): A is the
+// lone evictee, and the cells nobody occupies afterwards are exactly TR,
+// so A re-tiles into TR instead of untangling.
+doTile("HOSTC", "LH")
+verify("S17b re-house: C in LH, A moved to TR, B untouched")
+
+// MARK: S18 - undo restores a double eviction
+
+evict("HOSTA"); evict("HOSTB"); evict("HOSTC")
+doTile("HOSTA", "TL"); doTile("HOSTB", "BL")
+verify("S18a A in TL, B in BL")
+
+// The left half overlaps both A (TL) and B (BL): two evictees, so no
+// swap (one blocker required) and no re-house (one evictee required).
+// This is the newest undo chapter, so one ⌃⌥⇧⌘Z returns all of it: the
+// evicted windows go back to their slots and the requester to its
+// pre-tile frame.
+doTile("HOSTC", "LH")
+verify("S18b C in LH, A and B both evicted")
+pressUndo()
+usleep(1_500_000)
+tiled["HOSTC"] = nil
+tiled["HOSTA"] = "TL"
+tiled["HOSTB"] = "BL"
+verify("S18c undo returned A and B to their slots and C to its pre-tile frame")
 
 print("==============================")
 print("PASS \(pass)  FAIL \(fail)")
