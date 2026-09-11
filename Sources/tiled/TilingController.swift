@@ -47,8 +47,8 @@ final class TilingController {
     /// Per-canvas tiling spaces: each display's each Mission Control
     /// Space runs its own occupancy, splitters (owned by the tracker),
     /// undo chapters, and transient notices. The legacy `state` / `grid`
-    /// / undo surface below aggregates the focused canvas so menus and
-    /// existing callers keep working.
+    /// surface below mirrors the focused canvas so menus and existing
+    /// tests keep working.
     private var spaces: [TilingSpaceKey: CanvasState] = [:]
     private(set) var state = TilingState()
     /// Current grid. Source of truth lives in the tracker; this mirrors
@@ -66,20 +66,11 @@ final class TilingController {
     /// it across displays keeps its slot until untiled.
     private var spaceOwnership: [WindowID: TilingSpaceKey] = [:]
 
-    /// Snapshot of the last displacement(s), enabling a one-step undo.
-    /// Each entry is a full recovery unit: the snapshot plus the requester
-    /// to restore alongside it (a switch restores its requester; an
-    /// ordinary eviction retiles its own). Newest last. The global undo
-    /// consumes from the tail, so the freshest destruction is always the
-    /// one that returns: no silent invalidation, ever.
-    private var undoStack: [(snapshot: [EvictedWindow], requester: WindowID?)] = []
-    /// Depth cap: enough history to survive a tile-tile-realize rhythm
-    /// without growing unbounded in a hotkey-heavy session.
+    /// Depth cap for the per-canvas displacement undo: enough history to
+    /// survive a tile-tile-realize rhythm without growing unbounded in a
+    /// hotkey-heavy session. The chapters themselves live in `CanvasState`,
+    /// beside the occupancy they describe.
     fileprivate static let undoDepth = 5
-    /// Splitter fractions parked by the last Reset Splitters, enabling a
-    /// one-step restore. Memory-only, like the displacement undo: drag
-    /// positions are per-session craft.
-    private var splitterBackup: GridLayout?
 
     /// Whether a displacement undo is available (menu item visibility).
     var canUndoDisplacement: Bool { focusedCanvas().undoStack.isEmpty == false }
@@ -715,20 +706,6 @@ final class TilingController {
         visibleScreen(for: frame)
     }
 
-    /// The screen that owns `frame` (same fallback chain as
-    /// `visibleBounds`): largest overlap, then midpoint, then main.
-    func screen(for frame: CGRect) -> NSScreen? {
-        let screens = NSScreen.screens
-        if let index = Self.owningScreenIndex(frames: screens.map(\.frame), for: frame) {
-            return screens[index]
-        }
-        if let index = Self.midpointScreenIndex(frames: screens.map(\.frame), for: frame) {
-            return screens[index]
-        }
-        dbg("no screen overlaps \(frame); falling back to main")
-        return NSScreen.main
-    }
-
     /// Pure screen-fallback rule, extracted for tests: index of the screen
     /// containing the frame's midpoint, used when no screen shows a
     /// majority share (off-screen or inter-Space windows still tile
@@ -762,7 +739,7 @@ final class TilingController {
     func pruneDeadWindows() {
         let dead = records.filter { gateway.liveness(of: $0.value.handle) == .dead }
         let timestamp = now()
-        for (id, record) in dead {
+        for (id, _) in dead {
             let first = deadSince[id] ?? timestamp
             guard timestamp.timeIntervalSince(first) >= deathConfirmation else {
                 deadSince[id] = first
@@ -908,13 +885,7 @@ final class TilingController {
     /// its own through `Outcome.error` with the same precedence rule.
     private func reportRestoreFailures(_ failures: [String]) {
         guard !failures.isEmpty, lastTileError == nil else { return }
-        if failures.count == 1 {
-            lastTileError =
-                "Couldn't restore “\(failures[0])”: it may still be sitting in its old tile."
-        } else {
-            lastTileError =
-                "Couldn't restore \(failures.count) windows: they may still be sitting in their old tiles."
-        }
+        lastTileError = MenuText.restoreFailureMessage(failures)
     }
 
     /// Snaps all splitters back to defaults and re-tiles everyone. The
@@ -1077,9 +1048,9 @@ final class TilingController {
         } else if entry.snapshot.isEmpty {
             // Untile-all chapter with no surviving windows: the requester
             // restore above already ran; report the standard empty result.
-            mutateSpace(space) { $0.error = "Couldn't restore the evicted windows." }
+            mutateSpace(space) { $0.error = MenuText.restoreEvictedWindowsFailure }
         } else if errors.isEmpty {
-            mutateSpace(space) { $0.error = "Couldn't restore the evicted windows." }
+            mutateSpace(space) { $0.error = MenuText.restoreEvictedWindowsFailure }
         }
         // A nil requester with an empty snapshot (untile-all chapter
         // whose windows all died) still consumes the entry: nothing to
@@ -1682,15 +1653,14 @@ final class TilingController {
         expanded[id] = nil
     }
 
-    /// Mirrors the focused canvas onto the legacy surface (`state`,
-    /// `undoStack`, `splitterBackup`, `lastNotice`, `lastTileError`)
-    /// that menus and existing tests read. `focus` names the canvas that
-    /// just changed; nil re-resolves from the focused window.
+    /// Mirrors the focused canvas's occupancy onto the legacy `state`
+    /// surface that existing tests read. The canvas's undo chapters,
+    /// splitters, notices, and errors are read through `focusedCanvas()`
+    /// and the tracker, so they are not copied here. `focus` names the
+    /// canvas that just changed; nil re-resolves from the focused window.
     private func syncLegacySurface(focus space: TilingSpaceKey?) {
         let key = space ?? focusedSpaceKey()
         let current = spaces[key] ?? CanvasState()
         state = current.state
-        undoStack = current.undoStack
-        splitterBackup = current.splitterBackup
     }
 }

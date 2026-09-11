@@ -137,4 +137,20 @@ enum MenuText {
     static func nothingToEvictAnnouncement() -> String {
         "That window isn't tiled: nothing to evict."
     }
+
+    // MARK: Restore failures
+
+    /// A window's pre-tile frame could not be restored. Names the window
+    /// when there is exactly one, so the reader knows which app refused;
+    /// the plural states the count instead of listing names.
+    static func restoreFailureMessage(_ failures: [String]) -> String {
+        if failures.count == 1 {
+            return "Couldn't restore “\(failures[0])”: it may still be sitting in its old tile."
+        }
+        return "Couldn't restore \(failures.count) windows: they may still be sitting in their old tiles."
+    }
+
+    /// Undo found nothing restorable: the chapter's windows all closed
+    /// before it ran, so there is no window left to write.
+    static let restoreEvictedWindowsFailure = "Couldn't restore the evicted windows."
 }

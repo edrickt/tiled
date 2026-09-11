@@ -379,7 +379,7 @@ final class PlanExecutor {
             // could happen here is a nested execute, which never does.)
             return ("Undid displacement \u{00B7} \(noun) restored.", nil, state, records, nextID)
         }
-        return (nil, "Couldn't restore the evicted windows.", state, records, nextID)
+        return (nil, MenuText.restoreEvictedWindowsFailure, state, records, nextID)
     }
 
     // MARK: Eviction narrative
@@ -508,13 +508,7 @@ final class PlanExecutor {
     /// requested tiling itself failing) already took the slot.
     private func reportRestoreFailures(_ failures: [String], error: inout String?) {
         guard !failures.isEmpty, error == nil else { return }
-        if failures.count == 1 {
-            error =
-                "Couldn't restore “\(failures[0])”: it may still be sitting in its old tile."
-        } else {
-            error =
-                "Couldn't restore \(failures.count) windows: they may still be sitting in their old tiles."
-        }
+        error = MenuText.restoreFailureMessage(failures)
     }
 
     /// Applies `id`'s slot rect on `space` (the tiling canvas the plan
