@@ -208,7 +208,7 @@ final class DragTracker {
     /// `.converged` = a tick landed within tolerance of the target.
     enum Convergence { case converged, ignored }
     func convergence(for id: WindowID) -> Convergence? {
-        guard var entry = expectedFrames[id] else { return nil }
+        guard let entry = expectedFrames[id] else { return nil }
         if entry.settled { return .converged }
         guard entry.lastDistance == .infinity else { return nil }
         // Total echo silence alone is not a silent ignore: apps that

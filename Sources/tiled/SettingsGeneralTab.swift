@@ -198,7 +198,7 @@ final class GeneralTab: NSObject {
     }
 
     private var currentLaunchAtLogin: Bool {
-        (try? SMAppService.mainApp.status) == .enabled
+        SMAppService.mainApp.status == .enabled
     }
 
     @objc private func showGuideTapped(_ sender: NSButton) {
