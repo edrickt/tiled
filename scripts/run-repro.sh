@@ -39,8 +39,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# A second instance would fight over the global hotkeys.
+# A second instance would fight over the global hotkeys, and a stale host
+# app would hand the suite the wrong windows: it drives the host whose pid
+# it was given, while the window manager tiles whatever is focused.
 pkill -f '\.build/(debug|release)/tiled' 2>/dev/null || true
+pkill -f 'build/host' 2>/dev/null || true
 sleep 1
 
 echo "==> Launching tiled (grant Accessibility permission when prompted)"
@@ -55,7 +58,9 @@ sleep 3
 
 echo "==> Running $SUITE"
 status=0
-swift "$SUITE" || status=$?
+# HOST_PID lets the suite find exactly the host it launched, never a
+# leftover instance with the same window titles.
+HOST_PID="$HOST_PID" swift "$SUITE" || status=$?
 
 if [[ $status -ne 0 ]]; then
     echo

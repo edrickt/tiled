@@ -36,9 +36,25 @@ func title(of el: AXUIElement) -> String {
     return v as? String ?? "?"
 }
 
-let hostPID = NSWorkspace.shared.runningApplications.first { app in
-    app.localizedName == "host" || app.executableURL?.lastPathComponent == "host"
-}?.processIdentifier
+/// The host app this run drives. The script passes its pid, because more
+/// than one instance can be alive (a leftover from an interrupted run) and
+/// then "first match" can resolve to the wrong app: the suite would read
+/// and move that app's windows while the window manager tiles the other
+/// one's, which looks exactly like a broken layout. Without the env var,
+/// the most recently launched host wins.
+let hostPID: pid_t? = {
+    if let raw = ProcessInfo.processInfo.environment["HOST_PID"],
+        let pid = pid_t(raw), pid > 0
+    {
+        return pid
+    }
+    let hosts = NSWorkspace.shared.runningApplications.filter { app in
+        app.localizedName == "host" || app.executableURL?.lastPathComponent == "host"
+    }
+    return hosts.sorted {
+        ($0.launchDate ?? .distantPast) > ($1.launchDate ?? .distantPast)
+    }.first?.processIdentifier
+}()
 
 func hostWindows() -> [(el: AXUIElement, title: String, frame: CGRect)] {
     guard let pid = hostPID else { return [] }
@@ -91,6 +107,32 @@ func hotkey(_ slot: String) {
     }
 }
 
+/// The sixths family is ⌥⇧ + key (quarters are ⌥⇧⌘ + the same keys).
+let sixthKeyFor = ["TL": CGKeyCode(32), "TM": CGKeyCode(34), "TR": CGKeyCode(31),
+                   "BL": CGKeyCode(46), "BM": CGKeyCode(43), "BR": CGKeyCode(47),
+                   "L": CGKeyCode(38), "M": CGKeyCode(40), "R": CGKeyCode(37),
+                   "L2": CGKeyCode(4), "R2": CGKeyCode(41)]
+
+func sixthHotkey(_ slot: String) {
+    let src = CGEventSource(stateID: .hidSystemState)
+    for down in [true, false] {
+        let e = CGEvent(keyboardEventSource: src, virtualKey: sixthKeyFor[slot]!, keyDown: down)
+        e?.flags = [.maskAlternate, .maskShift]
+        post(e)
+    }
+}
+
+/// Tiles into a sixths slot and records it. Deliberately not `doTile`:
+/// that helper carries the quarters eviction algebra, and this scenario
+/// keeps the board to disjoint sextants so the app's sixths rules are
+/// asserted through frames instead of a second occupancy model.
+func doTileSixths(_ t: String, _ key: String, _ slot: String) {
+    focus(t)
+    sixthHotkey(key)
+    usleep(900_000)
+    tiled[t] = slot
+}
+
 func pressUndo() {
     let src = CGEventSource(stateID: .hidSystemState)
     // ⌃⌥⇧⌘Z: the app's fixed undo, global so it works from anywhere.
@@ -138,6 +180,68 @@ var col: CGFloat = 0.5
 // `row` here made every later scenario drift from the app on purpose.
 var rowL: CGFloat = 0.5, rowR: CGFloat = 0.5
 
+// Sixths keeps its own fractions (a layout switch never inherits the
+// other layout's geometry): two vertical dividers that start at equal
+// thirds, and one row divider per third — `sixthsLeftRowSplit`,
+// `sixthsMiddleRowSplit`, `sixthsRightRowSplit`.
+var sixthsL: CGFloat = 1.0 / 3.0, sixthsR: CGFloat = 2.0 / 3.0
+var sixthsRowL: CGFloat = 0.5, sixthsRowM: CGFloat = 0.5, sixthsRowR: CGFloat = 0.5
+let sixthsColumnClamp: ClosedRange<CGFloat> = 0.1...0.9
+
+/// Sixths slot rects, mirroring the app's own line formulas: the left
+/// sixth spans [screen left, sixthsLeftSplit], the middle spans
+/// [sixthsLeftSplit, sixthsRightSplit], the right spans
+/// [sixthsRightSplit, screen right]; thirds and two-thirds use the same
+/// lines, and the row divider is the one belonging to the slot's third.
+/// (A slot ending at the screen's right edge rides the right row split,
+/// which is why the right two-thirds uses `sixthsRowR`.)
+func sixthsColumns(_ slot: String) -> (CGFloat, CGFloat) {
+    switch slot {
+    case "sixthTopLeft", "sixthBottomLeft", "sixthLeft": return (0, sixthsL)
+    case "sixthTopMiddle", "sixthBottomMiddle", "sixthMiddle": return (sixthsL, sixthsR)
+    case "sixthTopRight", "sixthBottomRight", "sixthRight": return (sixthsR, 1)
+    case "sixthsLeftTwoThirds": return (0, sixthsR)
+    case "sixthsRightTwoThirds": return (sixthsL, 1)
+    default: fatalError("bad sixths slot: \(slot)")
+    }
+}
+
+func sixthsRowSplit(_ slot: String) -> CGFloat {
+    switch slot {
+    case "sixthTopLeft", "sixthBottomLeft", "sixthLeft", "sixthsLeftTwoThirds":
+        return sixthsRowL
+    case "sixthTopMiddle", "sixthBottomMiddle", "sixthMiddle":
+        return sixthsRowM
+    default:
+        return sixthsRowR
+    }
+}
+
+func sixthsRect(_ slot: String) -> CGRect {
+    let (c0, c1) = sixthsColumns(slot)
+    let row = sixthsRowSplit(slot)
+    let x0 = vf.minX + c0 * vf.width
+    let x1 = vf.minX + c1 * vf.width
+    let ySplit = vf.minY + row * vf.height
+    let rect: CGRect
+    switch slot {
+    case "sixthTopLeft", "sixthTopMiddle", "sixthTopRight":
+        rect = CGRect(x: x0, y: ySplit, width: x1 - x0, height: vf.maxY - ySplit)
+    case "sixthBottomLeft", "sixthBottomMiddle", "sixthBottomRight":
+        rect = CGRect(x: x0, y: vf.minY, width: x1 - x0, height: ySplit - vf.minY)
+    default:
+        rect = CGRect(x: x0, y: vf.minY, width: x1 - x0, height: vf.height)
+    }
+    return axRect(rect)
+}
+
+let sixthsSlots = [
+    "sixthTopLeft", "sixthTopMiddle", "sixthTopRight",
+    "sixthBottomLeft", "sixthBottomMiddle", "sixthBottomRight",
+    "sixthLeft", "sixthMiddle", "sixthRight",
+    "sixthsLeftTwoThirds", "sixthsRightTwoThirds",
+]
+
 let quads: [String: Set<String>] = [
     "TL": ["tl"], "TR": ["tr"], "BL": ["bl"], "BR": ["br"],
     "LH": ["tl", "bl"], "RH": ["tr", "br"],
@@ -151,6 +255,7 @@ let allQuadCells: Set<String> = ["tl", "tr", "bl", "br"]
 func overlaps(_ a: String, _ b: String) -> Bool { !quads[a]!.isDisjoint(with: quads[b]!) }
 
 func gridRect(_ slot: String) -> CGRect {
+    if sixthsSlots.contains(slot) { return sixthsRect(slot) }
     let x = vf.minX + col * vf.width
     let row = (slot == "TR" || slot == "BR") ? rowR : rowL
     let y = vf.minY + row * vf.height
@@ -176,7 +281,7 @@ func untileMirror(_ t: String) { tiled[t] = nil }
 /// Whether a frame is one of the grid's slot rects under the current
 /// splitters. A window the app still has tiled reports one of these.
 func isOnGrid(_ f: CGRect) -> Bool {
-    ["TL", "TR", "BL", "BR", "LH", "RH"].contains { close(f, gridRect($0)) }
+    (["TL", "TR", "BL", "BR", "LH", "RH"] + sixthsSlots).contains { close(f, gridRect($0)) }
 }
 
 func doTile(_ t: String, _ slot: String) {
@@ -279,6 +384,30 @@ func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
         let appkitY = primaryTop - (edge == "top" ? fin.minY : fin.maxY)
         let value = clamp((appkitY - vf.minY) / vf.height, 0.2...0.8)
         if slot == "TR" || slot == "BR" { rowR = value } else { rowL = value }
+    // Sixths rows: one divider per third, so dragging a left sixth's
+    // bottom edge must not move the middle or right thirds' divider.
+    case ("sixthTopLeft", "bottom"), ("sixthBottomLeft", "top"):
+        let appkitY = primaryTop - (edge == "top" ? fin.minY : fin.maxY)
+        sixthsRowL = clamp((appkitY - vf.minY) / vf.height, 0.2...0.8)
+    case ("sixthTopMiddle", "bottom"), ("sixthBottomMiddle", "top"):
+        let appkitY = primaryTop - (edge == "top" ? fin.minY : fin.maxY)
+        sixthsRowM = clamp((appkitY - vf.minY) / vf.height, 0.2...0.8)
+    case ("sixthTopRight", "bottom"), ("sixthBottomRight", "top"):
+        let appkitY = primaryTop - (edge == "top" ? fin.minY : fin.maxY)
+        sixthsRowR = clamp((appkitY - vf.minY) / vf.height, 0.2...0.8)
+    // Sixths columns. A two-thirds window drags its outer edge and keeps
+    // the hidden inner divider at the midpoint of the resulting span,
+    // which is how the app couples the two fractions.
+    case ("sixthTopLeft", "right"), ("sixthBottomLeft", "right"), ("sixthLeft", "right"):
+        sixthsL = clamp((fin.maxX - vf.minX) / vf.width, sixthsColumnClamp)
+    case ("sixthTopRight", "left"), ("sixthBottomRight", "left"), ("sixthRight", "left"):
+        sixthsR = clamp((fin.minX - vf.minX) / vf.width, sixthsColumnClamp)
+    case ("sixthsLeftTwoThirds", "right"):
+        sixthsR = clamp((fin.maxX - vf.minX) / vf.width, sixthsColumnClamp)
+        sixthsL = sixthsR / 2
+    case ("sixthsRightTwoThirds", "left"):
+        sixthsL = clamp((fin.minX - vf.minX) / vf.width, sixthsColumnClamp)
+        sixthsR = (sixthsL + 1) / 2
     default:
         break // screen edges: no splitter
     }
@@ -498,6 +627,49 @@ tiled["HOSTC"] = nil
 tiled["HOSTA"] = "TL"
 tiled["HOSTB"] = "BL"
 verify("S18c undo returned A and B to their slots and C to its pre-tile frame")
+
+// MARK: S19 - sixths: the switch, the geometry, and per-third rows
+
+// Requesting a sixths slot on a quarters canvas switches that canvas's
+// layout. The board is cleared first so nothing is untiled by the switch
+// and each placement's frame is the only thing under test.
+evict("HOSTA"); evict("HOSTB"); evict("HOSTC")
+verify("S19a board cleared before the layout switch")
+doTileSixths("HOSTA", "TL", "sixthTopLeft") // also switches quarters -> sixths
+doTileSixths("HOSTB", "TM", "sixthTopMiddle")
+doTileSixths("HOSTC", "TR", "sixthTopRight")
+verify("S19b switched to sixths: three top sixths at equal thirds")
+
+// One row divider per third: dragging the left sixth's bottom edge moves
+// only the left third's divider, so the middle and right sixths keep
+// their height.
+let midsBefore = gridRect("sixthTopMiddle"), rightBefore = gridRect("sixthTopRight")
+dragEdge("HOSTA", "bottom", -60)
+verify("S19c left sixth resized, middle and right sixths unmoved")
+let midAfter = gridRect("sixthTopMiddle")
+if close(midAfter, midsBefore) && close(gridRect("sixthTopRight"), rightBefore) {
+    pass += 1; print("PASS S19d per-third row independence: other thirds held")
+} else {
+    fail += 1; print(">>>> FAILED S19d: a sixths row drag moved another third")
+}
+
+// MARK: S20 - two-thirds keeps its hidden divider centered
+
+evict("HOSTA"); evict("HOSTB"); evict("HOSTC")
+doTileSixths("HOSTA", "L2", "sixthsLeftTwoThirds")
+doTileSixths("HOSTB", "R", "sixthRight")
+verify("S20a left two-thirds beside the right third")
+
+// Dragging the two-thirds' outer edge moves the visible divider and
+// re-centers the hidden one inside it, so the right third follows.
+dragEdge("HOSTA", "right", 80)
+verify("S20b two-thirds resized, right third followed")
+
+// The hidden divider is only observable once a window sits on it: the
+// middle third's rect starts where the hidden divider was left.
+evict("HOSTA")
+doTileSixths("HOSTB", "M", "sixthMiddle")
+verify("S20c middle third lands on the re-centered hidden divider")
 
 print("==============================")
 print("PASS \(pass)  FAIL \(fail)")

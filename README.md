@@ -199,7 +199,13 @@ The unit suite drives the pure engine through `FakeWindowGateway`, with
 clocks, schedulers, and the display set injected; only a few live-screen
 identity checks touch AppKit. The live adapter (`LiveWindowGateway`) is
 exercised by `scripts/run-repro.sh`, which launches the app plus a throwaway
-`host` app and drives real clicks, drags, and global hotkeys. The multi-display
+`host` app and drives real clicks, drags, and global hotkeys: 40 cases
+covering the quarters family end to end (tiling, edge drags with
+per-column row independence, clamping, screen edges, eviction, swap,
+re-house, undo, drag-out, closes) and the sixths family (the layout
+switch, sixths geometry, per-third row independence, and a two-thirds
+window's hidden divider). Sixths boards stay disjoint in the suite: it
+models the quarters eviction algebra, not a second occupancy model. The multi-display
 suite checks same-slot coexistence, per-monitor moves, and splitter isolation
 on two attached displays; unplug/replug, rearrange, and Mission Control
 validation stays in the accompanying manual checklist. Run these before a
