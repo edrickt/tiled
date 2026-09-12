@@ -213,6 +213,7 @@ release; they cannot run in CI (they move the real cursor and need a TCC grant).
 
 ```
 swift test                              # the gate for every change
+swift tools/repro/probe-spaces.swift     # what the live suites can cover here
 ./scripts/run-repro.sh                  # pre-release live check
 ./scripts/run-repro.sh tools/repro/multi-display-suite.swift  # two displays
 ./scripts/run-repro.sh tools/repro/driver.swift   # smaller focused driver
