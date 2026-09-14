@@ -235,8 +235,10 @@ enum MenuModel {
             if !snapshot.tiledWindows.isEmpty {
                 // Multi-monitor: group the manage list per display with a
                 // disabled header per section ("Display 1 · Quarters · 2
-                // tiled"). Single-monitor setups render the flat list.
-                if snapshot.monitorSections.isEmpty {
+                // tiled"). A single monitor renders the flat list: its one
+                // section title is already the status row above, and a
+                // header repeating it verbatim reads as a duplicate row.
+                if snapshot.monitorSections.count <= 1 {
                     for window in snapshot.tiledWindows {
                         items.append(windowItem(window, binding))
                     }
