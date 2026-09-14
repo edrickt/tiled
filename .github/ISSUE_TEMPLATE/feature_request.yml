@@ -1,0 +1,40 @@
+name: Feature request
+description: A rule, layout, or behavior Tiled should have.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tiled's rules are deliberately strict. A good request says which rule
+        is missing or wrong, not only which outcome you want, because the
+        engine decides every layout from one cell model and a new special case
+        has to earn its place. See `docs/tiling-rules.md` for the current set
+        and `CONTEXT.md` for the vocabulary.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what does Tiled do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: rule
+    attributes:
+      label: The rule you would add or change
+      description: State it the way the docs would, including what happens to the windows already on that canvas.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other window managers, other shortcuts, or working around it today.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I read docs/tiling-rules.md and this is not already a rule
+          required: true
+        - label: I understand changes must ship with tests (and usually a mutation-table entry)
+          required: true
