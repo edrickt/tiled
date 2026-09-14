@@ -1,5 +1,3 @@
-<p align="center"><img src="docs/assets/logo.png" width="128" alt="Tiled"></p>
-
 <h1 align="center">Tiled</h1>
 
 <p align="center">A native macOS window manager. Tile windows into quarters or sixths from global hotkeys or the menu bar, resize the grid by dragging a shared edge, and undo any layout change from anywhere.</p>
@@ -11,9 +9,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
 </p>
 
-<p align="center"><img src="docs/assets/quarters.gif" width="820" alt="Four windows snapping into the quarters grid, one hotkey each"></p>
-
-Four windows, four hotkeys, one canvas. The demo windows are drawn by `tools/capture/demo-host.swift`.
+Focus a window, press a slot shortcut, and it lands there. The menu bar glyph fills in as slots are taken, and one undo puts everything back.
 
 ## Features
 
@@ -120,9 +116,7 @@ The menu names the active layout's slots as single-click equivalents, plus one s
 
 Quarters and sixths are mutually exclusive on a canvas, and the menu always offers the switch: the focused window moves into the other layout's top-left, every tiled window on that canvas is untiled, and one undo brings the whole arrangement back.
 
-<p align="center"><img src="docs/assets/sixths.gif" width="820" alt="Switching to sixths and filling the 3×2 grid"></p>
-
-Six windows in sixths, including a two-thirds and a full top row. Splitters stay independent per third, and the layout switch is one undo away.
+A full sixths canvas holds up to six windows in the 3×2 grid, and a two-thirds slot sits beside a third without special handling: both are cell sets in the same model. Splitters stay independent per third.
 
 ## Tiling rules
 
@@ -135,22 +129,9 @@ The normative rules live in [docs/tiling-rules.md](docs/tiling-rules.md); the on
 - **Drag-out.** Dragging a tiled window by its title bar past ~100pt untiles it where you drop it. A shorter drag snaps back into the tile.
 - **Layouts are mutually exclusive per canvas.** Requesting a slot in the other layout untiles every tiled window on that canvas and switches it. One undo restores the whole thing, so exploring is safe.
 
-<p align="center"><img src="docs/assets/evict.gif" width="720" alt="Evicting the bottom-left sixth: its neighbor grows into the freed cells"></p>
-
-Evicting the bottom-left sixth: the top-left sixth grows into the whole left third, and the evicted window returns to its pre-tile frame. One undo reverses both.
-
-<p align="center">
-  <img src="docs/assets/expand.gif" width="400" alt="Expanding a window to fill the screen and returning it to its slot">
-  <img src="docs/assets/undo.gif" width="400" alt="A layout switch untiling the canvas, then one undo restoring it">
-</p>
-
-Left: ⌥⇧⏎ covers the layout without releasing the slot, and pressing it again returns the window to where it was. Right: a layout switch untiles the canvas, and ⌃⌥⇧⌘Z brings every window and the layout itself back from anywhere.
-
 ## Live resizing
 
 Drag any edge of a tiled window and the shared splitter follows; the neighbors on the other side resize when you release. Splitters are independent per column (quarters) and per third (sixths), and per canvas, so dragging an edge here never moves a tile there. A two-thirds window resizes as two equal one-thirds, keeping its hidden internal divider centered. **Reset Splitters** in the menu snaps the focused canvas back to even splits.
-
-<p align="center"><img src="docs/assets/resize.gif" width="720" alt="Dragging the divider between two halves"></p>
 
 ## Spaces and displays
 
@@ -160,18 +141,11 @@ Display changes (unplug, rearrange, resolution) re-assert every visible canvas i
 
 ## Settings
 
-<p align="center">
-  <img src="docs/assets/guide.png" width="420" alt="The Welcome tab: one demonstrated tiling and the two layout shapes">
-  <img src="docs/assets/shortcuts.png" width="420" alt="The Shortcuts tab: one recorder row per slot, grouped by layout">
-</p>
-
 - **Welcome** teaches one tiling with a live preview of both layout shapes, not seventeen combos.
 - **Shortcuts** is one recorder row per slot. Click a row, press a combo, and it rebinds. A conflict with another slot or with one of Tiled's fixed combos is refused and named; Esc keeps the old binding; ⌫ disables that slot. Each layout section has an Enable/Disable all switch that parks the combos aside and restores them unchanged.
 - **General** holds launch-at-login, the menu bar icon toggle (a fixed recovery shortcut opens Settings if you hide the icon), and the guide re-entry.
 
-<p align="center"><img src="docs/assets/menu.png" width="330" alt="The status menu: layout, the active layout's slots, the managed windows with their tiles, and bulk actions"></p>
-
-The status glyph is an occupancy map: each cell fills while a tiled window actually covers it, so the menu bar shows the layout's state, not just its shape.
+The status glyph is an occupancy map: each cell fills while a tiled window actually covers it, so the menu bar shows the layout's state, not just its shape. The menu itself lists the active layout's slots, the managed windows under the tiles they hold, and the bulk actions.
 
 ## Testing
 
@@ -257,7 +231,7 @@ swift test                        # the gate for every change
 python3 tools/mutation/mutate.py  # would the tests notice?
 ```
 
-`docs/capture.md` explains how the screenshots and GIFs in this README are generated (they are scripted, not hand-made), and `CONTEXT.md` is the project's vocabulary: one word per concept, with the words to avoid.
+`CONTEXT.md` is the project's vocabulary: one word per concept, with the words to avoid. The media pipeline lives in `tools/capture/` (see [docs/capture.md](docs/capture.md)); it is kept so the screenshots and GIFs can be regenerated on demand, and none are committed today.
 
 ## License
 

@@ -1,8 +1,10 @@
-# Capturing the screenshots and GIFs
+# Capturing screenshots and GIFs
 
-Every image in the README is generated from the real app by scripts in
-`tools/capture/`. Nothing is hand-drawn, and re-running the pipeline after a UI
-change refreshes the assets.
+The media pipeline records the real app with scripts in `tools/capture/`.
+Nothing is hand-drawn, and re-running it after a UI change refreshes every
+asset. **No media is committed at the moment**: `docs/assets/` is where a run
+writes its output when you want screenshots or GIFs again, and the run
+recreates the directory.
 
 ```bash
 tools/capture/capture.sh            # every scene, into docs/assets/
@@ -53,8 +55,9 @@ of steps, so adding a feature animation means adding a handful of `.focus` /
 
 - Demo windows are labeled honestly (Editor, Terminal, Notes, Files, Browser,
   Music). They are drawings, not screenshots of other apps.
-- The GIFs are cut to the visible frame, so the menu bar is not part of them.
-  The menu bar has its own still (`menu.png`), which is where the occupancy
-  glyph and the status item read best.
+- GIFs are cut to the visible frame, so the menu bar is not part of them. The
+  menu bar gets its own still (`menu.png`), which is where the occupancy glyph
+  and the status item read best.
 - Recordings and intermediate files land in `build/capture/` and are not
-  committed; only `docs/assets/` is.
+  committed. Nothing under `docs/assets/` is committed either while the media
+  is being reworked; add the exact files you want to keep.

@@ -19,7 +19,7 @@ help:
 	@echo "  make run        run the dev build from the terminal"
 	@echo "  make repro      live end-to-end suite (needs Accessibility + a quiet desktop)"
 	@echo "  make mutation   would the unit suite notice an injected bug?"
-	@echo "  make capture    regenerate the README's screenshots and GIFs"
+	@echo "  make capture    record screenshots and GIFs into docs/assets/"
 	@echo "  make clean      remove build products"
 
 build:

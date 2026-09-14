@@ -17,8 +17,8 @@
 
 <!--
 If this changes what happens to real windows, say what the user sees now
-versus before. Screenshots from tools/capture/ are welcome; drags and
-layout transitions are easier to show than to describe.
+versus before. The capture pipeline in tools/capture/ can record it when a
+written description is not enough.
 -->
 
 ## Screens

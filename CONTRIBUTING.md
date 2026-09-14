@@ -59,9 +59,9 @@ Tiled): two managers answering one keystroke make every case lie.
 Commits are imperative and specific: "Fix undo integrity, AX failure handling,
 and hotkey conflicts" rather than "fixes". A pull request should say what
 changed, what it is protecting against, and which commands you ran. If a
-change alters window behavior, include the before/after frames in the
-description; screenshot scripts live in `tools/capture/` (see
-[docs/capture.md](docs/capture.md)).
+change alters window behavior, say what the screen does before and after; the
+capture pipeline in `tools/capture/` (see [docs/capture.md](docs/capture.md))
+can record it if a description is not enough.
 
 ## Reporting bugs
 
