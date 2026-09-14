@@ -34,7 +34,7 @@ Tiled needs **macOS 13 or later** and **Accessibility permission** (System Setti
 
 ### From a release
 
-1. Download `Tiled-<version>.zip` from [Releases](https://github.com/edrickt/tiled/releases) and move `Tiled.app` to `/Applications`.
+1. Download `Tiled-<version>.zip` from [Releases](https://github.com/edrickt/tiled/releases) and move `Tiled.app` to `/Applications`. Release bundles are universal: Apple Silicon and Intel.
 2. Open it once. Releases are ad-hoc signed (there is no Developer ID yet), so Gatekeeper may ask you to confirm: right-click the app and choose **Open**.
 3. Tiled opens its Settings window and asks for Accessibility permission. Grant it, then relaunch Tiled.
 
@@ -48,13 +48,13 @@ cd tiled
 
 The script builds first and only then replaces the installed copy, so a failed build never leaves you without the app that is currently tiling your windows.
 
-`make app` builds the bundle at `build/Tiled.app` without installing it. Requires a recent Swift toolchain (developed with Swift 6.2, `Package.swift` tools version 5.9).
+`make app` builds the bundle at `build/Tiled.app` without installing it; `make app-universal` builds it for both architectures, which is what release bundles ship. Requires a recent Swift toolchain (developed with Swift 6.2, `Package.swift` tools version 5.9).
 
 ### Which binary do I want?
 
 | | Release bundle | `swift run` |
 |---|---|---|
-| Speed | optimized | debug |
+| Speed | optimized, universal | debug, this Mac only |
 | Permission | grant **Tiled** once | grant your terminal once |
 | Menu bar name | Tiled | tiled |
 | Survives rebuilds | re-grant may be needed (ad-hoc signing) | grant follows the terminal |

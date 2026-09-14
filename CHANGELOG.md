@@ -51,5 +51,7 @@ First release.
   suite, and a multi-display suite with a manual checklist.
 - CI on pushes to `master` and pull requests: unit suite, release build,
   app bundle verification, and a coverage summary.
+- Universal release bundles (Apple Silicon and Intel), built and checksummed
+  by the release workflow on a `v*` tag.
 
 [0.1.0]: https://github.com/edrickt/tiled/releases/tag/v0.1.0

@@ -14,12 +14,21 @@ fi
 # from the version so every release has a distinct value.
 BUILD=$(echo "$VERSION" | awk -F. '{ printf "%d%02d%02d", $1, $2, $3 }')
 
-swift build -c release
+# UNIVERSAL=1 builds a fat binary for Apple Silicon and Intel, which is what
+# a release ships. Local builds stay single-architecture because they are
+# twice as fast and nobody is distributing them.
+if [[ "${UNIVERSAL:-0}" == "1" ]]; then
+    swift build -c release --arch arm64 --arch x86_64
+    BINARY=".build/apple/Products/Release/tiled"
+else
+    swift build -c release
+    BINARY=".build/release/tiled"
+fi
 
 APP="build/Tiled.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/tiled "$APP/Contents/MacOS/Tiled"
+cp "$BINARY" "$APP/Contents/MacOS/Tiled"
 
 # App icon: regenerate with scripts/make-icon.swift + iconutil if missing.
 if [ ! -f Resources/AppIcon.icns ]; then
@@ -51,3 +60,4 @@ EOF
 
 codesign --force -s - "$APP"
 echo "Built $APP ($VERSION, build $BUILD)"
+lipo -archs "$APP/Contents/MacOS/Tiled"

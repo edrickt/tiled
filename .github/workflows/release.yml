@@ -40,10 +40,14 @@ jobs:
         run: swift test
 
       - name: App bundle
+        env:
+          UNIVERSAL: "1"
         run: |
           ./scripts/make-app.sh
           codesign --verify --deep --strict build/Tiled.app
           plutil -lint build/Tiled.app/Contents/Info.plist
+          lipo -archs build/Tiled.app/Contents/MacOS/Tiled | grep -q arm64
+          lipo -archs build/Tiled.app/Contents/MacOS/Tiled | grep -q x86_64
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
             build/Tiled.app/Contents/Info.plist
 
