@@ -361,8 +361,10 @@ final class ShortcutsTab: NSObject {
         else { return }
         if sectionHasDisabledSlot(layout) {
             var keptEdits: [String] = []
+            var clashes: [String] = []
             for slot in Slot.allCases where slot.layout == layout {
                 let current = hotkeyStore.binding(for: slot)
+                let restored: HotkeyBinding?
                 if let parked = parkedBinding(for: slot) {
                     if current.keyCode != nil, current != parked {
                         // Edited after the disable: the park is stale,
@@ -370,22 +372,48 @@ final class ShortcutsTab: NSObject {
                         // and say so; the live region exists for this.
                         clearParkedBinding(for: slot)
                         keptEdits.append(SlotPresentation.title(of: slot))
+                        restored = nil
                     } else {
-                        hotkeyStore.set(parked, for: slot)
-                        clearParkedBinding(for: slot)
+                        restored = parked
                     }
                 } else if current.keyCode == nil {
-                    hotkeyStore.set(HotkeyStore.defaultBinding(for: slot), for: slot)
+                    restored = HotkeyStore.defaultBinding(for: slot)
+                } else {
+                    restored = nil
+                }
+                guard let restored else { continue }
+                // Restores go through the same gate as a recording:
+                // another section may have claimed the combo while this
+                // one was disabled, and storing past the gate would
+                // leave a slot that renders enabled but never registers.
+                switch hotkeyStore.apply(restored, for: slot) {
+                case .applied:
+                    clearParkedBinding(for: slot)
+                case .duplicate(let owners):
+                    let names = owners.map { SlotPresentation.title(of: $0) }
+                        .joined(separator: ", ")
+                    clashes.append("\(SlotPresentation.title(of: slot)) (\(names))")
+                case .reserved(let name):
+                    clashes.append("\(SlotPresentation.title(of: slot)) (Tiled's \(name))")
                 }
             }
-            // The bulk button that triggered this lives in the old view.
+            // Registration runs before the rebuild so the fresh rows can
+            // surface the slots that failed to register, not the pre-toggle
+            // failure set. The bulk button that triggered this lives in
+            // the old view, so focus is restored after.
+            onHotkeysChange?()
             rebuildContent(restoringFocusTo: "bulk-\(layout.rawValue)")
+            var messages: [String] = []
+            if !clashes.isEmpty {
+                messages.append("Not restored, the combo is taken: \(clashes.joined(separator: ", ")).")
+            }
             if !keptEdits.isEmpty {
                 let names = keptEdits.joined(separator: ", ")
-                showConflict(
+                messages.append(
                     "\(names) \(keptEdits.count == 1 ? "was" : "were") edited while disabled; " +
                     "kept the new \(keptEdits.count == 1 ? "combo" : "combos").")
             }
+            if !messages.isEmpty { showConflict(messages.joined(separator: " ")) }
         } else {
             for slot in Slot.allCases where slot.layout == layout {
                 let current = hotkeyStore.binding(for: slot)
@@ -394,10 +422,11 @@ final class ShortcutsTab: NSObject {
                 }
                 hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: slot)
             }
-            // The bulk button that triggered this lives in the old view.
+            // Registration first: the rebuilt rows read the fresh
+            // failedSlots, not the pre-toggle set.
+            onHotkeysChange?()
             rebuildContent(restoringFocusTo: "bulk-\(layout.rawValue)")
         }
-        onHotkeysChange?()
     }
 
     /// Size for rebuilding the shortcuts view after collapse/bulk toggles.
@@ -567,6 +596,16 @@ final class ShortcutsTab: NSObject {
                     "\(SlotPresentation.title(of: slot)) kept its old shortcut."
                 showConflict(message)
                 NSLog("Tiled: %@", message)
+            case .reserved(let name):
+                // Tiled's own fixed combo: storing it would leave the slot
+                // with a hotkey that can never register.
+                button.showBinding(hotkeyStore.binding(for: slot))
+                button.shake()
+                let message =
+                    "\(candidate.label ?? "That combo") is Tiled's own \(name) shortcut; " +
+                    "\(SlotPresentation.title(of: slot)) kept its old shortcut."
+                showConflict(message)
+                NSLog("Tiled: %@", message)
             }
         }
         // The tab is deliberately not rebuilt here: the button that just
@@ -638,23 +677,33 @@ final class ShortcutsTab: NSObject {
             parkResetBackup(hotkeyStore.binding(for: slot), for: slot)
         }
         hotkeyStore.resetAll()
-        reload()
         onHotkeysChange?()
+        reload()
         sender.title = "Restore Previous Shortcuts"
     }
 
     /// Restores the combos parked by the last reset: an exact snapshot,
-    /// including disabled slots.
+    /// including disabled slots. A snapshot entry that names one of
+    /// Tiled's fixed combos is skipped: those register first and the slot
+    /// would never fire.
     private func restoreResetBackup(_ sender: NSButton) {
+        var skipped: [String] = []
         for slot in Slot.allCases {
-            if let backup = resetBackupBinding(for: slot) {
-                hotkeyStore.set(backup, for: slot)
+            guard let backup = resetBackupBinding(for: slot) else { continue }
+            if let name = HotkeyStore.reservedOwner(of: backup) {
+                skipped.append("\(SlotPresentation.title(of: slot)) (Tiled's \(name))")
                 clearResetBackup(for: slot)
+                continue
             }
+            hotkeyStore.set(backup, for: slot)
+            clearResetBackup(for: slot)
         }
-        reload()
         onHotkeysChange?()
+        reload()
         sender.title = "Reset Shortcuts"
+        if !skipped.isEmpty {
+            showConflict("Not restored: \(skipped.joined(separator: ", ")).")
+        }
     }
 
     /// Reset uses its own backup keys, never the Disable-all park keys:

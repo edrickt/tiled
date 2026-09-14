@@ -55,6 +55,17 @@ final class LiveWindowGateway: WindowGateway {
     /// window dies (probed via `isAlive`) so handles never dangle.
     private var elements: [WindowHandle: AXUIElement] = [:]
     private var pids: [WindowHandle: pid_t] = [:]
+    /// The observation key registered per observed handle, so `release`
+    /// can forget exactly that key while the pid's shared observer and
+    /// its other windows stay.
+    private var observedKeys: [WindowHandle: UInt] = [:]
+    /// Last focused-window resolution, memoized for one refresh pass:
+    /// a single menu build asks three times (has-focused, the expanded
+    /// slot, the icon's canvas), and every answer is a system-wide AX
+    /// element plus attribute reads. The focus observer clears it; the
+    /// TTL only bounds a pass that races a notification.
+    private var focusedCache: (handle: WindowHandle?, stamp: Date)?
+    private static let focusedCacheLifetime: TimeInterval = 0.05
     /// Last successfully-read frame per handle: the geometry a death
     /// confirmation matches against. Window element identity is useless
     /// for that check — after a display teardown a held element stops
@@ -155,8 +166,17 @@ final class LiveWindowGateway: WindowGateway {
     // MARK: WindowGateway
 
     func focusedWindow() -> WindowHandle? {
-        guard let (element, pid) = Self.focusedAXWindow() else { return nil }
-        return handle(for: element, pid: pid)
+        if let cache = focusedCache,
+           Date().timeIntervalSince(cache.stamp) < Self.focusedCacheLifetime {
+            return cache.handle
+        }
+        guard let (element, pid) = Self.focusedAXWindow() else {
+            focusedCache = (nil, Date())
+            return nil
+        }
+        let handle = handle(for: element, pid: pid)
+        focusedCache = (handle, Date())
+        return handle
     }
 
     func frame(of handle: WindowHandle) -> CGRect? {
@@ -170,6 +190,23 @@ final class LiveWindowGateway: WindowGateway {
     func setFrame(_ handle: WindowHandle, to frame: CGRect) -> Bool {
         guard let element = elements[handle] else { return false }
         return Self.setFrame(element, to: frame)
+    }
+
+    /// Drops a confirmed-gone handle: element, pid, handlers, baseline,
+    /// and its observation key. The shared observer outlives any one
+    /// window and only goes when the pid's last handle does.
+    func release(_ handle: WindowHandle) {
+        guard let pid = pids[handle] else { return }
+        if let key = observedKeys[handle] {
+            registry.forget(key: key, pid: pid)
+        }
+        observedKeys[handle] = nil
+        elements[handle] = nil
+        pids[handle] = nil
+        changeHandlers[handle] = nil
+        destructionHandlers[handle] = nil
+        lastFrames[handle] = nil
+        if !pids.values.contains(pid) { pruneObserver(for: pid) }
     }
 
     func liveness(of handle: WindowHandle) -> Liveness {
@@ -224,16 +261,14 @@ final class LiveWindowGateway: WindowGateway {
                 processAlive ? 1 : 0,
                 verdict == .alive ? "alive" : verdict == .dead ? "dead" : "unknown")
         }
-        if verdict == .dead {
-            elements[handle] = nil
-            pids[handle] = nil
-            changeHandlers[handle] = nil
-            destructionHandlers[handle] = nil
-            lastFrames[handle] = nil
-            // The last managed window of a process takes its shared
-            // observer with it; a process still holding one keeps it.
-            if !pids.values.contains(pid) { pruneObserver(for: pid) }
-        }
+        // A dead verdict is not a retirement. The controller confirms it
+        // across `deathConfirmation`, precisely so a transient (a lid
+        // close where window probes fail for live windows) can recover on
+        // the next probe. Retiring the element here would make the next
+        // call return `.dead` without probing and collapse the
+        // confirmation window to a single tick. The element stays until
+        // the controller confirms and forgets the window, which is when
+        // `release` runs and the slot actually frees.
         return verdict
     }
 
@@ -279,6 +314,7 @@ final class LiveWindowGateway: WindowGateway {
             lastFrames[handle] = frame
         }
         let key = UInt(CFHash(element))
+        observedKeys[handle] = key
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] observe win%d pid=%d key=%lu observed=%d",
                   handle.id, pid, key, registry.isObserved(key: key) ? 1 : 0)
@@ -586,6 +622,22 @@ final class LiveWindowGateway: WindowGateway {
         for (handle, registered) in elements where CFEqual(registered, element) {
             return handle
         }
+        // A held element can stop comparing equal to the app's fresh
+        // reference for the same window after a display teardown (the
+        // death rule relies on the same fact). Fall back to geometry:
+        // same pid, last-read frame within a point. Adopt the fresh
+        // element so CFEqual routing recovers with it.
+        if let frame = Self.frame(of: element) {
+            for (handle, registeredPID) in pids where registeredPID == pid {
+                guard let cached = lastFrames[handle],
+                      Self.framesClose(cached, frame)
+                else { continue }
+                elements[handle] = element
+                lastFrames[handle] = frame
+                Self.applyMessagingTimeout(element)
+                return handle
+            }
+        }
         let handle = WindowHandle(id: nextHandleID)
         nextHandleID += 1
         elements[handle] = element
@@ -612,6 +664,9 @@ final class LiveWindowGateway: WindowGateway {
     /// element is an application element, not a registered window, so the
     /// window-handle routing would never match it.
     private static let focusObserverCallback: AXObserverCallback = { _, _, _, _ in
+        // The focus changed: the memoized resolution is stale by
+        // definition, and the handler redraws from the new answer.
+        LiveWindowGateway.active?.focusedCache = nil
         LiveWindowGateway.active?.focusChangeHandler?()
     }
 
@@ -762,6 +817,16 @@ final class LiveWindowGateway: WindowGateway {
             let positionValue = pointValue(axTopLeft(of: nsFrame, primaryTop: primaryTop))
         else { return false }
 
+        // The pair can part-apply: a position write that lands followed by
+        // a permanently refused size leaves the window moved at its old
+        // size. Remember the origin before writing, so the failure path
+        // can put the window back; the README promises a refusing app's
+        // window is left alone, not half-moved with state believing
+        // nothing happened.
+        let previousOrigin: AXValue? = readPoint(element, kAXPositionAttribute)
+            .flatMap(pointValue)
+        var positionLanded = false
+
         // The write pair retries as a unit: position writes are idempotent,
         // so a retry after a partial application (position landed, size hit
         // a busy app) just rewrites both, never a half-moved window.
@@ -769,6 +834,7 @@ final class LiveWindowGateway: WindowGateway {
         let error = AXWrite.retrying {
             let positionResult = AXUIElementSetAttributeValue(
                 element, kAXPositionAttribute as CFString, positionValue)
+            if positionResult == .success { positionLanded = true }
             let sizeResult = AXUIElementSetAttributeValue(
                 element, kAXSizeAttribute as CFString, sizeValue)
             guard positionResult == .success, sizeResult == .success else {
@@ -778,6 +844,15 @@ final class LiveWindowGateway: WindowGateway {
                 return lastError
             }
             return .success
+        }
+        if AXWrite.needsPositionRestore(positionLanded: positionLanded, failed: error != nil),
+            let previousOrigin
+        {
+            // Best effort: if even the origin write is refused, the
+            // window is where the app left it and the refusal is still
+            // reported, so screen and state agree on the outcome.
+            AXUIElementSetAttributeValue(
+                element, kAXPositionAttribute as CFString, previousOrigin)
         }
         if let error, ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: setFrame failed after retries (error %d)", error.rawValue)
@@ -811,6 +886,14 @@ final class LiveWindowGateway: WindowGateway {
         /// Backoff before the first retry. Doubles per attempt; the total
         /// added latency across a fully-retried write is 0.3s.
         static let baseDelay: TimeInterval = 0.1
+
+        /// Whether a failed write pair needs the already-landed position
+        /// rolled back. The size write is mandatory, so a landed position
+        /// plus any failure means the window is half-moved unless the
+        /// caller restores the previous origin.
+        static func needsPositionRestore(positionLanded: Bool, failed: Bool) -> Bool {
+            positionLanded && failed
+        }
 
         /// Wait before retrying after `attempt` (0-indexed) failed.
         static func delay(forAttempt attempt: Int) -> TimeInterval {
@@ -914,6 +997,14 @@ final class LiveWindowGateway: WindowGateway {
             case .observerUnavailable:
                 observerPIDs.remove(pid)
             }
+        }
+
+        /// Forgets one released handle's key. The pid's shared observer
+        /// stays (its other windows still use it); the key must not, so a
+        /// window re-tiled under a fresh handle can register again.
+        mutating func forget(key: UInt, pid: pid_t) {
+            registeredKeys[key] = nil
+            pendingKeys.remove(key)
         }
 
         /// Whether the element's change notifications are registered.

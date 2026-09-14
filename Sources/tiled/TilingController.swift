@@ -92,16 +92,18 @@ final class TilingController {
     /// of just reporting destruction. Cleared on the next tiling attempt.
     /// Never overwrites a real error (refusals, restore failures win).
     /// Per-canvas: the shared surface reads the focused canvas's space.
-    private(set) var lastNotice: String? {
-        get { focusedCanvas().notice }
-        set { mutateSpace(focusedSpaceKey()) { $0.notice = newValue } }
-    }
+    var lastNotice: String? { focusedCanvas().notice }
 
     /// Last user-visible tiling failure (shown in the status menu).
     /// Cleared on the next tiling attempt. Per-canvas, like `lastNotice`.
-    private(set) var lastTileError: String? {
-        get { focusedCanvas().error }
-        set { mutateSpace(focusedSpaceKey()) { $0.error = newValue } }
+    var lastTileError: String? { focusedCanvas().error }
+
+    /// Records a tiling failure on the canvas that acted. Menu untile
+    /// rows, resize pushes, and reasserts act on background displays and
+    /// Spaces, so the message must land beside the windows it describes
+    /// rather than on whatever happens to be focused at menu time.
+    private func setTileError(_ message: String?, on space: TilingSpaceKey) {
+        mutateSpace(space) { $0.error = message }
     }
 
     /// Windows expanded over the layout by the ⌥⇧⏎ toggle, keyed by id,
@@ -591,10 +593,7 @@ final class TilingController {
                 }
             }
         }
-        let failed = pushRects(rects, excluding: nil)
-        if failed > 0 {
-            lastTileError = Self.refusalMessage(count: failed)
-        }
+        _ = pushRects(rects, excluding: nil, on: space)
     }
 
     /// Performs tracker-scheduled pushes: marks each write expected (echo
@@ -605,8 +604,11 @@ final class TilingController {
     /// Successful pushes schedule the same late convergence check as
     /// placements: a re-push the app silently ignores rolls back the same
     /// way. Per-window supersede keeps drag streams to one pending check.
-    private func pushRects(_ rects: [WindowID: CGRect], excluding: WindowID?) -> Int {
+    private func pushRects(
+        _ rects: [WindowID: CGRect], excluding: WindowID?, on space: TilingSpaceKey? = nil
+    ) -> Int {
         var failed = 0
+        var failuresByCanvas: [TilingSpaceKey: Int] = [:]
         for (id, target) in rects {
             guard let record = records[id] else { continue }
             // A push for a window on a canvas the user cannot see waits
@@ -628,12 +630,18 @@ final class TilingController {
                 continue
             }
             tracker.markExpected(id, target)
-            if !gateway.setFrame(record.handle, to: target) { failed += 1 }
+            if !gateway.setFrame(record.handle, to: target) {
+                failed += 1
+                let canvas = space ?? spaceOf(window: id) ?? focusedSpaceKey()
+                failuresByCanvas[canvas, default: 0] += 1
+            }
             else { scheduleVerification(of: [id], on: spaceOf(window: id) ?? focusedSpaceKey()) }
             dbg("push win\(id) target=\(target)")
         }
-        if failed > 0 {
-            lastTileError = Self.refusalMessage(count: failed)
+        // Refusals land on the canvas whose windows refused, not on
+        // whatever happens to be focused when the menu is next read.
+        for (canvas, count) in failuresByCanvas {
+            setTileError(Self.refusalMessage(count: count), on: canvas)
         }
         onChange?()
         return failed
@@ -775,6 +783,7 @@ final class TilingController {
             }
             deadSince[id] = nil
             dbg("prune win\(id): dead handle confirmed, releasing slot")
+            releaseHandle(id)
             let slot = slotOfWindow(id)
             let space = spaceOf(window: id)
             forgetWindow(id)
@@ -849,6 +858,7 @@ final class TilingController {
         // returns to the arrangement, not just to its pre-tile frame.
         // No modal: the sticky notice + ⌃⌥⇧⌘Z are the safety.
         let chapter = spaceState(for: space).occupants
+        let noun = chapter.count == 1 ? "1 window" : "\(chapter.count) windows"
         if !chapter.isEmpty {
             mutateSpace(space) {
                 $0.undoStack.append((snapshot: [], requester: nil))
@@ -856,7 +866,6 @@ final class TilingController {
                     $0.undoStack.removeFirst($0.undoStack.count - Self.undoDepth)
                 }
             }
-            let noun = chapter.count == 1 ? "1 window" : "\(chapter.count) windows"
             mutateSpace(space) {
                 $0.notice = "Untiled \(noun). Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
             }
@@ -880,7 +889,7 @@ final class TilingController {
             if let record = records[id] { handles[id] = record.handle }
         }
         let failures = spaceState(for: space).tiledWindows.compactMap { restoreOne($0).failure }
-        reportRestoreFailures(failures)
+        reportRestoreFailures(failures, on: space)
         // Rebuild the chapter from the frames untile-all just restored:
         // each window now sits at its pre-tile frame with no record, so
         // re-observe it there and pair it with its dissolved slot. The
@@ -900,7 +909,19 @@ final class TilingController {
                     handle: handle, slot: slot, preTileFrame: frame, space: space))
             }
             mutateSpace(space) {
-                $0.undoStack[$0.undoStack.count - 1] = (snapshot: snapshot, requester: nil)
+                if snapshot.isEmpty {
+                    // Every frame read failed (the AX-unreadable
+                    // transient): nothing can be restored, so the
+                    // placeholder chapter goes. A "Restore 0 Evicted
+                    // Windows" row would offer an undo that can only
+                    // report failure.
+                    _ = $0.undoStack.popLast()
+                    // The sticky notice must not offer a key that no
+                    // longer has a chapter behind it.
+                    $0.notice = "Untiled \(noun)."
+                } else {
+                    $0.undoStack[$0.undoStack.count - 1] = (snapshot: snapshot, requester: nil)
+                }
             }
         }
         noteSurfaceCanvas(space)
@@ -910,9 +931,12 @@ final class TilingController {
     /// Reports restore failures unless a more relevant error already took
     /// the slot. Shared by `untile`/`untileAll`; plan execution reports
     /// its own through `Outcome.error` with the same precedence rule.
-    private func reportRestoreFailures(_ failures: [String]) {
-        guard !failures.isEmpty, lastTileError == nil else { return }
-        lastTileError = MenuText.restoreFailureMessage(failures)
+    private func reportRestoreFailures(_ failures: [String], on space: TilingSpaceKey) {
+        guard !failures.isEmpty else { return }
+        mutateSpace(space) {
+            guard $0.error == nil else { return }
+            $0.error = MenuText.restoreFailureMessage(failures)
+        }
     }
 
     /// Snaps all splitters back to defaults and re-tiles everyone. The
@@ -1007,20 +1031,28 @@ final class TilingController {
         }
         pruneDeadWindows()
         mutateSpace(space) { $0.error = nil; $0.notice = nil }
-        // A slot may have been re-tiled since its window was evicted (the
-        // undo stack survives new actions by design). The restoration is
-        // honored like any tile: the current occupant is untiled to its
-        // pre-tile frame first, so undo never silently clobbers a window
-        // into a ghost that overlaps the restored one on screen. The
-        // window being restored itself (same handle, e.g. reissued by an
-        // earlier undo) is not displaced.
+        // A slot may have been re-tiled, and the canvas may have moved to
+        // the other layout, since the chapter was pushed (the undo stack
+        // survives new actions by design). Both are honored like any
+        // tile: every current occupant the restoration would land on
+        // (overlapping cells) or contradict (the other layout) is untiled
+        // to its pre-tile frame first. Undo can therefore never
+        // double-book a cell or leave two layouts on one canvas. Only the
+        // window an entry is about is exempt from that entry; a chapter's
+        // own requester still steps aside where it would block a restore,
+        // exactly as before.
+        var blockers: Set<WindowID> = []
         for evicted in entry.snapshot {
             let destination = evicted.space ?? space
-            if let current = spaceState(for: destination).occupant(of: evicted.slot),
-               let record = records[current], record.handle != evicted.handle
-            {
-                untile(window: current, reflowing: false)
+            for (slot, current) in spaceState(for: destination).occupants
+            where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {
+                guard let record = records[current],
+                      record.handle != evicted.handle else { continue }
+                blockers.insert(current)
             }
+        }
+        for current in blockers.sorted() {
+            untile(window: current, reflowing: false)
         }
         // Group the chapter by destination canvas: each window returns
         // to the canvas it left (legacy untagged entries restore into
@@ -1147,6 +1179,7 @@ final class TilingController {
         let slot = slotOfWindow(id)
         let space = spaceOf(window: id)
         dbg("destroyed win\(id): releasing slot now")
+        releaseHandle(id)
         forgetWindow(id)
         pushLeaveUndo(slot: slot, on: space)
         onChange?()
@@ -1253,12 +1286,22 @@ final class TilingController {
     /// listing every remembered canvas.
     func allTiledWindowsInfo() -> [TiledWindowInfo] {
         let infos = screens()
-        let sources: [(key: TilingSpaceKey, screenName: String?)] =
+        var sources: [(key: TilingSpaceKey, screenName: String?)] =
             if infos.isEmpty {
                 spaces.keys.sorted(by: Self.spaceOrder).map { ($0, nil) }
             } else {
                 infos.map { (tilingKey(for: $0.id), $0.name) }
             }
+        // A canvas whose Space id the server withheld holds windows too,
+        // and it is this display's canvas, not a hidden Space: list it so
+        // the manage rows and Untile All can still reach them.
+        for info in infos {
+            let fallback = TilingSpaceKey(screen: info.id, space: nil)
+            guard withheldCanvas(on: info.id) != nil,
+                  !sources.contains(where: { $0.key == fallback })
+            else { continue }
+            sources.append((fallback, info.name))
+        }
         var rows: [TiledWindowInfo] = []
         for source in sources {
             let occupants = spaces[source.key]?.state.occupants ?? [:]
@@ -1314,7 +1357,7 @@ final class TilingController {
         }
         mutateSpace(space) { $0.error = nil; $0.notice = nil }
         if let failure = restoreOne(id).failure {
-            reportRestoreFailures([failure])
+            reportRestoreFailures([failure], on: space)
         }
         pushLeaveUndo(slot: slot, on: space)
         noteSurfaceCanvas(space)
@@ -1337,7 +1380,7 @@ final class TilingController {
         mutateSpace(space) { $0.error = nil; $0.notice = nil }
         let slot = slotOfWindow(id)
         if let failure = restoreOne(id).failure {
-            reportRestoreFailures([failure])
+            reportRestoreFailures([failure], on: space)
         }
         if reflowing {
             pushLeaveUndo(slot: slot, on: space)
@@ -1396,7 +1439,7 @@ final class TilingController {
         for move in moves {
             if let target = tracker.rect(for: move.window) { rects[move.window] = target }
         }
-        if pushRects(rects, excluding: nil) > 0 {
+        if pushRects(rects, excluding: nil, on: space) > 0 {
             var rolled = spaceState(for: space)
             for move in moves { rolled.commit(window: move.window, into: move.from) }
             setSpaceState(rolled, for: space)
@@ -1491,9 +1534,19 @@ final class TilingController {
     /// feedback of its own.
     private func writeExpandedFrame(_ id: WindowID, to target: CGRect) -> Bool {
         guard let record = records[id] else { return false }
+        let windowSpace = spaceOf(window: id) ?? focusedSpaceKey()
+        // The same off-Space guard every other write path applies: an AX
+        // resize can pull a hidden-Space window onto the visible Space,
+        // so the expand write waits for the swipe back. Returning false
+        // keeps the expansion out of state: nothing on screen moved.
+        guard isVisible(windowSpace) else {
+            staleSpaces.insert(windowSpace)
+            dbg("expand win\(id) deferred off-Space")
+            return false
+        }
         tracker.markExpected(id, target)
         if gateway.setFrame(record.handle, to: target) { return true }
-        lastTileError = Self.refusalMessage(count: 1)
+        setTileError(Self.refusalMessage(count: 1), on: windowSpace)
         return false
     }
 
@@ -1562,6 +1615,13 @@ final class TilingController {
         spaceOwnership[id] = nil
         expanded[id] = nil
         noteSurfaceCanvas(nil)
+    }
+
+    /// Hands a confirmed-gone handle back to the adapter. Only death
+    /// paths call this: an untiled or evicted window keeps its element,
+    /// because undo and re-tiling reuse the stored handle.
+    private func releaseHandle(_ id: WindowID) {
+        if let record = records[id] { gateway.release(record.handle) }
     }
 
     private static func refusalMessage(count: Int) -> String {
@@ -1648,7 +1708,34 @@ final class TilingController {
     /// shown there. Focus lands on the active Space of whichever display
     /// owns the focused window, so this is the canvas a hotkey acts on.
     private func focusedSpaceKey() -> TilingSpaceKey {
-        tilingKey(for: focusedScreenID())
+        actionSpaceKey(for: focusedScreenID())
+    }
+
+    /// A display's withheld-Space canvas, when it still holds windows or
+    /// chapters. This is not a hidden Space: it is the canvas the window
+    /// server would not name when those windows tiled. If the id resolves
+    /// later, the canvas must stay reachable or its windows vanish from
+    /// the menu, the bulk actions, and undo.
+    private func withheldCanvas(on screen: ScreenID?) -> TilingSpaceKey? {
+        guard let screen else { return nil }
+        let key = TilingSpaceKey(screen: screen, space: nil)
+        guard let state = spaces[key],
+              !state.state.occupants.isEmpty || !state.undoStack.isEmpty
+        else { return nil }
+        return key
+    }
+
+    /// The canvas an action on `screen` resolves to: the identified
+    /// canvas when it holds anything, else the display's withheld-Space
+    /// canvas. Without this the first successful Space lookup after a
+    /// withheld period would strand every window tiled during it.
+    private func actionSpaceKey(for screen: ScreenID?) -> TilingSpaceKey {
+        let identified = tilingKey(for: screen)
+        if let state = spaces[identified],
+           !state.state.occupants.isEmpty || !state.undoStack.isEmpty {
+            return identified
+        }
+        return withheldCanvas(on: identified.screen) ?? identified
     }
 
     /// The canvas key for every display right now, in screen order. One
@@ -1659,6 +1746,11 @@ final class TilingController {
         for info in screens() {
             let key = tilingKey(for: info.id)
             if !keys.contains(key) { keys.append(key) }
+            // A withheld-Space canvas is reasserted like the identified
+            // one: it is the same display, just unnamed.
+            if let fallback = withheldCanvas(on: info.id), fallback != key {
+                keys.append(fallback)
+            }
         }
         if keys.isEmpty { keys = [tilingKey(for: nil)] }
         return keys

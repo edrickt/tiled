@@ -31,13 +31,25 @@ func title(of el: AXUIElement) -> String {
 guard let pid = ProcessInfo.processInfo.environment["PID"].flatMap({ pid_t($0) })
     ?? (CommandLine.arguments.count > 1 ? pid_t(CommandLine.arguments[1]) : nil)
 else {
-    print("usage: swift destroy-notification-probe.swift <pid> [close|kill]")
+    print("usage: swift destroy-notification-probe.swift <pid> <close|kill>")
     exit(1)
 }
-let mode = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "close"
+// The mode is required, not defaulted: "close" destroys a real window of
+// whatever pid was named, and a measurement probe must never do that
+// because an operator forgot the second argument.
+guard CommandLine.arguments.count > 2,
+    let mode = ["close", "kill"].first(where: { $0 == CommandLine.arguments[2] })
+else {
+    print("usage: swift destroy-notification-probe.swift <pid> <close|kill>")
+    print("  close: press the first window's AX close button")
+    print("  kill:  SIGKILL the process")
+    exit(1)
+}
 
 let app = AXUIElementCreateApplication(pid)
 AXUIElementSetMessagingTimeout(app, timeout)
+let targetName = (attr(app, kAXTitleAttribute as CFString) as? String) ?? "pid \(pid)"
+print("target: \(targetName) (pid \(pid)), mode \(mode)")
 let windows = (attr(app, kAXWindowsAttribute as CFString) as? [AXUIElement]) ?? []
 guard let victim = windows.first else {
     print("FATAL: pid \(pid) has no AX windows")

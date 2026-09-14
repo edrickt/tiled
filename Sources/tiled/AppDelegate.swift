@@ -326,12 +326,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return path
     }
 
-    /// VoiceOver line for the occupancy map: layout plus how many of its
-    /// slots are taken, so the state isn't sight-only.
+    /// VoiceOver line for the occupancy map: layout plus how many windows
+    /// are tiled, so the state isn't sight-only.
     private static func statusIconDescription(_ snapshot: StatusIcon.Snapshot) -> String {
-        let total = StatusIcon.cells(for: snapshot.layout).count
-        return "Tiled \(snapshot.layout.title) layout, "
-            + "\(snapshot.filled.count) of \(total) slots occupied"
+        StatusIcon.accessibilityDescription(snapshot)
     }
 
     /// Renders a snapshot on the status button. Whether to redraw is the
@@ -465,6 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tiledWindows: presentation.tiledWindows,
             canUndoDisplacement: controller.canUndoDisplacement,
             evictedCount: controller.evictedCount,
+            untileCount: controller.focusedTiledWindowsInfo.count,
             monitorSections: presentation.sections)
     }
 

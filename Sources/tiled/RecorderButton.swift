@@ -11,6 +11,7 @@ final class RecorderButton: NSButton {
     let slot: Slot
     private(set) var isRecording = false
     private var monitor: Any?
+    private var windowCloseObserver: NSObjectProtocol?
     private var completion: ((HotkeyRecorder.Outcome) -> Void)?
     /// Fires when a recorder arms: announce that the next keypress will be
     /// captured, so the state change is never visual-only.
@@ -39,6 +40,36 @@ final class RecorderButton: NSButton {
 
     deinit {
         stopMonitoring()
+        removeWindowCloseObserver()
+    }
+
+    /// An armed recorder must never outlive its visible surface: the key
+    /// monitor swallows every keyDown, so a hidden or closed button would
+    /// eat keystrokes (including ⌘Q) with nothing on screen to explain it.
+    /// Tab switches and view removal arrive here with `window == nil`;
+    /// the window-close observer covers the close button, where the
+    /// window object (and this view) outlive the dismissal.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            removeWindowCloseObserver()
+            if isRecording { cancelSilently() }
+            return
+        }
+        guard windowCloseObserver == nil, let window else { return }
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isRecording else { return }
+            self.cancelSilently()
+        }
+    }
+
+    private func removeWindowCloseObserver() {
+        if let windowCloseObserver {
+            NotificationCenter.default.removeObserver(windowCloseObserver)
+            self.windowCloseObserver = nil
+        }
     }
 
     /// Last committed binding, so a silent cancel (tab away mid-record)
@@ -80,8 +111,8 @@ final class RecorderButton: NSButton {
     func routeRecordedEvent(_ event: NSEvent) -> NSEvent? {
         guard isRecording, completion != nil else { return event }
         // Navigation keys pass through so keyboard users can tab away
-        // mid-record (the button disarms via resignFirstResponder's
-        // focus reset); Esc still cancels explicitly.
+        // mid-record (`viewDidMoveToWindow` disarms when the button
+        // leaves the window); Esc still cancels explicitly.
         if HotkeyRecorder.shouldPassThrough(event) {
             cancelSilently()
             return event

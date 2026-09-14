@@ -177,6 +177,23 @@ extension StatusIconTests {
         }
     }
 
+    func testAccessibilityDescriptionCountsWindowsNotCells() {
+        // A half lights two cells but is one window: the spoken line must
+        // not overstate occupancy (a half used to read "2 of 4").
+        let half = StatusIcon.snapshot(layout: .quarters, occupants: [.leftHalf: 1])
+        XCTAssertEqual(half.occupiedSlots, 1)
+        XCTAssertEqual(half.filled.count, 2, "the glyph still lights its whole column")
+        XCTAssertEqual(
+            StatusIcon.accessibilityDescription(half),
+            "Tiled Quarters layout, 1 of 4 slots occupied")
+
+        let thirds = StatusIcon.snapshot(
+            layout: .sixths, occupants: [.sixthLeft: 1, .sixthRight: 2])
+        XCTAssertEqual(
+            StatusIcon.accessibilityDescription(thirds),
+            "Tiled Sixths layout, 2 of 6 slots occupied")
+    }
+
     func testUnroundedCellIsTheFullRect() {
         // No corners or zero radius: the path is the rect itself.
         let rect = NSRect(x: 2, y: 3, width: 10, height: 8)

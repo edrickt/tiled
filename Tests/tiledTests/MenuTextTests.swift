@@ -41,17 +41,17 @@ final class MenuTextTests: XCTestCase {
     func testEvictHotkeyWarningNamesComboAndRecovery() {
         XCTAssertEqual(
             MenuText.evictHotkeyWarning(),
-            "The evict shortcut (⌥⇧⌫) is already used by another app; "
-                + "quit and reopen Tiled to try registering it again.")
+            "The evict shortcut (⌥⇧⌫) could not be registered; "
+                + "quit and reopen Tiled to try again.")
     }
 
     func testWarningSummaryTitleSingularAndPlural() {
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 1),
-            "⚠ 1 shortcut problem: other apps own it")
+            "⚠ 1 shortcut problem: a combo is taken")
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 3),
-            "⚠ 3 shortcut problems: other apps own them")
+            "⚠ 3 shortcut problems: combos are taken")
     }
 
     // MARK: Warnings
@@ -59,34 +59,35 @@ final class MenuTextTests: XCTestCase {
     func testSettingsHotkeyWarningNamesComboAndRecovery() {
         XCTAssertEqual(
             MenuText.settingsHotkeyWarning(),
-            "The Settings shortcut (⌃⌥⇧⌘,) is already used by another app; "
+            "The Settings shortcut (⌃⌥⇧⌘,) could not be registered; "
                 + "quit and reopen Tiled to get back to Settings while hidden.")
     }
 
     func testHotkeyFailureWarningNamesLabelAndSlot() {
         XCTAssertEqual(
             MenuText.hotkeyFailureWarning(label: "⌥⇧U", slot: .topLeft),
-            "⌥⇧U is already used by another app; “Top Left” has no hotkey.")
+            "⌥⇧U could not be registered; “Top Left” has no hotkey. "
+                + "Another Tiled shortcut or a system shortcut may already use it.")
     }
 
     func testHotkeyFailureWarningFallsBackToSlotNameWithoutSelfContradiction() {
         XCTAssertEqual(
             MenuText.hotkeyFailureWarning(label: nil, slot: .sixthLeft),
-            "The shortcut for “Left Third” is already used by another app: it has no hotkey.")
+            "The shortcut for “Left Third” could not be registered: it has no hotkey.")
     }
 
     func testUndoHotkeyWarningNamesComboAndMenuRecovery() {
         XCTAssertEqual(
             MenuText.undoHotkeyWarning(),
-            "The undo shortcut (⌃⌥⇧⌘Z) is already used by another app; "
+            "The undo shortcut (⌃⌥⇧⌘Z) could not be registered; "
                 + "undo the last displacement from the Tiled menu instead.")
     }
 
     func testExpandHotkeyWarningNamesComboAndRecovery() {
         XCTAssertEqual(
             MenuText.expandHotkeyWarning(),
-            "The expand shortcut (⌥⇧⏎) is already used by another app; "
-                + "quit and reopen Tiled to try registering it again.")
+            "The expand shortcut (⌥⇧⏎) could not be registered; "
+                + "quit and reopen Tiled to try again.")
     }
 
     // MARK: Menu rows

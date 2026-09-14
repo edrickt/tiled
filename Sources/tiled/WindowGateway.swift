@@ -79,4 +79,14 @@ protocol WindowGateway: AnyObject {
     /// app that never issues this call may not appear in System
     /// Settings' list at all, leaving only the manual "+" path. Idempotent.
     func registerAccessibilityInterest()
+    /// Releases the adapter's resources for a handle the controller has
+    /// confirmed gone (a confirmed prune or an OS destroy report).
+    /// Untile, evict, and drag-out do NOT release: a window that may
+    /// come back through undo keeps its element so its frame can be
+    /// restored. Stateless adapters need no implementation.
+    func release(_ handle: WindowHandle)
+}
+
+extension WindowGateway {
+    func release(_ handle: WindowHandle) {}
 }

@@ -37,6 +37,19 @@ final class FakeWindowGateway: WindowGateway {
     /// clamp or round the requested rect while still reporting success,
     /// so the live frame can differ from the target. Identity by default.
     var writtenFrame: (WindowHandle, CGRect) -> CGRect = { _, target in target }
+    /// Handles whose size write is refused while the position write still
+    /// lands: the partial application the live adapter must roll back.
+    /// The fake models the app (the origin moves, the call reports
+    /// false); the adapter's restore policy lives in `AXWrite`.
+    var refuseSizeWrites: Set<WindowHandle> = []
+    /// Every frame write the adapter applied, in order (a partial write
+    /// records the origin move). Lets tests pin "a no-op request issues
+    /// zero writes" instead of only the resulting frame.
+    private(set) var writes: [(handle: WindowHandle, frame: CGRect)] = []
+    /// Handles the controller has released. Only confirmed death may
+    /// release: an untiled or evicted window must keep its element so
+    /// undo and re-tiling can reuse the stored handle.
+    private(set) var releaseCalls: [WindowHandle] = []
 
     @discardableResult
     func addWindow(frame: CGRect, appName: String? = "TestApp") -> WindowHandle {
@@ -81,9 +94,24 @@ final class FakeWindowGateway: WindowGateway {
             windows[handle] = window
             return false
         }
+        if refuseSizeWrites.contains(handle) {
+            // Position lands, size is refused: the window is half-moved
+            // until the adapter puts the origin back.
+            window.frame.origin = frame.origin
+            windows[handle] = window
+            writes.append((handle, frame))
+            return false
+        }
         window.frame = writtenFrame(handle, frame)
         windows[handle] = window
+        writes.append((handle, window.frame))
         return true
+    }
+
+    func release(_ handle: WindowHandle) {
+        releaseCalls.append(handle)
+        changeHandlers[handle] = nil
+        destroyedHandlers[handle] = nil
     }
 
     /// Handles whose liveness probe reports unknown (a busy app that
@@ -187,6 +215,11 @@ final class FakeWindowGateway: WindowGateway {
 
     func refuseNextWrites(_ handle: WindowHandle, count: Int = 1) {
         windows[handle]?.refuseNextWrites = count
+    }
+
+    /// Clears the write log: tests assert about writes from here on.
+    func clearWrites() {
+        writes.removeAll()
     }
 
     func observedHandles() -> [WindowHandle] {

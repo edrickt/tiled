@@ -547,10 +547,18 @@ struct TilingState: Equatable {
     /// there is no unambiguous home to guess. The region may include
     /// cells that were free before the request: the evictee has nowhere
     /// else to go, and a whole free slot is a whole free slot.
-    func rehousingHome(evicting evictee: WindowID, for target: Slot) -> Slot? {
+    func rehousingHome(
+        evicting evictee: WindowID, for target: Slot, vacating previous: Slot? = nil
+    ) -> Slot? {
         guard let current = slot(of: evictee), current.overlaps(target) else { return nil }
+        // The free region is the one the request leaves behind: the target
+        // is taken by the requester, the evictee's own slot is freed, and
+        // the requester's vacated slot is freed too (it is still committed
+        // here). A caller that omits `previous` computes the pre-request
+        // region, which is only correct for an untiled requester.
         var occupied = target.cells
-        for (slot, window) in occupantBySlot where window != evictee {
+        for (slot, window) in occupantBySlot
+        where window != evictee && slot != previous {
             occupied.formUnion(slot.cells)
         }
         let free = Set(TileCell.allCases).subtracting(occupied)

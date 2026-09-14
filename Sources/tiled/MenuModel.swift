@@ -89,6 +89,11 @@ enum MenuModel {
         var tiledWindows: [TiledWindow]
         var canUndoDisplacement: Bool
         var evictedCount: Int
+        /// Windows on the focused canvas: the scope Untile All acts on.
+        /// Distinct from `tiledWindows`, which spans every visible canvas
+        /// for the manage list, because the row's count must match the
+        /// action it performs.
+        var untileCount: Int
         /// Per-monitor section headers for the tiled-windows list, in
         /// menu order. Empty = single monitor (no headers rendered).
         /// Defaulted so the existing 15-arg construction keeps working.
@@ -159,9 +164,7 @@ enum MenuModel {
             if let notice = snapshot.notice {
                 items.append(Item(title: notice, isEnabled: false))
             }
-            items.append(Item(
-                title: "Layout: \(snapshot.layoutTitle) · \(snapshot.tiledWindows.count) tiled",
-                isEnabled: false))
+            items.append(Item(title: snapshot.layoutTitle, isEnabled: false))
         }
         items.append(.separator())
 
@@ -268,7 +271,7 @@ enum MenuModel {
                         action: .undoSwitch))
                 }
                 items.append(Item(
-                    title: MenuText.untileAllTitle(count: snapshot.tiledWindows.count),
+                    title: MenuText.untileAllTitle(count: snapshot.untileCount),
                     action: .untileAll))
                 items.append(Item(
                     title: snapshot.hasSplitterBackup

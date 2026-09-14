@@ -20,6 +20,10 @@ enum StatusIcon {
         /// Icon cells (members of `cells(for:)`), in icon order, that are
         /// currently covered by a tiled window.
         var filled: [Slot]
+        /// Distinct tiled windows on the canvas. `filled.count` counts
+        /// lit cells, so a half or a third would overstate the spoken
+        /// occupancy; the VoiceOver line needs the window count.
+        var occupiedSlots: Int
     }
 
     /// The icon cells for a layout, in drawing order (left to right, top
@@ -53,6 +57,18 @@ enum StatusIcon {
     static func snapshot(
         layout: LayoutKind, occupants: [Slot: WindowID]
     ) -> Snapshot {
-        Snapshot(layout: layout, filled: filledCells(layout: layout, occupants: occupants))
+        Snapshot(
+            layout: layout,
+            filled: filledCells(layout: layout, occupants: occupants),
+            occupiedSlots: Set(occupants.values).count)
+    }
+
+    /// VoiceOver line for the occupancy map: layout plus how many windows
+    /// are tiled. Pure so the count is testable, and window-based so a
+    /// half reports "1 of 4 slots occupied", not "2 of 4".
+    static func accessibilityDescription(_ snapshot: Snapshot) -> String {
+        let total = cells(for: snapshot.layout).count
+        return "Tiled \(snapshot.layout.title) layout, "
+            + "\(snapshot.occupiedSlots) of \(total) slots occupied"
     }
 }

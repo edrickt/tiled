@@ -499,18 +499,23 @@ verify("S6b column recovered to \(col)")
 let colSaved = col, rowLSaved = rowL, rowRSaved = rowR
 dragEdge("HOSTA", "left", 40)
 dragEdge("HOSTB", "bottom", -40)
-if col == colSaved && rowL == rowLSaved && rowR == rowRSaved {
-    pass += 1; print("PASS S7 screen-edge drags did not move splitters")
-} else {
-    fail += 1; print(">>>> FAILED S7: splitters moved on screen-edge drag")
-}
 // Both windows were mutated off-grid; cycle them through an overlapping
 // slot (evicting, never swapping) so each is placed back onto the grid.
 // Self-tile is a no-op, so a direct re-press would leave them off-grid.
 doTile("HOSTA", "LH") // evicts B; A placed into the left half
 doTile("HOSTB", "BL") // evicts A; B placed into bottom left
 doTile("HOSTA", "TL") // disjoint: A placed back into top left
-verify("S7b A and B retiled after off-grid mutations")
+// The re-assert is what makes this check real: the saved splitters imply
+// these rects, so a screen-edge drag that moved a splitter would place
+// the frames somewhere else (the mirrors stayed at their saved values).
+if col == colSaved, rowL == rowLSaved, rowR == rowRSaved,
+    let aFrame = actualFrame("HOSTA"), close(aFrame, gridRect("TL")),
+    let bFrame = actualFrame("HOSTB"), close(bFrame, gridRect("BL"))
+{
+    pass += 1; print("PASS S7 screen-edge drags did not move splitters")
+} else {
+    fail += 1; print(">>>> FAILED S7: splitters moved on screen-edge drag")
+}
 
 // MARK: S8 - half over two quads evicts both
 
@@ -534,13 +539,17 @@ verify("S10c A retiled into resized left half")
 // MARK: S11 - moving a tiled window is inert (v1), grid intact
 
 simulateMove("HOSTA", by: CGSize(width: 60, height: 40))
-let colMoved = col, rowLMoved = rowL, rowRMoved = rowR
-if col == colMoved && rowL == rowLMoved && rowR == rowRMoved {
-    pass += 1; print("PASS S11a title-bar move did not move splitters")
+// The title-bar move must not read as a splitter drag: the mirrors for
+// the row/column fractions stay put, and the re-assert (any resize
+// re-normalizes the grid) must put A exactly back on its tile. Comparing
+// the app's frame to the rect the current splitters imply can fail; the
+// old mirror-to-itself comparison could not.
+dragEdge("HOSTC", "left", 30)
+if let aFrame = actualFrame("HOSTA"), close(aFrame, gridRect("TL")) {
+    pass += 1; print("PASS S11a title-bar move did not move splitters; A snapped back")
 } else {
     fail += 1; print(">>>> FAILED S11a")
 }
-dragEdge("HOSTC", "left", 30) // any resize re-asserts layout; A must snap back
 verify("S11b layout re-asserted: A snapped back onto grid")
 
 // MARK: S12 - window close prunes cleanly
@@ -642,12 +651,15 @@ verify("S19b switched to sixths: three top sixths at equal thirds")
 
 // One row divider per third: dragging the left sixth's bottom edge moves
 // only the left third's divider, so the middle and right sixths keep
-// their height.
-let midsBefore = gridRect("sixthTopMiddle"), rightBefore = gridRect("sixthTopRight")
+// their height. The app's own frames are the check: the mirror rects a
+// drag cannot reach would pass no matter what the drag did.
+let midBefore = actualFrame("HOSTB"), rightBefore = actualFrame("HOSTC")
 dragEdge("HOSTA", "bottom", -60)
 verify("S19c left sixth resized, middle and right sixths unmoved")
-let midAfter = gridRect("sixthTopMiddle")
-if close(midAfter, midsBefore) && close(gridRect("sixthTopRight"), rightBefore) {
+if let midBefore, let rightBefore,
+    let midAfter = actualFrame("HOSTB"), let rightAfter = actualFrame("HOSTC"),
+    close(midAfter, midBefore), close(rightAfter, rightBefore)
+{
     pass += 1; print("PASS S19d per-third row independence: other thirds held")
 } else {
     fail += 1; print(">>>> FAILED S19d: a sixths row drag moved another third")

@@ -6,14 +6,22 @@ on:
   pull_request:
   workflow_dispatch:
 
+# The job only reads the repository: keep the token at the minimum scope.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unit:
     # The unit suite is hermetic: fake gateway, injected clocks, no AX.
     # It runs headless and is the gate for every change.
     runs-on: macos-14
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Swift version
         run: swift --version
@@ -24,6 +32,18 @@ jobs:
       - name: Unit tests
         run: swift test
 
+      # The release configuration and the bundle are what users install;
+      # a release-only compile error or a broken Info.plist must not wait
+      # for a hand-run install to surface.
+      - name: Release build
+        run: swift build -c release
+
+      - name: App bundle
+        run: |
+          ./scripts/make-app.sh
+          codesign --verify --deep --strict build/Tiled.app
+          plutil -lint build/Tiled.app/Contents/Info.plist
+
       # The live end-to-end repro suite is NOT run here: it needs a logged-in
       # GUI session, Accessibility permission for the runner, and it moves the
       # real cursor. Run it locally before a release:
@@ -31,10 +51,12 @@ jobs:
       - name: Coverage summary
         if: always()
         run: |
-          swift test --enable-code-coverage >/dev/null 2>&1 || true
+          swift test --enable-code-coverage
           BIN=.build/debug/tiledPackageTests.xctest/Contents/MacOS/tiledPackageTests
           PROF=.build/debug/codecov/default.profdata
           if [[ -f "$BIN" && -f "$PROF" ]]; then
             xcrun llvm-cov report "$BIN" -instr-profile="$PROF" \
               -ignore-filename-regex='(Tests|\.build)' | tail -30
+          else
+            echo "::warning::coverage profile missing; check the test bundle path"
           fi

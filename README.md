@@ -85,10 +85,13 @@ Disable or re-enable a whole layout at once with the Enable/Disable all
 button beside each section header; your combos are parked aside and
 restored unchanged.
 
-If a shortcut is already owned by another app, that slot shows a warning in
-the menu instead of silently doing nothing. If two tiled slots use the same
-combo, the Shortcuts tab names the conflict and keeps the old binding until
-you pick a free one.
+If two tiled slots use the same combo, the Shortcuts tab names the conflict
+and keeps the old binding until you pick a free one, and a combo that
+matches one of Tiled's fixed shortcuts is refused the same way. If a
+shortcut fails to register, the menu says so. macOS does not report
+another app owning a global shortcut to a non-exclusive registrant (the
+key simply goes elsewhere), so Tiled can surface a dead combo but cannot
+tell you which app took it.
 
 ## Tiling rules
 
@@ -254,8 +257,8 @@ checks the suite cannot drive.
 `tools/mutation` answers the question a green suite cannot ask itself:
 would these tests notice if the code stopped working? Each entry in
 `tools/mutation/mutants.json` is a plausible bug injected into `Sources/tiled`;
-a mutant that survives is a test gap. It exits non-zero on any survivor, so
-it can gate a release branch. Sources are restored from memory after each
+a mutant that survives is a test gap. It exits non-zero on any survivor or
+unresolved mutant, so it can gate a release branch. Sources are restored from memory after each
 run, so uncommitted work is safe.
 
 CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.

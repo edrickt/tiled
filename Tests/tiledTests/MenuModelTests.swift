@@ -21,7 +21,8 @@ final class MenuModelTests: XCTestCase {
         expandedSlot: Slot? = nil,
         tiledWindows: [MenuModel.Snapshot.TiledWindow] = [],
         canUndoDisplacement: Bool = false,
-        evictedCount: Int = 0
+        evictedCount: Int = 0,
+        untileCount: Int = 0
     ) -> MenuModel.Snapshot {
         MenuModel.Snapshot(
             isTrusted: isTrusted,
@@ -36,7 +37,8 @@ final class MenuModelTests: XCTestCase {
             expandedSlot: expandedSlot,
             tiledWindows: tiledWindows,
             canUndoDisplacement: canUndoDisplacement,
-            evictedCount: evictedCount)
+            evictedCount: evictedCount,
+            untileCount: untileCount)
     }
 
     private var defaultBinding = HotkeyStore.defaultBinding(for: .topLeft)
@@ -59,11 +61,11 @@ final class MenuModelTests: XCTestCase {
             hasHotkeyWarnings: true))
         // One summary row, not one row per warning: the menu's first
         // screenful is the everyday surface, not a troubleshooting essay.
-        XCTAssertEqual(model.first?.title, "⚠ 1 shortcut problem: other apps own it")
+        XCTAssertEqual(model.first?.title, "⚠ 1 shortcut problem: a combo is taken")
         XCTAssertFalse(model.first!.isEnabled)
         // The compass survives trouble: the summary rides above the status line.
         XCTAssertTrue(
-            model.contains { $0.title == "Layout: Quarters · 0 tiled" },
+            model.contains { $0.title == "Quarters" },
             "warnings never erase the layout/count line")
         // The latest outcome narrates even while warnings persist: a
         // lingering hotkey failure must not erase the record of what the
@@ -87,17 +89,17 @@ final class MenuModelTests: XCTestCase {
             tileError: "Safari couldn't be tiled",
             hasHotkeyWarnings: true))
         XCTAssertEqual(model[0].title, "Safari couldn't be tiled")
-        XCTAssertEqual(model[1].title, "⚠ 1 shortcut problem: other apps own it")
+        XCTAssertEqual(model[1].title, "⚠ 1 shortcut problem: a combo is taken")
         XCTAssertEqual(model[2].title, "Open Shortcuts…")
     }
 
     func testWarningSummaryCounts() {
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 1),
-            "⚠ 1 shortcut problem: other apps own it")
+            "⚠ 1 shortcut problem: a combo is taken")
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 3),
-            "⚠ 3 shortcut problems: other apps own them")
+            "⚠ 3 shortcut problems: combos are taken")
     }
 
     func testExpandRowReflectsExpandedState() {
@@ -119,7 +121,7 @@ final class MenuModelTests: XCTestCase {
             warnings: ["⌥⇧U is already used by another app; “Top Left” has no hotkey."],
             hasHotkeyWarnings: true))
         let warnings = model.prefix(2).map(\.title)
-        XCTAssertEqual(warnings[0], "⚠ 1 shortcut problem: other apps own it")
+        XCTAssertEqual(warnings[0], "⚠ 1 shortcut problem: a combo is taken")
         // A disabled row can't fix itself: the actionable row follows,
         // opening exactly the tab that can rebind it.
         XCTAssertEqual(warnings[1], "Open Shortcuts…")
@@ -129,7 +131,7 @@ final class MenuModelTests: XCTestCase {
 
     func testCollapsedWarningsKeepSingleRowForMany() {
         let model = items(snapshot(warnings: ["a", "b", "c"]))
-        XCTAssertEqual(model.prefix(1).map(\.title), ["⚠ 3 shortcut problems: other apps own them"])
+        XCTAssertEqual(model.prefix(1).map(\.title), ["⚠ 3 shortcut problems: combos are taken"])
         XCTAssertTrue(model.prefix(1).allSatisfy { !$0.isEnabled })
     }
 
@@ -138,7 +140,7 @@ final class MenuModelTests: XCTestCase {
             notice: "Undid layout switch · 1 window restored.", layoutTitle: "Sixths"))
         XCTAssertEqual(model[0].title, "Undid layout switch · 1 window restored.")
         XCTAssertFalse(model[0].isEnabled)
-        XCTAssertEqual(model[1].title, "Layout: Sixths · 0 tiled")
+        XCTAssertEqual(model[1].title, "Sixths")
         XCTAssertFalse(model[1].isEnabled)
     }
 
@@ -290,6 +292,20 @@ final class MenuModelTests: XCTestCase {
         XCTAssertTrue(withoutUndo.contains { $0.action == .resetDividers })
         let reset = withoutUndo.first { $0.action == .resetDividers }
         XCTAssertEqual(reset?.title, "Reset Splitters")
+    }
+
+    func testUntileAllTitleCountsTheFocusedCanvasOnly() {
+        // Three windows across two canvases: the row acts on one canvas,
+        // so its count must be that canvas's count, not the manage list's.
+        let model = items(snapshot(
+            tiledWindows: [
+                .init(id: 1, slot: .topLeft, appName: nil),
+                .init(id: 2, slot: .topRight, appName: nil),
+                .init(id: 3, slot: .topLeft, appName: nil, screenName: "Display 2"),
+            ],
+            untileCount: 2))
+        let row = model.first { $0.action == .untileAll }
+        XCTAssertEqual(row?.title, "Untile 2 Windows")
     }
 
     func testSplitterBackupFlipsTheManageRow() {

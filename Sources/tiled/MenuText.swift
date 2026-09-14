@@ -42,16 +42,19 @@ enum MenuText {
     /// door; the full sentences already live in the Shortcuts tab.
     static func warningSummaryTitle(count: Int) -> String {
         count == 1
-            ? "⚠ 1 shortcut problem: other apps own it"
-            : "⚠ \(count) shortcut problems: other apps own them"
+            ? "⚠ 1 shortcut problem: a combo is taken"
+            : "⚠ \(count) shortcut problems: combos are taken"
     }
 
     // MARK: Warnings
 
-    /// The fallback Settings combo lost registration (owned by another app).
+    /// The fallback Settings combo lost registration. Carbon reports only
+    /// a same-process collision through `eventHotKeyExistsErr`; another
+    /// app's non-exclusive registration neither blocks nor reports, so
+    /// the wording must not blame an app that cannot be detected.
     static func settingsHotkeyWarning() -> String {
-        "The Settings shortcut (\u{2303}\u{2325}\u{21E7}\u{2318},) is already used "
-            + "by another app; quit and reopen Tiled to get back to Settings while hidden."
+        "The Settings shortcut (\u{2303}\u{2325}\u{21E7}\u{2318},) could not be registered; "
+            + "quit and reopen Tiled to get back to Settings while hidden."
     }
 
     /// A slot's global hotkey lost registration. `label` nil means the slot
@@ -60,27 +63,28 @@ enum MenuText {
     static func hotkeyFailureWarning(label: String?, slot: Slot) -> String {
         let title = SlotPresentation.title(of: slot)
         guard let label else {
-            return "The shortcut for “\(title)” is already used by another app: it has no hotkey."
+            return "The shortcut for “\(title)” could not be registered: it has no hotkey."
         }
-        return "\(label) is already used by another app; “\(title)” has no hotkey."
+        return "\(label) could not be registered; “\(title)” has no hotkey. "
+            + "Another Tiled shortcut or a system shortcut may already use it."
     }
 
-    /// The fixed expand combo lost registration (owned by another app).
+    /// The fixed expand combo lost registration.
     static func expandHotkeyWarning() -> String {
-        "The expand shortcut (⌥⇧⏎) is already used by another app; "
-            + "quit and reopen Tiled to try registering it again."
+        "The expand shortcut (⌥⇧⏎) could not be registered; "
+            + "quit and reopen Tiled to try again."
     }
 
-    /// The fixed evict combo lost registration (owned by another app).
+    /// The fixed evict combo lost registration.
     static func evictHotkeyWarning() -> String {
-        "The evict shortcut (⌥⇧⌫) is already used by another app; "
-            + "quit and reopen Tiled to try registering it again."
+        "The evict shortcut (⌥⇧⌫) could not be registered; "
+            + "quit and reopen Tiled to try again."
     }
 
-    /// The fixed undo combo lost registration (owned by another app). The
-    /// menu row still works, so the recovery is named, not a relaunch.
+    /// The fixed undo combo lost registration. The menu row still works,
+    /// so the recovery is named, not a relaunch.
     static func undoHotkeyWarning() -> String {
-        "The undo shortcut (⌃⌥⇧⌘Z) is already used by another app; "
+        "The undo shortcut (⌃⌥⇧⌘Z) could not be registered; "
             + "undo the last displacement from the Tiled menu instead."
     }
 

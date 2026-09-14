@@ -168,6 +168,11 @@ final class HotkeyStore {
     enum ApplyResult: Equatable {
         case applied
         case duplicate(slots: [Slot])
+        /// The combo belongs to one of Tiled's own fixed shortcuts
+        /// (expand, evict, Settings, undo). Storing it would leave the
+        /// slot with a hotkey that can never register, because the fixed
+        /// combos register first.
+        case reserved(name: String)
     }
     private let defaults: UserDefaults
     private static let prefix = "hotkey."
@@ -210,15 +215,39 @@ final class HotkeyStore {
         }
     }
 
-    /// Stores `candidate` for `slot` unless another slot already uses it.
-    /// Rejected duplicates leave the store untouched so the caller can
-    /// shake and keep the old binding. Disabled bindings never collide.
+    /// Stores `candidate` for `slot` unless another slot already uses it
+    /// or the combo belongs to a fixed shortcut. Rejected candidates leave
+    /// the store untouched so the caller can shake and keep the old
+    /// binding. Disabled bindings never collide.
     @discardableResult
     func apply(_ candidate: HotkeyBinding, for slot: Slot) -> ApplyResult {
+        if let name = Self.reservedOwner(of: candidate) { return .reserved(name: name) }
         let clashes = duplicates(of: candidate, ignoring: slot)
         guard clashes.isEmpty else { return .duplicate(slots: clashes) }
         set(candidate, for: slot)
         return .applied
+    }
+
+    /// The four fixed combos slots may not take. The registrations live in
+    /// `HotkeyService`; the store owns the conflict decision so the bulk
+    /// restore paths cannot bypass it with `set`.
+    static var reservedCombos: [(name: String, binding: HotkeyBinding)] {
+        [
+            ("Expand", HotkeyService.expandBinding),
+            ("Evict", HotkeyService.evictBinding),
+            ("Settings", HotkeyBinding(
+                modifiers: HotkeyService.settingsModifiers,
+                keyCode: HotkeyService.settingsKeyCode)),
+            ("Undo", HotkeyBinding(
+                modifiers: HotkeyService.undoModifiers,
+                keyCode: HotkeyService.undoKeyCode)),
+        ]
+    }
+
+    /// The fixed shortcut that owns `candidate`, if any.
+    static func reservedOwner(of candidate: HotkeyBinding) -> String? {
+        guard candidate.keyCode != nil else { return nil }
+        return reservedCombos.first { $0.binding == candidate }?.name
     }
 
     /// Slots (other than `ignored`) whose stored binding equals `candidate`.

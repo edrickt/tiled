@@ -92,14 +92,22 @@ def main():
     scored = [r for r in results if r["status"] in ("CAUGHT", "SURVIVED")]
     caught = sum(1 for r in scored if r["status"] == "CAUGHT")
     survivors = [r for r in scored if r["status"] == "SURVIVED"]
+    unresolved = [r for r in results if r["status"] not in ("CAUGHT", "SURVIVED")]
     print(f"\nMutation score: {caught}/{len(scored)} valid mutants caught")
     for survivor in survivors:
         print(f"  SURVIVED: {survivor['path']} - {survivor['label']}")
+    # An unrun mutant is not a survivor: a drifted target line, a compile
+    # error, or a hang means the suite was never asked the question. That
+    # must fail the gate, or the tool green-lights its own blindness.
+    if unresolved:
+        print(f"\nUNRESOLVED ({len(unresolved)}): every mutant must run and be judged")
+        for result in unresolved:
+            print(f"  {result['status']}: {result['path']} - {result['label']}")
 
     os.makedirs(os.path.dirname(RESULTS_FILE), exist_ok=True)
     json.dump(results, open(RESULTS_FILE, "w"), indent=2)
     print(f"Results: {os.path.relpath(RESULTS_FILE, ROOT)}")
-    return 1 if survivors else 0
+    return 1 if survivors or unresolved else 0
 
 
 if __name__ == "__main__":

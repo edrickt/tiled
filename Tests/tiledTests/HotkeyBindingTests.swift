@@ -140,6 +140,20 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertEqual(store.binding(for: .topLeft), custom)
     }
 
+    func testApplyRejectsFixedShortcutCombos() {
+        let store = makeStore()
+        let before = store.binding(for: .topLeft)
+        for (name, binding) in HotkeyStore.reservedCombos {
+            XCTAssertEqual(
+                store.apply(binding, for: .topLeft),
+                .reserved(name: name),
+                "\(name) must never be stolen by a slot")
+            XCTAssertEqual(store.binding(for: .topLeft), before, "rejection leaves the store")
+        }
+        XCTAssertEqual(store.apply(HotkeyService.expandBinding, for: .sixthLeft),
+                       .reserved(name: "Expand"))
+    }
+
     func testApplyRejectsDuplicateWithoutStoring() {
         let store = makeStore()
         // topRight's factory default differs from topLeft's, so forcing

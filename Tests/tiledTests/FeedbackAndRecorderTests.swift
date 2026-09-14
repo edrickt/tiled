@@ -235,6 +235,39 @@ final class ShortcutsBulkEnableTests: XCTestCase {
             "the stale park is dropped, not left to strike later")
     }
 
+    func testEnableAllKeepsDisabledWhenTheParkedComboWasClaimed() {
+        // A combo parked by Disable all can be claimed by another
+        // section's edit while this one is disabled. Enable all must not
+        // store it past the duplicate gate: the slot would render as
+        // enabled and never register.
+        let tab = makeTab()
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let disable = findButton(
+            identifier: "bulk-quarters", titledPrefix: "Disable all", in: view)
+        else { return XCTFail("expected a Disable-all bulk button") }
+        let parked = store.binding(for: .topLeft)
+        disable.performClick(nil)
+
+        // Another section claims the parked combo while quarters is off.
+        XCTAssertEqual(store.apply(parked, for: .sixthTopLeft), .applied)
+
+        let view2 = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let enable = findButton(
+            identifier: "bulk-quarters", titledPrefix: "Enable all", in: view2)
+        else { return XCTFail("expected an Enable-all bulk button") }
+        enable.performClick(nil)
+
+        XCTAssertNil(
+            store.binding(for: .topLeft).keyCode,
+            "the claimed combo is not restored; the slot stays disabled")
+        XCTAssertEqual(
+            store.binding(for: .sixthTopLeft), parked,
+            "the edit that claimed the combo keeps it")
+        XCTAssertNotNil(
+            defaults.dictionary(forKey: "parkedHotkey.topLeft"),
+            "the park survives for when the clash is resolved")
+    }
+
     func testStaleParkDoesNotClobberWhenNothingWasEdited() {
         // The complement: with no post-disable edits, Enable all restores
         // the parked combos exactly (the pre-existing contract).

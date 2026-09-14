@@ -113,4 +113,19 @@ final class AXWriteTests: XCTestCase {
         XCTAssertEqual(calls, 2)
         XCTAssertEqual(slept, [0.1], "only the transient failure sleeps")
     }
+
+    func testPartialWritePolicyRestoresTheLandedOrigin() {
+        // A landed position plus a failed size write is the half-moved
+        // window: the caller must put the origin back. No landed position
+        // or a successful pair needs no restore.
+        XCTAssertTrue(
+            LiveWindowGateway.AXWrite.needsPositionRestore(
+                positionLanded: true, failed: true))
+        XCTAssertFalse(
+            LiveWindowGateway.AXWrite.needsPositionRestore(
+                positionLanded: false, failed: true))
+        XCTAssertFalse(
+            LiveWindowGateway.AXWrite.needsPositionRestore(
+                positionLanded: true, failed: false))
+    }
 }

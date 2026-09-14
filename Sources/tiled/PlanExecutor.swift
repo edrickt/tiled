@@ -314,7 +314,8 @@ final class PlanExecutor {
         // come back to earth by untangling, not by moving.
         var rehouse: (window: WindowID, home: Slot)?
         if evicted.count == 1, !execution.isExpanded(evicted[0]),
-            let home = state.rehousingHome(evicting: evicted[0], for: slot)
+            let home = state.rehousingHome(
+                evicting: evicted[0], for: slot, vacating: previous)
         {
             rehouse = (evicted[0], home)
         }
@@ -333,11 +334,14 @@ final class PlanExecutor {
         outcome.error = placeResult.error
         outcome.feedback = placeResult.feedback
         reportRestoreFailures(restoreFailures, error: &outcome.error)
+        let clean = placeResult.error == nil && restoreFailures.isEmpty
         // Re-house commit: once the requester sits, the victim moves
-        // into the one free slot and stays tiled. A refused write
-        // falls back to the plain eviction (restore its pre-tile
-        // frame), so the outcome never lies about what happened.
-        if let (wid, home) = rehouse {
+        // into the one free slot and stays tiled. The move only happens
+        // when the requester's own placement landed: making room for a
+        // request that failed would move the victim for nothing, report
+        // no destruction to undo, and promise an undo that cannot exist.
+        // A refused re-house write falls back to the plain eviction.
+        if let (wid, home) = rehouse, clean {
             state.commit(window: wid, into: home)
             if applyLayout(
                 for: wid, state: state, records: records,
@@ -353,8 +357,12 @@ final class PlanExecutor {
                     id: wid, state: &state, records: &records, tracker: execution.tracker)
                 log("rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
             }
+        } else if let (wid, _) = rehouse {
+            _ = restoreWindow(
+                id: wid, state: &state, records: &records, tracker: execution.tracker)
+            log("rehouse SKIPPED win\(wid): requester placement failed")
         }
-        if placeResult.error == nil, restoreFailures.isEmpty {
+        if clean {
             // Hand the freed region to the controller: it owns the one
             // reflow applier, which drops the cells the requester
             // covers again (they are occupied, so only true remainders
@@ -366,15 +374,19 @@ final class PlanExecutor {
             }
             outcome.reflowFreed = freed
         }
-        if placeResult.error == nil, restoreFailures.isEmpty, !evicted.isEmpty {
+        if restoreFailures.isEmpty, !evicted.isEmpty {
             // Ordinary eviction gets the same narrative as a layout
             // switch: a notice naming the displaced app plus the shared
             // one-step undo. The switch was never special; it was
             // just the first destruction anyone bothered to narrate.
             // A re-house already narrated itself (the victim moved,
-            // nobody went back).
+            // nobody went back). The chapter is pushed even when the
+            // requester's own write was refused: the evictees really did
+            // go home, and without it that destruction would be silent
+            // and unrecoverable. The requester joins the chapter only
+            // when it actually landed.
             outcome.snapshot = snapshot
-            outcome.requester = id
+            outcome.requester = clean ? id : nil
             if outcome.notice == nil {
                 outcome.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
             }
