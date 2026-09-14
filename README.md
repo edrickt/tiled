@@ -190,7 +190,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (525 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (530 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~10s per mutant |
@@ -220,6 +220,33 @@ swift tools/repro/probe-spaces.swift     # what the live suites can cover here
 python3 tools/mutation/mutate.py        # verify the suite still catches bugs
 python3 tools/mutation/mutate.py --list # show the injected-bug table
 ```
+
+### Focused loops
+
+Two focused harnesses cover bugs whose signal is the status icon's
+occupancy rather than a window frame, and they must stop any installed
+`/Applications/Tiled.app` first (it owns the same global hotkeys; two
+managers answering one keystroke make every case lie):
+
+```
+scripts/run-focus-loop.sh tools/repro/window-lifecycle-repro.swift  # MODE=kill-app (default)
+MODE=close-window scripts/run-focus-loop.sh tools/repro/window-lifecycle-repro.swift
+swift tools/repro/destroy-notification-probe.swift <pid> [close|kill]
+```
+
+`window-lifecycle-repro.swift` tiles two windows (middle third, right
+third) and then either closes one through AX (the reported gesture's
+shape: Firefox closes the window a dragged tab left) or kills the whole
+app. A closed window's slot must release inside a sub-second budget — the
+adapter observes `AXUIElementDestroyed` and prunes on the spot — while a
+killed process has no notifications left to send and releases on the 5s
+tick plus 3s confirmation. The icon's cell count alone cannot tell a
+reflowed survivor from a ghost (both light the same cells), so the suite
+asserts the survivor's frame and, for a killed app, an empty icon.
+
+`destroy-notification-probe.swift` measures that notification's latency
+for any app (host app: ~3ms; Firefox: ~29ms), which is what makes the
+event-driven release safe to promise.
 
 See `tools/repro/multi-display-checklist.md` for the physical display-change
 checks the suite cannot drive.

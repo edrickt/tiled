@@ -1111,16 +1111,45 @@ final class TilingController {
 
     /// Registers the gateway's change handler and feeds callbacks to the
     /// tracker. Element identity and dedupe live behind the seam; echo,
-    /// edges, splitters, and coalescing live in the tracker.
+    /// edges, splitters, and coalescing live in the tracker. The
+    /// destruction handler releases the slot the moment the OS says the
+    /// element is gone, instead of waiting out the prune tick and its
+    /// confirmation window.
     private func observe(window id: WindowID) {
         guard let record = records[id] else { return }
         let handle = record.handle
-        gateway.observe(handle) { [weak self] in
-            guard let self else { return }
-            guard let currentID = self.currentID(for: handle) else { return }
-            guard let frame = self.gateway.frame(of: handle) else { return }
-            self.tracker.handleChange(id: currentID, frame: frame)
+        gateway.observe(
+            handle,
+            onChange: { [weak self] in
+                guard let self else { return }
+                guard let currentID = self.currentID(for: handle) else { return }
+                guard let frame = self.gateway.frame(of: handle) else { return }
+                self.tracker.handleChange(id: currentID, frame: frame)
+            },
+            onDestroyed: { [weak self] in
+                self?.windowDestroyed(handle)
+            })
+    }
+
+    /// The OS reported this window's element destroyed. That is not a
+    /// probe failure — the element is gone — but element identity can
+    /// churn while the window lives (display teardowns break it), so the
+    /// report accelerates the death check rather than replacing it: a
+    /// `.dead` verdict releases the slot on the spot, anything else
+    /// leaves the ordinary prune cadence in charge. Called on the main
+    /// thread by both adapters.
+    private func windowDestroyed(_ handle: WindowHandle) {
+        guard let id = currentID(for: handle) else { return }
+        guard gateway.liveness(of: handle) == .dead else {
+            dbg("destroyed win\(id): still live by the death standard; prune cadence decides")
+            return
         }
+        let slot = slotOfWindow(id)
+        let space = spaceOf(window: id)
+        dbg("destroyed win\(id): releasing slot now")
+        forgetWindow(id)
+        pushLeaveUndo(slot: slot, on: space)
+        onChange?()
     }
 
     private func currentID(for handle: WindowHandle) -> WindowID? {

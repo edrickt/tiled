@@ -16,6 +16,7 @@ final class FakeWindowGateway: WindowGateway {
     }
     private(set) var windows: [WindowHandle: Window] = [:]
     private var changeHandlers: [WindowHandle: () -> Void] = [:]
+    private var destroyedHandlers: [WindowHandle: () -> Void] = [:]
     /// Handles in issuance order (stable ids for tests).
     private(set) var issued: [WindowHandle] = []
 
@@ -104,8 +105,12 @@ final class FakeWindowGateway: WindowGateway {
         return busy.contains(handle) ? .unknown : .alive
     }
 
-    func observe(_ handle: WindowHandle, onChange: @escaping () -> Void) {
+    func observe(
+        _ handle: WindowHandle, onChange: @escaping () -> Void,
+        onDestroyed: @escaping () -> Void
+    ) {
         changeHandlers[handle] = onChange
+        destroyedHandlers[handle] = onDestroyed
     }
 
     private var focusChangeHandler: (() -> Void)?
@@ -167,6 +172,13 @@ final class FakeWindowGateway: WindowGateway {
     /// Moves without firing (asserts echo suppression absorbed it).
     func simulateSilentChange(_ handle: WindowHandle, to frame: CGRect) {
         windows[handle]?.frame = frame
+    }
+
+    /// Test control: simulates the OS's `AXUIElementDestroyed`
+    /// notification. `kill` first to model a window that is really gone;
+    /// leave it alive to model element churn.
+    func simulateDestroyed(_ handle: WindowHandle) {
+        destroyedHandlers[handle]?()
     }
 
     func kill(_ handle: WindowHandle) {

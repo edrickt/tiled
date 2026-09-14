@@ -250,5 +250,17 @@
   "degenerate swap fallback forgets which windows are expanded (re-houses an expanded evictee)",
   "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, working: Working(state: state, records: records),\n                execution: execution)",
   "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, working: Working(state: state, records: records),\n                execution: Execution(\n                    tracker: execution.tracker, boundsOf: execution.boundsOf,\n                    observe: execution.observe, spaceOf: execution.spaceOf,\n                    isExpanded: { _ in false }, space: execution.space))"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "dead process classified as unknown (ghost windows keep their slots forever)",
+  "        if !processAlive { return .dead }",
+  "        if false { return .dead }"
+ ],
+ [
+  "TilingController.swift",
+  "destroyed notification ignored (slots linger until the prune tick)",
+  "        guard let id = currentID(for: handle) else { return }\n        guard gateway.liveness(of: handle) == .dead else {",
+  "        guard let id = currentID(for: handle) else { return }\n        guard false, gateway.liveness(of: handle) == .dead else {"
  ]
 ]

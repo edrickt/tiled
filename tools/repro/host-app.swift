@@ -13,9 +13,17 @@ func makeWindow(_ title: String, _ frame: CGRect) -> NSWindow {
         styleMask: [.titled, .closable, .miniaturizable, .resizable],
         backing: .buffered, defer: false)
     w.title = title
+    // The repro suite drives frames directly; macOS state restoration
+    // would restore some earlier run's frame on key-in, silently
+    // overwriting what the suite (or the window manager) just wrote.
+    w.isRestorable = false
     w.makeKeyAndOrderFront(nil)
     return w
 }
+
+// macOS window tabbing can merge two same-app windows into one tabbed
+// window under the suite's feet; the suite needs four independent windows.
+NSWindow.allowsAutomaticWindowTabbing = false
 
 // AppKit coords (bottom-left origin). Screen ~1512x982.
 let a = makeWindow("HOSTA", NSRect(x: 200, y: 500, width: 600, height: 350))

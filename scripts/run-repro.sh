@@ -28,6 +28,17 @@ if [[ ! -t 0 && -z "${CI:-}" ]]; then
     echo "warning: no tty; the repro suite drives the real cursor and windows" >&2
 fi
 
+# Two window managers on one machine fight over every global hotkey: the
+# suite would press a shortcut and the installed app would answer with the
+# other manager's state, making every case look broken (or worse, pass for
+# the wrong reason). The dev build is killed below; the installed app must
+# be quit by whoever runs this, because it may hold unsaved layout state.
+if pgrep -x Tiled > /dev/null; then
+    echo "FATAL: /Applications/Tiled.app is running and owns the same global hotkeys." >&2
+    echo "Quit it first; scripts/run-focus-loop.sh does this for its own suites." >&2
+    exit 3
+fi
+
 echo "==> Building tiled and the throwaway host windows"
 swift build
 mkdir -p build

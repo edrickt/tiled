@@ -72,6 +72,12 @@ final class LiveWindowGateway: WindowGateway {
     private var registry = ObservationRegistry()
     /// Change handler per observed handle.
     private var changeHandlers: [WindowHandle: () -> Void] = [:]
+    /// Destruction handler per observed handle: the OS reported the
+    /// element destroyed. Separate from `changeHandlers` because the
+    /// notification means something categorically different (the window
+    /// is gone, not moved), and the controller must not read a frame for
+    /// an element that no longer answers.
+    private var destructionHandlers: [WindowHandle: () -> Void] = [:]
     /// Focus observer for the frontmost application: its key-window
     /// changes move which display's layout the status icon depicts.
     /// Separate from the per-window resize observers so an app with no
@@ -177,7 +183,11 @@ final class LiveWindowGateway: WindowGateway {
         // held refs, .attributeUnsupported on fresh refs) for LIVE
         // windows; the app element keeps answering and still lists them.
         // Death is therefore confirmed against the app's own window
-        // list, never from the window probe alone.
+        // list, never from the window probe alone. Which is also why the
+        // owning process gets a vote: a process that no longer exists
+        // owns no live windows, and its AX answers (.cannotComplete) are
+        // not a maybe.
+        let processAlive = Self.processExists(pid)
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
         var listRef: CFTypeRef?
@@ -203,18 +213,22 @@ final class LiveWindowGateway: WindowGateway {
             // Some listed frames unreadable: undeterminable — a maybe.
         }
         let verdict = Self.liveness(
-            probeError: probeError, appWindowsError: listError, appWindowMatch: match)
+            probeError: probeError, appWindowsError: listError, appWindowMatch: match,
+            processAlive: processAlive)
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
-            NSLog("Tiled: [DEBUG-lv] win handle %ld probe=%d appList err=%d count=%ld match=%@ → %@",
-                  handle.id, probeError.rawValue, listError.rawValue,
-                  list.count,
-                  match.map { $0 ? "yes" : "no" } ?? "unknown",
-                  verdict == .alive ? "alive" : verdict == .dead ? "dead" : "unknown")
+            NSLog(
+                "Tiled: [DEBUG-lv] win handle %ld probe=%d appList err=%d count=%ld match=%@ processAlive=%d → %@",
+                handle.id, probeError.rawValue, listError.rawValue,
+                list.count,
+                match.map { $0 ? "yes" : "no" } ?? "unknown",
+                processAlive ? 1 : 0,
+                verdict == .alive ? "alive" : verdict == .dead ? "dead" : "unknown")
         }
         if verdict == .dead {
             elements[handle] = nil
             pids[handle] = nil
             changeHandlers[handle] = nil
+            destructionHandlers[handle] = nil
             lastFrames[handle] = nil
             // The last managed window of a process takes its shared
             // observer with it; a process still holding one keeps it.
@@ -250,9 +264,20 @@ final class LiveWindowGateway: WindowGateway {
             && abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
     }
 
-    func observe(_ handle: WindowHandle, onChange: @escaping () -> Void) {
+    func observe(
+        _ handle: WindowHandle, onChange: @escaping () -> Void,
+        onDestroyed: @escaping () -> Void
+    ) {
         guard let element = elements[handle], let pid = pids[handle] else { return }
         changeHandlers[handle] = onChange
+        destructionHandlers[handle] = onDestroyed
+        // The death check confirms absence geometrically (the app answers
+        // and no listed frame matches the last read frame), so it needs a
+        // baseline even for a window whose frame was never read: a
+        // destroy notification can arrive before any move or resize tick.
+        if lastFrames[handle] == nil, let frame = Self.frame(of: element) {
+            lastFrames[handle] = frame
+        }
         let key = UInt(CFHash(element))
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] observe win%d pid=%d key=%lu observed=%d",
@@ -301,7 +326,10 @@ final class LiveWindowGateway: WindowGateway {
         on observer: AXObserver, element: AXUIElement, pid: pid_t, key: UInt
     ) {
         var failure: AXError?
-        for name in [kAXWindowResizedNotification, kAXWindowMovedNotification] {
+        for name in [
+            kAXWindowResizedNotification, kAXWindowMovedNotification,
+            kAXUIElementDestroyedNotification,
+        ] {
             let status = AXObserverAddNotification(
                 observer, element, name as CFString, nil)
             if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
@@ -597,7 +625,11 @@ final class LiveWindowGateway: WindowGateway {
         }
         for (handle, registered) in elements
         where CFEqual(registered, element) {
-            changeHandlers[handle]?()
+            if notification == kAXUIElementDestroyedNotification as String {
+                destructionHandlers[handle]?()
+            } else {
+                changeHandlers[handle]?()
+            }
             return
         }
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
@@ -659,16 +691,36 @@ final class LiveWindowGateway: WindowGateway {
     /// AX. A failed window probe is a maybe: live windows fail it all
     /// through a lid close/open (see `liveness(of:)`). Death requires
     /// the app to confirm: the app element itself is stale (the app
-    /// quit), or the app answers and no listed window matches the
+    /// quit), the app's process is gone (its AX answers read
+    /// `.cannotComplete`, which is not a maybe when there is nobody left
+    /// to answer), or the app answers and no listed window matches the
     /// window's last read frame. A frame match, or an undeterminable
     /// check (nil), stays unknown: a maybe never untiles.
     static func liveness(
-        probeError: AXError, appWindowsError: AXError, appWindowMatch: Bool?
+        probeError: AXError, appWindowsError: AXError, appWindowMatch: Bool?,
+        processAlive: Bool
     ) -> Liveness {
         if probeError == .success { return .alive }
         if appWindowsError == .invalidUIElement { return .dead }
+        // A window outlives nothing: with the owning process gone, its
+        // element cannot be anything but stale. Dead apps answer window
+        // probes with `.cannotComplete`, not `.invalidUIElement`, so
+        // without this a ghost keeps its slot and the status icon keeps
+        // showing it until the pid is recycled.
+        if !processAlive { return .dead }
         if appWindowsError == .success, appWindowMatch == false { return .dead }
         return .unknown
+    }
+
+    /// Whether `pid` still exists. `NSRunningApplication` knows every
+    /// live process that can own a window; the `kill(pid, 0)` probe
+    /// covers the rest, and its errno separates "gone" (ESRCH) from
+    /// "exists but not ours to signal" (EPERM), which must not read as
+    /// death.
+    static func processExists(_ pid: pid_t) -> Bool {
+        if NSRunningApplication(processIdentifier: pid) != nil { return true }
+        if kill(pid, 0) == 0 { return true }
+        return errno != ESRCH
     }
 
     // MARK: Geometry

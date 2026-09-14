@@ -55,7 +55,7 @@ final class PlanExecutorTests: XCTestCase {
             boundsOf: { $0 },
             observe: { [weak self] id in
                 guard let handle = self?.records[id]?.handle else { return }
-                self?.gateway.observe(handle, onChange: {})
+                self?.gateway.observe(handle, onChange: {}, onDestroyed: {})
             },
             isExpanded: isExpanded)
     }
@@ -370,7 +370,7 @@ final class PlanExecutorTests: XCTestCase {
             boundsOf: { $0 },
             observe: { [weak self] id in
                 guard let handle = self?.records[id]?.handle else { return }
-                self?.gateway.observe(handle, onChange: {})
+                self?.gateway.observe(handle, onChange: {}, onDestroyed: {})
             })
         state = newState
         records = newRecords
@@ -505,7 +505,7 @@ final class PlanExecutorTests: XCTestCase {
             boundsOf: { $0 },
             observe: { [weak self] id in
                 guard let handle = self?.records[id]?.handle else { return }
-                self?.gateway.observe(handle, onChange: {})
+                self?.gateway.observe(handle, onChange: {}, onDestroyed: {})
             })
 
         XCTAssertNil(result.error)

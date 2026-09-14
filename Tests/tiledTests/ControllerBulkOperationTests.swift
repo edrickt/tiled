@@ -572,6 +572,57 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertTrue(controller.state.occupants.isEmpty)
     }
 
+    // MARK: Destroyed notifications
+
+    func testDestroyedNotificationReleasesTheSlotAtOnce() {
+        // The reported latency bug: a window closed by its app (Firefox
+        // merging a dragged tab out of it) left the tile occupied until
+        // the 5s prune tick plus the 3s death confirmation completed.
+        // The OS's AXUIElementDestroyed notification is the window's own
+        // report: run the death check now, and when it agrees, release
+        // without waiting for either.
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+        XCTAssertEqual(controller.state.tiledWindows.count, 2)
+        changeCount = 0
+
+        gateway.kill(a)
+        gateway.simulateDestroyed(a)
+
+        XCTAssertEqual(controller.state.tiledWindows.count, 1, "the dead window released its slot")
+        XCTAssertGreaterThan(changeCount, 0, "the release announced itself for a menu/icon refresh")
+    }
+
+    func testDestroyedNotificationForALiveElementKeepsTheSlot() {
+        // Element churn: an app can destroy and recreate its window
+        // elements while the window lives (display changes are the
+        // known live case). The notification only accelerates the check;
+        // a live verdict must not untile anything.
+        let handle = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        gateway.simulateDestroyed(handle)
+
+        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+    }
+
+    func testDestroyedNotificationWithUnknownLivenessKeepsTheSlot() {
+        // The lid-cycle transient: probes fail for live windows
+        // mid-teardown and the death standard answers unknown. A
+        // destroyed report must not force a prune the standard still
+        // calls a maybe.
+        let handle = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        gateway.busy.insert(handle)
+
+        gateway.simulateDestroyed(handle)
+
+        XCTAssertEqual(controller.state.tiledWindows.count, 1, "a maybe never untiles")
+    }
+
     func testPruneTimerFiresAndReleasesSlots() {
         // The real 5-second timer, shrunk: the wiring (fire → prune →
         // onChange when the count changed) is what the nil-interval tests

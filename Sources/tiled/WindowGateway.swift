@@ -40,8 +40,15 @@ protocol WindowGateway: AnyObject {
     /// `.dead` once the window is closed or its app quit; `.unknown`
     /// when the app was too busy to answer (never treated as dead).
     func liveness(of handle: WindowHandle) -> Liveness
-    /// Calls `onChange` on resize/move. Dedupes repeat registrations.
-    func observe(_ handle: WindowHandle, onChange: @escaping () -> Void)
+    /// Calls `onChange` on resize/move, and `onDestroyed` when the window
+    /// element itself is destroyed: the OS's own report that the window
+    /// is gone, which lets the slot release at once instead of waiting
+    /// for the periodic death check. One call registers both, because
+    /// they always travel together and the adapter dedupes per element.
+    /// Repeats replace the handlers; they never double-register.
+    func observe(
+        _ handle: WindowHandle, onChange: @escaping () -> Void,
+        onDestroyed: @escaping () -> Void)
     /// Calls `onChange` when the frontmost application's focused window
     /// changes: the keyboard-focus move that picks which display's layout
     /// the status icon depicts. Replaces any previous handler. The live
