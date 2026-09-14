@@ -1,0 +1,10 @@
+# Generated README assets: do not review them line by line, regenerate them
+# with tools/capture/capture.sh (see docs/capture.md).
+docs/assets/* linguist-generated=true
+
+# Binary assets
+*.icns binary
+*.gif binary
+*.png binary
+*.mov binary
+*.zip binary
