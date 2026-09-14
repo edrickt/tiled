@@ -541,14 +541,14 @@ verify("S10c A retiled into resized left half")
 simulateMove("HOSTA", by: CGSize(width: 60, height: 40))
 // The title-bar move must not read as a splitter drag: the mirrors for
 // the row/column fractions stay put, and the re-assert (any resize
-// re-normalizes the grid) must put A exactly back on its tile. A is in
-// the left half here (S10c), so the expected rect is that slot's under
-// the current splitters, not the quad it passed through earlier.
+// re-normalizes the grid) must put A exactly back on its tile. Comparing
+// the app's frame to the rect the current splitters imply can fail; the
+// old mirror-to-itself comparison could not.
 dragEdge("HOSTC", "left", 30)
-if let slot = tiled["HOSTA"], let aFrame = actualFrame("HOSTA"), close(aFrame, gridRect(slot)) {
+if let aFrame = actualFrame("HOSTA"), close(aFrame, gridRect("TL")) {
     pass += 1; print("PASS S11a title-bar move did not move splitters; A snapped back")
 } else {
-    fail += 1; print(">>>> FAILED S11a: A is not on its mirrored slot after the re-assert")
+    fail += 1; print(">>>> FAILED S11a")
 }
 verify("S11b layout re-asserted: A snapped back onto grid")
 

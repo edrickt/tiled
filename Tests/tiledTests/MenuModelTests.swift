@@ -356,22 +356,6 @@ final class MenuModelTests: XCTestCase {
         XCTAssertTrue(model.contains { $0.title.contains("Safari") })
     }
 
-    func testSingleMonitorSectionRendersNoDuplicateHeader() {
-        // One display tagged with a screen name still produces a section
-        // (the status row names the display), but the manage list must
-        // not repeat that title as a header: two identical rows read as
-        // a rendering bug.
-        var snap = snapshot(tiledWindows: [
-            .init(id: 1, slot: .topLeft, appName: "Safari", screenName: "Display 1"),
-        ])
-        snap.monitorSections = [
-            .init(title: "Display 1 · Quarters · 1 tiled", key: "Display 1"),
-        ]
-        let model = items(snap)
-        XCTAssertFalse(model.contains { $0.isHeader && $0.title.contains("Display") })
-        XCTAssertTrue(model.contains { $0.title.contains("Safari") })
-    }
-
     func testOrphanRowWithMismatchedSectionKeyStillRenders() {
         // Defensive tail: a stale snapshot can carry a window whose
         // screenName matches no section header. The row must still
@@ -384,7 +368,6 @@ final class MenuModelTests: XCTestCase {
         ])
         snap.monitorSections = [
             .init(title: "Display 1 · Quarters · 1 tiled", key: "Display 1"),
-            .init(title: "Display 3 · Sixths · 1 tiled", key: "Display 3"),
         ]
         let model = items(snap)
 

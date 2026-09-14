@@ -1,238 +1,281 @@
-<h1 align="center">Tiled</h1>
+# Tiled
 
-<p align="center">A native macOS window manager. Tile windows into quarters or sixths from global hotkeys or the menu bar, resize the grid by dragging a shared edge, and undo any layout change from anywhere.</p>
-
-<p align="center">
-  <a href="https://github.com/edrickt/tiled/actions/workflows/tests.yml"><img src="https://github.com/edrickt/tiled/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
-  <a href="https://github.com/edrickt/tiled/releases"><img src="https://img.shields.io/github/v/release/edrickt/tiled?sort=semver&color=2b7" alt="Release"></a>
-  <img src="https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey" alt="macOS 13+">
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
-</p>
-
-Focus a window, press a slot shortcut, and it lands there. The menu bar glyph fills in as slots are taken, and one undo puts everything back.
-
-## Features
-
-| Feature | What it does |
-|---|---|
-| **Two layouts per canvas** | Quarters: a 2×2 grid plus halves. Sixths: a 3×2 grid plus thirds and two-thirds. Both are refinements of one shared 4×2 cell model, so overlap, eviction, and geometry are decided by cell sets, not special cases. |
-| **Live shared-edge resizing** | Drag any edge of a tiled window and the splitter moves with it; the neighbors sharing that edge follow. Columns (quarters) and thirds (sixths) resize independently, and so do separate displays and Spaces. |
-| **Reversible destruction** | Tiling into an occupied slot evicts the occupant, but one undo (⌃⌥⇧⌘Z, from anywhere) puts everything back, including layout switches that untiled the whole canvas. |
-| **Eviction, swap, reflow, re-house** | A lone blocker swaps tiles instead of being evicted. Freed cells merge with an adjacent survivor into a whole slot. An evictee returns to tiling when exactly one slot is free. The rules are strict and unit-tested, not heuristics. |
-| **Per-Space, per-display canvases** | A canvas is one display's one Mission Control Space. Each has its own occupancy, splitters, undo history, and notices, so tiling on one desktop never touches another. |
-| **Remappable shortcuts** | Click a shortcut in Settings and press a new combo. Conflicts are named, Esc keeps the old binding, ⌫ disables the slot, and each layout has an Enable/Disable all switch that parks your combos instead of losing them. |
-| **Honest failure states** | If an app refuses programmatic resizing, the window stays put and the menu names the app. If a shortcut fails to register, the menu says so. State and screen never silently disagree. |
-| **No overlay, no chrome** | Tiled is a menu bar app (no Dock icon) that drives windows through the Accessibility API. Nothing is drawn over your windows; there are no owned resize handles to hunt for. |
-
-## Install
-
-Tiled needs **macOS 13 or later** and **Accessibility permission** (System Settings → Privacy & Security → Accessibility). It does not need kernel extensions, a scripting bridge, or a helper daemon.
-
-### From a release
-
-1. Download `Tiled-<version>.zip` from [Releases](https://github.com/edrickt/tiled/releases) and move `Tiled.app` to `/Applications`. Release bundles are universal: Apple Silicon and Intel.
-2. Open it once. Releases are ad-hoc signed (there is no Developer ID yet), so Gatekeeper may ask you to confirm: right-click the app and choose **Open**.
-3. Tiled opens its Settings window and asks for Accessibility permission. Grant it, then relaunch Tiled.
-
-### From source
-
-```bash
-git clone https://github.com/edrickt/tiled.git
-cd tiled
-./scripts/install-app.sh     # release build, installed to /Applications, launched
-```
-
-The script builds first and only then replaces the installed copy, so a failed build never leaves you without the app that is currently tiling your windows.
-
-`make app` builds the bundle at `build/Tiled.app` without installing it; `make app-universal` builds it for both architectures, which is what release bundles ship. Requires a recent Swift toolchain (developed with Swift 6.2, `Package.swift` tools version 5.9).
-
-### Which binary do I want?
-
-| | Release bundle | `swift run` |
-|---|---|---|
-| Speed | optimized, universal | debug, this Mac only |
-| Permission | grant **Tiled** once | grant your terminal once |
-| Menu bar name | Tiled | tiled |
-| Survives rebuilds | re-grant may be needed (ad-hoc signing) | grant follows the terminal |
-
-Use the bundle for daily driving and `swift run` while developing.
-
-### Accessibility permission
-
-macOS attributes Accessibility requests to the *responsible* process. Two consequences worth knowing:
-
-- **Running the bundled app** grants `Tiled` itself. Tiled's first-run flow opens the settings pane for you.
-- **Running from a terminal** (`swift run`) grants your terminal app, because the subprocess inherits its responsibility. Grant Terminal once and `swift run` works from then on.
-
-Ad-hoc signatures change on every rebuild, so macOS may ask you to re-grant after a rebuild. Signing with a stable identity (even a free Apple Development certificate) makes TCC remember the grant.
-
-Uninstalling is `rm -rf /Applications/Tiled.app`. Quitting Tiled leaves your windows where they are; see [docs/install.md](docs/install.md) for the full caveat list.
-
-## Quick start
-
-First launch opens Settings on a **Welcome** tab: focus any window, press the Top Left shortcut (⌥⇧⌘U by default), and the window snaps into place, with a miniature preview showing what Top Left covers. Dismiss the guide and it stays gone; reopen it from menu bar → **Tiled Guide**.
-
-From then on:
-
-1. Focus a window.
-2. Press a tile shortcut.
-3. The menu bar glyph fills the cells that are occupied on the current canvas.
+A native macOS window manager. Tile windows into quarters (2×2 plus halves)
+or sixths (3×2 grid plus thirds and two-thirds), with global hotkeys or from
+the menu bar. Dragging a tiled window's edge resizes it live; the
+neighbors sharing the edge resize when the mouse button is released.
 
 ## Hotkeys
 
-Seventeen slot combos are remappable; four combos are fixed and always available. The full list also lives in the app under **Settings… → Shortcuts**.
+Tile the focused window. Tiling a window into its own tile is a no-op (it
+stays exactly where it is). Every shortcut also exists as a menu item
+under **Tile Focused Window** in the menu bar menu.
 
 ### Quarters (hold ⌥⇧⌘)
 
-| Key | Tile | Key | Tile |
-|---|---|---|---|
-| ⌥⇧⌘U | Top left | ⌥⇧⌘J | Left half |
-| ⌥⇧⌘O | Top right | ⌥⇧⌘L | Right half |
-| ⌥⇧⌘M | Bottom left | ⌥⇧⌘. | Bottom right |
+| Key    | Tile          |
+|--------|---------------|
+| ⌥⇧⌘U   | Top left      |
+| ⌥⇧⌘O   | Top right     |
+| ⌥⇧⌘M   | Bottom left   |
+| ⌥⇧⌘.   | Bottom right  |
+| ⌥⇧⌘J   | Left half     |
+| ⌥⇧⌘L   | Right half    |
 
 ### Sixths (hold ⌥⇧)
 
-| Key | Tile | Key | Tile |
-|---|---|---|---|
-| ⌥⇧U | Top left sixth | ⌥⇧J | Left third |
-| ⌥⇧I | Top middle sixth | ⌥⇧K | Middle third |
-| ⌥⇧O | Top right sixth | ⌥⇧L | Right third |
-| ⌥⇧M | Bottom left sixth | ⌥⇧H | Left two-thirds |
-| ⌥⇧, | Bottom middle sixth | ⌥⇧; | Right two-thirds |
-| ⌥⇧. | Bottom right sixth | | |
+| Key   | Tile               |
+|-------|--------------------|
+| ⌥⇧U   | Top left sixth     |
+| ⌥⇧I   | Top middle sixth   |
+| ⌥⇧O   | Top right sixth    |
+| ⌥⇧M   | Bottom left sixth  |
+| ⌥⇧,   | Bottom middle sixth|
+| ⌥⇧.   | Bottom right sixth |
+| ⌥⇧J   | Left third         |
+| ⌥⇧K   | Middle third       |
+| ⌥⇧L   | Right third        |
+| ⌥⇧H   | Left two-thirds    |
+| ⌥⇧;   | Right two-thirds   |
+| ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
+| ⌃⌥⇧⌘Z   | Undo the last displacement (a layout switch, an eviction, a swap, or a reflow, from anywhere) |
 
-### Fixed
+### Expand (⌥⇧⏎)
 
-| Key | Action |
-|---|---|
-| ⌥⇧⏎ | Expand the focused window to fill the screen (not fullscreen mode); press again to return to its slot |
-| ⌥⇧⌫ | Evict the focused window: untile it and restore its pre-tile frame |
-| ⌃⌥⇧⌘, | Open Settings (works even with the menu bar icon hidden) |
-| ⌃⌥⇧⌘Z | Undo the last displacement: a layout switch, an eviction, a swap, or a reflow, from anywhere |
+| Key  | Action                                                        |
+|------|---------------------------------------------------------------|
+| ⌥⇧⏎  | Expand the focused window to fill the screen (not fullscreen mode) |
 
-The menu names the active layout's slots as single-click equivalents, plus one switch row for the other layout, because switching layouts re-tiles the focused window into it.
+Press ⌥⇧⏎ again and the window returns to its previous tile, or to its
+previous frame if it wasn't tiled. The layout is never erased: a tiled
+window keeps its slot while expanded (the expanded window just covers the
+others, like focusing does), and tiling a neighbor into a free tile leaves
+the expanded window alone. This shortcut is fixed; the slot shortcuts
+below are the remappable ones.
 
-## Layouts
+### Evict (⌥⇧⌫)
 
-Quarters and sixths are mutually exclusive on a canvas, and the menu always offers the switch: the focused window moves into the other layout's top-left, every tiled window on that canvas is untiled, and one undo brings the whole arrangement back.
+| Key  | Action                                                        |
+|------|---------------------------------------------------------------|
+| ⌥⇧⌫  | Evict the focused window: untile it and restore its pre-tile frame  |
 
-A full sixths canvas holds up to six windows in the 3×2 grid, and a two-thirds slot sits beside a third without special handling: both are cell sets in the same model. Splitters stay independent per third.
+Evicting restores the focused window to its pre-tile frame and releases
+its slot. When a tiling request evicts a window and leaves exactly one
+whole slot free, the victim re-tiles into that slot instead (the middle
+third making room for the right two-thirds moves into the top-left sixth)
+and only untangles when no single slot fits. The freed cells reflow: a neighboring tile that merges with
+them into a whole slot grows into it — evict the bottom-left sixth and
+the top-left sixth expands into the left third; free the middle third
+and the right third becomes the right two-thirds (the right side wins
+when both flanks could grow). The same reflow runs whenever a tiled
+window leaves the layout (untile, drag-out, closing the window) or moves
+to a free tile, and ⌃⌥⇧⌘Z undoes it together with the event that
+caused it. A hole no neighbor can merge into exactly stays empty.
+Like Expand, this shortcut is fixed.
+
+First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
+to tile it top-left, and you're going, with a miniature preview showing
+what Top Left covers. Dismiss the guide once; reopen it anytime from the menu bar menu → Tiled Guide.
+
+The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
+
+Shortcuts are remappable: open the Shortcuts tab, click a shortcut, and
+press a new combo. Esc keeps the old one, ⌫ disables that slot.
+Disable or re-enable a whole layout at once with the Enable/Disable all
+button beside each section header; your combos are parked aside and
+restored unchanged.
+
+If two tiled slots use the same combo, the Shortcuts tab names the conflict
+and keeps the old binding until you pick a free one, and a combo that
+matches one of Tiled's fixed shortcuts is refused the same way. If a
+shortcut fails to register, the menu says so. macOS does not report
+another app owning a global shortcut to a non-exclusive registrant (the
+key simply goes elsewhere), so Tiled can surface a dead combo but cannot
+tell you which app took it.
 
 ## Tiling rules
 
-The normative rules live in [docs/tiling-rules.md](docs/tiling-rules.md); the ones you will actually meet:
-
-- **One window per tile.** Tiling into an occupied slot evicts the occupant, unless exactly one window blocks it and your window has a tile to give: then the two **swap**, both stay tiled, and focus follows the displaced window.
-- **Reflow.** When a tiled window leaves the layout (untile, evict, drag-out, close) or moves, its freed cells merge with an adjacent survivor into a whole slot. Rightmost candidate wins ties. A hole no survivor fits exactly stays empty.
-- **Re-house.** An eviction that leaves exactly one whole slot free re-tiles the victim into it instead of untiling it (the middle third making room for the right two-thirds moves into the freed top-left sixth).
-- **Expand keeps the slot.** An expanded window covers the layout without releasing its tile; the layout is never erased, and tiling a neighbor into a free tile leaves the expanded window alone.
-- **Drag-out.** Dragging a tiled window by its title bar past ~100pt untiles it where you drop it. A shorter drag snaps back into the tile.
-- **Layouts are mutually exclusive per canvas.** Requesting a slot in the other layout untiles every tiled window on that canvas and switches it. One undo restores the whole thing, so exploring is safe.
+- One window per tile.
+- Tiling a window into a slot **evicts** any window occupying an overlapping
+  slot. Evicted windows are restored to their pre-tile frames.
+  - Two quads occupied on one side + the half key → both quads are evicted.
+  - A half occupied + a quad key on that side → the half window is evicted.
+- **Swap:** a tiled window tiling into a slot blocked by exactly one other
+  tiled window swaps with it instead of evicting: the blocker moves into the
+  tile the requester vacated, and both stay tiled. Focus follows the
+  displaced window into the tile it landed in. (With more than one window in
+  the way, or from an untiled window, the request evicts as above, and focus
+  stays put.) Undo swaps back.
+- Tiling a window into its own tile does nothing: no restore, no reassert.
+- A window re-tiling itself into an overlapping slot just moves (never evicts
+  itself) and keeps its original pre-tile frame.
+- **Drag a tiled window by its title bar**: past ~100pt of drag it untiles
+  right where you dropped it (the drop is the placement; no pre-tile
+  restore); a shorter drag snaps back into its tile. A single far jump
+  (a programmatic move, not a hand drag) always snaps back.
+- Use **Untile All** in the menu to restore every tiled window, or open a
+  tiled window's submenu to focus it, untile just that window, or tile the
+  focused window into its slot.
+- Each canvas tiles independently, where a canvas is one display's one
+  Mission Control Space. Every Space you reach by swiping up with three
+  fingers has its own layout, occupancy, splitters, undo history, and
+  notices, and so does every display: the same tile can be occupied in
+  several Spaces and on several displays at once. Tiling, switching,
+  drag-resizing, and ⌃⌥⇧⌘Z on one canvas never disturb another; Untile
+  All and Reset Splitters act on the focused canvas only. (Where the
+  window server withholds a Space id, Tiled falls back to one canvas per
+  display rather than guessing.)
+- The menu-bar glyph and the menu's rows follow the focused window's
+  display and Space. Swiping to another Space (or focusing a window on
+  another display) redraws the glyph (2×2 or 3×2) and its occupancy for
+  the canvas that just became visible, even though there was no tiling
+  action. Windows parked in hidden Spaces stay tiled and keep their
+  history; they simply wait off-menu until you swipe back.
+- Quarters and sixths are mutually exclusive per canvas: requesting a slot
+  in the other layout untiles every tiled window on that canvas and
+  switches that canvas's layout. The menu names the switch and how to undo
+  it ("Switched to Sixths · 3 windows untiled. Undo (⌃⌥⇧⌘Z) is one step,
+  from anywhere. Safe to explore: destruction is always reversible.
+- A display change (unplug, rearrange, resolution) re-asserts every visible
+  canvas immediately. Canvas identity follows the physical monitor's
+  CoreGraphics display number, so reordering screens never moves a monitor's
+  arrangement to another display. Hidden Spaces are marked stale instead:
+  Tiled never writes an off-Space window, because an AX resize can pull it
+  onto the visible Space. Swiping back re-asserts that Space against the new
+  bounds.
+- Some apps refuse programmatic resizing. When that happens the window is
+  left alone and the menu says which app refused, so state and screen never
+  silently disagree.
 
 ## Live resizing
 
-Drag any edge of a tiled window and the shared splitter follows; the neighbors on the other side resize when you release. Splitters are independent per column (quarters) and per third (sixths), and per canvas, so dragging an edge here never moves a tile there. A two-thirds window resizes as two equal one-thirds, keeping its hidden internal divider centered. **Reset Splitters** in the menu snaps the focused canvas back to even splits.
+Drag any edge of a tiled window and the shared grid splitter moves with it;
+neighbors on the other side follow. Vertical and horizontal splitters are
+independent per column (quarters) or per third (sixths), so resizing one
+column never moves the other, and the same independence holds between
+monitors and Spaces, so dragging an edge on one canvas never moves tiles on
+another. A two-thirds window resizes as two equal one-thirds: the hidden
+splitter inside it follows its outer edge, staying at the midpoint.
+**Reset Splitters** in the menu snaps the focused canvas's splitters back
+to even splits.
 
-## Spaces and displays
+## Building & running
 
-Every Mission Control Space on every display has its own canvas: occupancy, layout, splitters, undo history, and notices. The menu, the status glyph, and the bulk actions (**Untile All**, **Reset Splitters**) follow the focused window's canvas.
+Requires a recent Swift toolchain (tested with Swift 6.2).
 
-Display changes (unplug, rearrange, resolution) re-assert every visible canvas immediately. Canvas identity follows the monitor's CoreGraphics display number, so reordering screens never moves an arrangement to another display. Hidden Spaces are marked stale instead of being written to, because an off-screen resize can pull a window onto the visible Space; swiping back re-asserts them against the new bounds. Where the window server withholds a Space identifier, Tiled falls back to one canvas per display rather than guessing.
+```bash
+swift build          # debug build
+swift test           # layout-engine unit tests
+./scripts/make-app.sh # release build bundled as build/tiled.app
+```
 
-## Settings
+### Running during development
 
-- **Welcome** teaches one tiling with a live preview of both layout shapes, not seventeen combos.
-- **Shortcuts** is one recorder row per slot. Click a row, press a combo, and it rebinds. A conflict with another slot or with one of Tiled's fixed combos is refused and named; Esc keeps the old binding; ⌫ disables that slot. Each layout section has an Enable/Disable all switch that parks the combos aside and restores them unchanged.
-- **General** holds launch-at-login, the menu bar icon toggle (a fixed recovery shortcut opens Settings if you hide the icon), and the guide re-entry.
+The easiest dev loop: run the binary from your terminal and grant **Terminal**
+(itself) Accessibility permission once, because TCC attributes AX requests from
+subprocesses to the responsible process:
 
-The status glyph is an occupancy map: each cell fills while a tiled window actually covers it, so the menu bar shows the layout's state, not just its shape. The menu itself lists the active layout's slots, the managed windows under the tiles they hold, and the bulk actions.
+```bash
+swift run
+```
+
+For the bundled app (`./scripts/make-app.sh`), grant **Tiled** Accessibility
+permission in System Settings. Note: ad-hoc signing changes on every rebuild,
+so macOS may ask you to re-grant the permission after rebuilds. For serious
+use, sign with a stable identity (even a free Apple ID "Apple Development"
+certificate) so TCC remembers the grant.
+
+Quitting Tiled leaves your windows where they are.
 
 ## Testing
 
-Four layers, from hermetic to physical:
+Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
-|---|---|---|
-| Unit suite (551 tests) | `swift test` | nothing: no Accessibility, no run loop, ~2s |
-| Mutation audit (44 mutants) | `python3 tools/mutation/mutate.py` | nothing, ~10s per mutant |
-| Live end-to-end (39 cases) | `./scripts/run-repro.sh` | a GUI session and Accessibility permission |
-| Multi-display suite | `./scripts/run-repro.sh tools/repro/multi-display-suite.swift` | two attached displays |
+|-------|---------|-------|
+| Unit suite (530 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
+| Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
+| Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~10s per mutant |
 
-The unit suite drives the pure engine through `FakeWindowGateway`, with clocks, schedulers, and the display set injected, so behavior is pinned without a window server. The live suite drives a throwaway host app through real clicks, drags, and global hotkeys: quarters and sixths geometry, eviction, swap, re-house, reflow, undo, drag clamping, and window closes, plus `tools/repro/multi-display-checklist.md` for the display changes a suite cannot drive.
-
-The mutation audit answers the question a green suite cannot ask itself: would these tests notice if the code stopped working? Each entry in `tools/mutation/mutants.json` injects a plausible bug into `Sources/tiled` and expects the suite to fail. Survivors are test gaps, and the tool exits non-zero on any survivor, so it can gate a release branch.
-
-CI runs the unit suite, a release build, and the app bundle check on pushes to `master` and on every pull request.
-
-## Architecture
-
-Two halves, one seam:
+The unit suite drives the pure engine through `FakeWindowGateway`, with
+clocks, schedulers, and the display set injected; only a few live-screen
+identity checks touch AppKit. The live adapter (`LiveWindowGateway`) is
+exercised by `scripts/run-repro.sh`, which launches the app plus a throwaway
+`host` app and drives real clicks, drags, and global hotkeys: 40 cases
+covering the quarters family end to end (tiling, edge drags with
+per-column row independence, clamping, screen edges, eviction, swap,
+re-house, undo, drag-out, closes) and the sixths family (the layout
+switch, sixths geometry, per-third row independence, and a two-thirds
+window's hidden divider). Sixths boards stay disjoint in the suite: it
+models the quarters eviction algebra, not a second occupancy model. The multi-display
+suite checks same-slot coexistence, per-monitor moves, and splitter isolation
+on two attached displays; unplug/replug, rearrange, and Mission Control
+validation stays in the accompanying manual checklist. Run these before a
+release; they cannot run in CI (they move the real cursor and need a TCC grant).
 
 ```
-   AppKit / Carbon                 pure Swift
- ┌──────────────────────┐      ┌──────────────────────┐
- │ AppDelegate          │      │ Layout  GridLayout   │
- │ MenuModel            │      │ TilingState          │
- │ SettingsWindow…      │      │  (slots, cells,      │
- │ StatusIcon  Hotkeys  │      │   eviction, swap,    │
- └──────────┬───────────┘      │   reflow, re-house)  │
-            │                  └──────────┬───────────┘
-      ┌─────┴─────────────────────────────┘
-      │
- ┌────┴─────────────────┐
- │ TilingController     │
- │ PlanExecutor         │
- │ DragTracker          │
- └────┬─────────────────┘
-      │  WindowGateway (protocol)
- ┌────┴─────────────┐     ┌──────────────────┐
- │ LiveWindowGateway│     │ FakeWindowGateway│
- │ (AX, production) │     │ (tests)          │
- └──────────────────┘     └──────────────────┘
+swift test                              # the gate for every change
+swift tools/repro/probe-spaces.swift     # what the live suites can cover here
+./scripts/run-repro.sh                  # pre-release live check
+./scripts/run-repro.sh tools/repro/multi-display-suite.swift  # two displays
+./scripts/run-repro.sh tools/repro/driver.swift   # smaller focused driver
+python3 tools/mutation/mutate.py        # verify the suite still catches bugs
+python3 tools/mutation/mutate.py --list # show the injected-bug table
 ```
 
-`TilingController` owns decisions and records and never touches Accessibility types; everything about element identity, coordinate conversion, observation, and activation lives behind `WindowGateway`, which is why the engine can be tested hermetically. [docs/architecture.md](docs/architecture.md) maps every module and the invariants it holds.
+### Focused loops
 
-## Troubleshooting
+Two focused harnesses cover bugs whose signal is the status icon's
+occupancy rather than a window frame, and they must stop any installed
+`/Applications/Tiled.app` first (it owns the same global hotkeys; two
+managers answering one keystroke make every case lie):
 
-| Symptom | Likely cause |
-|---|---|
-| Hotkeys do nothing | Accessibility permission was revoked by a rebuild; see [docs/install.md](docs/install.md) |
-| A shortcut does nothing, the menu warns | Another app registered that global combo; macOS cannot tell Tiled which one. Pick another in Settings → Shortcuts |
-| A window will not move | The app refuses programmatic resizing; the menu names it |
-| Two managers fight over a keystroke | Quit any other tiling manager (Tiled, Rectangle, …) while testing |
-| Windows tile on one Space but not another | Hidden Spaces re-assert when you swipe back; nothing is written off-screen on purpose |
+```
+scripts/run-focus-loop.sh tools/repro/window-lifecycle-repro.swift  # MODE=kill-app (default)
+MODE=close-window scripts/run-focus-loop.sh tools/repro/window-lifecycle-repro.swift
+swift tools/repro/destroy-notification-probe.swift <pid> [close|kill]
+```
 
-More in [docs/troubleshooting.md](docs/troubleshooting.md).
+`window-lifecycle-repro.swift` tiles two windows (middle third, right
+third) and then either closes one through AX (the reported gesture's
+shape: Firefox closes the window a dragged tab left) or kills the whole
+app. A closed window's slot must release inside a sub-second budget — the
+adapter observes `AXUIElementDestroyed` and prunes on the spot — while a
+killed process has no notifications left to send and releases on the 5s
+tick plus 3s confirmation. The icon's cell count alone cannot tell a
+reflowed survivor from a ghost (both light the same cells), so the suite
+asserts the survivor's frame and, for a killed app, an empty icon.
 
-## Roadmap
+`destroy-notification-probe.swift` measures that notification's latency
+for any app (host app: ~3ms; Firefox: ~29ms), which is what makes the
+event-driven release safe to promise.
+
+See `tools/repro/multi-display-checklist.md` for the physical display-change
+checks the suite cannot drive.
+
+`tools/mutation` answers the question a green suite cannot ask itself:
+would these tests notice if the code stopped working? Each entry in
+`tools/mutation/mutants.json` is a plausible bug injected into `Sources/tiled`;
+a mutant that survives is a test gap. It exits non-zero on any survivor or
+unresolved mutant, so it can gate a release branch. Sources are restored from memory after each
+run, so uncommitted work is safe.
+
+CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
+
+## Status / roadmap
 
 - [x] Menu bar app (LSUIElement), Accessibility permission flow
-- [x] Quarters and sixths layouts, 21 global hotkeys (17 remappable slots + 4 fixed)
-- [x] Pure, unit-tested tiling state with eviction, swap, reflow, and re-house
-- [x] Live shared-edge resizing
-- [x] Per-Space, per-display canvases
-- [x] Drag-out (short drag snaps back, long drag untiles in place)
-- [x] Expand without releasing the slot
-- [x] Undo across eviction, swap, reflow, and layout switches
-- [x] Remappable shortcuts with conflict handling
+- [x] 17 global hotkeys (Carbon RegisterEventHotKey) + clickable menu equivalents
+- [x] In-app keyboard-shortcut reference
+- [x] Pure, unit-tested tiling state with eviction and layout-switch rules
+- [x] Fixed-rect tiling via the Accessibility API
+- [x] Live shared-edge resizing (observe native drag + compensate neighbors)
+- [x] Sixths layout (3×2 grid, thirds, two-thirds)
 - [x] Visible failure states (hotkey conflicts, apps refusing resize)
-- [x] Display-change re-assertion and closed-window cleanup
+- [x] Display-change reassertion + automatic cleanup of closed windows
+- [x] Per-Space layouts (Mission Control desktops independent per display)
+- [x] Drag-out (short drag snaps back, long drag untiles in place)
 - [ ] Owned overlay resize handles
-- [ ] Gaps (decided: no gaps for now)
-
-## Contributing
-
-Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop, the test layers, and what a change is expected to prove. The short version:
-
-```bash
-swift test                        # the gate for every change
-./scripts/run-repro.sh            # before a release
-python3 tools/mutation/mutate.py  # would the tests notice?
-```
-
-`CONTEXT.md` is the project's vocabulary: one word per concept, with the words to avoid. The media pipeline lives in `tools/capture/` (see [docs/capture.md](docs/capture.md)); it is kept so the screenshots and GIFs can be regenerated on demand, and none are committed today.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+- [x] Remappable shortcuts
+- [ ] Gaps? (decided: no gaps for now)
