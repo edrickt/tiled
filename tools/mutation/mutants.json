@@ -262,5 +262,35 @@
   "destroyed notification ignored (slots linger until the prune tick)",
   "        guard let id = currentID(for: handle) else { return }\n        guard gateway.liveness(of: handle) == .dead else {",
   "        guard let id = currentID(for: handle) else { return }\n        guard false, gateway.liveness(of: handle) == .dead else {"
+ ],
+ [
+  "FrameWriter.swift",
+  "no-op write pushed anyway (expectation never converges)",
+  "        if let live = gateway.frame(of: handle),\n            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
+  ""
+ ],
+ [
+  "FrameWriter.swift",
+  "off-Space defer never taken (hidden canvas written)",
+  "        guard isVisible(space) else {\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }",
+  "        guard true else {\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }"
+ ],
+ [
+  "FrameWriter.swift",
+  "rollback check inverted (silent ignores never verified)",
+  "        if case .rollback = check { scheduleCheck(id, space) }",
+  "        if case .none = check { scheduleCheck(id, space) }"
+ ],
+ [
+  "FrameWriter.swift",
+  "refusal reported as success (no write result reaches callers)",
+  "        guard gateway.setFrame(handle, to: target) else {\n            log(\"write win\\(id) refused target=\\(target)\")\n            return .refused\n        }",
+  "        _ = gateway.setFrame(handle, to: target)"
+ ],
+ [
+  "FrameWriter.swift",
+  "echo expectation not armed (own write reads as a user drag)",
+  "        markExpected(id, target)\n        guard gateway.setFrame",
+  "        guard gateway.setFrame"
  ]
 ]

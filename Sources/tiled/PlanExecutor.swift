@@ -63,10 +63,17 @@ final class PlanExecutor {
     }
 
     private let gateway: WindowGateway
+    /// The shared write policy, injected: plan placements must not grow a
+    /// second copy of the no-op / off-Space / echo rules.
+    private let frameWriter: FrameWriter
     private let log: (String) -> Void
 
-    init(gateway: WindowGateway, log: @escaping (String) -> Void = { _ in }) {
+    init(
+        gateway: WindowGateway, frameWriter: FrameWriter,
+        log: @escaping (String) -> Void = { _ in }
+    ) {
         self.gateway = gateway
+        self.frameWriter = frameWriter
         self.log = log
     }
 
@@ -611,19 +618,25 @@ final class PlanExecutor {
         let current = gateway.frame(of: record.handle) ?? record.preTileFrame
         let bounds = boundsOf(current)
         let target = tracker.grid(for: space).rect(for: slot, in: bounds)
-        // A no-op write changes nothing observable: skip it and count
-        // success. Writing anyway would draw no echo, and the caller's
-        // late convergence check would evict an already-correct window.
-        if let live = gateway.frame(of: record.handle),
-            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)
-        {
-            log("applyLayout win\(id) no-op skip target=\(target)")
-            return true
-        }
-        tracker.markExpected(id, target)
-        let ok = gateway.setFrame(record.handle, to: target)
-        log("applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) target=\(target) ok=\(ok)")
-        return ok
+        // The shared write policy: a no-op target counts as success
+        // without a write, and a hidden canvas defers (false: the branch
+        // rolls back). The check is `.none`: settle schedules the plan's
+        // convergence check, so a per-write check would double-schedule.
+        // No canvas (legacy/headless snapshots) resolves to the
+        // display-less fallback, which the visibility policy treats as
+        // visible.
+        let canvas = space ?? .displayless
+        let result = frameWriter.write(
+            id, handle: record.handle, to: target, on: canvas, check: .none)
+        log(
+            "applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) "
+                + "target=\(target) result=\(result)")
+        // A transiently unresolvable Space (the window-server table can
+        // answer nil while the canvas key still carries an id) defers the
+        // write: writing blind could pull the window onto the visible
+        // Space. The branch rolls the placement back with its standard
+        // refusal, the only user-facing failure vocabulary this path has.
+        return result.isAccepted
     }
 
     private func appName(for id: WindowID, records: [WindowID: WindowRecord]) -> String? {

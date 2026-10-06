@@ -48,6 +48,14 @@ struct TilingSpaceKey: Hashable {
     let space: SpaceID?
 }
 
+extension TilingSpaceKey {
+    /// The display-less canvas: headless environments keep one shared
+    /// canvas, and callers with no canvas at all resolve here. The
+    /// visibility policy treats it as visible, so only the write
+    /// policies that do not depend on Space identity apply.
+    static let displayless = TilingSpaceKey(screen: nil, space: nil)
+}
+
 /// One display's geometry for tiling: full frame plus visible frame
 /// (excluding menu bar and Dock). AppKit-free so tests inject synthetic
 /// multi-monitor setups without attached displays. `displayID` lets the

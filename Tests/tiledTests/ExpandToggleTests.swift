@@ -82,6 +82,23 @@ final class ExpandToggleTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: handle), original)
     }
 
+    func testExpandOfAnAlreadyExpandedWindowIssuesNoWrite() {
+        // The target equals the live frame: the shared write policy
+        // skips it, so no expectation is armed that would never
+        // converge. Both directions of the toggle share the policy.
+        let full = bounds(for: CGRect(x: 100, y: 100, width: 800, height: 600))
+        let handle = gateway.addWindow(frame: full)
+        gateway.focused = handle
+
+        controller.handleExpandToggle()
+        XCTAssertTrue(gateway.writes.isEmpty)
+        XCTAssertTrue(feedbacks.isEmpty)
+
+        controller.handleExpandToggle()
+        XCTAssertTrue(gateway.writes.isEmpty)
+        XCTAssertEqual(gateway.frame(of: handle), full)
+    }
+
     // MARK: Tiled windows
 
     func testExpandTiledWindowKeepsItsSlot() {

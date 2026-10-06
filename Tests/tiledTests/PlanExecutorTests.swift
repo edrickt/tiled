@@ -12,6 +12,10 @@ final class PlanExecutorTests: XCTestCase {
     private var records: [WindowID: WindowRecord]!
     private var handles: [WindowID: WindowHandle]!
     private var nextID: WindowID!
+    /// Whether the writer's visibility policy sees the canvas. Tests that
+    /// exercise deferral flip this; everyone else writes as on a visible
+    /// canvas.
+    private var canvasVisible = true
 
     override func setUp() {
         super.setUp()
@@ -20,6 +24,7 @@ final class PlanExecutorTests: XCTestCase {
         records = [:]
         handles = [:]
         nextID = 1
+        canvasVisible = true
         tracker = DragTracker(
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.state.slot(of: $0) ?? nil },
@@ -31,7 +36,16 @@ final class PlanExecutorTests: XCTestCase {
                 boundsOf: { $0 },
                 occupants: { [weak self] in self?.state.occupants ?? [:] }),
             apply: { _, _ in 0 })
-        executor = PlanExecutor(gateway: gateway)
+        let writer = FrameWriter(
+            gateway: gateway,
+            isVisible: { [weak self] _ in self?.canvasVisible ?? true },
+            markStale: { _ in },
+            markExpected: { [weak self] id, target in
+                self?.tracker.markExpected(id, target)
+            },
+            scheduleCheck: { _, _ in },
+            log: { _ in })
+        executor = PlanExecutor(gateway: gateway, frameWriter: writer)
     }
 
     @discardableResult
@@ -98,6 +112,18 @@ final class PlanExecutorTests: XCTestCase {
         let outcome = commit(run(.tile(evicting: []), requester: id, slot: .topLeft))
 
         XCTAssertNil(state.slot(of: id), "occupancy rolled back so state and screen agree")
+        XCTAssertNotNil(outcome.error)
+        XCTAssertNotNil(outcome.feedback)
+    }
+
+    func testTileOnAHiddenCanvasDefersTheWriteAndRollsBack() {
+        let id = addWindow()
+        canvasVisible = false
+
+        let outcome = commit(run(.tile(evicting: []), requester: id, slot: .topLeft))
+
+        XCTAssertTrue(gateway.writes.isEmpty, "a hidden canvas is never written blind")
+        XCTAssertNil(state.slot(of: id), "the placement rolls back rather than diverge")
         XCTAssertNotNil(outcome.error)
         XCTAssertNotNil(outcome.feedback)
     }

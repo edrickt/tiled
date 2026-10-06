@@ -16,8 +16,26 @@ final class TilingController {
     /// Convergence-check scheduler for the late silent-ignore verification.
     /// Injectable so tests fire verifications without waiting 3.5s.
     private let scheduleVerify: DragTracker.DragEndScheduler
+    /// The one frame-write policy every push path shares: no-op skip,
+    /// off-Space deferral, echo marking, and the convergence check each
+    /// write declares. Lazy so its closures can capture self.
+    private lazy var frameWriter = FrameWriter(
+        gateway: gateway,
+        isVisible: { [weak self] in self?.isVisible($0) ?? false },
+        markStale: { [weak self] space in
+            guard let self else { return }
+            self.staleSpaces.insert(space)
+        },
+        markExpected: { [weak self] id, target in
+            self?.tracker.markExpected(id, target)
+        },
+        scheduleCheck: { [weak self] id, space in
+            self?.scheduleVerification(of: [id], on: space)
+        },
+        log: { [weak self] in self?.dbg($0) })
     private lazy var executor = PlanExecutor(
-        gateway: gateway, log: { [weak self] in self?.dbg($0) })
+        gateway: gateway, frameWriter: frameWriter,
+        log: { [weak self] in self?.dbg($0) })
 
     /// The drag-resize loop. Lazy so its context closures can capture
     /// self: the tracker decides (echo, edges, splitters), this module
@@ -596,14 +614,13 @@ final class TilingController {
         _ = pushRects(rects, excluding: nil, on: space)
     }
 
-    /// Performs tracker-scheduled pushes: marks each write expected (echo
-    /// bookkeeping lives in the tracker) and writes via the gateway.
-    /// Returns the refusal count. `excluding` names the window whose frame
-    /// is the drag's source of truth; it is informational, since snapback rects
-    /// DO name the (formerly) dragged window, with `excluding` nil.
-    /// Successful pushes schedule the same late convergence check as
-    /// placements: a re-push the app silently ignores rolls back the same
-    /// way. Per-window supersede keeps drag streams to one pending check.
+    /// Performs tracker-scheduled pushes through the shared write policy:
+    /// no-op skip, off-Space deferral, echo marking, and the late
+    /// convergence check belong to `FrameWriter`; this method counts
+    /// refusals per canvas so the menu can name them. `excluding` names
+    /// the window whose frame is the drag's source of truth; it is
+    /// informational, since snapback rects DO name the (formerly) dragged
+    /// window, with `excluding` nil.
     private func pushRects(
         _ rects: [WindowID: CGRect], excluding: WindowID?, on space: TilingSpaceKey? = nil
     ) -> Int {
@@ -611,32 +628,17 @@ final class TilingController {
         var failuresByCanvas: [TilingSpaceKey: Int] = [:]
         for (id, target) in rects {
             guard let record = records[id] else { continue }
-            // A push for a window on a canvas the user cannot see waits
-            // for the swipe back: resizing an off-Space window can pull
-            // it onto the visible Space. The mark re-asserts it later.
-            if let windowSpace = spaceOf(window: id), !isVisible(windowSpace) {
-                staleSpaces.insert(windowSpace)
-                dbg("push win\(id) deferred off-Space")
-                continue
-            }
-            // No-op writes are skipped, not pushed: the app changes
-            // nothing and emits no echo, so a marked expectation here
-            // would never converge and the late check would evict an
-            // already-correct window.
-            if let current = gateway.frame(of: record.handle),
-                DragTracker.close(current, target, tolerance: DragTracker.noOpWriteTolerance)
+            // The window's own canvas scopes the write (visibility and
+            // the convergence check); the passed space is the fallback
+            // for a window whose canvas record is gone.
+            let canvas = writeCanvas(for: id, fallback: space)
+            if frameWriter.write(
+                id, handle: record.handle, to: target, on: canvas, check: .rollback)
+                == .refused
             {
-                dbg("push win\(id) no-op skip target=\(target)")
-                continue
-            }
-            tracker.markExpected(id, target)
-            if !gateway.setFrame(record.handle, to: target) {
                 failed += 1
-                let canvas = space ?? spaceOf(window: id) ?? focusedSpaceKey()
                 failuresByCanvas[canvas, default: 0] += 1
             }
-            else { scheduleVerification(of: [id], on: spaceOf(window: id) ?? focusedSpaceKey()) }
-            dbg("push win\(id) target=\(target)")
         }
         // Refusals land on the canvas whose windows refused, not on
         // whatever happens to be focused when the menu is next read.
@@ -1534,20 +1536,19 @@ final class TilingController {
     /// feedback of its own.
     private func writeExpandedFrame(_ id: WindowID, to target: CGRect) -> Bool {
         guard let record = records[id] else { return false }
-        let windowSpace = spaceOf(window: id) ?? focusedSpaceKey()
-        // The same off-Space guard every other write path applies: an AX
-        // resize can pull a hidden-Space window onto the visible Space,
-        // so the expand write waits for the swipe back. Returning false
-        // keeps the expansion out of state: nothing on screen moved.
-        guard isVisible(windowSpace) else {
-            staleSpaces.insert(windowSpace)
-            dbg("expand win\(id) deferred off-Space")
+        let windowSpace = writeCanvas(for: id)
+        // The shared write policy: the off-Space guard defers a hidden
+        // canvas (the expansion stays out of state), and a no-op target
+        // counts as success without a write. Expansion has no rollback
+        // path of its own, so it declares no convergence check.
+        let result = frameWriter.write(
+            id, handle: record.handle, to: target, on: windowSpace, check: .none)
+        if result == .refused {
+            setTileError(Self.refusalMessage(count: 1), on: windowSpace)
             return false
         }
-        tracker.markExpected(id, target)
-        if gateway.setFrame(record.handle, to: target) { return true }
-        setTileError(Self.refusalMessage(count: 1), on: windowSpace)
-        return false
+        // Deferred stays out of state: nothing on screen moved.
+        return result.isAccepted
     }
 
     /// Slot a window presents to the tracker: expanded windows read as
@@ -1659,6 +1660,14 @@ final class TilingController {
     /// Owning canvas of a tiled window (nil when untiled/unknown).
     private func spaceOf(window id: WindowID) -> TilingSpaceKey? {
         spaceOwnership[id]
+    }
+
+    /// The canvas a window's frame write belongs to: its own canvas when
+    /// known, else the caller's passed canvas, else the focused one. The
+    /// one spelling of that precedence, so visibility, verification, and
+    /// refusal attribution cannot drift apart.
+    private func writeCanvas(for id: WindowID, fallback: TilingSpaceKey? = nil) -> TilingSpaceKey {
+        spaceOf(window: id) ?? fallback ?? focusedSpaceKey()
     }
 
     private func setSpaceOwnership(_ id: WindowID, _ space: TilingSpaceKey) {
