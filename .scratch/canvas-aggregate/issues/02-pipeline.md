@@ -1,6 +1,6 @@
 # Stage 2 - Move the placement pipeline into TilingSpace
 
-Status: TODO
+Status: DONE at `27a1562` ("Move the placement pipeline into TilingSpace"), master.
 Blocked by: stage 1 (DONE, `26c1db3`)
 Blocks: stage 3
 
@@ -56,7 +56,24 @@ Out:
    -> Criterion: both axes reported; commit on `master` with gate evidence in the body; this ticket and
    the README table updated with the commit hash.
 
-## Evidence to record
+## Evidence
 
-- build/test/mutation output at the final commit (test count delta expected: 0).
-- The review's findings and their resolutions.
+- `swift build`: clean, zero warnings.
+- `swift test`: 557/557 (delta 0). `PlanExecutorTests` was retargeted to the canvas's `execute`/`undo`
+  interface; no fixtures were added or weakened.
+- `python3 tools/mutation/mutate.py`: 49/49 caught, none STALE/INVALID/TIMEOUT. Eight mutants were
+  re-pointed to `TilingSpace.swift` (path and/or target text), including the degenerate-swap mutant,
+  whose replacement now flips `context.isExpanded`.
+- `code-review` on both axes against `26c1db3`:
+  - Spec: no wrong behaviour found. Two scope creeps are forced by the move and reasoned in the commit:
+    the expand/collapse refusal plumbing (the placement pipeline owns its canvas's error while `apply`
+    runs) and `DragTracker.rect(for:slot:)` (the canvas holds a grown slot before the coordinator's
+    view catches up). `undo` riding along is a stage-3 formalization, required because
+    `PlanExecutor.swift` is deleted.
+  - Standards (smell baseline; no repo standards files): fixed the duplicated refusal pair (now
+    `Refusal`), the duplicated undo-entry construction (now `evictedEntry`), `applyLayout` threading a
+    second copy of `records`, `untileAll` hand-trimming the undo stack (now `beginUndoChapter()`),
+    inlined the `pushUndo`/`undoDepth` middle-men, shared the three expand/collapse/retile failure arms
+    (`expandedWriteFailure`), and refreshed the stale `CanvasState` comment. Reasoned: internal
+    `execute` (test seam, stage 4) and the separate `pushRects`/`writeReflow` loops (per-canvas
+    coordinator attribution vs canvas-local error).

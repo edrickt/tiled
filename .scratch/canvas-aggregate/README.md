@@ -6,8 +6,8 @@ this file is the single source of truth for the design and the stage map.
 
 ## Where this is
 
-Stage 1 is done. `master` at `26c1db3` ("Unify frame writes behind the FrameWriter policy module"):
-one write policy module, 557 tests, 49/49 mutants. Stages 2-4 remain.
+Stages 1-2 are done. `master` at `27a1562` ("Move the placement pipeline into TilingSpace"):
+one write policy module, one placement pipeline per canvas, 557 tests, 49/49 mutants. Stages 3-4 remain.
 
 ## The design (settled)
 
@@ -36,7 +36,7 @@ mutation-table target stays live and caught.
 | # | Ticket | Delivers | Blocked by | Status |
 |---|---|---|---|---|
 | 1 | `issues/01-framewriter.md` | FrameWriter write policy | - | DONE (`26c1db3`) |
-| 2 | `issues/02-pipeline.md` | Pipeline moves into TilingSpace; PlanExecutor dissolves | 1 | TODO |
+| 2 | `issues/02-pipeline.md` | Pipeline moves into TilingSpace; PlanExecutor dissolves | 1 | DONE (`27a1562`) |
 | 3 | `issues/03-state.md` | Canvas owns records/grid/expansion; ownership derived | 2 | TODO |
 | 4 | `issues/04-tests-surface.md` | TilingSpaceTests; duplicated tests and accessors die | 3 | TODO |
 
