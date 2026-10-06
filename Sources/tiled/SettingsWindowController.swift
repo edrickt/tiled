@@ -39,9 +39,7 @@ final class SettingsWindowController: NSWindowController {
     var onHideIconChange: ((Bool) -> Void)?
     /// Called after any binding change so the delegate can re-register
     /// hotkeys and refresh the menu.
-    var onHotkeysChange: (() -> Void)? {
-        didSet { shortcutsTab.onHotkeysChange = onHotkeysChange }
-    }
+    var onHotkeysChange: (() -> Void)?
     /// Slots whose global hotkey lost registration (owned by another app),
     /// forwarded to the Shortcuts tab so a cross-app failure surfaces
     /// beside the recorder that accepted the combo, not only in the menu.
@@ -70,7 +68,10 @@ final class SettingsWindowController: NSWindowController {
         welcomeTab.onOpenAccessibilitySettings = { [weak self] in
             self?.onOpenAccessibilitySettings?()
         }
-        shortcutsTab.onHotkeysChange = { [weak self] in self?.onHotkeysChange?() }
+        shortcutsTab.onHotkeysChange = { [weak self] in
+            self?.welcomeTab.refreshShortcutInstructions()
+            self?.onHotkeysChange?()
+        }
         shortcutsTab.onContentRebuilt = { [weak self] view in
             self?.replaceShortcutsView(view)
         }
@@ -196,6 +197,7 @@ final class SettingsWindowController: NSWindowController {
     /// Welcome item exists before selection (selectTab is identifier-safe
     /// and no-ops on a missing tab, never a wrong tab).
     func showWelcomeAgain() {
+        welcomeTab.refreshShortcutInstructions()
         if window?.isVisible != true {
             rebuildTabView(includingWelcome: true)
             loadValues()
@@ -254,6 +256,7 @@ final class SettingsWindowController: NSWindowController {
 
     private func loadValues() {
         generalTab.loadValues()
+        welcomeTab.refreshShortcutInstructions()
     }
 
     /// The delegate's permission poll calls this when Accessibility

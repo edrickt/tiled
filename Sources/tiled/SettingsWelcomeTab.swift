@@ -19,6 +19,7 @@ final class WelcomeTab: NSObject {
     /// placement on open.
     private(set) var dismissButton: NSButton?
     private var permissionRow: NSStackView!
+    private var stepsField: NSTextField?
 
     init(hotkeyStore: HotkeyStore) {
         self.hotkeyStore = hotkeyStore
@@ -51,7 +52,7 @@ final class WelcomeTab: NSObject {
         ])
         view.addSubview(scroll)
 
-        let title = NSTextField(labelWithString: "Tile a window in one keypress")
+        let title = NSTextField(labelWithString: "Tile your first window")
         title.font = .boldSystemFont(ofSize: NSFont.systemFontSize + 2)
         stack.addArrangedSubview(title)
 
@@ -81,12 +82,9 @@ final class WelcomeTab: NSObject {
         permissionRow.trailingAnchor.constraint(
             equalTo: stack.trailingAnchor, constant: -24).isActive = true
 
-        let topLeft = hotkeyStore.binding(for: .topLeft).label ?? "\u{2325}\u{21E7}U"
-        let steps = NSTextField(wrappingLabelWithString:
-            "1. Click any window to focus it.\n" +
-            "2. Press \(topLeft) to tile it top-left.\n" +
-            "3. Press it again; tiling its own tile does nothing, safely.\n" +
-            "Every combo lives under Tile Focused Window in the menu bar menu.")
+        let steps = NSTextField(wrappingLabelWithString: "")
+        stepsField = steps
+        refreshShortcutInstructions()
         steps.font = .systemFont(ofSize: NSFont.systemFontSize)
         stack.addArrangedSubview(steps)
 
@@ -106,7 +104,9 @@ final class WelcomeTab: NSObject {
         previewColumn.orientation = .vertical
         previewColumn.spacing = 4
         previews.addArrangedSubview(previewColumn)
-        let preview = SlotPreviewView(highlighted: [.topLeft], trackColor: .tertiaryLabelColor)
+        let preview = SlotPreviewView(
+            highlighted: [.topLeft], trackColor: .tertiaryLabelColor,
+            displayColumns: 2)
         preview.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             preview.widthAnchor.constraint(equalToConstant: 160),
@@ -154,8 +154,8 @@ final class WelcomeTab: NSObject {
         sixthsCaption.widthAnchor.constraint(equalToConstant: 160).isActive = true
 
         let sixthsLabel = NSTextField(wrappingLabelWithString:
-            "Sixths work the same way: three columns instead of two. Hold ⌥⇧ with the sixths keys " +
-            "(⌥⇧⌘ tiles quarters); the full list lives in Settings → Shortcuts.")
+            "Sixths work the same way: three columns instead of two. " +
+            "Find your current shortcuts in Settings → Shortcuts.")
         sixthsLabel.textColor = .secondaryLabelColor
         sixthsLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stack.addArrangedSubview(sixthsLabel)
@@ -193,6 +193,25 @@ final class WelcomeTab: NSObject {
 
     @objc private func dismissTapped(_ sender: NSButton) {
         onDismiss?()
+    }
+
+    /// The guide may already be built when Shortcuts changes a binding.
+    /// Re-read it instead of keeping first-launch instructions indefinitely.
+    func refreshShortcutInstructions() {
+        if let topLeft = hotkeyStore.binding(for: .topLeft).label {
+            stepsField?.stringValue =
+                "1. Click any window to focus it.\n" +
+                "2. Press \(topLeft) to tile it Top Left.\n" +
+                "3. Press it again; the window stays in its slot.\n" +
+                "Every slot is also in the menu bar → Tile Focused Window."
+        } else {
+            stepsField?.stringValue =
+                "1. Click any window to focus it.\n" +
+                "2. Menu bar → Tile Focused Window → Top Left.\n" +
+                "   In Sixths, choose Switch to Quarters instead.\n" +
+                "3. Set a shortcut in Settings → Shortcuts.\n" +
+                "Top Left's shortcut is disabled."
+        }
     }
 
     /// Re-probes trust for an already-built Welcome view; the shell's

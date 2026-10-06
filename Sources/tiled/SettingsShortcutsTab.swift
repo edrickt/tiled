@@ -110,6 +110,16 @@ final class ShortcutsTab: NSObject {
         // the text itself covers every moment after.
         stack.addArrangedSubview(conflictLabel)
 
+        // Teach recording before the first control, not below seventeen rows.
+        let hint = NSTextField(wrappingLabelWithString:
+            "Click a shortcut, press a new combo; Esc keeps the old one, ⌫ disables.")
+        hint.textColor = .secondaryLabelColor
+        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        stack.addArrangedSubview(hint)
+        hint.trailingAnchor.constraint(
+            equalTo: stack.trailingAnchor, constant: -24).isActive = true
+        stack.setCustomSpacing(12, after: hint)
+
         // Headers show row counts so a collapsed section still communicates
         // its size. Bulk enable/disable lives in the small button beside
         // each header, deliberately separate from the disclosure control,
@@ -137,18 +147,7 @@ final class ShortcutsTab: NSObject {
             target: self, action: #selector(resetShortcuts(_:)))
         resetButton.bezelStyle = .rounded
         footer.addArrangedSubview(resetButton)
-        let hint = NSTextField(wrappingLabelWithString:
-            "Click a shortcut, press a new combo; Esc keeps the old one, ⌫ disables.")
-        hint.textColor = .secondaryLabelColor
-        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        footer.addArrangedSubview(hint)
         stack.addArrangedSubview(footer)
-        // Same inset-width cap as the permission row above (activated
-        // after the row joins the stack; constraints need a common
-        // ancestor): without it the hint's intrinsic single-line width
-        // shoves the row wide.
-        footer.trailingAnchor.constraint(
-            equalTo: stack.trailingAnchor, constant: -24).isActive = true
 
         scroll.documentView = stack
         NSLayoutConstraint.activate([

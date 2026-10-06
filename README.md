@@ -73,9 +73,12 @@ to a free tile, and ⌃⌥⇧⌘Z undoes it together with the event that
 caused it. A hole no neighbor can merge into exactly stays empty.
 Like Expand, this shortcut is fixed.
 
-First launch opens Settings on a Welcome tab: focus any window, press ⌥⇧U
-to tile it top-left, and you're going, with a miniature preview showing
-what Top Left covers. Dismiss the guide once; reopen it anytime from the menu bar menu → Tiled Guide.
+First launch opens Settings on a Welcome tab: focus any window and press the
+Top Left shortcut (⌥⇧⌘U by default), with a miniature preview showing what
+Top Left covers. The guide shows your current binding; if it's disabled,
+it teaches menu bar → Tile Focused Window → Top Left instead (or Switch to
+Quarters if Sixths is active).
+Dismiss the guide once; reopen it anytime from the menu bar menu → Tiled Guide.
 
 The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
 

@@ -18,10 +18,9 @@ final class SlotPreviewView: NSView {
     ///   system quaternary label color; pass `.tertiaryLabelColor` for
     ///   small sizes in Dark Mode, where quaternary can render
     ///   near-invisible against the window background.
-    /// - Parameter displayColumns: 4 (the shared refinement) or 3 for a
-    ///   sixths-shaped preview; refinement cols 0..3 fold onto display
-    ///   cols 0..2 (1+2 merge into the middle third), so sixths geometry
-    ///   reads as three columns instead of an uneven quarter grid.
+    /// - Parameter displayColumns: 4 (the shared refinement), 2 for
+    ///   quarters (0+1 and 2+3 merge), or 3 for sixths (1+2 merge into
+    ///   the middle third). User-facing previews hide refinement edges.
     init(
         highlighted: Set<Slot>, trackColor: NSColor = .quaternaryLabelColor,
         displayColumns: Int = 4
@@ -39,8 +38,8 @@ final class SlotPreviewView: NSView {
 
     /// Cells covered by any highlighted slot, as (column, row): col
     /// 0..displayColumns-1 left to right, row 0 = top. The 4-col refinement
-    /// maps straight through; the 3-col sixths display folds cols 1+2 into
-    /// the middle column so thirds read as thirds.
+    /// maps straight through; quarters merge pairs and sixths fold cols
+    /// 1+2 into the middle column so the diagram matches its layout.
     private var filledCells: Set<String> {
         var out = Set<String>()
         for slot in highlighted {
@@ -56,7 +55,13 @@ final class SlotPreviewView: NSView {
                 case .col2Bottom: (col, row) = (2, 1)
                 case .col3Bottom: (col, row) = (3, 1)
                 }
-                out.insert("\(displayColumns == 3 ? (col >= 3 ? 2 : min(col, 1)) : col),\(row)")
+                let displayCol: Int
+                switch displayColumns {
+                case 2: displayCol = col / 2
+                case 3: displayCol = col >= 3 ? 2 : min(col, 1)
+                default: displayCol = col
+                }
+                out.insert("\(displayCol),\(row)")
             }
         }
         return out
@@ -65,7 +70,7 @@ final class SlotPreviewView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let filled = filledCells
-        // displayColumns (4 refinement or 3 sixths) × 2 rows. Gap and
+        // displayColumns (4 refinement, 2 quarters, or 3 sixths) × 2 rows. Gap and
         // corner radius scale with size so the miniature stays legible at
         // the 160×100 Welcome size.
         let gap = max(1, min(bounds.width, bounds.height) / 50)
@@ -92,5 +97,4 @@ final class SlotPreviewView: NSView {
         }
     }
 }
-
 
