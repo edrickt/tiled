@@ -6,9 +6,10 @@ this file is the single source of truth for the design and the stage map.
 
 ## Where this is
 
-Stages 1-3 are done. `master` at `2524826` ("Move per-canvas state into TilingSpace"):
-one write policy module, one placement pipeline per canvas, per-canvas records/grid/expansion,
-556 tests, 50/50 mutants. Stage 4 remains.
+Stages 1-4 are done. `master` at `60cea51` ("Make the canvas the test surface and collapse the
+accessor facade"): one write policy module, one placement pipeline per canvas, per-canvas
+records/grid/expansion, the canvas as the test surface, 581 tests, 50/50 mutants. The arc is
+closed.
 
 ## The design (settled)
 
@@ -39,7 +40,7 @@ mutation-table target stays live and caught.
 | 1 | `issues/01-framewriter.md` | FrameWriter write policy | - | DONE (`26c1db3`) |
 | 2 | `issues/02-pipeline.md` | Pipeline moves into TilingSpace; PlanExecutor dissolves | 1 | DONE (`27a1562`) |
 | 3 | `issues/03-state.md` | Canvas owns records/grid/expansion; ownership derived | 2 | DONE (`2524826`) |
-| 4 | `issues/04-tests-surface.md` | TilingSpaceTests; duplicated tests and accessors die | 3 | TODO |
+| 4 | `issues/04-tests-surface.md` | TilingSpaceTests; duplicated tests and accessors die | 3 | DONE (`60cea51`) |
 
 ## Running one stage in a fresh session
 
