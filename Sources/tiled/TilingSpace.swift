@@ -2,8 +2,8 @@ import CoreGraphics
 import Foundation
 
 /// A managed window's restore record: its gateway handle plus the frame
-/// to restore when untiled. Owned by the coordinator's registry during
-/// stage 2; read and mutated by the canvas's placement pipeline.
+/// to restore when untiled. Owned by the canvas the window belongs to;
+/// the coordinator derives `spaceOf(window:)` from these records.
 struct WindowRecord {
     let handle: WindowHandle
     var preTileFrame: CGRect
@@ -22,18 +22,15 @@ struct EvictedWindow {
     var space: TilingSpaceKey? = nil
 }
 
-/// One tiling canvas's module: its occupancy, undo chapters, splitter
-/// backup, notices, and the placement pipeline (plan, commit, settle,
-/// reflow) for that canvas.
+/// One tiling canvas's module: its occupancy, window records, expansion,
+/// splitters, undo chapters, notices, and the placement pipeline (plan,
+/// commit, settle, reflow) for that canvas.
 ///
-/// Previously the pipeline was split across `TilingState.plan`,
-/// `PlanExecutor`, `TilingController.settle`, and `TilingController.reflow`;
-/// every caller had to re-derive the restore set, the reflow exclusions,
-/// and the undo chapter. Now one request runs its whole path here and
-/// returns one `Outcome` naming the effects the coordinator applies
-/// (observation, forgotten records, focus, verification). The occupancy
-/// is the canvas's; the records, tracker, and expansion still belong to
-/// the coordinator for this stage and travel through `Context`.
+/// The coordinator keeps focus and handle resolution, the handle->id
+/// allocation table, observation, bounds, and the death clock; every
+/// piece of per-canvas state lives here. Records being canvas-owned is
+/// what makes `spaceOf(window:)` derivable: a window's canvas is the one
+/// holding its record, so ownership cannot drift from a second registry.
 ///
 /// `notice`/`error` stay readable on the canvas: the placement writes
 /// them as it settles, so the menu surface reads the canvas that acted.
@@ -41,6 +38,22 @@ struct TilingSpace {
     var state = TilingState()
     var undoStack: [(snapshot: [EvictedWindow], requester: WindowID?)] = []
     var splitterBackup: GridLayout?
+    /// Splitter fractions for this canvas. The tracker moves them through
+    /// its `GridProvider`, which reads and writes here.
+    var grid = GridLayout()
+    /// Managed windows: the handle to reach them plus the frame untiling
+    /// restores. A window records here when the coordinator hands it
+    /// over, and leaves when an action forgets it.
+    var records: [WindowID: WindowRecord] = [:]
+    /// Windows expanded over the layout by the ⌥⇧⏎ toggle, keyed by id,
+    /// holding the frame to restore for windows that had no slot when
+    /// expanded (tiled windows retile into their slot instead, so their
+    /// entry is unused). Expanded windows keep their slot in `state`:
+    /// expanding acts like focusing, covering the layout without erasing
+    /// it, but the tracker reads them as untiled (`trackedSlot`), so
+    /// echoes of the expand write and hand drags of the covering window
+    /// never mutate splitters or trigger drag-out untile.
+    var expanded: [WindowID: CGRect] = [:]
     var notice: String?
     var error: String?
 
@@ -50,69 +63,54 @@ struct TilingSpace {
     /// the occupancy they describe.
     static let undoDepth = 5
 
-    /// Everything a placement needs from the coordinator: the
-    /// coordinator-owned values threaded by value and the collaborators
-    /// that reach back into live state.
-    ///
-    /// `records`/`nextID` are threaded in and read back out after the
-    /// call: holding the coordinator's registry `inout` across the call
-    /// would trip Swift's exclusivity checker, since collaborator
-    /// closures (`observe`, `spaceOf`) read the live registry while the
-    /// phase runs. Copies are trivial (a handful of tiled windows), and
-    /// record creation for pruned undo handles happens on this copy via
-    /// `nextID`, so it stays visible to the rest of the call.
+    /// Everything an action needs from the coordinator: the collaborators
+    /// that reach back into live state. Records, expansion, splitters, and
+    /// undo chapters are this canvas's own; the context never carries them.
     struct Context {
-        var records: [WindowID: WindowRecord] = [:]
-        var nextID: WindowID = 1
         let gateway: WindowGateway
         let frameWriter: FrameWriter
         let tracker: DragTracker
         let boundsOf: (CGRect) -> CGRect
         /// The canvas every write without a better owner belongs to: the
-        /// canvas this placement is running on.
+        /// canvas this action is running on.
         let space: TilingSpaceKey
-        /// The canvas a window's frame writes and verification belong to
-        /// (nil when untiled/unknown).
-        var spaceOf: (WindowID) -> TilingSpaceKey? = { _ in nil }
-        /// Whether `id` is currently expanded over the layout.
-        var isExpanded: (WindowID) -> Bool = { _ in false }
-        /// Collapses `id` (a swap's displaced window) and returns the
-        /// refusal message when its frame write was refused: the caller
-        /// owns the canvas's error for the duration of `apply` and folds
-        /// the message in at the right precedence.
-        var collapseExpanded: (WindowID) -> String? = { _ in nil }
-        var log: (String) -> Void = { _ in }
+        /// Issues a fresh id and hands the window to the coordinator's
+        /// handle->id table. Called when a record must be rebuilt from a
+        /// handle alone (a pruned undo entry, an untile-all re-observation).
+        let allocateID: (WindowHandle) -> WindowID
+        let log: (String) -> Void
     }
 
-    /// What one placement returns: the typed result the coordinator maps
-    /// to feedback, plus the coordinator effects it applies. `notice` and
+    /// What one action returns: the typed result the coordinator maps to
+    /// feedback, plus the coordinator effects it applies. `notice` and
     /// `error` are not here: they stay readable on the canvas.
     struct Outcome {
         enum Result: Equatable {
-            /// The request committed: the requester's own write landed.
+            /// The action committed.
             case placed
-            /// The requester's write was refused. The name is for the
+            /// The request's write was refused. The name is for the
             /// announcement (nil when the app named nothing).
             case refused(windowName: String?)
             /// The window already occupies the requested slot: strict no-op.
             case alreadyTiled
+            /// The evict key found no slot to release.
+            case nothingToEvict
+            /// An expand or retile write was refused.
+            case expandRefused(windowName: String?)
         }
         var result: Result = .placed
         /// The window to focus once everything settled: a swap's displaced
         /// window. Focus effects stay coordinator-side.
         var focusAfter: WindowID?
-        /// Windows the coordinator must now observe (their commit landed).
+        /// Windows the coordinator must now observe (their records landed).
         var observe: [WindowID] = []
-        /// Windows whose records the placement destroyed (evicted, not
-        /// re-housed): the coordinator forgets them.
+        /// Windows the canvas released: the coordinator clears its handle
+        /// table, death clock, and pending verification for them.
         var forget: [WindowID] = []
         /// Restored windows sit below the arrangement they left.
         var raise: Bool = false
         /// Windows whose convergence must be verified one delay later.
         var verify: [WindowID] = []
-        /// The requester, when its placement landed cleanly: the
-        /// coordinator sets canvas ownership from this commit.
-        var requester: WindowID?
     }
 
     /// What one undo returns: narration plus observation requests. Kept
@@ -125,6 +123,31 @@ struct TilingSpace {
         var observe: [WindowID] = []
     }
 
+    // MARK: Records
+
+    /// Ensures `id` has a record on this canvas. The coordinator resolves
+    /// the handle->id table and hands the window over before an action
+    /// that needs its restore frame.
+    mutating func attach(_ id: WindowID, handle: WindowHandle) {
+        if records[id] == nil {
+            records[id] = WindowRecord(handle: handle, preTileFrame: .zero)
+        }
+    }
+
+    func record(of id: WindowID) -> WindowRecord? { records[id] }
+
+    func handle(of id: WindowID) -> WindowHandle? { records[id]?.handle }
+
+    /// Whether `id` is currently expanded over the layout.
+    func isExpanded(_ id: WindowID) -> Bool { expanded[id] != nil }
+
+    /// Drops a window the convergence check judged silently ignored:
+    /// occupancy and record go, nothing is written. The coordinator owns
+    /// the narration and the death/verification bookkeeping.
+    mutating func discard(window id: WindowID, context: Context) {
+        forget(id, context: context)
+    }
+
     // MARK: Placement
 
     /// One placement request: `slot` for `requester`. Plans, commits,
@@ -133,9 +156,7 @@ struct TilingSpace {
     /// effects. The coordinator collapses an expanded requester before
     /// calling; a swap's expanded displaced window is collapsed here,
     /// between planning and committing, exactly where it always was.
-    mutating func apply(
-        slot: Slot, requester id: WindowID, context: inout Context
-    ) -> Outcome {
+    mutating func apply(slot: Slot, requester id: WindowID, context: Context) -> Outcome {
         let decision = state.plan(window: id, into: slot)
         guard decision != .noop else {
             return Outcome(result: .alreadyTiled)
@@ -146,9 +167,9 @@ struct TilingSpace {
         error = nil
         notice = nil
         if case .swap(let displaced) = decision {
-            error = context.collapseExpanded(displaced)
+            _ = collapseExpanded(displaced, context: context)
         }
-        return execute(decision: decision, requester: id, slot: slot, context: &context)
+        return execute(decision: decision, requester: id, slot: slot, context: context)
     }
 
     /// Commits a decided plan for `requester` into `slot`: dispatches to
@@ -156,7 +177,7 @@ struct TilingSpace {
     /// verification, undo chapter). Internal so branch behaviour stays
     /// testable with a directly chosen plan.
     mutating func execute(
-        decision: TilePlan, requester id: WindowID, slot: Slot, context: inout Context
+        decision: TilePlan, requester id: WindowID, slot: Slot, context: Context
     ) -> Outcome {
         let commit: Commit
         switch decision {
@@ -165,27 +186,27 @@ struct TilingSpace {
             return Outcome(result: .alreadyTiled)
         case .switchLayout:
             commit = applySwitchLayout(
-                decision, requester: id, slot: slot, context: &context)
+                decision, requester: id, slot: slot, context: context)
         case .swap(let displaced):
             commit = applySwap(
                 displaced, decision: decision, requester: id, slot: slot,
-                context: &context)
+                context: context)
         case .tile:
             commit = applyTile(
-                decision, requester: id, slot: slot, context: &context)
+                decision, requester: id, slot: slot, context: context)
         }
-        return settle(decision, commit: commit, requester: id, context: &context)
+        return settle(decision, commit: commit, requester: id, context: context)
     }
 
     /// The placement half of settle: untiled windows give up their
-    /// records (the coordinator forgets them), the cells the event freed
-    /// reflow into one survivor, restored windows sit below the
-    /// arrangement, a swap's displaced window takes focus, and the event
-    /// is narrated, verified, and made undoable. One chapter per event,
-    /// so a single ⌃⌥⇧⌘Z puts back everything this settled.
+    /// records (the coordinator clears its handle table), the cells the
+    /// event freed reflow into one survivor, restored windows sit below
+    /// the arrangement, a swap's displaced window takes focus, and the
+    /// event is narrated, verified, and made undoable. One chapter per
+    /// event, so a single ⌃⌥⇧⌘Z puts back everything this settled.
     private mutating func settle(
         _ decision: TilePlan, commit: Commit, requester id: WindowID,
-        context: inout Context
+        context: Context
     ) -> Outcome {
         var outcome = Outcome()
         outcome.result = commit.refusal?.windowName.map { .refused(windowName: $0) } ?? .placed
@@ -203,7 +224,7 @@ struct TilingSpace {
         var reflowSnapshot: [EvictedWindow] = []
         if commit.clean, let freed = commit.reflowFreed, !freed.isEmpty {
             let skip = Set([id] + decision.windowsToRestore(requester: id))
-            reflowSnapshot = reflow(freed, excluding: skip, context: &context)
+            reflowSnapshot = reflow(freed, excluding: skip, context: context)
         }
         // Restored windows sit BELOW the arrangement they left: an
         // evictee returns to its pre-tile frame and must never cover the
@@ -214,7 +235,7 @@ struct TilingSpace {
         // degenerate fallback (a plain eviction) deletes its record, so
         // the guard keeps focus untouched there and after refusals.
         if case .swap(let displaced) = decision, commit.clean,
-            context.records[displaced] != nil
+            records[displaced] != nil
         {
             outcome.focusAfter = displaced
         }
@@ -234,10 +255,6 @@ struct TilingSpace {
             }
         }
         outcome.observe = commit.observed
-        // Successful placements own the requester's canvas: the window
-        // tiles where it sits, and never migrates mid-session. Refused
-        // writes roll back occupancy, so ownership follows the commit.
-        outcome.requester = commit.clean ? id : nil
         // The reflow's survivors share the event's undo chapter: undo
         // restores the pre-event world in one ⌃⇧⌘Z (a move with no
         // eviction has no chapter of its own, so the reflow starts one).
@@ -285,11 +302,11 @@ struct TilingSpace {
     /// aggregates multi-canvas chapters and narrates on the chapter's
     /// own canvas.
     mutating func undo(
-        snapshot: [EvictedWindow], requester: WindowID?, context: inout Context
+        snapshot: [EvictedWindow], requester: WindowID?, context: Context
     ) -> UndoOutcome {
         var result = UndoOutcome()
         if let requester {
-            _ = restoreWindow(id: requester, context: &context)
+            _ = restore(window: requester, context: context)
         }
         var restored = 0
         for entry in snapshot {
@@ -298,19 +315,18 @@ struct TilingSpace {
             // failed attempt is reported, not silently skipped.
             guard context.gateway.liveness(of: entry.handle) != .dead else { continue }
             // Handles whose records were pruned need fresh ids, issued
-            // here on the local copy so the creation stays visible to
-            // the commit and write below.
+            // through the coordinator's table so the window stays
+            // resolvable by handle.
             let id: WindowID
-            if let existing = context.records.first(where: { $0.value.handle == entry.handle })?.key {
+            if let existing = records.first(where: { $0.value.handle == entry.handle })?.key {
                 id = existing
             } else {
-                id = context.nextID
-                context.nextID += 1
-                context.records[id] = WindowRecord(handle: entry.handle, preTileFrame: .zero)
+                id = context.allocateID(entry.handle)
+                records[id] = WindowRecord(handle: entry.handle, preTileFrame: .zero)
             }
-            guard var record = context.records[id] else { continue }
+            guard var record = records[id] else { continue }
             record.preTileFrame = entry.preTileFrame
-            context.records[id] = record
+            records[id] = record
             state.commit(window: id, into: entry.slot)
             result.observe.append(id)
             // The frame may already be correct (e.g. an untile-all chapter
@@ -318,24 +334,18 @@ struct TilingSpace {
             // settle frame the gateway applied late): skip the write and
             // count it restored. Rewriting an identical frame is not just
             // wasteful: on a settling window it re-arms echo tracking
-            // and risks a phantom drag-out. The grid is the destination
-            // canvas's, not the legacy shared one.
-            if let record = context.records[id],
+            // and risks a phantom drag-out.
+            if let record = records[id],
                 let slot = state.slot(of: id),
                 let current = context.gateway.frame(of: record.handle),
-                current == context.tracker.grid(for: entry.space).rect(
-                    for: slot, in: context.boundsOf(current))
+                current == grid.rect(for: slot, in: context.boundsOf(current))
             {
                 context.log("undo SKIP-WRITE win\(id) already placed")
                 restored += 1
-            } else if applyLayout(
-                for: id, state: state, context: context, space: entry.space)
-            {
+            } else if applyLayout(for: id, context: context, on: entry.space) {
                 restored += 1
             } else {
-                state.remove(window: id)
-                context.records[id] = nil
-                context.tracker.forget(id)
+                forget(id, context: context)
             }
         }
         if restored > 0 {
@@ -355,7 +365,7 @@ struct TilingSpace {
     /// so everyone else in the way is restored first (restoring the
     /// requester would delete its record and the placement would bail).
     private mutating func applySwitchLayout(
-        _ decision: TilePlan, requester id: WindowID, slot: Slot, context: inout Context
+        _ decision: TilePlan, requester id: WindowID, slot: Slot, context: Context
     ) -> Commit {
         var commit = Commit()
         // The requester moves rather than evicts: restore everyone
@@ -364,14 +374,12 @@ struct TilingSpace {
         // is vacated by the commit inside `place`.
         let evicted = decision.windowsToRestore(requester: id)
         let snapshot = evicted.compactMap { evictedID in
-            Self.snapshotEntry(
-                for: evictedID, state: state, records: context.records, fallback: slot,
-                space: context.spaceOf(evictedID))
+            snapshotEntry(for: evictedID, fallback: slot, space: context.space)
         }
-        let restoreFailures = restore(evicted, context: &context)
+        let restoreFailures = restore(evicted, context: context)
         let placeResult = place(
-            window: id, into: slot, context: &context, observed: &commit.observed)
-        if context.records[id] == nil {
+            window: id, into: slot, context: context, observed: &commit.observed)
+        if records[id] == nil {
             // `place` bailed (no record): nothing to snapshot.
             Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
         } else if placeResult == nil, restoreFailures.isEmpty, !evicted.isEmpty {
@@ -381,8 +389,8 @@ struct TilingSpace {
             // undo row may sit below the fold. One sentence, one
             // cue: no menu-title splicing, just the combo.
             commit.notice =
-                "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. " +
-                "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+                "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. "
+                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
             commit.snapshot = snapshot
             commit.requester = id
         } else {
@@ -398,68 +406,58 @@ struct TilingSpace {
     /// a refusal anywhere leaves every window where it started.
     private mutating func applySwap(
         _ displaced: WindowID, decision: TilePlan, requester id: WindowID, slot: Slot,
-        context: inout Context
+        context: Context
     ) -> Commit {
         var commit = Commit()
         guard let previous = state.slot(of: id),
             let displacedOriginal = state.slot(of: displaced),
-            context.records[id] != nil, context.records[displaced] != nil
+            records[id] != nil, records[displaced] != nil
         else {
             // Degenerate plan (untiled requester or a window that
             // vanished): degrade to the ordinary eviction path, with the
-            // real closure set. An `isExpanded` that always answers false
-            // would let a re-house pick up an expanded evictee, which the
-            // documented rule forbids: an expanded window comes back to
-            // earth by untangling, never by moving into the freed slot
-            // while it still covers the layout.
+            // real closure set. The live expansion map would let a
+            // re-house pick up an expanded evictee, which the documented
+            // rule forbids: an expanded window comes back to earth by
+            // untangling, never by moving into the freed slot while it
+            // still covers the layout.
             context.log("swap DEGENERATE win\(id) -> \(slot.rawValue); falling back to tile")
             return applyTile(
                 .tile(evicting: [displaced]), requester: id,
-                slot: slot, context: &context)
+                slot: slot, context: context)
         }
         // Snapshot before any commit: each entry carries its window's
         // own former tile, so undo replays the swap backwards.
         let snapshot = [(displaced, displacedOriginal), (id, previous)].compactMap {
             (entryID, formerSlot) in
-            Self.snapshotEntry(
-                for: entryID, state: state, records: context.records, fallback: formerSlot,
-                space: context.spaceOf(entryID))
+            snapshotEntry(for: entryID, fallback: formerSlot, space: context.space)
         }
         state.commit(window: displaced, into: previous)
         commit.observed.append(displaced)
-        if !applyLayout(
-            for: displaced, state: state, context: context, space: context.space)
-        {
+        if !applyLayout(for: displaced, context: context, on: context.space) {
             // The refused write moved nothing on screen: the rollback
             // is state-only, restoring both occupancies.
             state.commit(window: displaced, into: displacedOriginal)
             state.commit(window: id, into: previous)
             context.log("swap FAILED displaced win\(displaced) -> \(previous.rawValue)")
-            commit.refusal = Self.refusal(
-                for: displaced, records: context.records, gateway: context.gateway)
+            commit.refusal = refusal(for: displaced, context: context)
             return commit
         }
         state.commit(window: id, into: slot)
         commit.observed.append(id)
-        if !applyLayout(
-            for: id, state: state, context: context, space: context.space)
-        {
+        if !applyLayout(for: id, context: context, on: context.space) {
             // Roll the whole swap back: the displaced window's frame
             // visibly moved, so it is written home; the requester was
             // never written, so only its occupancy restores.
             state.commit(window: displaced, into: displacedOriginal)
             state.commit(window: id, into: previous)
-            applyLayout(
-                for: displaced, state: state, context: context, space: context.space)
+            applyLayout(for: displaced, context: context, on: context.space)
             context.log("place FAILED win\(id) -> \(slot.rawValue); swap rolled back")
-            commit.refusal = Self.refusal(
-                for: id, records: context.records, gateway: context.gateway)
+            commit.refusal = refusal(for: id, context: context)
             return commit
         }
         // A swap untiles nobody, but it does move a window the user
         // didn't touch: the notice names it and its landing tile.
-        let displacedName = Self.appName(
-            for: displaced, records: context.records, gateway: context.gateway) ?? "That window"
+        let displacedName = appName(displaced, context: context) ?? "That window"
         commit.notice =
             "\(displacedName) moved to \(SlotPresentation.title(of: previous)) "
                 + "to make room. Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
@@ -475,7 +473,7 @@ struct TilingSpace {
     /// free. Hands the freed cells to settle, which owns the one reflow
     /// applier.
     private mutating func applyTile(
-        _ decision: TilePlan, requester id: WindowID, slot: Slot, context: inout Context
+        _ decision: TilePlan, requester id: WindowID, slot: Slot, context: Context
     ) -> Commit {
         var commit = Commit()
         let evicted = decision.windowsToRestore(requester: id)
@@ -484,11 +482,9 @@ struct TilingSpace {
         // Safari go?"; a count answers bookkeeping, not memory. One
         // named app reads alone; more read as first-plus-count.
         // Names resolve BEFORE the restore deletes the records:
-        // `restoreWindow` nils each record as it frees the slot, so
+        // `restore` nils each record as it frees the slot, so
         // naming after would degrade every eviction to a count.
-        let evictedNames = evicted.compactMap {
-            Self.appName(for: $0, records: context.records, gateway: context.gateway)
-        }
+        let evictedNames = evicted.compactMap { appName($0, context: context) }
         // Slots leave the state before reflow sees them: the evicted
         // slots and the requester's vacated tile together form the
         // freed region the survivors may absorb.
@@ -501,21 +497,19 @@ struct TilingSpace {
         // the free top-left sixth). Expanded windows skip it: they
         // come back to earth by untangling, not by moving.
         var rehouse: (window: WindowID, home: Slot)?
-        if evicted.count == 1, !context.isExpanded(evicted[0]),
+        if evicted.count == 1, !isExpanded(evicted[0]),
             let home = state.rehousingHome(
                 evicting: evicted[0], for: slot, vacating: previous)
         {
             rehouse = (evicted[0], home)
         }
         let snapshot = evicted.compactMap { evictedID in
-            Self.snapshotEntry(
-                for: evictedID, state: state, records: context.records, fallback: slot,
-                space: context.spaceOf(evictedID))
+            snapshotEntry(for: evictedID, fallback: slot, space: context.space)
         }
         let restoreFailures = restore(
-            evicted.filter { $0 != rehouse?.window }, context: &context)
+            evicted.filter { $0 != rehouse?.window }, context: context)
         let placeResult = place(
-            window: id, into: slot, context: &context, observed: &commit.observed)
+            window: id, into: slot, context: context, observed: &commit.observed)
         commit.refusal = placeResult
         Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
         let clean = commit.clean
@@ -527,21 +521,18 @@ struct TilingSpace {
         // A refused re-house write falls back to the plain eviction.
         if let (wid, home) = rehouse, clean {
             state.commit(window: wid, into: home)
-            if applyLayout(
-                for: wid, state: state, context: context, space: context.space)
-            {
+            if applyLayout(for: wid, context: context, on: context.space) {
                 commit.rehoused = wid
-                let name = Self.appName(
-                    for: wid, records: context.records, gateway: context.gateway) ?? "That window"
+                let name = appName(wid, context: context) ?? "That window"
                 commit.notice =
                     "\(name) moved to \(SlotPresentation.title(of: home)) to make room. "
                         + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
             } else {
-                _ = restoreWindow(id: wid, context: &context)
+                _ = restore(window: wid, context: context)
                 context.log("rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
             }
         } else if let (wid, _) = rehouse {
-            _ = restoreWindow(id: wid, context: &context)
+            _ = restore(window: wid, context: context)
             context.log("rehouse SKIPPED win\(wid): requester placement failed")
         }
         if clean {
@@ -610,21 +601,18 @@ struct TilingSpace {
     /// to return it to, the frame it held before tiling. `fallback` is
     /// the slot to use when occupancy is already gone by capture time;
     /// only the switch branch knows the requested slot.
-    private static func snapshotEntry(
-        for evictedID: WindowID, state: TilingState, records: [WindowID: WindowRecord],
-        fallback: Slot, space: TilingSpaceKey? = nil
+    private func snapshotEntry(
+        for evictedID: WindowID, fallback: Slot, space: TilingSpaceKey?
     ) -> EvictedWindow? {
         evictedEntry(
-            for: evictedID, slot: state.slot(of: evictedID) ?? fallback,
-            records: records, space: space)
+            for: evictedID, slot: state.slot(of: evictedID) ?? fallback, space: space)
     }
 
     /// One undo entry for `id`'s `slot`: the handle to find it again, the
     /// slot to return it to, the frame it held. Nil when the record is
     /// gone.
-    private static func evictedEntry(
-        for id: WindowID, slot: Slot, records: [WindowID: WindowRecord],
-        space: TilingSpaceKey? = nil
+    private func evictedEntry(
+        for id: WindowID, slot: Slot, space: TilingSpaceKey?
     ) -> EvictedWindow? {
         records[id].map {
             EvictedWindow(
@@ -656,10 +644,8 @@ struct TilingSpace {
 
     /// The refusal for a failed placement or swap write: names the window
     /// whose resize was refused, matching the standard wording.
-    private static func refusal(
-        for id: WindowID, records: [WindowID: WindowRecord], gateway: WindowGateway
-    ) -> Refusal {
-        let name = records[id].flatMap { gateway.appName(of: $0.handle) } ?? "That window"
+    private func refusal(for id: WindowID, context: Context) -> Refusal {
+        let name = appName(id, context: context) ?? "That window"
         return Refusal(
             message: "\(name) couldn't be tiled: the app refused to resize it.",
             windowName: name)
@@ -671,54 +657,61 @@ struct TilingSpace {
     /// fails; nil means placed.
     private mutating func place(
         window id: WindowID, into slot: Slot,
-        context: inout Context, observed: inout [WindowID]
+        context: Context, observed: inout [WindowID]
     ) -> Refusal? {
-        guard var record = context.records[id] else { return nil }
+        guard var record = records[id] else { return nil }
         if state.slot(of: id) == nil {
             // First tiling: remember where to restore when untiled.
             // A window moving between overlapping slots (e.g. Left -> BottomLeft)
             // keeps its original pre-tile frame.
             record.preTileFrame = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-            context.records[id] = record
+            records[id] = record
         }
         state.commit(window: id, into: slot)
         observed.append(id)
-        if !applyLayout(for: id, state: state, context: context, space: context.space) {
+        if !applyLayout(for: id, context: context, on: context.space) {
             // The window refused the frame (some apps ignore AX resizes):
             // roll back occupancy so state and screen agree, and say so.
             state.remove(window: id)
             context.tracker.forget(id)
             context.log("place FAILED win\(id) -> \(slot.rawValue)")
-            return Self.refusal(
-                for: id, records: context.records, gateway: context.gateway)
+            return refusal(for: id, context: context)
         }
         context.log("place win\(id) -> \(slot.rawValue)")
         return nil
     }
 
+    /// Drops the window's record, expansion, tracker entries, and
+    /// occupancy. Callers perform any frame write first; this only
+    /// forgets. Shared by untiling, silent-ignore rollback, and untile-all.
+    private mutating func forget(_ id: WindowID, context: Context) {
+        records[id] = nil
+        expanded[id] = nil
+        context.tracker.forget(id)
+        state.remove(window: id)
+    }
+
     /// Restores the window's pre-tile frame and releases its slot.
     /// Returns false when the restore was attempted and refused, so the
     /// caller can say so instead of silently leaving a stray window behind.
+    /// The coordinator's undo reuses this for the chapter's requester.
     @discardableResult
-    private mutating func restoreWindow(id: WindowID, context: inout Context) -> Bool {
+    mutating func restore(window id: WindowID, context: Context) -> Bool {
         var restored = true
-        if let record = context.records[id], record.preTileFrame != .zero {
+        if let record = records[id], record.preTileFrame != .zero {
             restored = context.gateway.setFrame(record.handle, to: record.preTileFrame)
         }
-        context.records[id] = nil
-        context.tracker.forget(id)
-        state.remove(window: id)
+        forget(id, context: context)
         return restored
     }
 
-    /// Untiles every window in `ids`, returning the display names of those
-    /// whose pre-tile frame refused to restore.
-    private mutating func restore(_ ids: [WindowID], context: inout Context) -> [String] {
+    /// Restores every window in `ids`, returning the display names of
+    /// those whose pre-tile frame refused to restore.
+    private mutating func restore(_ ids: [WindowID], context: Context) -> [String] {
         var failures: [String] = []
         for evicted in ids {
-            let name = Self.appName(
-                for: evicted, records: context.records, gateway: context.gateway) ?? "A window"
-            if !restoreWindow(id: evicted, context: &context) {
+            let name = appName(evicted, context: context) ?? "A window"
+            if !restore(window: evicted, context: context) {
                 failures.append(name)
             }
         }
@@ -732,19 +725,18 @@ struct TilingSpace {
         refusal = Refusal(message: MenuText.restoreFailureMessage(failures), windowName: nil)
     }
 
-    /// Applies `id`'s slot rect on `space` (the tiling canvas the plan
-    /// belongs to; nil selects the legacy shared grid). Returns whether
-    /// the gateway write succeeded (some windows refuse
-    /// resizes). The tracker bookkeeps the write for echo suppression.
+    /// Applies `id`'s slot rect on `space` (nil selects the display-less
+    /// fallback for legacy/headless snapshots). Returns whether the
+    /// gateway write succeeded (some windows refuse resizes). The tracker
+    /// bookkeeps the write for echo suppression.
     @discardableResult
     private func applyLayout(
-        for id: WindowID, state: TilingState,
-        context: Context, space: TilingSpaceKey?
+        for id: WindowID, context: Context, on space: TilingSpaceKey?
     ) -> Bool {
-        guard let record = context.records[id], let slot = state.slot(of: id) else { return false }
+        guard let record = records[id], let slot = state.slot(of: id) else { return false }
         let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
         let bounds = context.boundsOf(current)
-        let target = context.tracker.grid(for: space).rect(for: slot, in: bounds)
+        let target = grid.rect(for: slot, in: bounds)
         // The shared write policy: a no-op target counts as success
         // without a write, and a hidden canvas defers (false: the branch
         // rolls back). The check is `.none`: settle schedules the plan's
@@ -766,10 +758,8 @@ struct TilingSpace {
         return result.isAccepted
     }
 
-    private static func appName(
-        for id: WindowID, records: [WindowID: WindowRecord], gateway: WindowGateway
-    ) -> String? {
-        records[id].flatMap { gateway.appName(of: $0.handle) }
+    private func appName(_ id: WindowID, context: Context) -> String? {
+        records[id].flatMap { context.gateway.appName(of: $0.handle) }
     }
 
     // MARK: Reflow
@@ -779,7 +769,8 @@ struct TilingSpace {
     /// the freed cells into a whole slot moves into it, the rightmost
     /// candidate winning ties (see `TilingState.reflow`). Callers have
     /// already removed the leaving window; the requester, evicted, and
-    /// expanded windows never grow. A hole no survivor merges into
+    /// expanded windows never grow (the expanded exclusion lives here
+    /// now, not with the pure rule). A hole no survivor merges into
     /// exactly stays empty. Refused writes roll every survivor back and
     /// the generic refusal message lands on this canvas, so state and
     /// screen never disagree about who holds the freed cells.
@@ -789,12 +780,12 @@ struct TilingSpace {
     /// when the reflow stands alone.
     @discardableResult
     mutating func reflow(
-        _ freed: Set<TileCell>, excluding: Set<WindowID>, context: inout Context
+        _ freed: Set<TileCell>, excluding: Set<WindowID> = [], context: Context
     ) -> [EvictedWindow] {
         guard !freed.isEmpty else { return [] }
         // Expanded windows keep covering the layout; they never grow.
         let skip = excluding.union(
-            Set(state.occupants.filter { context.isExpanded($0.value) }.map(\.value)))
+            Set(state.occupants.filter { expanded[$0.value] != nil }.map(\.value)))
         let placements = state.reflow(freed: freed, excluding: skip)
         guard !placements.isEmpty else { return [] }
         var moves: [(window: WindowID, from: Slot, to: Slot)] = []
@@ -810,28 +801,28 @@ struct TilingSpace {
         // writes and marks the canvas stale for the swipe back.
         var rects: [WindowID: CGRect] = [:]
         for move in moves {
-            if let target = context.tracker.rect(for: move.window, slot: move.to) {
-                rects[move.window] = target
+            if let record = records[move.window] {
+                let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
+                rects[move.window] = grid.rect(for: move.to, in: context.boundsOf(current))
             }
         }
-        if writeReflow(rects, context: &context) > 0 {
+        if writeReflow(rects, context: context) > 0 {
             var rolled = state
             for move in moves { rolled.commit(window: move.window, into: move.from) }
             state = rolled
             var oldRects: [WindowID: CGRect] = [:]
             for move in moves {
-                if let old = context.tracker.rect(for: move.window, slot: move.from) {
-                    oldRects[move.window] = old
+                if let record = records[move.window] {
+                    let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
+                    oldRects[move.window] = grid.rect(for: move.from, in: context.boundsOf(current))
                 }
             }
-            _ = writeReflow(oldRects, context: &context)
+            _ = writeReflow(oldRects, context: context)
             return []
         }
         context.log("reflow \(moves.map { "win\($0.window)->\($0.to.rawValue)" }.joined(separator: ", "))")
         return moves.compactMap { move in
-            Self.evictedEntry(
-                for: move.window, slot: move.from,
-                records: context.records, space: context.space)
+            evictedEntry(for: move.window, slot: move.from, space: context.space)
         }
     }
 
@@ -839,16 +830,12 @@ struct TilingSpace {
     /// refusals and recording the generic refusal message on this canvas.
     /// Deferred (off-Space) writes are not failures: the FrameWriter has
     /// already marked the canvas stale and the grown state stands.
-    private mutating func writeReflow(_ rects: [WindowID: CGRect], context: inout Context) -> Int {
+    private mutating func writeReflow(_ rects: [WindowID: CGRect], context: Context) -> Int {
         var failed = 0
         for (id, target) in rects {
-            guard let record = context.records[id] else { continue }
-            // The window's own canvas scopes the write; the placement's
-            // canvas is the fallback for a window whose record has no
-            // canvas yet.
-            let canvas = context.spaceOf(id) ?? context.space
+            guard let record = records[id] else { continue }
             if context.frameWriter.write(
-                id, handle: record.handle, to: target, on: canvas, check: .rollback)
+                id, handle: record.handle, to: target, on: context.space, check: .rollback)
                 == .refused
             {
                 failed += 1
@@ -866,5 +853,339 @@ struct TilingSpace {
         count == 1
             ? "Couldn't move that window: the app refused to resize it."
             : "Couldn't move \(count) windows: an app refused to resize."
+    }
+
+    // MARK: Untile / evict / release
+
+    /// Restores one window to its pre-tile frame and releases its slot,
+    /// then lets the freed cells reflow (when `reflowing`). The freed
+    /// cells' survivor moves into them and shares the leave's undo
+    /// chapter; the restore itself keeps no chapter (the frame IS the
+    /// recovery).
+    mutating func untile(window id: WindowID, reflowing: Bool, context: Context) -> Outcome {
+        error = nil
+        notice = nil
+        let slot = state.slot(of: id)
+        let name = appName(id, context: context) ?? "A window"
+        if !restore(window: id, context: context) {
+            error = MenuText.restoreFailureMessage([name])
+        }
+        guard reflowing else { return Outcome(forget: [id]) }
+        return leave(window: id, from: slot, context: context)
+    }
+
+    /// Evicts one window: the untile path, refusing early when the
+    /// window holds no slot. The coordinator answers `.nothingToEvict`.
+    mutating func evict(window id: WindowID, context: Context) -> Outcome {
+        guard state.slot(of: id) != nil else {
+            return Outcome(result: .nothingToEvict)
+        }
+        return untile(window: id, reflowing: true, context: context)
+    }
+
+    /// Releases a confirmed-dead window: the untile path without a frame
+    /// write (the window is gone), reflowing its freed cells and pushing
+    /// the survivor chapter. The coordinator's prune and destroy paths
+    /// call this once the death standard agrees.
+    mutating func release(window id: WindowID, context: Context) -> Outcome {
+        leave(window: id, from: state.slot(of: id), context: context)
+    }
+
+    /// Drag-out untile: the drop IS the placement, so the pre-tile frame
+    /// is never written. The freed cells still reflow and the survivor is
+    /// raised, chapter and all.
+    mutating func untileFromDrag(window id: WindowID, context: Context) -> Outcome {
+        error = nil
+        notice = nil
+        return leave(window: id, from: state.slot(of: id), context: context)
+    }
+
+    /// The shared tail of every leave: drop the record, reflow the freed
+    /// cells into the mergeable survivor, and make the survivor's growth
+    /// undoable. The caller performs any frame write first, and gets the
+    /// survivor raise back.
+    private mutating func leave(
+        window id: WindowID, from slot: Slot?, context: Context
+    ) -> Outcome {
+        forget(id, context: context)
+        let moves = reflow(slot?.cells ?? [], context: context)
+        pushUndo(snapshot: moves, requester: nil)
+        return Outcome(forget: [id], raise: true)
+    }
+
+    /// Dissolves every window on this canvas in one undo chapter. The
+    /// chapter lists each dissolved (slot, pre-tile frame) pair, and undo
+    /// re-applies the slot rect on top of the restored frame: the window
+    /// visibly returns to the arrangement, not just to its pre-tile
+    /// frame. Fresh ids are issued for the re-observed windows (their
+    /// records were released).
+    mutating func untileAll(context: Context) -> Outcome {
+        error = nil
+        notice = nil
+        var outcome = Outcome()
+        let chapter = state.occupants
+        let noun = chapter.count == 1 ? "1 window" : "\(chapter.count) windows"
+        if !chapter.isEmpty {
+            beginUndoChapter()
+            notice = "Untiled \(noun). Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+            // Prime the tracker's intent for the slot rects the undo will
+            // write: the live frames are pre-tile settle frames, and the
+            // diff must measure against where we're going, not where the
+            // restore just put us. Without this the undo's own writes
+            // read as a user drag and the grid moves under them.
+            for (slot, id) in chapter {
+                if let record = records[id] {
+                    let target = grid.rect(for: slot, in: context.boundsOf(record.preTileFrame))
+                    context.tracker.markExpected(id, target)
+                }
+            }
+        }
+        // Handles first: the restore clears each record, so resolve every
+        // handle while the canvas still knows them.
+        var handles: [WindowID: WindowHandle] = [:]
+        for id in state.tiledWindows {
+            handles[id] = records[id]?.handle
+        }
+        var failures: [String] = []
+        for id in state.tiledWindows {
+            let name = appName(id, context: context) ?? "A window"
+            if !restore(window: id, context: context) {
+                failures.append(name)
+            }
+        }
+        if !failures.isEmpty {
+            error = MenuText.restoreFailureMessage(failures)
+        }
+        // Rebuild the chapter from the frames untile-all just restored:
+        // each window now sits at its pre-tile frame with no record, so
+        // re-observe it there and pair it with its dissolved slot. The
+        // undo then retiles the live window back into place.
+        if !chapter.isEmpty {
+            var snapshot: [EvictedWindow] = []
+            for (slot, id) in chapter {
+                guard let handle = handles[id],
+                      let frame = context.gateway.frame(of: handle)
+                else { continue }
+                let fresh = context.allocateID(handle)
+                records[fresh] = WindowRecord(handle: handle, preTileFrame: frame)
+                outcome.observe.append(fresh)
+                snapshot.append(EvictedWindow(
+                    handle: handle, slot: slot, preTileFrame: frame, space: context.space))
+            }
+            if snapshot.isEmpty {
+                // Every frame read failed (the AX-unreadable
+                // transient): nothing can be restored, so the
+                // placeholder chapter goes. A "Restore 0 Evicted
+                // Windows" row would offer an undo that can only
+                // report failure.
+                _ = undoStack.popLast()
+                // The sticky notice must not offer a key that no
+                // longer has a chapter behind it.
+                notice = "Untiled \(noun)."
+            } else {
+                undoStack[undoStack.count - 1] = (snapshot: snapshot, requester: nil)
+            }
+        }
+        outcome.forget = chapter.values.map { $0 }
+        return outcome
+    }
+
+    // MARK: Expand toggle
+
+    /// Expands the window to fill its screen; a second toggle retiles it
+    /// to its previous tile (or restores its previous frame when it
+    /// wasn't tiled). Layout state is untouched: a tiled window keeps its
+    /// slot while expanded, exactly like focusing it.
+    mutating func expandToggle(window id: WindowID, context: Context) -> Outcome {
+        if expanded[id] != nil {
+            return collapseExpanded(id, context: context)
+        }
+        return expand(id, context: context)
+    }
+
+    private mutating func expand(_ id: WindowID, context: Context) -> Outcome {
+        guard let record = records[id] else { return Outcome() }
+        let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
+        // No readable frame anywhere: there is no sane screen to expand
+        // onto, so refuse to guess (visibleBounds would fall back to main).
+        guard current != .zero else { return Outcome() }
+        let target = context.boundsOf(current)
+        error = nil
+        notice = nil
+        let result = writeExpandedFrame(id, to: target, context: context)
+        if result.accepted {
+            expanded[id] = current
+            context.log("expand win\(id) -> \(target)")
+            return Outcome()
+        }
+        // Every non-accepted expanded write answers `.expandRefused`,
+        // deferred included (the old feedback shape); only a genuine
+        // refusal records a message on the canvas.
+        if let message = result.refusal {
+            error = message
+        }
+        return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
+    }
+
+    /// Unexpands `id`, recording the refusal on this canvas and returning
+    /// it through the outcome. The coordinator announces the refusal for
+    /// a pressed toggle; `apply` folds it in at its own precedence
+    /// (a placement refusal overwrites it, exactly as before).
+    @discardableResult
+    mutating func collapseExpanded(_ id: WindowID, context: Context) -> Outcome {
+        guard let saved = expanded[id] else { return Outcome() }
+        expanded[id] = nil
+        error = nil
+        notice = nil
+        var refusal: String?
+        var answered = false
+        if state.slot(of: id) != nil {
+            if let result = retileExpanded(id, context: context) {
+                refusal = result.refusal
+                answered = !result.accepted
+            }
+        } else if records[id] != nil {
+            let result = writeExpandedFrame(id, to: saved, context: context)
+            refusal = result.refusal
+            answered = !result.accepted
+            if result.accepted {
+                context.log("collapse win\(id) -> saved \(saved)")
+            }
+        }
+        if let refusal {
+            error = refusal
+        }
+        // A deferred or refused retile answers `.expandRefused`; a
+        // collapse with no record (nothing to write) stays silent.
+        guard answered else { return Outcome() }
+        return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
+    }
+
+    /// Re-applies an expanded window's slot rect after collapse; the
+    /// write result comes back for the caller to fold. Nil when the
+    /// window's record or slot is already gone: nothing was written.
+    /// Uses the canvas's own grid directly, not plan execution: the
+    /// window never left its slot, so there is nothing to restore or
+    /// evict.
+    private func retileExpanded(_ id: WindowID, context: Context) -> ExpandedWrite? {
+        guard let record = records[id], let slot = state.slot(of: id) else { return nil }
+        let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
+        let target = grid.rect(for: slot, in: context.boundsOf(current))
+        let result = writeExpandedFrame(id, to: target, context: context)
+        context.log("retile expanded win\(id) -> \(slot.rawValue) target=\(target)")
+        return result
+    }
+
+    /// One expected frame write via the gateway: the shared shape of the
+    /// expand, collapse, and retile writes. Expansion has no rollback
+    /// path of its own, so it declares no convergence check; a refusal
+    /// comes back as its message for the caller to record.
+    private enum ExpandedWrite: Equatable {
+        /// The frame is where intended (written, or already correct).
+        case accepted
+        /// The canvas is not the visible Space: nothing written, nothing
+        /// recorded; expansion stays out of state.
+        case deferred
+        /// The gateway refused: message for the window's canvas.
+        case refused(String)
+
+        var accepted: Bool { self == .accepted }
+
+        /// The refusal message to record, when the gateway refused.
+        var refusal: String? {
+            if case .refused(let message) = self { return message }
+            return nil
+        }
+    }
+
+    private func writeExpandedFrame(
+        _ id: WindowID, to target: CGRect, context: Context
+    ) -> ExpandedWrite {
+        guard let record = records[id] else { return .deferred }
+        // The shared write policy: the off-Space guard defers a hidden
+        // canvas (the expansion stays out of state), and a no-op target
+        // counts as success without a write.
+        let result = context.frameWriter.write(
+            id, handle: record.handle, to: target, on: context.space, check: .none)
+        switch result {
+        case .written, .skippedNoOp: return .accepted
+        case .deferredOffSpace: return .deferred
+        case .refused: return .refused(Self.refusalMessage(count: 1))
+        }
+    }
+
+    // MARK: Splitter reset / restore
+
+    /// Snaps all splitters back to defaults and re-tiles everyone. The
+    /// displaced fractions are kept as a one-step restore (same pattern
+    /// as the shortcuts reset backup), so the app's "destruction is
+    /// always reversible" ethic holds for drag positions too.
+    mutating func resetSplitters(context: Context) -> Outcome {
+        splitterBackup = grid
+        grid = GridLayout()
+        error = nil
+        notice = nil
+        return reassert(context: context)
+    }
+
+    /// Restores the splitter fractions parked by the last reset. Nil
+    /// backup (fresh install, or already restored once) is a no-op, and
+    /// the coordinator answers false.
+    @discardableResult
+    mutating func restoreSplitters(context: Context) -> Outcome {
+        guard let backup = splitterBackup else { return Outcome() }
+        grid = backup
+        splitterBackup = nil
+        error = nil
+        notice = "Splitters restored to their pre-reset positions."
+        return reassert(context: context)
+    }
+
+    /// Whether a splitter backup is parked: drives the menu row title
+    /// ("Reset Splitters" vs "Restore Previous Splitters").
+    var hasSplitterBackup: Bool { splitterBackup != nil }
+
+    // MARK: Reassert / publish
+
+    /// Recomputes and pushes rects for this canvas's occupants under its
+    /// own grid. Skips expanded windows (they cover the layout, not
+    /// their slot) and the caller's exclusions. This is the resize
+    /// propagation path after a display change, a reset, or a restore.
+    @discardableResult
+    mutating func reassert(excluding excluded: Set<WindowID> = [], context: Context) -> Outcome {
+        var rects: [WindowID: CGRect] = [:]
+        for (slot, occupant) in state.occupants {
+            guard !excluded.contains(occupant), expanded[occupant] == nil,
+                let record = records[occupant]
+            else { continue }
+            let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
+            rects[occupant] = grid.rect(for: slot, in: context.boundsOf(current))
+        }
+        return publish(rects: rects, excluding: nil, context: context)
+    }
+
+    /// Performs coalesced pushes through the shared write policy:
+    /// no-op skip, off-Space deferral, echo marking, and the late
+    /// convergence check belong to `FrameWriter`. Refusals land on this
+    /// canvas, counted at once. `excluding` names the drag's source of
+    /// truth (informational; snapback rects name it with nil).
+    @discardableResult
+    mutating func publish(
+        rects: [WindowID: CGRect], excluding: WindowID?, context: Context
+    ) -> Outcome {
+        var failed = 0
+        for (id, target) in rects {
+            guard let record = records[id] else { continue }
+            if context.frameWriter.write(
+                id, handle: record.handle, to: target, on: context.space, check: .rollback)
+                == .refused
+            {
+                failed += 1
+            }
+        }
+        if failed > 0 {
+            error = Self.refusalMessage(count: failed)
+        }
+        return Outcome()
     }
 }

@@ -32,6 +32,16 @@ import Foundation
 /// (via the `onUntile` callback), otherwise it snaps back into its slot
 /// rect. A single far jump is never a hand drag, so it snaps back too.
 final class DragTracker {
+    /// Reads and writes splitter fractions: the canvas owns them, the
+    /// tracker only moves them. Nil keys are the display-less fallback
+    /// (headless tests and windows whose canvas is unknown). Injected at
+    /// construction so a tracker never keeps a second copy of a canvas's
+    /// grid.
+    struct GridProvider {
+        var grid: (TilingSpaceKey?) -> GridLayout
+        var setGrid: (GridLayout, TilingSpaceKey?) -> Void
+    }
+
     /// Reads live frames and resolves occupancy for the tracker.
     struct Context {
         var slotOf: (WindowID) -> Slot?
@@ -59,18 +69,13 @@ final class DragTracker {
         var liveFrameOf: (WindowID) -> CGRect? = { _ in nil }
     }
 
-    private(set) var grid = GridLayout()
-    /// Per-canvas splitter sets. Only populated when `spaceOf` resolves:
-    /// each monitor's each Space drags its own dividers, so a resize on
-    /// one canvas never moves tiles on another.
-    private var grids: [TilingSpaceKey: GridLayout] = [:]
+    private let gridProvider: GridProvider
 
-    /// Splitter set for `space` (defaults when untouched). Nil selects
-    /// the legacy shared grid.
+    /// Splitter set for `space` (defaults when the canvas has none).
     func grid(for space: TilingSpaceKey?) -> GridLayout {
-        guard let space else { return grid }
-        return grids[space] ?? GridLayout()
+        gridProvider.grid(space)
     }
+
     private let context: Context
     /// Pushes computed rects (excluding the dragged window); reports refusals.
     private let apply: (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Int
@@ -167,12 +172,14 @@ final class DragTracker {
 
     init(
         context: Context,
+        gridProvider: GridProvider,
         apply: @escaping (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Int,
         onUntile: @escaping (WindowID) -> Void = { _ in },
         scheduleDragEnd: @escaping DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         log: @escaping (String) -> Void = { _ in }
     ) {
         self.context = context
+        self.gridProvider = gridProvider
         self.apply = apply
         self.onUntile = onUntile
         self.scheduleDragEnd = scheduleDragEnd
@@ -248,50 +255,6 @@ final class DragTracker {
         lastKnownFrames[id] = nil
         expectedFrames[id] = nil
         clearDrag(id)
-    }
-
-    /// Writes `updated` as `space`'s splitter set (nil selects the
-    /// legacy shared grid). The diff against the previous frame's grid
-    /// decides the drag, mirroring the single-canvas read path.
-    func setGrid(_ updated: GridLayout, for space: TilingSpaceKey?) {
-        if let space {
-            grids[space] = updated
-        } else {
-            grid = updated
-        }
-    }
-
-    /// Snaps all splitters back to defaults. Callers re-push occupants.
-    /// The displaced fractions come back as the return value, so the
-    /// caller can park them as a one-step restore (see
-    /// TilingController.resetDividers): nothing else in the app knows the
-    /// live fractions, and a bare reset would be the one destruction the
-    /// app performs without keeping receipts.
-    @discardableResult
-    func resetDividers() -> GridLayout {
-        let previous = grid
-        grid = GridLayout()
-        return previous
-    }
-
-    /// Snaps one canvas's splitters back to defaults. Returns that
-    /// canvas's displaced fractions as the caller's one-step restore.
-    @discardableResult
-    func resetDividers(for space: TilingSpaceKey) -> GridLayout {
-        let previous = grid(for: space)
-        grids[space] = GridLayout()
-        return previous
-    }
-
-    /// Restores splitter fractions parked by an earlier reset, re-pushed
-    /// by the caller onto current occupants.
-    func restoreDividers(_ saved: GridLayout) {
-        grid = saved
-    }
-
-    /// Restores one canvas's parked splitter fractions.
-    func restoreDividers(_ saved: GridLayout, for space: TilingSpaceKey) {
-        grids[space] = saved
     }
 
     /// Rect for `id`'s slot under its canvas's grid. Nil when the window
@@ -490,7 +453,7 @@ final class DragTracker {
                 boundary: boundary, toPosition: position, in: bounds,
                 centeringTwoThirds: centered)
             {
-                setGrid(spaceGrid, for: space)
+                gridProvider.setGrid(spaceGrid, space)
                 changed = true
                 log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(spaceGrid)")
             }

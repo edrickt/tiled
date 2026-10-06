@@ -169,17 +169,10 @@ final class ReflowTests: XCTestCase {
             [a: .sixthLeft])
     }
 
-    func testExpandedExclusionIsTheCallersJob() {
-        // Pure state knows nothing about expansion; `excluding` is the
-        // single exclusion mechanism (requesters and expanded windows).
-        var state = TilingState()
-        state.commit(window: a, into: .sixthTopLeft)
-        state.commit(window: b, into: .sixthBottomLeft)
-        state.remove(window: b)
-        XCTAssertEqual(
-            state.reflow(freed: Slot.sixthBottomLeft.cells, excluding: [a]),
-            [:])
-    }
+    // The expanded/exclusion rule moved out of this pure suite: the
+    // canvas unions expanded occupants into the skip set itself
+    // (`TilingSpace.reflow`), pinned end-to-end by
+    // `testExpandedSurvivorNeverGrows` below.
     // MARK: Re-house (an eviction keeps its victim tiled when one slot fits)
 
     func testEvicteeReHousesIntoTheOneFreeSlot() {

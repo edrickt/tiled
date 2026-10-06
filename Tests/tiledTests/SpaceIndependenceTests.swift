@@ -321,6 +321,33 @@ final class SpaceIndependenceTests: XCTestCase {
 
     // MARK: Display-change reassertion
 
+    func testTileOnAHiddenSpaceDefersTheWriteAndRollsBack() {
+        // A tiled window's own canvas wins even while hidden: asking it
+        // to move to another slot must not write the off-Space window
+        // (the write could pull it onto the visible Space), and the
+        // placement rolls back instead of diverging.
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let hiddenFrame = gateway.frame(of: a)!
+
+        switchTo(Self.spaceB)
+        gateway.focused = a
+        var feedbacks: [TilingController.Feedback] = []
+        controller.onFeedback = { feedbacks.append($0) }
+
+        controller.handle(slot: .topRight)
+
+        XCTAssertEqual(
+            gateway.frame(of: a), hiddenFrame,
+            "a hidden canvas is never written in the dark")
+        guard case .refused = feedbacks.first else {
+            return XCTFail("expected .refused, got \(feedbacks)")
+        }
+        XCTAssertNil(
+            controller.state(on: Self.display.id).slot(of: a.id),
+            "the deferred placement rolls back rather than diverging")
+    }
+
     func testScreenChangeWhileHiddenReassertsWhenTheSpaceReturns() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)

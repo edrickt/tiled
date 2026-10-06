@@ -8,14 +8,20 @@
  [
   "TilingSpace.swift",
   "swap write-home deleted (screen/state diverge)",
-  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            applyLayout(\n                for: displaced, state: state, context: context, space: context.space)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
+  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            applyLayout(for: displaced, context: context, on: context.space)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
   "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")"
+ ],
+ [
+  "TilingSpace.swift",
+  "placement writes lose their canvas (hidden canvas written blind)",
+  "        let canvas = space ?? .displayless",
+  "        let canvas = TilingSpaceKey.displayless"
  ],
  [
   "TilingController.swift",
   "expanded windows re-pushed as tile occupants",
-  "self.space(for: space)?.state.occupants.filter { expanded[$0.value] == nil } ?? [:]",
-  "self.space(for: space)?.state.occupants ?? [:]"
+  "        return canvas.state.occupants.filter { !canvas.isExpanded($0.value) }",
+  "        return canvas.state.occupants"
  ],
  [
   "TilingSpace.swift",
@@ -36,10 +42,10 @@
   "            var rolled = state\n            for move in moves { rolled.commit(window: move.window, into: move.from) }"
  ],
  [
-  "DragTracker.swift",
-  "per-screen restoreDividers no-op",
-  "    func restoreDividers(_ saved: GridLayout, for space: TilingSpaceKey) {\n        grids[space] = saved\n    }",
-  "    func restoreDividers(_ saved: GridLayout, for space: TilingSpaceKey) {\n    }"
+  "TilingSpace.swift",
+  "splitter restore ignores the parked backup",
+  "        grid = backup\n        splitterBackup = nil",
+  "        grid = GridLayout()\n        splitterBackup = nil"
  ],
  [
   "Layout.swift",
@@ -122,7 +128,7 @@
  [
   "TilingSpace.swift",
   "rehouse ignores expanded-window exclusion",
-  "        if evicted.count == 1, !context.isExpanded(evicted[0]),",
+  "        if evicted.count == 1, !isExpanded(evicted[0]),",
   "        if evicted.count == 1,"
  ],
  [
@@ -248,8 +254,8 @@
  [
   "TilingSpace.swift",
   "degenerate swap fallback forgets which windows are expanded (re-houses an expanded evictee)",
-  "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: &context)",
-  "            context.isExpanded = { _ in false }\n            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: &context)"
+  "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: context)",
+  "            expanded[displaced] = nil\n            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: context)"
  ],
  [
   "LiveWindowGateway.swift",
@@ -260,8 +266,8 @@
  [
   "TilingController.swift",
   "destroyed notification ignored (slots linger until the prune tick)",
-  "        guard let id = currentID(for: handle) else { return }\n        guard gateway.liveness(of: handle) == .dead else {",
-  "        guard let id = currentID(for: handle) else { return }\n        guard false, gateway.liveness(of: handle) == .dead else {"
+  "        guard let id = recordID(for: handle) else { return }\n        guard gateway.liveness(of: handle) == .dead else {",
+  "        guard let id = recordID(for: handle) else { return }\n        guard false, gateway.liveness(of: handle) == .dead else {"
  ],
  [
   "FrameWriter.swift",

@@ -11,7 +11,6 @@ final class PlanExecutorTests: XCTestCase {
     private var tracker: DragTracker!
     private var space: TilingSpace!
     private var writer: FrameWriter!
-    private var records: [WindowID: WindowRecord]!
     private var handles: [WindowID: WindowHandle]!
     private var nextID: WindowID!
     /// Whether the writer's visibility policy sees the canvas. Tests that
@@ -23,7 +22,6 @@ final class PlanExecutorTests: XCTestCase {
         super.setUp()
         gateway = FakeWindowGateway()
         space = TilingSpace()
-        records = [:]
         handles = [:]
         nextID = 1
         canvasVisible = true
@@ -33,10 +31,13 @@ final class PlanExecutorTests: XCTestCase {
                 frameOf: { [weak self] in
                     guard let self, let handle = self.handles[$0] else { return nil }
                     return self.gateway.frame(of: handle)
-                        ?? self.records[$0]?.preTileFrame
+                        ?? self.space.records[$0]?.preTileFrame
                 },
                 boundsOf: { $0 },
                 occupants: { [weak self] in self?.space.state.occupants ?? [:] }),
+            gridProvider: DragTracker.GridProvider(
+                grid: { [weak self] _ in self?.space.grid ?? GridLayout() },
+                setGrid: { [weak self] updated, _ in self?.space.grid = updated }),
             apply: { _, _ in 0 })
         writer = FrameWriter(
             gateway: gateway,
@@ -49,19 +50,25 @@ final class PlanExecutorTests: XCTestCase {
             log: { _ in })
     }
 
-    /// The coordinator-side values and collaborators one placement needs.
-    private func context(
-        isExpanded: @escaping (WindowID) -> Bool = { _ in false }
-    ) -> TilingSpace.Context {
+    /// The canvas's grid, for expectations that mirror its rect math.
+    private var grid: GridLayout { space.grid }
+
+    /// The coordinator-side collaborators one placement needs. Records,
+    /// expansion, and splitters live on the canvas now.
+    private func context() -> TilingSpace.Context {
         TilingSpace.Context(
-            records: records,
-            nextID: nextID,
             gateway: gateway,
             frameWriter: writer,
             tracker: tracker,
             boundsOf: { $0 },
             space: .displayless,
-            isExpanded: isExpanded)
+            allocateID: { [weak self] _ in
+                guard let self else { return 0 }
+                let id: WindowID = self.nextID
+                self.nextID += 1
+                return id
+            },
+            log: { _ in })
     }
 
     @discardableResult
@@ -70,40 +77,22 @@ final class PlanExecutorTests: XCTestCase {
         nextID += 1
         let handle = gateway.addWindow(frame: frame)
         handles[id] = handle
-        records[id] = WindowRecord(handle: handle, preTileFrame: .zero)
+        space.attach(id, handle: handle)
         return id
-    }
-
-    /// Reads the threaded context back out after a canvas call, exactly
-    /// as the coordinator does; syncs the handle map for ids the canvas
-    /// created (undo restores pruned handles under fresh ids).
-    private func sync(_ context: TilingSpace.Context) {
-        records = context.records
-        nextID = context.nextID
-        for (id, record) in records where handles[id] == nil {
-            handles[id] = record.handle
-        }
     }
 
     /// Runs one decision through the canvas.
     private func run(
-        _ decision: TilePlan, requester: WindowID, slot: Slot,
-        isExpanded: @escaping (WindowID) -> Bool = { _ in false }
+        _ decision: TilePlan, requester: WindowID, slot: Slot
     ) -> TilingSpace.Outcome {
-        var context = context(isExpanded: isExpanded)
-        let outcome = space.execute(
-            decision: decision, requester: requester, slot: slot, context: &context)
-        sync(context)
-        return outcome
+        space.execute(
+            decision: decision, requester: requester, slot: slot, context: context())
     }
 
     private func runUndo(
         snapshot: [EvictedWindow], requester: WindowID?
     ) -> TilingSpace.UndoOutcome {
-        var context = context()
-        let result = space.undo(snapshot: snapshot, requester: requester, context: &context)
-        sync(context)
-        return result
+        space.undo(snapshot: snapshot, requester: requester, context: context())
     }
 
     // MARK: Tile
@@ -111,13 +100,13 @@ final class PlanExecutorTests: XCTestCase {
     func testTilePlacesAndWritesFrame() {
         let id = addWindow()
         let initialFrame = gateway.frame(of: handles[id]!)!
-        let expected = tracker.grid.rect(for: .topLeft, in: initialFrame)
+        let expected = grid.rect(for: .topLeft, in: initialFrame)
 
         _ = run(.tile(evicting: []), requester: id, slot: .topLeft)
 
         XCTAssertNil(space.error)
         XCTAssertEqual(space.state.slot(of: id), .topLeft)
-        XCTAssertNotEqual(records[id]?.preTileFrame, .zero)
+        XCTAssertNotEqual(space.records[id]?.preTileFrame, .zero)
         XCTAssertEqual(
             gateway.frame(of: handles[id]!), expected,
             "the tile writes the top-left quad of the window's own bounds")
@@ -150,7 +139,7 @@ final class PlanExecutorTests: XCTestCase {
         let a = addWindow()
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
         gateway.setFrame(handles[a]!, to: original)
-        records[a]?.preTileFrame = original
+        space.records[a]?.preTileFrame = original
         space.state.commit(window: a, into: .topLeft)
         let b = addWindow()
 
@@ -214,10 +203,10 @@ final class PlanExecutorTests: XCTestCase {
             "the displaced window takes the tile the requester vacated")
         XCTAssertEqual(
             gateway.frame(of: handles[a]!),
-            tracker.grid.rect(for: .sixthMiddle, in: aBounds))
+            grid.rect(for: .sixthMiddle, in: aBounds))
         XCTAssertEqual(
             gateway.frame(of: handles[b]!),
-            tracker.grid.rect(for: .sixthTopLeft, in: bBounds))
+            grid.rect(for: .sixthTopLeft, in: bBounds))
     }
 
     func testSwapKeepsBothPreTileFrames() {
@@ -227,15 +216,15 @@ final class PlanExecutorTests: XCTestCase {
         let bFrame = CGRect(x: 7, y: 8, width: 280, height: 190)
         gateway.setFrame(handles[a]!, to: aFrame)
         gateway.setFrame(handles[b]!, to: bFrame)
-        records[a]?.preTileFrame = aFrame
-        records[b]?.preTileFrame = bFrame
+        space.records[a]?.preTileFrame = aFrame
+        space.records[b]?.preTileFrame = bFrame
         space.state.commit(window: a, into: .sixthTopLeft)
         space.state.commit(window: b, into: .sixthsRightTwoThirds)
 
         _ = run(.swap(displaced: b), requester: a, slot: .sixthMiddle)
 
-        XCTAssertEqual(records[a]?.preTileFrame, aFrame)
-        XCTAssertEqual(records[b]?.preTileFrame, bFrame)
+        XCTAssertEqual(space.records[a]?.preTileFrame, aFrame)
+        XCTAssertEqual(space.records[b]?.preTileFrame, bFrame)
     }
 
     func testSwapRefusalByDisplacedMovesNothing() {
@@ -269,9 +258,9 @@ final class PlanExecutorTests: XCTestCase {
         // in the requester's vacated tile unless the rollback writes it
         // home. State alone cannot see that: an unwritten rollback leaves
         // screen and state disagreeing while this test stays green.
-        let stale = tracker.grid(for: nil).rect(
+        let stale = grid.rect(
             for: .sixthTopLeft, in: CGRect(x: 0, y: 0, width: 800, height: 600))
-        let home = tracker.grid(for: nil).rect(
+        let home = grid.rect(
             for: .sixthsRightTwoThirds, in: stale)
         XCTAssertEqual(
             gateway.frame(of: handles[b]!), home,
@@ -314,10 +303,11 @@ final class PlanExecutorTests: XCTestCase {
         // The requester holds no slot, so `.swap` is degenerate; the top
         // left overlaps the left half, so the blocker is evicted; and the
         // cells left free are exactly the right half, which is the slot a
-        // re-house would have used.
+        // re-house would have used. Marking the blocker expanded in the
+        // canvas is the rule the fallback must honor.
+        space.expanded[blocker] = .zero
         _ = run(
-            .swap(displaced: blocker), requester: requester, slot: .leftHalf,
-            isExpanded: { $0 == blocker })
+            .swap(displaced: blocker), requester: requester, slot: .leftHalf)
 
         XCTAssertNil(
             space.state.slot(of: blocker),
@@ -379,7 +369,7 @@ final class PlanExecutorTests: XCTestCase {
         let a = addWindow()
         space.state.commit(window: a, into: .topLeft)
         // Poison a's pre-tile frame restore: the gateway refuses the write.
-        records[a]?.preTileFrame = CGRect(x: 10, y: 10, width: 100, height: 100)
+        space.records[a]?.preTileFrame = CGRect(x: 10, y: 10, width: 100, height: 100)
         gateway.refuseNextWrites(handles[a]!)
         let b = addWindow()
 
@@ -410,7 +400,7 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 1 window restored.")
         XCTAssertNil(result.error)
         XCTAssertEqual(
-            space.state.occupant(of: .topLeft).flatMap { records[$0]?.handle }, handles[a],
+            space.state.occupant(of: .topLeft).flatMap { space.records[$0]?.handle }, handles[a],
             "evicted window returns to its slot (under a fresh id; its record was pruned at switch)")
     }
 
@@ -437,7 +427,7 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertNil(result.error)
         XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 1 window restored.")
         XCTAssertEqual(
-            space.state.occupant(of: .topLeft).flatMap { records[$0]?.handle },
+            space.state.occupant(of: .topLeft).flatMap { space.records[$0]?.handle },
             handles[a],
             "unknown liveness still restores the window to its slot")
     }
@@ -500,7 +490,7 @@ final class PlanExecutorTests: XCTestCase {
         XCTAssertTrue(space.state.occupants.isEmpty,
             "a refused re-tile releases the slot so state and screen agree")
         XCTAssertFalse(
-            records.values.contains { $0.handle == handles[a] },
+            space.records.values.contains { $0.handle == handles[a] },
             "the refused window's fresh record is dropped, not left dangling")
     }
 
@@ -517,7 +507,7 @@ final class PlanExecutorTests: XCTestCase {
         // At undo time a's live frame is its restored pre-tile frame; the
         // re-tile target derives from the grid evaluated in that frame.
         let aRestoredFrame = gateway.frame(of: handles[a]!)!
-        let expected = tracker.grid.rect(for: .topLeft, in: aRestoredFrame)
+        let expected = grid.rect(for: .topLeft, in: aRestoredFrame)
 
         let result = runUndo(snapshot: snapshot, requester: b)
 

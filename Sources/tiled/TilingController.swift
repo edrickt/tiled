@@ -3,11 +3,16 @@ import AppKit
 /// Glues the pure `TilingState` + `GridLayout` to real windows through a
 /// `WindowGateway`, never touching AX types directly. All element
 /// identity, coordinate conversion, observation, and activation live
-/// behind the seam; this module owns only tiling decisions and records.
+/// behind the seam; the coordinator keeps focus and handle resolution,
+/// the handle->id table, bounds, and the death clock.
 ///
-/// The live drag-resize loop lives in `DragTracker` (echo suppression,
-/// edge detection, splitter moves, apply coalescing); this module feeds
-/// it gateway callbacks and performs the writes it schedules.
+/// Each canvas's state (occupancy, records, expansion, splitters, undo
+/// chapters, notices) lives in `TilingSpace`; this module routes each
+/// action to the canvas that owns the window and applies the effects the
+/// returned `Outcome` names. The live drag-resize loop lives in
+/// `DragTracker` (echo suppression, edge detection, splitter moves, apply
+/// coalescing); this module feeds it gateway callbacks and performs the
+/// writes it schedules.
 final class TilingController {
     private let gateway: WindowGateway
     /// Drag-end debounce scheduler for the tracker's drag-out loop.
@@ -36,7 +41,8 @@ final class TilingController {
 
     /// The drag-resize loop. Lazy so its context closures can capture
     /// self: the tracker decides (echo, edges, splitters), this module
-    /// performs writes via `pushRects` and serves record reads.
+    /// performs writes via `publishRects` and serves record reads. Grids
+    /// live on the canvases and travel through `GridProvider`.
     private lazy var tracker: DragTracker = DragTracker(
         context: DragTracker.Context(
             slotOf: { [weak self] in self?.trackedSlot(of: $0) },
@@ -46,9 +52,18 @@ final class TilingController {
             spaceOf: { [weak self] in self?.spaceOf(window: $0) },
             occupantsOf: { [weak self] space in self?.trackedOccupants(on: space) ?? [:] },
             liveFrameOf: { [weak self] id in self?.liveFrameForTracker(id) }),
+        gridProvider: DragTracker.GridProvider(
+            grid: { [weak self] space in
+                guard let self else { return GridLayout() }
+                return self.spaces[space ?? .displayless]?.grid ?? GridLayout()
+            },
+            setGrid: { [weak self] updated, space in
+                guard let self else { return }
+                self.mutateSpace(space ?? .displayless) { $0.grid = updated }
+            }),
         apply: { [weak self] rects, excluding in
             guard let self else { return 0 }
-            return self.pushRects(rects, excluding: excluding)
+            return self.publishRects(rects, excluding: excluding)
         },
         onUntile: { [weak self] in self?.untileFromDrag($0) },
         scheduleDragEnd: scheduleDragEnd,
@@ -60,8 +75,8 @@ final class TilingController {
     /// effect without an observer.
     private let screens: ScreenProvider
     /// Per-canvas tiling spaces: each display's each Mission Control
-    /// Space runs its own occupancy, splitters (owned by the tracker),
-    /// undo chapters, and transient notices. The `state` / `grid` surface
+    /// Space runs its own occupancy, records, expansion, splitters, undo
+    /// chapters, and transient notices. The `state` / `grid` surface
     /// below is derived from one canvas at a time, so menus and existing
     /// tests keep working without a second copy of anything.
     private var spaces: [TilingSpaceKey: TilingSpace] = [:]
@@ -74,20 +89,16 @@ final class TilingController {
     var state: TilingState {
         spaceState(for: surfaceSpace ?? focusedSpaceKey())
     }
-    /// Current grid. Source of truth lives in the tracker; this mirrors
-    /// it for tests and menus that read `controller.grid`.
-    var grid: GridLayout { tracker.grid(for: focusedSpaceKey()) }
+    /// Current grid. Owned by the focused canvas; menus and tests read it
+    /// through this forwarding surface.
+    var grid: GridLayout { focusedCanvas().grid }
 
-    /// Registry of managed windows. The canvas reads and mutates these
-    /// through the placement `Context` (and `undo`); `WindowRecord` lives
-    /// beside `TilingSpace` so both share one record shape.
-    private var records: [WindowID: WindowRecord] = [:]
+    /// The coordinator's handle registry: one id per live handle. The
+    /// record itself lives on the canvas holding the window; this table
+    /// only answers "which id is this handle", and allocating a fresh id
+    /// hands the window over to the handle->id space the canvases share.
+    private var windowIDs: [WindowHandle: WindowID] = [:]
     private var nextID: WindowID = 1
-    /// Window -> owning tiling canvas. Set when a window tiles (and when
-    /// undo reissues ids); cleared on forget. A tiled window never
-    /// migrates mid-session: its canvas wins over geometry, so dragging
-    /// it across displays keeps its slot until untiled.
-    private var spaceOwnership: [WindowID: TilingSpaceKey] = [:]
 
     /// Whether a displacement undo is available (menu item visibility).
     var canUndoDisplacement: Bool { focusedCanvas().undoStack.isEmpty == false }
@@ -107,23 +118,6 @@ final class TilingController {
     /// Cleared on the next tiling attempt. Per-canvas, like `lastNotice`.
     var lastTileError: String? { focusedCanvas().error }
 
-    /// Records a tiling failure on the canvas that acted. Menu untile
-    /// rows, resize pushes, and reasserts act on background displays and
-    /// Spaces, so the message must land beside the windows it describes
-    /// rather than on whatever happens to be focused at menu time.
-    private func setTileError(_ message: String?, on space: TilingSpaceKey) {
-        mutateSpace(space) { $0.error = message }
-    }
-
-    /// Windows expanded over the layout by the ⌥⇧⏎ toggle, keyed by id,
-    /// holding the frame to restore for windows that had no slot when
-    /// expanded (tiled windows retile into their slot instead, so their
-    /// entry is unused). Expanded windows keep their slot in `state`:
-    /// expanding acts like focusing, covering the layout without erasing
-    /// it, but the tracker reads them as untiled (`trackedSlot`), so
-    /// echoes of the expand write and hand drags of the covering window
-    /// never mutate splitters or trigger drag-out untile.
-    private var expanded: [WindowID: CGRect] = [:]
     private var pruneTimer: Timer?
     private var screenObserver: NSObjectProtocol?
 
@@ -341,7 +335,9 @@ final class TilingController {
     /// The requester for a slot hotkey and the canvas the request belongs
     /// to: prunes dead windows first, then resolves the focused window to
     /// its registry id. Nil (with feedback) when nothing is focused.
-    private func requesterAndCanvas(for slot: Slot) -> (id: WindowID, key: TilingSpaceKey)? {
+    private func requesterAndCanvas(
+        for slot: Slot
+    ) -> (id: WindowID, handle: WindowHandle, key: TilingSpaceKey)? {
         pruneDeadWindows()
         guard let handle = gateway.focusedWindow() else {
             dbg("no focused window for \(slot.rawValue)")
@@ -349,41 +345,74 @@ final class TilingController {
             return nil
         }
         let id = windowID(for: handle)
-        return (id, spaceKeyForRequester(id, handle: handle))
+        return (id, handle, spaceKeyForRequester(id, handle: handle))
     }
 
     func handle(slot: Slot) {
-        guard let (id, key) = requesterAndCanvas(for: slot) else { return }
+        guard let (id, handle, key) = requesterAndCanvas(for: slot) else { return }
+        let context = placementContext(for: key)
         // An expanded window getting a slot hotkey comes back to earth
         // first: its own slot becomes the strict no-op below; a different
         // slot retiles from the collapsed state.
-        if expanded[id] != nil {
-            collapseExpanded(id)
+        let (collapse, outcome) = mutateSpace(key) { canvas in
+            canvas.attach(id, handle: handle)
+            let collapse = canvas.isExpanded(id)
+                ? canvas.collapseExpanded(id, context: context)
+                : nil
+            return (collapse, canvas.apply(slot: slot, requester: id, context: context))
         }
-        var space = spaces[key] ?? TilingSpace()
-        var context = placementContext(for: key)
-        let outcome = space.apply(slot: slot, requester: id, context: &context)
-        spaces[key] = space
-        records = context.records
-        nextID = context.nextID
+        let collapsed = collapse != nil
+        if let collapse { announce(collapse.result) }
         if case .alreadyTiled = outcome.result {
             // Already in that tile: a strict no-op; no state, error, or
             // menu side effects. Still signal it so the hotkey path can
             // confirm subtly (the Welcome tab teaches this as safety).
             dbg("noop win\(id) already in \(slot.rawValue)")
             onFeedback?(.alreadyTiled(slot: slot))
+            // A collapse that ran just before the no-op already wrote a
+            // frame, so the menu must refresh even though the placement
+            // itself changed nothing.
+            if collapsed { onChange?() }
             return
         }
+        apply(outcome, on: key)
+        announce(outcome.result)
+        if collapsed { onChange?() }
+        // The reflow's survivors share the event's undo chapter: undo
+        // restores the pre-event world in one ⌃⇧⌘Z (a move with no
+        // eviction has no chapter of its own, so the reflow starts one).
+        // The canvas pushed the chapter; the coordinator only notes the
+        // canvas that acted and refreshes.
+        noteSurfaceCanvas(key)
+        onChange?()
+    }
+
+    /// Maps one canvas outcome to the hotkey feedback channel: refusals
+    /// are announced, everything else is silent (the canvas's notice/
+    /// error carry the rest).
+    private func announce(_ result: TilingSpace.Outcome.Result) {
+        switch result {
+        case .refused(let windowName):
+            onFeedback?(.refused(windowName: windowName))
+        case .expandRefused(let windowName):
+            onFeedback?(.expandRefused(windowName: windowName))
+        case .placed, .alreadyTiled, .nothingToEvict:
+            break
+        }
+    }
+
+    /// Applies one canvas action's coordinator effects: the handle
+    /// registry, observation, raising, focus, and the convergence
+    /// schedule. `notice`/`error` are already on the canvas.
+    private func apply(_ outcome: TilingSpace.Outcome, on key: TilingSpaceKey) {
         // Restored-not-re-housed windows: untiled for good. A re-housed
         // window stayed tiled, so its record and observation survive.
         for evicted in outcome.forget {
-            forgetWindow(evicted)
-        }
-        // Successful placements own the requester's canvas: the window
-        // tiles where it sits, and never migrates mid-session. Refused
-        // writes roll back occupancy, so ownership follows the commit.
-        if outcome.requester != nil, space.state.slot(of: id) != nil {
-            setSpaceOwnership(id, key)
+            forgetBookkeeping(evicted)
+            // The window left management: re-resolve the shared surface
+            // to the focused canvas, exactly as the record drop always
+            // did.
+            noteSurfaceCanvas(nil)
         }
         for window in outcome.observe {
             observe(window: window)
@@ -396,44 +425,30 @@ final class TilingController {
         }
         // A swap leaves the user's attention on the window that took the
         // requester's old tile: focus follows the displaced window.
-        if let focusAfter = outcome.focusAfter, let record = records[focusAfter] {
-            gateway.focus(record.handle)
-        }
-        switch outcome.result {
-        case .refused(let windowName):
-            onFeedback?(.refused(windowName: windowName))
-        case .placed, .alreadyTiled:
-            break
+        if let focusAfter = outcome.focusAfter, let handle = handle(of: focusAfter) {
+            gateway.focus(handle)
         }
         if !outcome.verify.isEmpty {
             scheduleVerification(of: outcome.verify, on: key)
         }
-        // The reflow's survivors share the event's undo chapter: undo
-        // restores the pre-event world in one ⌃⇧⌘Z (a move with no
-        // eviction has no chapter of its own, so the reflow starts one).
-        // The canvas pushed the chapter; the coordinator only notes the
-        // canvas that acted and refreshes.
-        noteSurfaceCanvas(key)
-        onChange?()
     }
 
-    /// The collaborators and coordinator-owned values one placement
-    /// needs. The canvas reads `records`/`nextID` back out of the
-    /// context after the call; a fresh context is built per action so a
-    /// re-resolved canvas (a swipe, a focus move) is always reflected.
+    /// The collaborators one action needs. A fresh context is built per
+    /// action so a re-resolved canvas (a swipe, a focus move) is always
+    /// reflected; the id allocator writes through to the handle table.
     private func placementContext(for key: TilingSpaceKey) -> TilingSpace.Context {
         TilingSpace.Context(
-            records: records,
-            nextID: nextID,
             gateway: gateway,
             frameWriter: frameWriter,
             tracker: tracker,
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
             space: key,
-            spaceOf: { [weak self] in self?.spaceOf(window: $0) },
-            isExpanded: { [weak self] in self?.expanded[$0] != nil },
-            collapseExpanded: { [weak self] in
-                self?.collapseExpanded($0, recordingRefusal: false)
+            allocateID: { [weak self] handle in
+                guard let self else { return 0 }
+                let id = self.nextID
+                self.nextID += 1
+                self.windowIDs[handle] = id
+                return id
             },
             log: { [weak self] message in self?.dbg(message) })
     }
@@ -469,20 +484,22 @@ final class TilingController {
     /// released, tracker entry cleared, standard refusal surfaced), so
     /// state and screen agree instead of disagreeing silently.
     private func verifyConvergence(_ id: WindowID, on space: TilingSpaceKey) {
-        guard records[id] != nil, slotOfWindow(id) != nil else { return }
+        guard let errorSpace = spaceOf(window: id),
+            spaces[errorSpace]?.state.slot(of: id) != nil
+        else { return }
         guard tracker.convergence(for: id) == .ignored else { return }
-        let errorSpace = spaceOf(window: id) ?? space
-        tracker.forget(id)
-        var s = spaceState(for: errorSpace)
-        s.remove(window: id)
-        setSpaceState(s, for: errorSpace)
-        spaceOwnership[id] = nil
-        expanded[id] = nil
+        // Name the window before its record goes; the rollback itself
+        // writes nothing (the write never took effect).
         let name = appName(for: id) ?? "That window"
+        let hasError = mutateSpace(errorSpace) { canvas in
+            canvas.discard(window: id, context: placementContext(for: errorSpace))
+            return canvas.error != nil
+        }
+        forgetBookkeeping(id)
         // A later error (e.g. a newer refusal) wins over this late one.
         // Scoped to the window's own canvas: the placement may tile onto
         // a background display or Space while focus sits elsewhere.
-        if self.space(for: errorSpace)?.error == nil {
+        if !hasError {
             mutateSpace(errorSpace) {
                 $0.error = "\(name) couldn't be tiled: the app refused to resize it."
             }
@@ -495,84 +512,45 @@ final class TilingController {
 
     // MARK: Placement (delegated)
 
-    /// Single-window restore shared by `untile` and `untileAll`: restores
-    /// the pre-tile frame, releases the slot, and reports refusal so the
-    /// caller can name the window instead of leaving a stray behind.
-    /// Returns the pre-tile frame it restored to (nil when there was
-    /// nothing to restore), so bulk callers can snapshot it for undo;
-    /// the record is cleared here and unreadable afterwards.
-    private func restoreOne(_ id: WindowID) -> (failure: String?, restoredFrame: CGRect?) {
-        // Capture the display name before the record is cleared, so a
-        // refused restore can name the window instead of saying "A window".
-        let name = appName(for: id) ?? "A window"
-        var restored = true
-        var restoredFrame: CGRect?
-        if let record = records[id], record.preTileFrame != .zero {
-            restoredFrame = record.preTileFrame
-            restored = gateway.setFrame(record.handle, to: record.preTileFrame)
-        }
-        forgetWindow(id)
-        if restored { return (nil, restoredFrame) }
-        return (name, nil)
-    }
-
     /// Recomputes and pushes rects for all occupants (resize propagation).
-    /// The tracker computes rects under each canvas's grid; this module
-    /// performs the writes and reports refusals: the push half of the
-    /// tracker's decide/push split. Nil reasserts every currently visible
-    /// canvas (display changes); a key scopes to one canvas (reset,
-    /// restore, stale reassert).
+    /// Each canvas reasserts its own occupants under its own grid and
+    /// reports refusals: the push half of the tracker's decide/push
+    /// split. Nil reasserts every currently visible canvas (display
+    /// changes); a key scopes to one canvas (reset, restore, stale
+    /// reassert).
     private func applyAll(excluding excluded: Set<WindowID> = [], on space: TilingSpaceKey? = nil) {
-        var rects: [WindowID: CGRect] = [:]
         let keys: [TilingSpaceKey] =
             if let space { [space] } else { activeSpaceKeys() }
         staleSpaces.subtract(keys)
         for key in keys {
-            for (_, occupant) in spaceState(for: key).occupants {
-                guard !excluded.contains(occupant), records[occupant] != nil,
-                    expanded[occupant] == nil
-                else { continue }
-                if let target = tracker.rect(for: occupant) {
-                    rects[occupant] = target
-                }
+            mutateSpace(key) {
+                $0.reassert(excluding: excluded, context: placementContext(for: key))
             }
         }
-        _ = pushRects(rects, excluding: nil, on: space)
     }
 
-    /// Performs tracker-scheduled pushes through the shared write policy:
-    /// no-op skip, off-Space deferral, echo marking, and the late
-    /// convergence check belong to `FrameWriter`; this method counts
-    /// refusals per canvas so the menu can name them. `excluding` names
-    /// the window whose frame is the drag's source of truth; it is
+    /// Routes tracker-scheduled pushes to the canvas that owns each
+    /// window: the canvas runs them through the shared write policy and
+    /// records refusals beside the windows that refused. `excluding`
+    /// names the window whose frame is the drag's source of truth; it is
     /// informational, since snapback rects DO name the (formerly) dragged
     /// window, with `excluding` nil.
-    private func pushRects(
-        _ rects: [WindowID: CGRect], excluding: WindowID?, on space: TilingSpaceKey? = nil
-    ) -> Int {
-        var failed = 0
-        var failuresByCanvas: [TilingSpaceKey: Int] = [:]
+    private func publishRects(_ rects: [WindowID: CGRect], excluding: WindowID?) -> Int {
+        var byCanvas: [TilingSpaceKey: [WindowID: CGRect]] = [:]
         for (id, target) in rects {
-            guard let record = records[id] else { continue }
-            // The window's own canvas scopes the write (visibility and
-            // the convergence check); the passed space is the fallback
-            // for a window whose canvas record is gone.
-            let canvas = writeCanvas(for: id, fallback: space)
-            if frameWriter.write(
-                id, handle: record.handle, to: target, on: canvas, check: .rollback)
-                == .refused
-            {
-                failed += 1
-                failuresByCanvas[canvas, default: 0] += 1
+            byCanvas[writeCanvas(for: id), default: [:]][id] = target
+        }
+        for (key, group) in byCanvas {
+            mutateSpace(key) {
+                $0.publish(
+                    rects: group, excluding: excluding,
+                    context: placementContext(for: key))
             }
         }
-        // Refusals land on the canvas whose windows refused, not on
-        // whatever happens to be focused when the menu is next read.
-        for (canvas, count) in failuresByCanvas {
-            setTileError(TilingSpace.refusalMessage(count: count), on: canvas)
-        }
         onChange?()
-        return failed
+        // The tracker's apply contract counts refusals; the canvas owns
+        // refusal attribution now, and no caller reads the count.
+        return 0
     }
 
     /// Frame the tracker diffs against: the last pushed target when known,
@@ -581,7 +559,7 @@ final class TilingController {
     /// tick late) can never read as a user drag: echo suppression
     /// compares against this, and it must be our intent, not the echo.
     private func frameForTracker(_ id: WindowID) -> CGRect? {
-        guard let record = records[id] else { return nil }
+        guard let record = record(of: id) else { return nil }
         if let pushed = tracker.lastPushedTarget(for: id) { return pushed }
         return gateway.frame(of: record.handle) ?? record.preTileFrame
     }
@@ -590,7 +568,7 @@ final class TilingController {
     /// must never consult intent (`frameForTracker`), which equals the
     /// push target by definition and would skip every push.
     private func liveFrameForTracker(_ id: WindowID) -> CGRect? {
-        guard let record = records[id] else { return nil }
+        guard let record = record(of: id) else { return nil }
         return gateway.frame(of: record.handle)
     }
 
@@ -656,7 +634,7 @@ final class TilingController {
         if let frame = gateway.frame(of: handle),
            let info = screenInfo(for: frame)
         { return tilingKey(for: info.id) }
-        if let record = records[id], record.preTileFrame != .zero,
+        if let record = record(of: id), record.preTileFrame != .zero,
            let info = screenInfo(for: record.preTileFrame)
         { return tilingKey(for: info.id) }
         return focusedSpaceKey()
@@ -682,16 +660,23 @@ final class TilingController {
     // MARK: Registry
 
     private func windowID(for handle: WindowHandle) -> WindowID {
-        if let existing = recordID(for: handle) { return existing }
+        // Reuse the table id only while the handle still has a record on
+        // some canvas: a released window's next resolution is a fresh
+        // window as far as the canvas state is concerned.
+        if let existing = windowIDs[handle], spaceOf(window: existing) != nil {
+            return existing
+        }
         let id = nextID
         nextID += 1
-        records[id] = WindowRecord(handle: handle, preTileFrame: .zero)
+        windowIDs[handle] = id
         return id
     }
 
-    /// Existing id for a live handle, without creating a record.
+    /// Existing id for a live handle whose record still lives on a
+    /// canvas, without creating a stub.
     private func recordID(for handle: WindowHandle) -> WindowID? {
-        records.first(where: { $0.value.handle == handle })?.key
+        guard let id = windowIDs[handle], spaceOf(window: id) != nil else { return nil }
+        return id
     }
 
     /// Drops records whose handle is gone (window closed, app quit).
@@ -700,38 +685,45 @@ final class TilingController {
     /// confirmed deaths prune: a busy app's unanswerable probe is unknown,
     /// and pruning on a maybe would untile a live window.
     func pruneDeadWindows() {
-        let dead = records.filter { gateway.liveness(of: $0.value.handle) == .dead }
+        var dead: [(key: TilingSpaceKey, id: WindowID, handle: WindowHandle)] = []
+        for (key, canvas) in spaces {
+            for (id, record) in canvas.records
+            where gateway.liveness(of: record.handle) == .dead {
+                dead.append((key, id, record.handle))
+            }
+        }
         let timestamp = now()
-        for (id, _) in dead {
-            let first = deadSince[id] ?? timestamp
+        for entry in dead {
+            let first = deadSince[entry.id] ?? timestamp
             guard timestamp.timeIntervalSince(first) >= deathConfirmation else {
-                deadSince[id] = first
-                dbg("prune win\(id): dead handle, awaiting confirmation")
+                deadSince[entry.id] = first
+                dbg("prune win\(entry.id): dead handle, awaiting confirmation")
                 continue
             }
-            deadSince[id] = nil
-            dbg("prune win\(id): dead handle confirmed, releasing slot")
-            releaseHandle(id)
-            let slot = slotOfWindow(id)
-            let space = spaceOf(window: id)
-            forgetWindow(id)
-            // A window closed while tiled is a leave like any other:
-            // its cells flow to the mergeable survivor.
-            pushLeaveUndo(slot: slot, on: space)
+            deadSince[entry.id] = nil
+            dbg("prune win\(entry.id): dead handle confirmed, releasing slot")
+            // Hand the element back to the adapter before the record
+            // (the only holder of the handle) goes away.
+            gateway.release(entry.handle)
+            let outcome = mutateSpace(entry.key) {
+                $0.release(window: entry.id, context: placementContext(for: entry.key))
+            }
+            apply(outcome, on: entry.key)
         }
         // A recovered probe or a vanished record clears the pending
         // death: only windows still reading dead stay marked.
-        let deadIDs = Set(dead.map(\.key))
+        let deadIDs = Set(dead.map(\.id))
         deadSince = deadSince.filter { deadIDs.contains($0.key) }
     }
 
-    /// Clears error/notice state: every user-initiated tiling action
-    /// starts from a clean slate. The undo stack is NOT cleared here:
-    /// history survives new actions up to `undoDepth`. Only a successful
-    /// undo consumes its entry, and bulk destructive ops (untile all)
-    /// start a new chapter. Scoped to the affected canvas: other
-    /// displays and Spaces keep their notices until acted on there.
-
+    /// Clears the coordinator-side bookkeeping of a window the canvas
+    /// released: the handle table, the death clock, and any pending
+    /// convergence check. The record itself is already gone.
+    private func forgetBookkeeping(_ id: WindowID) {
+        cancelVerification(id)
+        deadSince[id] = nil
+        windowIDs = windowIDs.filter { $0.value != id }
+    }
 
     private func raiseOccupants(on space: TilingSpaceKey) {
         // Raising an off-Space window can pull it to the visible Space;
@@ -742,26 +734,9 @@ final class TilingController {
         for (_, id) in spaceState(for: space).occupants
             .sorted(by: { $0.key.rawValue < $1.key.rawValue })
         {
-            guard let record = records[id] else { continue }
-            gateway.raise(record.handle)
+            guard let handle = spaces[space]?.handle(of: id) else { continue }
+            gateway.raise(handle)
         }
-    }
-
-    /// The shared tail of every leave-with-reflow path: the freed cells
-    /// flow to the mergeable survivor through the canvas's one reflow
-    /// applier, and the survivor is raised above the window that just
-    /// left — one helper so the invariant lives in one place and no
-    /// leave path forgets the raise.
-    private func pushLeaveUndo(slot: Slot?, on space: TilingSpaceKey?) {
-        let key = space ?? focusedSpaceKey()
-        var canvas = spaces[key] ?? TilingSpace()
-        var context = placementContext(for: key)
-        let moves = canvas.reflow(slot?.cells ?? [], excluding: [], context: &context)
-        spaces[key] = canvas
-        records = context.records
-        nextID = context.nextID
-        mutateSpace(key) { $0.pushUndo(snapshot: moves, requester: nil) }
-        raiseOccupants(on: key)
     }
 
     // MARK: Bulk operations
@@ -786,88 +761,12 @@ final class TilingController {
     /// retiles per display and per Space.
     private func untileAll(in space: TilingSpaceKey) {
         pruneDeadWindows()
-        mutateSpace(space) { $0.error = nil; $0.notice = nil }
-        // Untile-all starts its own undo chapter: the chapter lists each
-        // dissolved (slot, pre-tile frame) pair, and undo re-applies the
-        // slot rect on top of the restored frame: the window visibly
-        // returns to the arrangement, not just to its pre-tile frame.
-        // No modal: the sticky notice + ⌃⌥⇧⌘Z are the safety.
-        let chapter = spaceState(for: space).occupants
-        let noun = chapter.count == 1 ? "1 window" : "\(chapter.count) windows"
-        if !chapter.isEmpty {
-            mutateSpace(space) { $0.beginUndoChapter() }
-            mutateSpace(space) {
-                $0.notice = "Untiled \(noun). Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
-            }
-            // Prime the tracker's intent for the slot rects the undo will
-            // write: the live frames are pre-tile settle frames, and the
-            // diff must measure against where we're going, not where the
-            // restore just put us. Without this the undo's own writes
-            // read as a user drag and the grid moves under them.
-            for (slot, id) in chapter {
-                if let record = records[id] {
-                    let target = tracker.grid(for: space).rect(
-                        for: slot, in: visibleBounds(for: record.preTileFrame))
-                    tracker.markExpected(id, target)
-                }
-            }
+        let outcome = mutateSpace(space) {
+            $0.untileAll(context: placementContext(for: space))
         }
-        // Handles first: restoreOne clears each record, so resolve every
-        // handle while the registry still knows them.
-        var handles: [WindowID: WindowHandle] = [:]
-        for id in spaceState(for: space).tiledWindows {
-            if let record = records[id] { handles[id] = record.handle }
-        }
-        let failures = spaceState(for: space).tiledWindows.compactMap { restoreOne($0).failure }
-        reportRestoreFailures(failures, on: space)
-        // Rebuild the chapter from the frames untile-all just restored:
-        // each window now sits at its pre-tile frame with no record, so
-        // re-observe it there and pair it with its dissolved slot. The
-        // undo then retiles the live window back into place.
-        if !chapter.isEmpty {
-            var snapshot: [EvictedWindow] = []
-            for (slot, id) in chapter {
-                guard let handle = handles[id],
-                      let frame = gateway.frame(of: handle)
-                else { continue }
-                let fresh: WindowID = nextID
-                nextID += 1
-                records[fresh] = WindowRecord(handle: handle, preTileFrame: frame)
-                setSpaceOwnership(fresh, space)
-                observe(window: fresh)
-                snapshot.append(EvictedWindow(
-                    handle: handle, slot: slot, preTileFrame: frame, space: space))
-            }
-            mutateSpace(space) {
-                if snapshot.isEmpty {
-                    // Every frame read failed (the AX-unreadable
-                    // transient): nothing can be restored, so the
-                    // placeholder chapter goes. A "Restore 0 Evicted
-                    // Windows" row would offer an undo that can only
-                    // report failure.
-                    _ = $0.undoStack.popLast()
-                    // The sticky notice must not offer a key that no
-                    // longer has a chapter behind it.
-                    $0.notice = "Untiled \(noun)."
-                } else {
-                    $0.undoStack[$0.undoStack.count - 1] = (snapshot: snapshot, requester: nil)
-                }
-            }
-        }
+        apply(outcome, on: space)
         noteSurfaceCanvas(space)
         onChange?()
-    }
-
-    /// Reports restore failures unless a more relevant error already took
-    /// the slot. Shared by `untile`/`untileAll`; the canvas's placement
-    /// pipeline reports its own through the refusal it settles onto the
-    /// canvas, with the same precedence rule.
-    private func reportRestoreFailures(_ failures: [String], on space: TilingSpaceKey) {
-        guard !failures.isEmpty else { return }
-        mutateSpace(space) {
-            guard $0.error == nil else { return }
-            $0.error = MenuText.restoreFailureMessage(failures)
-        }
     }
 
     /// Snaps all splitters back to defaults and re-tiles everyone. The
@@ -888,9 +787,9 @@ final class TilingController {
     }
 
     private func resetDividers(in space: TilingSpaceKey) {
-        mutateSpace(space) { $0.splitterBackup = self.tracker.resetDividers(for: space) }
-        mutateSpace(space) { $0.error = nil; $0.notice = nil }
-        applyAll(on: space)
+        mutateSpace(space) {
+            $0.resetSplitters(context: placementContext(for: space))
+        }
         onChange?()
     }
 
@@ -910,11 +809,10 @@ final class TilingController {
     }
 
     private func restoreSplitters(in space: TilingSpaceKey) -> Bool {
-        guard let backup = self.space(for: space)?.splitterBackup else { return false }
-        tracker.restoreDividers(backup, for: space)
-        mutateSpace(space) { $0.splitterBackup = nil }
-        mutateSpace(space) { $0.error = nil; $0.notice = "Splitters restored to their pre-reset positions." }
-        applyAll(on: space)
+        guard spaces[space]?.hasSplitterBackup == true else { return false }
+        mutateSpace(space) {
+            $0.restoreSplitters(context: placementContext(for: space))
+        }
         onChange?()
         return true
     }
@@ -928,11 +826,12 @@ final class TilingController {
     /// expanded; nil otherwise. Drives the expand row's stateful title:
     /// the toggle must show its state, not just its combo.
     var expandedFocusedSlot: Slot? {
-        guard let handle = gateway.focusedWindow() else { return nil }
-        let id = recordID(for: handle) ?? windowID(for: handle)
-        guard expanded[id] != nil else { return nil }
-        guard let space = spaceOf(window: id) else { return nil }
-        return spaceState(for: space).slot(of: id)
+        guard let handle = gateway.focusedWindow(),
+            let id = recordID(for: handle),
+            let key = spaceOf(window: id),
+            spaces[key]?.isExpanded(id) == true
+        else { return nil }
+        return spaces[key]?.state.slot(of: id)
     }
 
     /// Undoes the freshest destructive tiling action: a layout switch, an
@@ -977,8 +876,8 @@ final class TilingController {
             let destination = evicted.space ?? space
             for (slot, current) in spaceState(for: destination).occupants
             where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {
-                guard let record = records[current],
-                      record.handle != evicted.handle else { continue }
+                guard let handle = spaces[destination]?.handle(of: current),
+                      handle != evicted.handle else { continue }
                 blockers.insert(current)
             }
         }
@@ -995,32 +894,26 @@ final class TilingController {
         }
         var restored = 0
         var errors: [String] = []
-        // Restore the requester once, against the undone canvas's state.
-        // (Its record may already be gone; `restoreWindow` is a no-op
-        // then, but the per-canvas unwinding below still needs its id
-        // looked up in the same state.)
+        // Restore the requester once, in the canvas owning its record.
+        // (Its record may already be gone; the restore is a no-op then,
+        // but the per-canvas unwinding below still needs its id looked up
+        // in the same state.)
         if let requester = entry.requester {
-            var undoneState = spaceState(for: space)
-            undoRestoreWindow(requester, state: &undoneState)
-            setSpaceState(undoneState, for: space)
+            let requesterSpace = spaceOf(window: requester) ?? space
+            mutateSpace(requesterSpace) {
+                $0.restore(
+                    window: requester, context: placementContext(for: requesterSpace))
+            }
+            forgetBookkeeping(requester)
         }
         for (destination, group) in bySpace {
-            var canvas = spaces[destination] ?? TilingSpace()
-            var context = placementContext(for: destination)
-            let result = canvas.undo(snapshot: group, requester: nil, context: &context)
-            spaces[destination] = canvas
-            records = context.records
-            nextID = context.nextID
+            let result = mutateSpace(destination) {
+                $0.undo(
+                    snapshot: group, requester: nil,
+                    context: placementContext(for: destination))
+            }
             for window in result.observe {
                 observe(window: window)
-            }
-            // Tag reissued ids with their destination canvas: undo creates
-            // fresh records for pruned handles, and the window belongs to
-            // the canvas it just returned to.
-            for evicted in group {
-                if let id = records.first(where: { $0.value.handle == evicted.handle })?.key {
-                    setSpaceOwnership(id, destination)
-                }
             }
             if result.notice != nil {
                 restored += group.count
@@ -1079,13 +972,12 @@ final class TilingController {
     /// element is gone, instead of waiting out the prune tick and its
     /// confirmation window.
     private func observe(window id: WindowID) {
-        guard let record = records[id] else { return }
-        let handle = record.handle
+        guard let handle = handle(of: id) else { return }
         gateway.observe(
             handle,
             onChange: { [weak self] in
                 guard let self else { return }
-                guard let currentID = self.currentID(for: handle) else { return }
+                guard let currentID = self.recordID(for: handle) else { return }
                 guard let frame = self.gateway.frame(of: handle) else { return }
                 self.tracker.handleChange(id: currentID, frame: frame)
             },
@@ -1102,25 +994,19 @@ final class TilingController {
     /// leaves the ordinary prune cadence in charge. Called on the main
     /// thread by both adapters.
     private func windowDestroyed(_ handle: WindowHandle) {
-        guard let id = currentID(for: handle) else { return }
+        guard let id = recordID(for: handle) else { return }
         guard gateway.liveness(of: handle) == .dead else {
             dbg("destroyed win\(id): still live by the death standard; prune cadence decides")
             return
         }
-        let slot = slotOfWindow(id)
-        let space = spaceOf(window: id)
+        let key = spaceOf(window: id) ?? focusedSpaceKey()
         dbg("destroyed win\(id): releasing slot now")
-        releaseHandle(id)
-        forgetWindow(id)
-        pushLeaveUndo(slot: slot, on: space)
-        onChange?()
-    }
-
-    private func currentID(for handle: WindowHandle) -> WindowID? {
-        for (id, record) in records where record.handle == handle {
-            return id
+        gateway.release(handle)
+        let outcome = mutateSpace(key) {
+            $0.release(window: id, context: placementContext(for: key))
         }
-        return nil
+        apply(outcome, on: key)
+        onChange?()
     }
 
     // MARK: Presentation
@@ -1183,13 +1069,13 @@ final class TilingController {
 
     /// One canvas's grid.
     func grid(in space: TilingSpaceKey) -> GridLayout {
-        tracker.grid(for: space)
+        spaces[space]?.grid ?? GridLayout()
     }
 
     /// One display's currently shown canvas grid (the screen-based form
     /// menus and tests use).
     func grid(on screen: ScreenID?) -> GridLayout {
-        tracker.grid(for: tilingKey(for: screen))
+        grid(in: tilingKey(for: screen))
     }
 
     var tiledWindowsInfo: [TiledWindowInfo] {
@@ -1262,8 +1148,8 @@ final class TilingController {
 
     /// Brings a tiled window to the front without disturbing the layout.
     func focus(window id: WindowID) {
-        guard let record = records[id] else { return }
-        gateway.focus(record.handle)
+        guard let handle = handle(of: id) else { return }
+        gateway.focus(handle)
     }
 
     /// Evicts the focused window (⌥⇧⌫): restores its pre-tile frame and
@@ -1279,19 +1165,18 @@ final class TilingController {
             onFeedback?(.noFocusedWindow)
             return
         }
-        let id = recordID(for: handle) ?? windowID(for: handle)
-        let space = spaceOf(window: id) ?? focusedSpaceKey()
-        let slot = slotOfWindow(id)
-        guard slot != nil else {
+        let id = windowID(for: handle)
+        let key = spaceOf(window: id) ?? focusedSpaceKey()
+        let outcome = mutateSpace(key) { canvas in
+            canvas.attach(id, handle: handle)
+            return canvas.evict(window: id, context: placementContext(for: key))
+        }
+        if case .nothingToEvict = outcome.result {
             onFeedback?(.nothingToEvict)
             return
         }
-        mutateSpace(space) { $0.error = nil; $0.notice = nil }
-        if let failure = restoreOne(id).failure {
-            reportRestoreFailures([failure], on: space)
-        }
-        pushLeaveUndo(slot: slot, on: space)
-        noteSurfaceCanvas(space)
+        apply(outcome, on: key)
+        noteSurfaceCanvas(key)
         onChange?()
     }
 
@@ -1307,15 +1192,12 @@ final class TilingController {
         pruneDeadWindows()
         // The window's own canvas clears (not the focused one): menu
         // untile rows act on background displays and Spaces.
-        let space = spaceOf(window: id) ?? focusedSpaceKey()
-        mutateSpace(space) { $0.error = nil; $0.notice = nil }
-        let slot = slotOfWindow(id)
-        if let failure = restoreOne(id).failure {
-            reportRestoreFailures([failure], on: space)
+        let key = spaceOf(window: id) ?? focusedSpaceKey()
+        let outcome = mutateSpace(key) {
+            $0.untile(
+                window: id, reflowing: reflowing, context: placementContext(for: key))
         }
-        if reflowing {
-            pushLeaveUndo(slot: slot, on: space)
-        }
+        apply(outcome, on: key)
         onChange?()
     }
 
@@ -1333,134 +1215,30 @@ final class TilingController {
             return
         }
         let id = windowID(for: handle)
-        if expanded[id] != nil {
-            collapseExpanded(id)
-        } else {
-            expand(id)
+        let key = spaceOf(window: id) ?? focusedSpaceKey()
+        let outcome = mutateSpace(key) { canvas in
+            canvas.attach(id, handle: handle)
+            return canvas.expandToggle(
+                window: id, context: placementContext(for: key))
         }
-    }
-
-    private func expand(_ id: WindowID) {
-        guard let record = records[id] else { return }
-        let current = gateway.frame(of: record.handle) ?? record.preTileFrame
-        // No readable frame anywhere: there is no sane screen to expand
-        // onto, so refuse to guess (visibleBounds would fall back to main).
-        guard current != .zero else { return }
-        let target = visibleBounds(for: current)
-        mutateSpace(spaceOf(window: id) ?? focusedSpaceKey()) { $0.error = nil; $0.notice = nil }
-        let result = writeExpandedFrame(id, to: target)
-        if result.accepted {
-            expanded[id] = current
-            dbg("expand win\(id) -> \(target)")
-        } else if let message = expandedWriteFailure(result, for: id) {
-            setTileError(message, on: writeCanvas(for: id))
-        }
+        announce(outcome.result)
         onChange?()
-    }
-
-    /// Unexpands `id`, returning the refusal message when a frame write
-    /// was refused. Callers that do not own the canvas's error for the
-    /// duration (`recordingRefusal: true`, the default) get the standard
-    /// recording here; the placement pipeline passes false and folds the
-    /// message in at its own precedence.
-    @discardableResult
-    private func collapseExpanded(_ id: WindowID, recordingRefusal: Bool = true) -> String? {
-        guard let saved = expanded[id] else { return nil }
-        expanded[id] = nil
-        mutateSpace(spaceOf(window: id) ?? focusedSpaceKey()) { $0.error = nil; $0.notice = nil }
-        var refusal: String?
-        if slotOfWindow(id) != nil {
-            refusal = retileExpanded(id)
-        } else if records[id] != nil {
-            let result = writeExpandedFrame(id, to: saved)
-            refusal = expandedWriteFailure(result, for: id)
-            if result.accepted {
-                dbg("collapse win\(id) -> saved \(saved)")
-            }
-        }
-        if let refusal, recordingRefusal {
-            setTileError(refusal, on: writeCanvas(for: id))
-        }
-        onChange?()
-        return refusal
-    }
-
-    /// Re-applies an expanded window's slot rect after collapse; returns
-    /// the refusal message when the write was refused. Uses the tracker
-    /// grid directly, not plan execution: the window never left its slot,
-    /// so there is nothing to restore or evict.
-    private func retileExpanded(_ id: WindowID) -> String? {
-        guard let record = records[id], let slot = slotOfWindow(id) else { return nil }
-        let current = gateway.frame(of: record.handle) ?? record.preTileFrame
-        let bounds = visibleBounds(for: current)
-        let target = tracker.grid(for: spaceOf(window: id) ?? focusedSpaceKey())
-            .rect(for: slot, in: bounds)
-        let result = writeExpandedFrame(id, to: target)
-        let refused = expandedWriteFailure(result, for: id)
-        dbg("retile expanded win\(id) -> \(slot.rawValue) target=\(target)")
-        return refused
-    }
-
-    /// Emits the expand-refused feedback a non-accepted expanded write
-    /// owes and returns the refusal message for the caller to record.
-    /// Accepted writes do nothing.
-    private func expandedWriteFailure(_ result: ExpandedWrite, for id: WindowID) -> String? {
-        guard !result.accepted else { return nil }
-        onFeedback?(.expandRefused(windowName: appName(for: id)))
-        return result.refusal
-    }
-
-    /// One expected frame write via the gateway: the shared shape of the
-    /// expand, collapse, and retile writes. The caller records a refusal
-    /// on the window's canvas (with the feedback of its own): the canvas
-    /// the write belongs to may be under the placement pipeline's
-    /// ownership for the duration, so the message travels back instead of
-    /// being recorded here.
-    private enum ExpandedWrite: Equatable {
-        /// The frame is where intended (written, or already correct).
-        case accepted
-        /// The canvas is not the visible Space: nothing written, nothing
-        /// recorded; expansion stays out of state.
-        case deferred
-        /// The gateway refused: message for the window's canvas.
-        case refused(String)
-
-        var accepted: Bool { self == .accepted }
-
-        /// The refusal message to record, when the gateway refused.
-        var refusal: String? {
-            if case .refused(let message) = self { return message }
-            return nil
-        }
-    }
-
-    private func writeExpandedFrame(_ id: WindowID, to target: CGRect) -> ExpandedWrite {
-        guard let record = records[id] else { return .deferred }
-        let windowSpace = writeCanvas(for: id)
-        // The shared write policy: the off-Space guard defers a hidden
-        // canvas (the expansion stays out of state), and a no-op target
-        // counts as success without a write. Expansion has no rollback
-        // path of its own, so it declares no convergence check.
-        let result = frameWriter.write(
-            id, handle: record.handle, to: target, on: windowSpace, check: .none)
-        switch result {
-        case .written, .skippedNoOp: return .accepted
-        case .deferredOffSpace: return .deferred
-        case .refused: return .refused(TilingSpace.refusalMessage(count: 1))
-        }
     }
 
     /// Slot a window presents to the tracker: expanded windows read as
     /// untiled, so the tracker never diff-resizes them into splitter
     /// moves or drags them out.
     private func trackedSlot(of id: WindowID) -> Slot? {
-        expanded[id] == nil ? slotOfWindow(id) : nil
+        guard let key = spaceOf(window: id), spaces[key]?.isExpanded(id) != true else {
+            return nil
+        }
+        return spaces[key]?.state.slot(of: id)
     }
 
     private var trackedOccupants: [Slot: WindowID] {
         var all: [Slot: WindowID] = [:]
         for space in spaces.values {
-            for (slot, id) in space.state.occupants where expanded[id] == nil {
+            for (slot, id) in space.state.occupants where !space.isExpanded(id) {
                 all[slot] = id
             }
         }
@@ -1469,7 +1247,8 @@ final class TilingController {
 
     /// Unexpanded occupants of one canvas.
     private func trackedOccupants(on space: TilingSpaceKey) -> [Slot: WindowID] {
-        self.space(for: space)?.state.occupants.filter { expanded[$0.value] == nil } ?? [:]
+        guard let canvas = self.space(for: space) else { return [:] }
+        return canvas.state.occupants.filter { !canvas.isExpanded($0.value) }
     }
 
     // MARK: Drag-out untile
@@ -1479,49 +1258,18 @@ final class TilingController {
     /// dropped: no pre-tile restore, the drag IS the placement. (Short
     /// drags snap back inside the tracker and never reach here.)
     func untileFromDrag(_ id: WindowID) {
-        guard records[id] != nil else { return }
-        let space = spaceOf(window: id) ?? focusedSpaceKey()
-        mutateSpace(space) { $0.error = nil; $0.notice = nil }
-        let slot = slotOfWindow(id)
-        forgetWindow(id)
-        pushLeaveUndo(slot: slot, on: space)
+        guard record(of: id) != nil else { return }
+        let key = spaceOf(window: id) ?? focusedSpaceKey()
+        let outcome = mutateSpace(key) {
+            $0.untileFromDrag(window: id, context: placementContext(for: key))
+        }
+        apply(outcome, on: key)
         dbg("drag-untile win\(id)")
         onChange?()
     }
 
     private func appName(for id: WindowID) -> String? {
-        records[id].flatMap { gateway.appName(of: $0.handle) }
-    }
-
-    /// Releases a window's records, tracker entries, occupancy, and any
-    /// expansion. Callers handle any frame writes first; this only
-    /// forgets. Shared by untile, drag-out untile, prune, and eviction.
-    private func forgetWindow(_ id: WindowID) {
-        cancelVerification(id)
-        records[id] = nil
-        deadSince[id] = nil
-        tracker.forget(id)
-        if let space = spaceOf(window: id) {
-            var s = spaceState(for: space)
-            s.remove(window: id)
-            setSpaceState(s, for: space)
-        } else {
-            for key in spaces.keys {
-                var s = spaceState(for: key)
-                s.remove(window: id)
-                setSpaceState(s, for: key)
-            }
-        }
-        spaceOwnership[id] = nil
-        expanded[id] = nil
-        noteSurfaceCanvas(nil)
-    }
-
-    /// Hands a confirmed-gone handle back to the adapter. Only death
-    /// paths call this: an untiled or evicted window keeps its element,
-    /// because undo and re-tiling reuse the stored handle.
-    private func releaseHandle(_ id: WindowID) {
-        if let record = records[id] { gateway.release(record.handle) }
+        record(of: id).flatMap { gateway.appName(of: $0.handle) }
     }
 
     var isTrusted: Bool { gateway.isTrusted }
@@ -1535,6 +1283,7 @@ final class TilingController {
         spaces[space]
     }
 
+    @discardableResult
     private func mutateSpace<T>(_ space: TilingSpaceKey, _ body: (inout TilingSpace) -> T) -> T {
         var value = spaces[space] ?? TilingSpace()
         let result = body(&value)
@@ -1546,13 +1295,25 @@ final class TilingController {
         spaces[space]?.state ?? TilingState()
     }
 
-    private func setSpaceState(_ state: TilingState, for space: TilingSpaceKey) {
-        mutateSpace(space) { $0.state = state }
+    /// Owning canvas of a managed window, derived from the canvas that
+    /// holds its record (nil when untiled/unknown). A tiled window never
+    /// migrates mid-session: its canvas wins over geometry, so dragging
+    /// it across displays keeps its slot until untiled.
+    private func spaceOf(window id: WindowID) -> TilingSpaceKey? {
+        for (key, space) in spaces where space.record(of: id) != nil {
+            return key
+        }
+        return nil
     }
 
-    /// Owning canvas of a tiled window (nil when untiled/unknown).
-    private func spaceOf(window id: WindowID) -> TilingSpaceKey? {
-        spaceOwnership[id]
+    /// The record of a managed window, wherever it lives.
+    private func record(of id: WindowID) -> WindowRecord? {
+        spaceOf(window: id).flatMap { spaces[$0]?.record(of: id) }
+    }
+
+    /// The handle of a managed window, wherever it lives.
+    private func handle(of id: WindowID) -> WindowHandle? {
+        spaceOf(window: id).flatMap { spaces[$0]?.handle(of: id) }
     }
 
     /// The canvas a window's frame write belongs to: its own canvas when
@@ -1563,19 +1324,9 @@ final class TilingController {
         spaceOf(window: id) ?? fallback ?? focusedSpaceKey()
     }
 
-    private func setSpaceOwnership(_ id: WindowID, _ space: TilingSpaceKey) {
-        spaceOwnership[id] = space
-    }
-
     /// Slot of a window in its own canvas (nil when untiled/unknown).
     private func slotOfWindow(_ id: WindowID) -> Slot? {
-        guard let space = spaceOf(window: id) else {
-            // No ownership yet: scan canvases (fresh records pre-tiling).
-            for space in spaces.values {
-                if let slot = space.state.slot(of: id) { return slot }
-            }
-            return nil
-        }
+        guard let space = spaceOf(window: id) else { return nil }
         return spaceState(for: space).slot(of: id)
     }
 
@@ -1668,7 +1419,7 @@ final class TilingController {
                let info = visibleScreen(for: frame)
             { return info.id }
             if let id = recordID(for: handle),
-               let record = records[id], record.preTileFrame != .zero,
+               let record = record(of: id), record.preTileFrame != .zero,
                let info = visibleScreen(for: record.preTileFrame)
             { return info.id }
         }
@@ -1684,20 +1435,6 @@ final class TilingController {
     /// tests keep the legacy nil-keyed canvas and shared grid).
     private func fallbackScreen() -> ScreenID? {
         screens().first?.id
-    }
-
-    /// Restores one window's pre-tile frame and releases its slot in its
-    /// own canvas. Shared with the per-canvas undo unwinding (the
-    /// canvas's `undo` restores a single state value).
-    private func undoRestoreWindow(_ id: WindowID, state: inout TilingState) {
-        if let record = records[id], record.preTileFrame != .zero {
-            _ = gateway.setFrame(record.handle, to: record.preTileFrame)
-        }
-        records[id] = nil
-        tracker.forget(id)
-        state.remove(window: id)
-        spaceOwnership[id] = nil
-        expanded[id] = nil
     }
 
     /// Reports which canvas the derived `state` surface describes: the
