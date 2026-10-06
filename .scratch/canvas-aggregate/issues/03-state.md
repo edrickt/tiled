@@ -1,62 +1,63 @@
 # Stage 3 - The canvas owns its state
 
-Status: TODO
-Blocked by: stage 2
+Status: DONE at `2524826` ("Move per-canvas state into TilingSpace"), master.
+Blocked by: stage 2 (DONE, `27a1562`)
 Blocks: stage 4
 
-## Goal
+## What shipped
 
-Per-canvas state stops being threaded from the coordinator. `TilingSpace` owns window records for the
-windows it manages (tiled, or expanded-but-untiled), the grid + splitter backup, and expansion.
-`spaceOwnership` is derived, not stored. `DragTracker` reads the grid through a provider and the legacy
-shared-grid twins die.
+- `TilingSpace` owns the per-canvas state: window records (`records`), expansion (`expanded`), and
+  splitter fractions (`grid`), on top of the occupancy, undo chapters, `splitterBackup`, notice, and
+  error it already held. The placement `Context` no longer threads records/nextID/isExpanded/spaceOf;
+  it carries only collaborators (gateway, frame writer, tracker, bounds, canvas key, id allocator, log).
+- The coordinator keeps the handle->id table (`windowIDs`) plus `nextID`; it resolves the id and the
+  canvas hands the window over (`attach`, which creates the stub). `spaceOf(window:)` is derived by
+  scanning canvases for the record; `spaceOwnership`, the coordinator's `expanded` map, and its
+  `records` registry are gone.
+- `DragTracker` stores no grids. It takes a `GridProvider` (read/write closures) at construction; the
+  coordinator wires it to `spaces[key]?.grid` (nil key -> `.displayless`). The legacy shared `grid`,
+  `setGrid(_:for:)`, both `resetDividers` spellings, and both `restoreDividers` spellings are deleted;
+  splitter reset/restore are canvas actions (`splitterBackup` + `grid`).
+- The non-placement actions moved in and return one `Outcome`: `untile`, `evict`, `expandToggle`
+  (plus internal `collapseExpanded`), `resetSplitters`, `restoreSplitters`, `release` (the prune
+  leave), `reassert`, `publish(rects:excluding:)`, plus `untileAll`, the drag-out leave
+  (`untileFromDrag`), and `discard` for the silent-ignore rollback. `Outcome.Result` grew
+  `.nothingToEvict` and `.expandRefused`; `Outcome.requester` died with stored ownership.
+- Prune stays coordinator-side (timer, `deadSince`, liveness probes) and calls `canvas.release(window)`
+  on confirmation: the untile leave without a frame write (forget + reflow + chapter).
+- `TilingState.plan`/`reflow` and `TilePlan` stay pure. The expanded exclusion is the canvas's internal
+  rule now: `ReflowTests.testExpandedExclusionIsTheCallersJob` died, coverage pinned by the existing
+  canvas-level `testExpandedSurvivorNeverGrows`.
+- `CONTEXT.md` canvas `_Code_` line now reads "occupancy, records, splitters, expansion, and placement
+  pipeline".
+- Mutation table: five targets re-pointed (path/text), one new mutant pins the placement write's canvas
+  key (the regression the review caught).
 
-## Scope
+## Evidence
 
-In:
-
-- Records move into the canvas. The coordinator keeps the handle->id table, creates the record stub,
-  and hands the window to the canvas. `spaceOf(window:)` becomes a derived lookup over canvases.
-- `expanded` moves into the canvas; reflow/plan exclusions become the canvas's internal rule, not
-  caller-passed `excluding:` sets (`ReflowTests.testExpandedExclusionIsTheCallersJob` inverts or dies).
-- Grid + `splitterBackup` become canvas fields. `DragTracker` takes a `GridProvider` for its session;
-  delete the tracker's legacy shared `grid` and the dead no-space twins (`resetDividers()`, the
-  single-arg `restoreDividers`).
-- Prune stays coordinator-side (timer, `deadSince`, liveness probes); on confirmation it calls
-  `canvas.release(window)`, which performs the leave (forget + reflow + chapter), the same as untile.
-- `Outcome` grows the non-placement actions, each a named method returning one `Outcome`:
-  `untile`, `evict`, `expandToggle`, `undo`, `resetSplitters`, `restoreSplitters`, `release`,
-  `reassert`, and `publish(rects:excluding:)` for the tracker's coalesced pushes (routed through the
-  shared `FrameWriter`).
-- Update `CONTEXT.md`: the canvas's `_Code_` line (`CanvasState` -> `TilingSpace`).
-- Re-point the mutation table for every target the move invalidated.
-
-Out: accessor-surface cleanup and test-file migration (stage 4). Echo bookkeeping stays in `DragTracker`
-until something forces it out; do not couple it to this stage.
-
-## Constraints
-
-- One red-green slice per action moved; behaviour preserved unless the design says otherwise.
-- The coordinator's public read surface (`state`, `grid`, `state(in:)`, ...) stays working until
-  stage 4, even if it now forwards.
-- Same gates: build clean, suite green, every mutant live and caught.
-
-## Steps
-
-1. Move records + expansion ownership into the canvas; derive `spaceOf`.
-   -> Criterion: no `records` or `expanded` storage left in the coordinator (handle->id table and record
-   stub excepted); suite green.
-2. Move grid + backup into the canvas; give the tracker a `GridProvider`; delete the legacy twins.
-   -> Criterion: `DragTracker` stores no grids; no dead no-space API; suite green.
-3. Move the remaining actions in, one slice each, all returning `Outcome`.
-   -> Criterion: coordinator methods are thin routing; suite green.
-4. Update `CONTEXT.md` code names; re-point the mutation table; run the full gate.
-   -> Criterion: build clean, suite green, every mutant caught, CONTEXT.md matches the code.
-5. `code-review` both axes; commit; update this ticket and the README table.
-   -> Criterion: findings resolved or reasoned; commit on `master` with gate evidence; statuses updated.
-
-## Evidence to record
-
-- Per-step suite results and the final build/test/mutation output.
-- The tracker's new provider interface (before/after signature).
-- Any test that had to change and why.
+- `swift build`: clean, zero warnings.
+- `swift test`: 556/556 (delta -1: two tests died by design, one added).
+  - Died: `DragTrackerTests.testResetDividersRestoresDefaults` (the tracker no longer owns splitters),
+    `ReflowTests.testExpandedExclusionIsTheCallersJob` (expanded exclusion is internal).
+  - Added: `SpaceIndependenceTests.testTileOnAHiddenSpaceDefersTheWriteAndRollsBack` (red before the
+    review fix, green after).
+  - Retargeted fixtures: `PlanExecutorTests` (records/expansion on the canvas, new `Context`),
+    `DragTrackerTests` (provider-backed splitter storage).
+- `python3 tools/mutation/mutate.py`: 50/50 caught, none STALE/INVALID/TIMEOUT.
+- The tracker's provider interface (before -> after):
+  - before: `private(set) var grid: GridLayout`, `private var grids: [TilingSpaceKey: GridLayout]`,
+    `grid(for:)`, `setGrid(_:for:)`, `resetDividers()` / `resetDividers(for:)`,
+    `restoreDividers(_:)` / `restoreDividers(_:for:)`.
+  - after: `struct GridProvider { var grid: (TilingSpaceKey?) -> GridLayout; var setGrid: (GridLayout, TilingSpaceKey?) -> Void }`,
+    injected at init; the tracker keeps no grid state, and `grid(for:)` reads the provider.
+- `code-review` on both axes against `75dfe34`:
+  - Standards: fixed the duplicated leave tails (one `leave`), the repeated load/store canvas pattern
+    (`mutateSpace` at every site), the duplicated refusal -> feedback mapping (`announce`), the
+    `currentID` and tracker `store` middle men; `discard` lost its unused `Outcome`; `applyLayout` lost
+    its dead `on:` default. Top-level docs refreshed.
+  - Spec: found and fixed one real defect: placement writes had dropped their canvas key, scoping every
+    tile/swap/re-house write to `.displayless` and disarming the off-Space deferral; pinned by the new
+    red-then-green test and a new mutant. Two spec lines are reasoned deviations: `reflow` keeps an
+    `excluding:` parameter because its only caller is `settle` inside the canvas (the expanded half is
+    internal), and `undo` returns `UndoOutcome` because one chapter spans canvases, so its narration
+    cannot ride the per-action `Outcome`.
