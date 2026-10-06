@@ -1,14 +1,16 @@
 import XCTest
 @testable import tiled
 
-/// PlanExecutor through its own interface: branch execution (tile,
-/// switch), refusal rollback, restore-failure precedence, and undo, with
-/// a fake gateway and a real DragTracker. No controller, no AX.
+/// `TilingSpace` through its placement interface: branch execution
+/// (tile, switch), refusal rollback, restore-failure precedence, and
+/// undo, with a fake gateway and a real DragTracker. No controller, no
+/// AX. (Named for the module it replaced; stage 4 dissolves it into the
+/// canvas's own suite.)
 final class PlanExecutorTests: XCTestCase {
     private var gateway: FakeWindowGateway!
     private var tracker: DragTracker!
-    private var executor: PlanExecutor!
-    private var state: TilingState!
+    private var space: TilingSpace!
+    private var writer: FrameWriter!
     private var records: [WindowID: WindowRecord]!
     private var handles: [WindowID: WindowHandle]!
     private var nextID: WindowID!
@@ -20,23 +22,23 @@ final class PlanExecutorTests: XCTestCase {
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
-        state = TilingState()
+        space = TilingSpace()
         records = [:]
         handles = [:]
         nextID = 1
         canvasVisible = true
         tracker = DragTracker(
             context: DragTracker.Context(
-                slotOf: { [weak self] in self?.state.slot(of: $0) ?? nil },
+                slotOf: { [weak self] in self?.space.state.slot(of: $0) ?? nil },
                 frameOf: { [weak self] in
                     guard let self, let handle = self.handles[$0] else { return nil }
                     return self.gateway.frame(of: handle)
                         ?? self.records[$0]?.preTileFrame
                 },
                 boundsOf: { $0 },
-                occupants: { [weak self] in self?.state.occupants ?? [:] }),
+                occupants: { [weak self] in self?.space.state.occupants ?? [:] }),
             apply: { _, _ in 0 })
-        let writer = FrameWriter(
+        writer = FrameWriter(
             gateway: gateway,
             isVisible: { [weak self] _ in self?.canvasVisible ?? true },
             markStale: { _ in },
@@ -45,7 +47,21 @@ final class PlanExecutorTests: XCTestCase {
             },
             scheduleCheck: { _, _ in },
             log: { _ in })
-        executor = PlanExecutor(gateway: gateway, frameWriter: writer)
+    }
+
+    /// The coordinator-side values and collaborators one placement needs.
+    private func context(
+        isExpanded: @escaping (WindowID) -> Bool = { _ in false }
+    ) -> TilingSpace.Context {
+        TilingSpace.Context(
+            records: records,
+            nextID: nextID,
+            gateway: gateway,
+            frameWriter: writer,
+            tracker: tracker,
+            boundsOf: { $0 },
+            space: .displayless,
+            isExpanded: isExpanded)
     }
 
     @discardableResult
@@ -58,34 +74,36 @@ final class PlanExecutorTests: XCTestCase {
         return id
     }
 
-    private func run(
-        _ decision: TilePlan, requester: WindowID, slot: Slot,
-        isExpanded: @escaping (WindowID) -> Bool = { _ in false }
-    ) -> (PlanExecutor.Outcome, TilingState, [WindowID: WindowRecord], WindowID) {
-        executor.execute(
-            decision: decision, requester: requester, slot: slot,
-            state: state, records: records, nextID: nextID,
-            tracker: tracker,
-            boundsOf: { $0 },
-            observe: { [weak self] id in
-                guard let handle = self?.records[id]?.handle else { return }
-                self?.gateway.observe(handle, onChange: {}, onDestroyed: {})
-            },
-            isExpanded: isExpanded)
-    }
-
-    private func commit(_ result: (PlanExecutor.Outcome, TilingState, [WindowID: WindowRecord], WindowID))
-        -> PlanExecutor.Outcome
-    {
-        state = result.1
-        records = result.2
-        nextID = result.3
-        // Sync the handle map for ids the executor created (undo restores
-        // pruned handles under fresh ids).
+    /// Reads the threaded context back out after a canvas call, exactly
+    /// as the coordinator does; syncs the handle map for ids the canvas
+    /// created (undo restores pruned handles under fresh ids).
+    private func sync(_ context: TilingSpace.Context) {
+        records = context.records
+        nextID = context.nextID
         for (id, record) in records where handles[id] == nil {
             handles[id] = record.handle
         }
-        return result.0
+    }
+
+    /// Runs one decision through the canvas.
+    private func run(
+        _ decision: TilePlan, requester: WindowID, slot: Slot,
+        isExpanded: @escaping (WindowID) -> Bool = { _ in false }
+    ) -> TilingSpace.Outcome {
+        var context = context(isExpanded: isExpanded)
+        let outcome = space.execute(
+            decision: decision, requester: requester, slot: slot, context: &context)
+        sync(context)
+        return outcome
+    }
+
+    private func runUndo(
+        snapshot: [EvictedWindow], requester: WindowID?
+    ) -> TilingSpace.UndoOutcome {
+        var context = context()
+        let result = space.undo(snapshot: snapshot, requester: requester, context: &context)
+        sync(context)
+        return result
     }
 
     // MARK: Tile
@@ -95,10 +113,10 @@ final class PlanExecutorTests: XCTestCase {
         let initialFrame = gateway.frame(of: handles[id]!)!
         let expected = tracker.grid.rect(for: .topLeft, in: initialFrame)
 
-        let outcome = commit(run(.tile(evicting: []), requester: id, slot: .topLeft))
+        _ = run(.tile(evicting: []), requester: id, slot: .topLeft)
 
-        XCTAssertNil(outcome.error)
-        XCTAssertEqual(state.slot(of: id), .topLeft)
+        XCTAssertNil(space.error)
+        XCTAssertEqual(space.state.slot(of: id), .topLeft)
         XCTAssertNotEqual(records[id]?.preTileFrame, .zero)
         XCTAssertEqual(
             gateway.frame(of: handles[id]!), expected,
@@ -109,23 +127,23 @@ final class PlanExecutorTests: XCTestCase {
         let id = addWindow()
         gateway.refuseNextWrites(handles[id]!)
 
-        let outcome = commit(run(.tile(evicting: []), requester: id, slot: .topLeft))
+        let outcome = run(.tile(evicting: []), requester: id, slot: .topLeft)
 
-        XCTAssertNil(state.slot(of: id), "occupancy rolled back so state and screen agree")
-        XCTAssertNotNil(outcome.error)
-        XCTAssertNotNil(outcome.feedback)
+        XCTAssertNil(space.state.slot(of: id), "occupancy rolled back so state and screen agree")
+        XCTAssertNotNil(space.error)
+        XCTAssertEqual(outcome.result, .refused(windowName: "TestApp"))
     }
 
     func testTileOnAHiddenCanvasDefersTheWriteAndRollsBack() {
         let id = addWindow()
         canvasVisible = false
 
-        let outcome = commit(run(.tile(evicting: []), requester: id, slot: .topLeft))
+        let outcome = run(.tile(evicting: []), requester: id, slot: .topLeft)
 
         XCTAssertTrue(gateway.writes.isEmpty, "a hidden canvas is never written blind")
-        XCTAssertNil(state.slot(of: id), "the placement rolls back rather than diverge")
-        XCTAssertNotNil(outcome.error)
-        XCTAssertNotNil(outcome.feedback)
+        XCTAssertNil(space.state.slot(of: id), "the placement rolls back rather than diverge")
+        XCTAssertNotNil(space.error)
+        XCTAssertEqual(outcome.result, .refused(windowName: "TestApp"))
     }
 
     func testEvictionRestoresPreTileFrame() {
@@ -133,13 +151,13 @@ final class PlanExecutorTests: XCTestCase {
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
         gateway.setFrame(handles[a]!, to: original)
         records[a]?.preTileFrame = original
-        state.commit(window: a, into: .topLeft)
+        space.state.commit(window: a, into: .topLeft)
         let b = addWindow()
 
-        let outcome = commit(run(.tile(evicting: [a]), requester: b, slot: .topLeft))
+        _ = run(.tile(evicting: [a]), requester: b, slot: .topLeft)
 
-        XCTAssertNil(outcome.error)
-        XCTAssertNil(state.slot(of: a))
+        XCTAssertNil(space.error)
+        XCTAssertNil(space.state.slot(of: a))
         XCTAssertEqual(
             gateway.frame(of: handles[a]!), original,
             "eviction writes the pre-tile frame back to the window")
@@ -147,30 +165,31 @@ final class PlanExecutorTests: XCTestCase {
 
     func testPlainTileEvictionNoticesAndSnapshotsForUndo() {
         let a = addWindow()
-        state.commit(window: a, into: .topLeft)
+        space.state.commit(window: a, into: .topLeft)
         let b = addWindow()
 
-        let outcome = commit(run(.tile(evicting: [a]), requester: b, slot: .topLeft))
+        _ = run(.tile(evicting: [a]), requester: b, slot: .topLeft)
 
         // Ordinary eviction gets the same narrative as a layout switch:
         // a notice naming the displaced app (not a count), plus the
         // shared one-step undo.
         XCTAssertEqual(
-            outcome.notice,
+            space.notice,
             "TestApp went back to where it was. "
                 + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
-        XCTAssertNotNil(outcome.snapshot, "the eviction is undoable like a switch")
-        XCTAssertEqual(outcome.snapshot?.first?.slot, .topLeft)
-        XCTAssertEqual(outcome.requester, b)
+        let chapter = space.undoStack.last
+        XCTAssertNotNil(chapter, "the eviction is undoable like a switch")
+        XCTAssertEqual(chapter?.snapshot.first?.slot, .topLeft)
+        XCTAssertEqual(chapter?.requester, b)
     }
 
     func testPlainTileWithoutEvictionHasNoNoticeOrSnapshot() {
         let b = addWindow()
 
-        let outcome = commit(run(.tile(evicting: []), requester: b, slot: .topLeft))
+        _ = run(.tile(evicting: []), requester: b, slot: .topLeft)
 
-        XCTAssertNil(outcome.notice, "nothing was displaced, nothing to narrate")
-        XCTAssertNil(outcome.snapshot)
+        XCTAssertNil(space.notice, "nothing was displaced, nothing to narrate")
+        XCTAssertTrue(space.undoStack.isEmpty)
     }
 
     // MARK: Swap
@@ -180,18 +199,18 @@ final class PlanExecutorTests: XCTestCase {
         // third with the right two-thirds window; nobody is untiled.
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .sixthTopLeft)
-        state.commit(window: b, into: .sixthsRightTwoThirds)
+        space.state.commit(window: a, into: .sixthTopLeft)
+        space.state.commit(window: b, into: .sixthsRightTwoThirds)
         let aBounds = gateway.frame(of: handles[a]!)!
         let bBounds = gateway.frame(of: handles[b]!)!
 
-        let outcome = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+        let outcome = run(.swap(displaced: b), requester: a, slot: .sixthMiddle)
 
-        XCTAssertNil(outcome.error)
-        XCTAssertNil(outcome.feedback)
-        XCTAssertEqual(state.slot(of: a), .sixthMiddle)
+        XCTAssertNil(space.error)
+        XCTAssertEqual(outcome.result, .placed)
+        XCTAssertEqual(space.state.slot(of: a), .sixthMiddle)
         XCTAssertEqual(
-            state.slot(of: b), .sixthTopLeft,
+            space.state.slot(of: b), .sixthTopLeft,
             "the displaced window takes the tile the requester vacated")
         XCTAssertEqual(
             gateway.frame(of: handles[a]!),
@@ -210,10 +229,10 @@ final class PlanExecutorTests: XCTestCase {
         gateway.setFrame(handles[b]!, to: bFrame)
         records[a]?.preTileFrame = aFrame
         records[b]?.preTileFrame = bFrame
-        state.commit(window: a, into: .sixthTopLeft)
-        state.commit(window: b, into: .sixthsRightTwoThirds)
+        space.state.commit(window: a, into: .sixthTopLeft)
+        space.state.commit(window: b, into: .sixthsRightTwoThirds)
 
-        _ = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+        _ = run(.swap(displaced: b), requester: a, slot: .sixthMiddle)
 
         XCTAssertEqual(records[a]?.preTileFrame, aFrame)
         XCTAssertEqual(records[b]?.preTileFrame, bFrame)
@@ -222,30 +241,30 @@ final class PlanExecutorTests: XCTestCase {
     func testSwapRefusalByDisplacedMovesNothing() {
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .sixthTopLeft)
-        state.commit(window: b, into: .sixthsRightTwoThirds)
+        space.state.commit(window: a, into: .sixthTopLeft)
+        space.state.commit(window: b, into: .sixthsRightTwoThirds)
         gateway.refuseNextWrites(handles[b]!)
 
-        let outcome = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+        _ = run(.swap(displaced: b), requester: a, slot: .sixthMiddle)
 
-        XCTAssertNotNil(outcome.error)
-        XCTAssertEqual(state.slot(of: a), .sixthTopLeft, "the requester stays put")
-        XCTAssertEqual(state.slot(of: b), .sixthsRightTwoThirds, "the displaced window stays put")
-        XCTAssertNil(outcome.snapshot)
+        XCTAssertNotNil(space.error)
+        XCTAssertEqual(space.state.slot(of: a), .sixthTopLeft, "the requester stays put")
+        XCTAssertEqual(space.state.slot(of: b), .sixthsRightTwoThirds, "the displaced window stays put")
+        XCTAssertTrue(space.undoStack.isEmpty)
     }
 
     func testSwapRefusalByRequesterRollsDisplacedBack() {
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .sixthTopLeft)
-        state.commit(window: b, into: .sixthsRightTwoThirds)
+        space.state.commit(window: a, into: .sixthTopLeft)
+        space.state.commit(window: b, into: .sixthsRightTwoThirds)
         gateway.refuseNextWrites(handles[a]!)
 
-        let outcome = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+        _ = run(.swap(displaced: b), requester: a, slot: .sixthMiddle)
 
-        XCTAssertNotNil(outcome.error)
-        XCTAssertEqual(state.slot(of: a), .sixthTopLeft)
-        XCTAssertEqual(state.slot(of: b), .sixthsRightTwoThirds, "rolled back to its own tile")
+        XCTAssertNotNil(space.error)
+        XCTAssertEqual(space.state.slot(of: a), .sixthTopLeft)
+        XCTAssertEqual(space.state.slot(of: b), .sixthsRightTwoThirds, "rolled back to its own tile")
         // The displaced window's first write succeeded, so it visibly sits
         // in the requester's vacated tile unless the rollback writes it
         // home. State alone cannot see that: an unwritten rollback leaves
@@ -262,17 +281,17 @@ final class PlanExecutorTests: XCTestCase {
     func testSwapNoticesAndSnapshotsBothForUndo() {
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .sixthTopLeft)
-        state.commit(window: b, into: .sixthsRightTwoThirds)
+        space.state.commit(window: a, into: .sixthTopLeft)
+        space.state.commit(window: b, into: .sixthsRightTwoThirds)
 
-        let outcome = commit(run(.swap(displaced: b), requester: a, slot: .sixthMiddle))
+        _ = run(.swap(displaced: b), requester: a, slot: .sixthMiddle)
 
         XCTAssertEqual(
-            outcome.notice,
+            space.notice,
             "TestApp moved to Top Left Sixth to make room. "
                 + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
-        XCTAssertEqual(outcome.requester, a)
-        let snapshot = try! XCTUnwrap(outcome.snapshot)
+        XCTAssertEqual(space.undoStack.last?.requester, a)
+        let snapshot = try! XCTUnwrap(space.undoStack.last?.snapshot)
         XCTAssertEqual(snapshot.count, 2, "both windows are undoable")
         XCTAssertTrue(
             snapshot.contains { $0.slot == .sixthsRightTwoThirds },
@@ -290,22 +309,20 @@ final class PlanExecutorTests: XCTestCase {
     func testDegenerateSwapNeverRehousesAnExpandedEvictee() {
         let blocker = addWindow()
         let requester = addWindow()
-        state.commit(window: blocker, into: .topLeft)
+        space.state.commit(window: blocker, into: .topLeft)
 
         // The requester holds no slot, so `.swap` is degenerate; the top
         // left overlaps the left half, so the blocker is evicted; and the
         // cells left free are exactly the right half, which is the slot a
         // re-house would have used.
-        let outcome = commit(
-            run(
-                .swap(displaced: blocker), requester: requester, slot: .leftHalf,
-                isExpanded: { $0 == blocker }))
+        _ = run(
+            .swap(displaced: blocker), requester: requester, slot: .leftHalf,
+            isExpanded: { $0 == blocker })
 
         XCTAssertNil(
-            outcome.rehoused,
+            space.state.slot(of: blocker),
             "an expanded evictee is never re-housed, degenerate swap or not")
-        XCTAssertNil(state.slot(of: blocker), "the expanded blocker untangles")
-        XCTAssertEqual(state.slot(of: requester), .leftHalf)
+        XCTAssertEqual(space.state.slot(of: requester), .leftHalf)
     }
 
     /// The same shape without the expansion: the lone evictee is re-housed
@@ -314,14 +331,12 @@ final class PlanExecutorTests: XCTestCase {
     func testDegenerateSwapRehousesAnUnexpandedEvictee() {
         let blocker = addWindow()
         let requester = addWindow()
-        state.commit(window: blocker, into: .topLeft)
+        space.state.commit(window: blocker, into: .topLeft)
 
-        let outcome = commit(
-            run(.swap(displaced: blocker), requester: requester, slot: .leftHalf))
+        _ = run(.swap(displaced: blocker), requester: requester, slot: .leftHalf)
 
-        XCTAssertEqual(outcome.rehoused, blocker, "the lone evictee stays tiled")
-        XCTAssertEqual(state.slot(of: blocker), .rightHalf)
-        XCTAssertEqual(state.slot(of: requester), .leftHalf)
+        XCTAssertEqual(space.state.slot(of: blocker), .rightHalf, "the lone evictee stays tiled")
+        XCTAssertEqual(space.state.slot(of: requester), .leftHalf)
     }
 
     // MARK: Notice copy
@@ -329,14 +344,14 @@ final class PlanExecutorTests: XCTestCase {
     func testSwitchNoticeNamesLayoutCountAndUndoOffer() {
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
+        space.state.commit(window: a, into: .topLeft)
+        space.state.commit(window: b, into: .topRight)
 
-        let outcome = commit(run(
-            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
+        _ = run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft)
 
         XCTAssertEqual(
-            outcome.notice,
+            space.notice,
             "Switched to Sixths \u{00B7} 1 window untiled. "
                 + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
     }
@@ -346,35 +361,35 @@ final class PlanExecutorTests: XCTestCase {
     func testSwitchSnapshotsEvictedAndNotices() {
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
+        space.state.commit(window: a, into: .topLeft)
+        space.state.commit(window: b, into: .topRight)
 
-        let outcome = commit(run(
-            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
+        _ = run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft)
 
-        XCTAssertNil(outcome.error)
-        XCTAssertNotNil(outcome.notice)
-        XCTAssertEqual(outcome.snapshot?.count, 1, "requester moves, not evicted")
-        XCTAssertEqual(outcome.requester, b)
-        XCTAssertEqual(state.slot(of: b), .sixthLeft)
-        XCTAssertNil(state.slot(of: a), "evicted window restored (untiled)")
+        XCTAssertNil(space.error)
+        XCTAssertNotNil(space.notice)
+        XCTAssertEqual(space.undoStack.last?.snapshot.count, 1, "requester moves, not evicted")
+        XCTAssertEqual(space.undoStack.last?.requester, b)
+        XCTAssertEqual(space.state.slot(of: b), .sixthLeft)
+        XCTAssertNil(space.state.slot(of: a), "evicted window restored (untiled)")
     }
 
     func testRestoreFailureLosesToNothingButWinsOverSilence() {
         let a = addWindow()
-        state.commit(window: a, into: .topLeft)
+        space.state.commit(window: a, into: .topLeft)
         // Poison a's pre-tile frame restore: the gateway refuses the write.
         records[a]?.preTileFrame = CGRect(x: 10, y: 10, width: 100, height: 100)
         gateway.refuseNextWrites(handles[a]!)
         let b = addWindow()
 
-        let outcome = commit(run(
-            .switchLayout(evicting: [a]), requester: b, slot: .sixthLeft))
+        _ = run(
+            .switchLayout(evicting: [a]), requester: b, slot: .sixthLeft)
 
-        XCTAssertNotNil(outcome.error, "failed restore surfaces instead of silence")
-        XCTAssertNil(outcome.snapshot, "no undo when the switch didn't cleanly land")
-        XCTAssertNil(outcome.notice)
-        XCTAssertEqual(state.slot(of: b), .sixthLeft, "requester still lands in its slot")
+        XCTAssertNotNil(space.error, "failed restore surfaces instead of silence")
+        XCTAssertTrue(space.undoStack.isEmpty, "no undo when the switch didn't cleanly land")
+        XCTAssertNil(space.notice)
+        XCTAssertEqual(space.state.slot(of: b), .sixthLeft, "requester still lands in its slot")
     }
 
     // MARK: Undo
@@ -382,29 +397,20 @@ final class PlanExecutorTests: XCTestCase {
     func testUndoRestoresRequesterAndEvicted() {
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        let outcome = commit(run(
-            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
-        guard let snapshot = outcome.snapshot else {
+        space.state.commit(window: a, into: .topLeft)
+        space.state.commit(window: b, into: .topRight)
+        _ = run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft)
+        guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")
         }
 
-        let (notice, error, newState, newRecords, newNextID) = executor.undo(
-            snapshot: snapshot, requester: outcome.requester,
-            state: state, records: records, nextID: nextID, tracker: tracker,
-            boundsOf: { $0 },
-            observe: { [weak self] id in
-                guard let handle = self?.records[id]?.handle else { return }
-                self?.gateway.observe(handle, onChange: {}, onDestroyed: {})
-            })
-        state = newState
-        records = newRecords
-        nextID = newNextID
+        let result = runUndo(snapshot: snapshot, requester: b)
 
-        XCTAssertEqual(notice, "Undid displacement \u{00B7} 1 window restored.")
-        XCTAssertNil(error)
-        XCTAssertEqual(state.occupant(of: .topLeft).flatMap { records[$0]?.handle }, handles[a],
+        XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 1 window restored.")
+        XCTAssertNil(result.error)
+        XCTAssertEqual(
+            space.state.occupant(of: .topLeft).flatMap { records[$0]?.handle }, handles[a],
             "evicted window returns to its slot (under a fresh id; its record was pruned at switch)")
     }
 
@@ -417,24 +423,21 @@ final class PlanExecutorTests: XCTestCase {
         // handle is busy instead of dead, so the restore lands.
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        let outcome = commit(run(
-            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
-        guard let snapshot = outcome.snapshot else {
+        space.state.commit(window: a, into: .topLeft)
+        space.state.commit(window: b, into: .topRight)
+        _ = run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft)
+        guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")
         }
         gateway.busy.insert(handles[a]!)
 
-        let result = executor.undo(
-            snapshot: snapshot, requester: outcome.requester,
-            state: state, records: records, nextID: nextID, tracker: tracker,
-            boundsOf: { $0 }, observe: { _ in })
+        let result = runUndo(snapshot: snapshot, requester: b)
 
         XCTAssertNil(result.error)
         XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 1 window restored.")
         XCTAssertEqual(
-            result.state.occupant(of: .topLeft).flatMap { result.3[$0]?.handle },
+            space.state.occupant(of: .topLeft).flatMap { records[$0]?.handle },
             handles[a],
             "unknown liveness still restores the window to its slot")
     }
@@ -442,24 +445,21 @@ final class PlanExecutorTests: XCTestCase {
     func testUndoSkipsDeadHandlesAndReports() {
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        let outcome = commit(run(
-            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
-        guard let snapshot = outcome.snapshot else {
+        space.state.commit(window: a, into: .topLeft)
+        space.state.commit(window: b, into: .topRight)
+        _ = run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft)
+        guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")
         }
         XCTAssertEqual(snapshot.count, 1, "requester moves, not evicted")
         gateway.kill(handles[a]!)
 
-        let result = executor.undo(
-            snapshot: snapshot, requester: outcome.requester,
-            state: state, records: records, nextID: nextID, tracker: tracker,
-            boundsOf: { $0 }, observe: { _ in })
+        let result = runUndo(snapshot: snapshot, requester: b)
 
         XCTAssertNil(result.notice)
         XCTAssertEqual(result.error, "Couldn't restore the evicted windows.")
-        XCTAssertTrue(result.state.occupants.isEmpty,
+        XCTAssertTrue(space.state.occupants.isEmpty,
             "dead evictee skipped; requester restored (untiled)")
     }
 
@@ -467,20 +467,17 @@ final class PlanExecutorTests: XCTestCase {
         let a = addWindow()
         let b = addWindow()
         let c = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
+        space.state.commit(window: a, into: .topLeft)
+        space.state.commit(window: b, into: .topRight)
 
-        let outcome = commit(run(
-            .switchLayout(evicting: [a, b, c]), requester: c, slot: .sixthLeft))
-        guard let snapshot = outcome.snapshot else {
+        _ = run(
+            .switchLayout(evicting: [a, b, c]), requester: c, slot: .sixthLeft)
+        guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")
         }
         XCTAssertEqual(snapshot.count, 2)
 
-        let result = executor.undo(
-            snapshot: snapshot, requester: outcome.requester,
-            state: state, records: records, nextID: nextID, tracker: tracker,
-            boundsOf: { $0 }, observe: { _ in })
+        let result = runUndo(snapshot: snapshot, requester: c)
 
         XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 2 windows restored.")
     }
@@ -488,36 +485,33 @@ final class PlanExecutorTests: XCTestCase {
     func testUndoRetileRefusalDropsTheWindow() {
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        let outcome = commit(run(
-            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
-        guard let snapshot = outcome.snapshot else {
+        space.state.commit(window: a, into: .topLeft)
+        space.state.commit(window: b, into: .topRight)
+        _ = run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft)
+        guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")
         }
         gateway.refuseNextWrites(handles[a]!)
 
-        let result = executor.undo(
-            snapshot: snapshot, requester: outcome.requester,
-            state: state, records: records, nextID: nextID, tracker: tracker,
-            boundsOf: { $0 }, observe: { _ in })
+        let result = runUndo(snapshot: snapshot, requester: b)
 
         XCTAssertEqual(result.error, "Couldn't restore the evicted windows.")
-        XCTAssertTrue(result.state.occupants.isEmpty,
+        XCTAssertTrue(space.state.occupants.isEmpty,
             "a refused re-tile releases the slot so state and screen agree")
         XCTAssertFalse(
-            result.records.values.contains { $0.handle == handles[a] },
+            records.values.contains { $0.handle == handles[a] },
             "the refused window's fresh record is dropped, not left dangling")
     }
 
     func testUndoRetilesEvictedUnderCurrentGrid() {
         let a = addWindow()
         let b = addWindow()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .topRight)
-        let outcome = commit(run(
-            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft))
-        guard let snapshot = outcome.snapshot else {
+        space.state.commit(window: a, into: .topLeft)
+        space.state.commit(window: b, into: .topRight)
+        _ = run(
+            .switchLayout(evicting: [a, b]), requester: b, slot: .sixthLeft)
+        guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")
         }
         // At undo time a's live frame is its restored pre-tile frame; the
@@ -525,14 +519,7 @@ final class PlanExecutorTests: XCTestCase {
         let aRestoredFrame = gateway.frame(of: handles[a]!)!
         let expected = tracker.grid.rect(for: .topLeft, in: aRestoredFrame)
 
-        let result = executor.undo(
-            snapshot: snapshot, requester: outcome.requester,
-            state: state, records: records, nextID: nextID, tracker: tracker,
-            boundsOf: { $0 },
-            observe: { [weak self] id in
-                guard let handle = self?.records[id]?.handle else { return }
-                self?.gateway.observe(handle, onChange: {}, onDestroyed: {})
-            })
+        let result = runUndo(snapshot: snapshot, requester: b)
 
         XCTAssertNil(result.error)
         XCTAssertEqual(

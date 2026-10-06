@@ -70,19 +70,6 @@ struct ScreenInfo {
     var displayID: CGDirectDisplayID = 0
 }
 
-/// One tiling canvas's state: its occupancy, undo chapters, transient
-/// notices, and splitter backup. The grid itself lives in the tracker
-/// (keyed by the same `TilingSpaceKey`); this owns everything else so
-/// each display's each Space tiles, switches, drags, and undoes
-/// independently.
-struct CanvasState {
-    var state = TilingState()
-    var undoStack: [(snapshot: [EvictedWindow], requester: WindowID?)] = []
-    var splitterBackup: GridLayout?
-    var notice: String?
-    var error: String?
-}
-
 /// Provides the current display set. The controller calls it on every
 /// tiling action (never cached), so replugs and rearranges take effect
 /// without an observer: a monitor's state appears on first use.

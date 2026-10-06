@@ -1,15 +1,15 @@
 [
  [
-  "TilingController.swift",
+  "TilingSpace.swift",
   "undo depth cap shrunk 5 -> 2",
-  "fileprivate static let undoDepth = 5",
-  "fileprivate static let undoDepth = 2"
+  "static let undoDepth = 5",
+  "static let undoDepth = 2"
  ],
  [
-  "PlanExecutor.swift",
+  "TilingSpace.swift",
   "swap write-home deleted (screen/state diverge)",
-  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            applyLayout(\n                for: displaced, state: state, records: records,\n                tracker: execution.tracker, boundsOf: execution.boundsOf, space: execution.space)\n            log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
-  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")"
+  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            applyLayout(\n                for: displaced, state: state, context: context, space: context.space)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
+  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")"
  ],
  [
   "TilingController.swift",
@@ -18,7 +18,7 @@
   "self.space(for: space)?.state.occupants ?? [:]"
  ],
  [
-  "TilingController.swift",
+  "TilingSpace.swift",
   "refusal message always plural",
   "        count == 1\n            ? \"Couldn't move that window: the app refused to resize it.\"\n            : \"Couldn't move \\(count) windows: an app refused to resize.\"",
   "        false\n            ? \"Couldn't move that window: the app refused to resize it.\"\n            : \"Couldn't move \\(count) windows: an app refused to resize.\""
@@ -30,10 +30,10 @@
   "guard let current = slot(of: evictee) else { return nil }"
  ],
  [
-  "TilingController.swift",
+  "TilingSpace.swift",
   "reflow rollback skipped (state keeps grown slot)",
-  "            var rolled = spaceState(for: space)\n            for move in moves { rolled.commit(window: move.window, into: move.from) }\n            setSpaceState(rolled, for: space)",
-  "            var rolled = spaceState(for: space)\n            for move in moves { rolled.commit(window: move.window, into: move.from) }"
+  "            var rolled = state\n            for move in moves { rolled.commit(window: move.window, into: move.from) }\n            state = rolled",
+  "            var rolled = state\n            for move in moves { rolled.commit(window: move.window, into: move.from) }"
  ],
  [
   "DragTracker.swift",
@@ -114,19 +114,19 @@
   "guard timestamp.timeIntervalSince(first) >= deathConfirmation + 60 else {"
  ],
  [
-  "PlanExecutor.swift",
+  "TilingSpace.swift",
   "failed displaced swap write is NOT rolled back",
-  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")",
-  "            log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")"
+  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            context.log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")",
+  "            context.log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")"
  ],
  [
-  "PlanExecutor.swift",
+  "TilingSpace.swift",
   "rehouse ignores expanded-window exclusion",
-  "        if evicted.count == 1, !execution.isExpanded(evicted[0]),",
+  "        if evicted.count == 1, !context.isExpanded(evicted[0]),",
   "        if evicted.count == 1,"
  ],
  [
-  "PlanExecutor.swift",
+  "TilingSpace.swift",
   "reflowFreed drops the vacated tile",
   "            if let previous {\n                freed.formUnion(previous.cells)\n            }",
   "            if false, let previous {\n                freed.formUnion(previous.cells)\n            }"
@@ -246,10 +246,10 @@
   "        surfaceSpace = focusedSpaceKey()"
  ],
  [
-  "PlanExecutor.swift",
+  "TilingSpace.swift",
   "degenerate swap fallback forgets which windows are expanded (re-houses an expanded evictee)",
-  "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, working: Working(state: state, records: records),\n                execution: execution)",
-  "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, working: Working(state: state, records: records),\n                execution: Execution(\n                    tracker: execution.tracker, boundsOf: execution.boundsOf,\n                    observe: execution.observe, spaceOf: execution.spaceOf,\n                    isExpanded: { _ in false }, space: execution.space))"
+  "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: &context)",
+  "            context.isExpanded = { _ in false }\n            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: &context)"
  ],
  [
   "LiveWindowGateway.swift",

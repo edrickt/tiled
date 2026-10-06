@@ -19,7 +19,7 @@ _Avoid_: desktop, workspace, virtual desktop
 **Tiling space (canvas)**:
 One display's one Mission Control Space: its occupancy, layout, splitters, undo chapters, and notices. Tiling acts on the requesting window's canvas; menus aggregate the visible canvases (the manage list groups per display). A canvas whose Space id the OS withholds falls back to per-display state.
 _Avoid_: monitor space (prose for the display dimension only), screen (AppKit type), desktop
-_Code_: `CanvasState` (one canvas's state), `TilingSpaceKey` (display + Space identity)
+_Code_: `TilingSpace` (one canvas's state and placement pipeline), `TilingSpaceKey` (display + Space identity)
 
 **Cell**:
 An atomic unit of the shared 4×2 refinement both layouts are built from; overlap is cell-set intersection.
@@ -62,5 +62,5 @@ The controller's opaque reference to a managed window, issued by the window gate
 _Avoid_: window id (that's the pure-state key), element
 
 **Plan execution**:
-Committing a decided plan (tile or switch): snapshot, restore, place, rollback, and notice logic. Owned by the plan executor; the controller keeps focus, pruning, and dispatch.
+Committing a decided plan (tile or switch): snapshot, restore, place, rollback, and notice logic. Owned by the tiling space's placement pipeline; the controller keeps focus, pruning, and dispatch.
 _Avoid_: placement (which is only the place step), commit

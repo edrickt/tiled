@@ -297,7 +297,17 @@ final class DragTracker {
     /// Rect for `id`'s slot under its canvas's grid. Nil when the window
     /// has no slot (untiled) or no readable frame.
     func rect(for id: WindowID) -> CGRect? {
-        guard let slot = context.slotOf(id), let frame = context.frameOf(id) else { return nil }
+        guard let slot = context.slotOf(id) else { return nil }
+        return rect(for: id, slot: slot)
+    }
+
+    /// Rect for `id` in `slot` (not necessarily its current one) under
+    /// its canvas's grid. The state that names a prospective slot lives
+    /// in the caller's canvas, which is why the slot comes in instead of
+    /// being read back from the tracker's session. Nil when the window
+    /// has no readable frame.
+    func rect(for id: WindowID, slot: Slot) -> CGRect? {
+        guard let frame = context.frameOf(id) else { return nil }
         return grid(for: context.spaceOf(id)).rect(for: slot, in: context.boundsOf(frame))
     }
 
