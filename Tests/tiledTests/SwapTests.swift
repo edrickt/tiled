@@ -1,4 +1,3 @@
-import AppKit
 import XCTest
 @testable import tiled
 
@@ -7,13 +6,27 @@ import XCTest
 /// example end to end: the request is honored, the displaced window
 /// lands in the vacated tile, and undo swaps back.
 final class SwapTests: XCTestCase {
+    /// Deterministic display: written rects are checked against this
+    /// rect, never the host Mac's screen.
+    private static let screen = ScreenInfo(
+        id: ScreenID(rawValue: 1),
+        frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        name: "Display 1")
+
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
+
+    /// The canvas the test's single display tiles onto: reads go through
+    /// the same accessor actions do.
+    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
 
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
-        controller = TilingController(gateway: gateway, pruneInterval: nil)
+        controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { [Self.screen] })
     }
 
     /// The report's setup: top-left and bottom-left sixths plus the right
@@ -32,10 +45,8 @@ final class SwapTests: XCTestCase {
     }
 
     private func expectedRect(_ slot: Slot, for handle: WindowHandle) -> CGRect {
-        let frame = gateway.frame(of: handle)!
-        let screens = NSScreen.screens
-        let index = TilingController.owningScreenIndex(frames: screens.map(\.frame), for: frame) ?? 0
-        return controller.grid.rect(for: slot, in: screens[index].visibleFrame)
+        controller.canvas(for: Self.screen.id).grid.rect(
+            for: slot, in: Self.screen.visibleFrame)
     }
 
     func testSwapHonorsTileRequestAndMovesDisplacedIntoVacatedTile() {
@@ -47,12 +58,12 @@ final class SwapTests: XCTestCase {
         gateway.focused = a
         controller.handle(slot: .sixthMiddle)
 
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthMiddle)
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthMiddle)
         XCTAssertEqual(
-            controller.state.slot(of: 3), .sixthTopLeft,
+            canvas.state.slot(of: 3), .sixthTopLeft,
             "the displaced window takes the requester's vacated tile")
-        XCTAssertEqual(controller.state.slot(of: 2), .sixthBottomLeft, "bystanders stay put")
-        XCTAssertEqual(controller.state.tiledWindows.count, 3, "nobody was untiled")
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthBottomLeft, "bystanders stay put")
+        XCTAssertEqual(canvas.state.tiledWindows.count, 3, "nobody was untiled")
         XCTAssertEqual(
             gateway.frame(of: a), expectedRect(.sixthMiddle, for: a))
         XCTAssertEqual(
@@ -65,15 +76,15 @@ final class SwapTests: XCTestCase {
         gateway.focused = a
         controller.handle(slot: .sixthMiddle)
 
-        XCTAssertTrue(controller.canUndoDisplacement)
+        XCTAssertFalse(canvas.undoStack.isEmpty)
         XCTAssertTrue(
-            controller.lastNotice?.contains("TestApp") ?? false,
+            canvas.notice?.contains("TestApp") ?? false,
             "the notice names the displaced app")
         XCTAssertTrue(
-            controller.lastNotice?.contains("Top Left Sixth") ?? false,
+            canvas.notice?.contains("Top Left Sixth") ?? false,
             "the notice names the displaced window's landing tile")
         XCTAssertTrue(
-            controller.lastNotice?.contains("Z") ?? false,
+            canvas.notice?.contains("Z") ?? false,
             "the notice offers the undo")
     }
 
@@ -95,8 +106,8 @@ final class SwapTests: XCTestCase {
         gateway.focused = a
         controller.handle(slot: .rightHalf)
 
-        XCTAssertEqual(controller.state.slot(of: 1), .rightHalf)
-        XCTAssertEqual(controller.state.slot(of: 3), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .rightHalf)
+        XCTAssertEqual(canvas.state.slot(of: 3), .topLeft)
         XCTAssertEqual(
             gateway.focusCalls.last, c,
             "focus follows the displaced window, not the requester")
@@ -116,9 +127,9 @@ final class SwapTests: XCTestCase {
 
         controller.handle(slot: .rightHalf)
 
-        XCTAssertEqual(controller.state.slot(of: 2), .rightHalf)
+        XCTAssertEqual(canvas.state.slot(of: 2), .rightHalf)
         XCTAssertEqual(
-            controller.state.slot(of: 1), .leftHalf,
+            canvas.state.slot(of: 1), .leftHalf,
             "the evicted window re-tiles into the one slot left free")
         XCTAssertTrue(
             gateway.focusCalls.isEmpty,
@@ -129,24 +140,24 @@ final class SwapTests: XCTestCase {
         let (a, _, c) = tileSixthsSession()
         gateway.focused = a
         controller.handle(slot: .sixthMiddle)
-        XCTAssertEqual(controller.evictedCount, 2, "both swap partners are recoverable")
+        XCTAssertEqual(canvas.evictedCount, 2, "both swap partners are recoverable")
 
         controller.undoLastDisplacement()
 
         // Both windows re-tile into their former slots. Records were
         // reissued by the shared undo machinery, so ids are fresh (the
         // same shape as an eviction undo's restored windows).
-        XCTAssertNil(controller.state.slot(of: 1))
-        XCTAssertNil(controller.state.slot(of: 3))
-        XCTAssertNotNil(controller.state.occupant(of: .sixthTopLeft))
-        XCTAssertNotNil(controller.state.occupant(of: .sixthsRightTwoThirds))
+        XCTAssertNil(canvas.state.slot(of: 1))
+        XCTAssertNil(canvas.state.slot(of: 3))
+        XCTAssertNotNil(canvas.state.occupant(of: .sixthTopLeft))
+        XCTAssertNotNil(canvas.state.occupant(of: .sixthsRightTwoThirds))
         XCTAssertEqual(
             gateway.frame(of: a), expectedRect(.sixthTopLeft, for: a),
             "undo re-tiles the requester into its old tile")
         XCTAssertEqual(
             gateway.frame(of: c), expectedRect(.sixthsRightTwoThirds, for: c),
             "undo re-tiles the displaced window into its own tile")
-        XCTAssertFalse(controller.canUndoDisplacement)
+        XCTAssertTrue(canvas.undoStack.isEmpty)
     }
 
     func testSwapCollapsesExpandedDisplacedWindow() {
@@ -160,7 +171,7 @@ final class SwapTests: XCTestCase {
         gateway.focused = a
         controller.handle(slot: .sixthMiddle)
 
-        XCTAssertEqual(controller.state.slot(of: 3), .sixthTopLeft)
+        XCTAssertEqual(canvas.state.slot(of: 3), .sixthTopLeft)
         gateway.focused = c
         XCTAssertNil(
             controller.expandedFocusedSlot,

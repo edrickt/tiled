@@ -20,6 +20,16 @@ final class UndoIntegrityTests: XCTestCase {
     private var controller: TilingController!
     private var feedbacks: [TilingController.Feedback] = []
 
+    /// The canvas the test's single display tiles onto: reads go through
+    /// the same accessor actions do.
+    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
+
+    /// One canvas of a controller built inside a test (the setup
+    /// controller is not always the one acting).
+    private func localCanvas(_ controller: TilingController) -> TilingSpace {
+        controller.canvas(for: controller.focusedTilingSpace)
+    }
+
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
@@ -42,7 +52,7 @@ final class UndoIntegrityTests: XCTestCase {
     private var doubledCells: [TileCell] {
         var seen: Set<TileCell> = []
         var doubled: [TileCell] = []
-        for slot in controller.state.occupants.keys {
+        for slot in canvas.state.occupants.keys {
             for cell in slot.cells {
                 if !seen.insert(cell).inserted { doubled.append(cell) }
             }
@@ -66,14 +76,14 @@ final class UndoIntegrityTests: XCTestCase {
         controller.undoLastDisplacement()
 
         XCTAssertTrue(doubledCells.isEmpty, "undo left cells double-booked")
-        XCTAssertNotNil(controller.state.occupant(of: .leftHalf), "a returns to its half")
-        XCTAssertNil(controller.state.slot(of: 3), "c's quad overlaps a's half and must yield")
+        XCTAssertNotNil(canvas.state.occupant(of: .leftHalf), "a returns to its half")
+        XCTAssertNil(canvas.state.slot(of: 3), "c's quad overlaps a's half and must yield")
         XCTAssertEqual(
             gateway.frame(of: c), CGRect(x: 60, y: 60, width: 600, height: 400),
             "c restored to its pre-tile frame, not left under a's half")
-        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
         // b was the chapter's requester: undo releases it like any requester.
-        XCTAssertNil(controller.state.slot(of: 2))
+        XCTAssertNil(canvas.state.slot(of: 2))
     }
 
     func testUndoOfLayoutSwitchDisplacesTheOtherLayoutsOccupants() {
@@ -87,15 +97,15 @@ final class UndoIntegrityTests: XCTestCase {
         controller.undoLastDisplacement()
 
         XCTAssertEqual(
-            controller.state.activeLayout, .quarters,
+            canvas.state.activeLayout, .quarters,
             "the restored chapter's layout owns the canvas again")
-        XCTAssertNotNil(controller.state.occupant(of: .topLeft), "a returns")
-        XCTAssertNil(controller.state.occupant(of: .sixthBottomRight))
-        XCTAssertNil(controller.state.slot(of: 3), "c was untiled out of the abandoned layout")
+        XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "a returns")
+        XCTAssertNil(canvas.state.occupant(of: .sixthBottomRight))
+        XCTAssertNil(canvas.state.slot(of: 3), "c was untiled out of the abandoned layout")
         XCTAssertEqual(
             gateway.frame(of: c), CGRect(x: 60, y: 60, width: 600, height: 400),
             "c restored to its pre-tile frame")
-        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
     }
 
     // MARK: Refused requesters
@@ -115,19 +125,19 @@ final class UndoIntegrityTests: XCTestCase {
         gateway.refuseNextWrites(right)
         controller.handle(slot: .sixthsRightTwoThirds)
 
-        XCTAssertNotNil(controller.lastTileError, "the refusal is reported")
-        XCTAssertNil(controller.state.slot(of: 2), "the evictee went home, not to a new tile")
+        XCTAssertNotNil(canvas.error, "the refusal is reported")
+        XCTAssertNil(canvas.state.slot(of: 2), "the evictee went home, not to a new tile")
         XCTAssertEqual(
             gateway.frame(of: middle), CGRect(x: 20, y: 20, width: 400, height: 300),
             "the victim's frame is its pre-tile frame")
         XCTAssertFalse(
-            controller.lastNotice?.contains("to make room") ?? false,
+            canvas.notice?.contains("to make room") ?? false,
             "no re-house notice for a request that never landed")
-        XCTAssertTrue(controller.canUndoDisplacement, "the eviction itself is undoable")
+        XCTAssertFalse(canvas.undoStack.isEmpty, "the eviction itself is undoable")
 
         controller.undoLastDisplacement()
         XCTAssertNotNil(
-            controller.state.occupant(of: .sixthMiddle),
+            canvas.state.occupant(of: .sixthMiddle),
             "undo returns the evictee to the slot it left")
     }
 
@@ -139,15 +149,15 @@ final class UndoIntegrityTests: XCTestCase {
         gateway.refuseNextWrites(x)
         controller.handle(slot: .leftHalf) // evicts w, then refuses x
 
-        XCTAssertNil(controller.state.slot(of: 1), "w was evicted by the failed request")
+        XCTAssertNil(canvas.state.slot(of: 1), "w was evicted by the failed request")
         XCTAssertEqual(
             gateway.frame(of: w), CGRect(x: 0, y: 0, width: 800, height: 600),
             "w went back to its pre-tile frame")
-        XCTAssertNotNil(controller.lastNotice, "the eviction is narrated, not silent")
-        XCTAssertTrue(controller.canUndoDisplacement, "the eviction is undoable")
+        XCTAssertNotNil(canvas.notice, "the eviction is narrated, not silent")
+        XCTAssertFalse(canvas.undoStack.isEmpty, "the eviction is undoable")
 
         controller.undoLastDisplacement()
-        XCTAssertNotNil(controller.state.occupant(of: .topLeft), "undo re-tiles w")
+        XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "undo re-tiles w")
     }
 
     // MARK: Re-house region and empty chapters
@@ -165,19 +175,19 @@ final class UndoIntegrityTests: XCTestCase {
 
         controller.handle(slot: .sixthsRightTwoThirds)
 
-        XCTAssertEqual(controller.state.slot(of: 2), .sixthLeft, "the evictee re-tiles")
-        XCTAssertEqual(controller.state.occupant(of: .sixthLeft), 2)
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft, "the evictee re-tiles")
+        XCTAssertEqual(canvas.state.occupant(of: .sixthLeft), 2)
         XCTAssertTrue(
-            controller.lastNotice?.contains("to make room") ?? false,
+            canvas.notice?.contains("to make room") ?? false,
             "the move is narrated as a re-house")
-        XCTAssertNil(controller.lastTileError, "no error on a clean re-house")
+        XCTAssertNil(canvas.error, "no error on a clean re-house")
 
         controller.undoLastDisplacement()
         XCTAssertEqual(
-            controller.state.occupant(of: .sixthRight), 2,
+            canvas.state.occupant(of: .sixthRight), 2,
             "undo returns the victim to the slot it was evicted from")
-        XCTAssertNil(controller.state.occupant(of: .sixthLeft))
-        XCTAssertNil(controller.state.slot(of: 1), "the requester is released by undo")
+        XCTAssertNil(canvas.state.occupant(of: .sixthLeft))
+        XCTAssertNil(canvas.state.slot(of: 1), "the requester is released by undo")
     }
 
     func testUntileAllDropsAChapterItCouldNotRebuild() {
@@ -192,13 +202,13 @@ final class UndoIntegrityTests: XCTestCase {
 
         controller.untileAll()
 
-        XCTAssertNil(controller.state.slot(of: 1))
-        XCTAssertNil(controller.state.slot(of: 2))
+        XCTAssertNil(canvas.state.slot(of: 1))
+        XCTAssertNil(canvas.state.slot(of: 2))
         XCTAssertFalse(
-            controller.canUndoDisplacement,
+            !canvas.undoStack.isEmpty,
             "no chapter can restore windows whose frames never read")
         XCTAssertFalse(
-            controller.lastNotice?.contains("to undo") ?? false,
+            canvas.notice?.contains("to undo") ?? false,
             "the notice must not offer a key with no chapter behind it")
     }
 
@@ -231,11 +241,10 @@ final class UndoIntegrityTests: XCTestCase {
         localController.untile(window: 2)
 
         XCTAssertNil(
-            localController.lastTileError,
+            localController.canvas(for: left.id).error,
             "the focused canvas did not act and must not carry the message")
-        localGateway.focused = rightHandle
         XCTAssertNotNil(
-            localController.lastTileError,
+            localController.canvas(for: right.id).error,
             "the acting canvas carries the refusal")
     }
 
@@ -264,7 +273,7 @@ final class UndoIntegrityTests: XCTestCase {
         gateway.simulateDestroyed(a)
 
         XCTAssertEqual(gateway.releaseCalls, [a])
-        XCTAssertNil(controller.state.slot(of: 1))
+        XCTAssertNil(canvas.state.slot(of: 1))
     }
 
     func testTransientDeadReadingRecoversBeforeTheConfirmationWindow() {
@@ -282,14 +291,16 @@ final class UndoIntegrityTests: XCTestCase {
         // promises (the lid-close transient).
         localGateway.probeDead.insert(a)
         localController.pruneDeadWindows()
-        XCTAssertEqual(localController.state.occupant(of: .topLeft), 1)
+        XCTAssertEqual(localCanvas(localController).state.occupant(of: .topLeft), 1)
         XCTAssertTrue(localGateway.releaseCalls.isEmpty)
 
         // The probe answers again inside the confirmation window.
         localGateway.probeDead.remove(a)
         clock = clock.addingTimeInterval(1)
         localController.pruneDeadWindows()
-        XCTAssertEqual(localController.state.occupant(of: .topLeft), 1, "the transient recovered")
+        XCTAssertEqual(
+            localCanvas(localController).state.occupant(of: .topLeft), 1,
+            "the transient recovered")
         XCTAssertTrue(localGateway.releaseCalls.isEmpty)
 
         // A sustained dead reading confirms and releases.
@@ -297,7 +308,7 @@ final class UndoIntegrityTests: XCTestCase {
         localController.pruneDeadWindows()
         clock = clock.addingTimeInterval(4)
         localController.pruneDeadWindows()
-        XCTAssertNil(localController.state.occupant(of: .topLeft))
+        XCTAssertNil(localCanvas(localController).state.occupant(of: .topLeft))
         XCTAssertEqual(localGateway.releaseCalls, [a])
     }
 
@@ -311,8 +322,8 @@ final class UndoIntegrityTests: XCTestCase {
 
         controller.handle(slot: .leftHalf)
 
-        XCTAssertNil(controller.state.slot(of: 2), "state never commits a refused placement")
-        XCTAssertNotNil(controller.lastTileError)
+        XCTAssertNil(canvas.state.slot(of: 2), "state never commits a refused placement")
+        XCTAssertNotNil(canvas.error)
         XCTAssertTrue(
             gateway.writes.contains { $0.handle == x },
             "the partial write is observable instead of indistinguishable from a refusal")
@@ -331,7 +342,8 @@ final class UndoIntegrityTests: XCTestCase {
     // MARK: Withheld-Space canvases
 
     private func makeWithheldSpaceController()
-        -> (gateway: FakeWindowGateway, controller: TilingController, displayID: CGDirectDisplayID)
+        -> (gateway: FakeWindowGateway, controller: TilingController,
+            key: TilingSpaceKey, displayID: CGDirectDisplayID)
     {
         let displayID: CGDirectDisplayID = 42
         let screen = ScreenInfo(
@@ -344,11 +356,14 @@ final class UndoIntegrityTests: XCTestCase {
         let controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             screens: { [screen] }, deathConfirmation: 0)
-        return (gateway, controller, displayID)
+        // The canvas windows tiled onto while the Space id was unknown:
+        // an explicit key, because the resolved id names a different one.
+        let key = TilingSpaceKey(screen: screen.id, space: nil)
+        return (gateway, controller, key, displayID)
     }
 
     func testWindowTiledWhileTheSpaceWasWithheldStaysReachable() {
-        let (gateway, controller, displayID) = makeWithheldSpaceController()
+        let (gateway, controller, key, displayID) = makeWithheldSpaceController()
         let a = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
         gateway.focused = a
         controller.handle(slot: .topLeft)
@@ -363,11 +378,13 @@ final class UndoIntegrityTests: XCTestCase {
             controller.focusedTiledWindowsInfo.count, 1,
             "the focused canvas stays the withheld one")
         controller.untileAll()
-        XCTAssertNil(controller.state.slot(of: 1), "Untile All reaches the withheld canvas")
+        XCTAssertNil(
+            controller.canvas(for: key).state.slot(of: 1),
+            "Untile All reaches the withheld canvas")
     }
 
     func testUndoReachesChaptersPushedWhileTheSpaceWasWithheld() {
-        let (gateway, controller, displayID) = makeWithheldSpaceController()
+        let (gateway, controller, key, displayID) = makeWithheldSpaceController()
         let a = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
         gateway.focused = a
         controller.handle(slot: .topLeft)
@@ -378,9 +395,10 @@ final class UndoIntegrityTests: XCTestCase {
         gateway.activeSpaces = [displayID: SpaceID(rawValue: 101)]
         controller.undoLastDisplacement()
 
-        XCTAssertNotNil(controller.state.occupant(of: .topLeft), "the evicted window returned")
-        XCTAssertNil(controller.state.slot(of: 2), "the requester was released by the undo")
-        XCTAssertFalse(controller.canUndoDisplacement, "the withheld chapter was consumed")
+        let canvas = controller.canvas(for: key)
+        XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "the evicted window returned")
+        XCTAssertNil(canvas.state.slot(of: 2), "the requester was released by the undo")
+        XCTAssertTrue(canvas.undoStack.isEmpty, "the withheld chapter was consumed")
     }
 
     func testExpandDefersAnOffSpaceWindowInsteadOfWritingIt() {

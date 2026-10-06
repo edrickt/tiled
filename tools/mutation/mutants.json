@@ -247,9 +247,9 @@
  ],
  [
   "TilingController.swift",
-  "derived surface tracks focus instead of the canvas that acted",
-  "        surfaceSpace = space ?? focusedSpaceKey()",
-  "        surfaceSpace = focusedSpaceKey()"
+  "screen canvas read ignores the named display",
+  "        spaces[actionSpaceKey(for: screen)] ?? TilingSpace()",
+  "        spaces[focusedSpaceKey()] ?? TilingSpace()"
  ],
  [
   "TilingSpace.swift",

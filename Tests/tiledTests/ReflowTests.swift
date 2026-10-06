@@ -12,13 +12,27 @@ final class ReflowTests: XCTestCase {
     private let c = 3
     private let d = 4
 
+    /// Deterministic display: controller wiring checks written rects
+    /// against this rect, never the host Mac's screen.
+    private static let screen = ScreenInfo(
+        id: ScreenID(rawValue: 1),
+        frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        name: "Display 1")
+
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
+
+    /// The canvas the test's single display tiles onto: reads go through
+    /// the same accessor actions do.
+    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
 
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
-        controller = TilingController(gateway: gateway, pruneInterval: nil, deathConfirmation: 0)
+        controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { [Self.screen] }, deathConfirmation: 0)
     }
 
     // MARK: Pure reflow rules (TilingState)
@@ -291,10 +305,8 @@ extension ReflowTests {
     }
 
     private func expectedRect(_ slot: Slot, for handle: WindowHandle) -> CGRect {
-        let frame = gateway.frame(of: handle)!
-        let screens = NSScreen.screens
-        let index = TilingController.owningScreenIndex(frames: screens.map(\.frame), for: frame) ?? 0
-        return controller.grid.rect(for: slot, in: screens[index].visibleFrame)
+        controller.canvas(for: Self.screen.id).grid.rect(
+            for: slot, in: Self.screen.visibleFrame)
     }
 
     func testEvictHotkeyGrowsColumnSurvivorDown() {
@@ -303,9 +315,9 @@ extension ReflowTests {
         gateway.focused = a
         controller.handleEvict()
 
-        XCTAssertEqual(controller.state.slot(of: 2), .sixthLeft, "the survivor expands down")
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft, "the survivor expands down")
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthLeft, for: b))
-        XCTAssertTrue(controller.state.slot(of: 1) == nil, "the evicted window is untiled")
+        XCTAssertTrue(canvas.state.slot(of: 1) == nil, "the evicted window is untiled")
         XCTAssertEqual(gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 600))
     }
 
@@ -322,16 +334,16 @@ extension ReflowTests {
         controller.handleEvict()
 
         XCTAssertEqual(
-            controller.state.slot(of: 2), .sixthBottomLeft,
+            canvas.state.slot(of: 2), .sixthBottomLeft,
             "the survivor keeps its slot when its grow write is refused")
         XCTAssertEqual(
             gateway.frame(of: b), survivorFrame,
             "the refused write left the survivor on its old frame")
         XCTAssertNotNil(
-            controller.lastTileError,
+            canvas.error,
             "the refusal surfaces in the menu instead of passing silently")
         XCTAssertFalse(
-            controller.canUndoDisplacement,
+            !canvas.undoStack.isEmpty,
             "a reflow that did not happen writes no undo chapter")
     }
 
@@ -353,7 +365,7 @@ extension ReflowTests {
         controller.handleEvict()
 
         XCTAssertEqual(
-            controller.state.slot(of: 3), .sixthsRightTwoThirds,
+            canvas.state.slot(of: 3), .sixthsRightTwoThirds,
             "right flank preferred over growing the left third")
         XCTAssertEqual(gateway.frame(of: c), expectedRect(.sixthsRightTwoThirds, for: c))
     }
@@ -363,15 +375,15 @@ extension ReflowTests {
 
         gateway.focused = a
         controller.handleEvict()
-        XCTAssertTrue(controller.canUndoDisplacement, "the reflow is its own chapter")
+        XCTAssertFalse(canvas.undoStack.isEmpty, "the reflow is its own chapter")
 
         controller.undoLastDisplacement()
 
         XCTAssertEqual(
-            controller.state.slot(of: 2), .sixthBottomLeft,
+            canvas.state.slot(of: 2), .sixthBottomLeft,
             "the survivor returns to the slot it held before the reflow")
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthBottomLeft, for: b))
-        XCTAssertTrue(controller.state.slot(of: 1) == nil, "the evicted window stays untiled")
+        XCTAssertTrue(canvas.state.slot(of: 1) == nil, "the evicted window stays untiled")
         XCTAssertEqual(gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 600))
     }
 
@@ -392,8 +404,8 @@ extension ReflowTests {
         gateway.focused = b
         controller.handle(slot: .sixthBottomLeft)
 
-        XCTAssertEqual(controller.state.slot(of: 2), .sixthBottomLeft)
-        XCTAssertEqual(controller.state.slot(of: 3), .sixthsRightTwoThirds)
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthBottomLeft)
+        XCTAssertEqual(canvas.state.slot(of: 3), .sixthsRightTwoThirds)
         XCTAssertEqual(gateway.frame(of: c), expectedRect(.sixthsRightTwoThirds, for: c))
     }
 
@@ -412,10 +424,10 @@ extension ReflowTests {
 
         controller.undoLastDisplacement()
 
-        XCTAssertEqual(controller.state.slot(of: 3), .sixthRight, "the survivor returns")
+        XCTAssertEqual(canvas.state.slot(of: 3), .sixthRight, "the survivor returns")
         XCTAssertEqual(gateway.frame(of: c), expectedRect(.sixthRight, for: c))
         XCTAssertEqual(
-            controller.state.slot(of: 2), .sixthBottomLeft,
+            canvas.state.slot(of: 2), .sixthBottomLeft,
             "the requester keeps the slot it chose")
     }
 
@@ -424,7 +436,7 @@ extension ReflowTests {
 
         controller.untile(window: 2)
 
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthLeft)
         XCTAssertEqual(gateway.frame(of: a), expectedRect(.sixthLeft, for: a))
     }
 
@@ -433,7 +445,7 @@ extension ReflowTests {
 
         controller.untileFromDrag(2)
 
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthLeft)
         XCTAssertEqual(gateway.frame(of: a), expectedRect(.sixthLeft, for: a))
     }
 
@@ -443,7 +455,7 @@ extension ReflowTests {
         gateway.kill(b)
         controller.pruneDeadWindows()
 
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthLeft)
     }
 
     // MARK: Re-house through the controller (the report's scenarios)
@@ -474,13 +486,13 @@ extension ReflowTests {
         gateway.focused = m
         controller.handle(slot: .sixthsRightTwoThirds)
 
-        XCTAssertEqual(controller.state.slot(of: 2), .sixthsRightTwoThirds)
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthsRightTwoThirds)
         XCTAssertEqual(
-            controller.state.slot(of: 3), .sixthTopLeft,
+            canvas.state.slot(of: 3), .sixthTopLeft,
             "the evicted right third re-tiles into the free top-left sixth")
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthBottomLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthBottomLeft)
         XCTAssertEqual(gateway.frame(of: r), expectedRect(.sixthTopLeft, for: r))
-        XCTAssertTrue(controller.lastNotice?.contains("moved to") ?? false)
+        XCTAssertTrue(canvas.notice?.contains("moved to") ?? false)
     }
 
     func testRightThirdToRightTwoThirdsReHousesMiddleThird() {
@@ -493,11 +505,11 @@ extension ReflowTests {
         gateway.focused = r
         controller.handle(slot: .sixthsRightTwoThirds)
 
-        XCTAssertEqual(controller.state.slot(of: 3), .sixthsRightTwoThirds)
+        XCTAssertEqual(canvas.state.slot(of: 3), .sixthsRightTwoThirds)
         XCTAssertEqual(
-            controller.state.slot(of: 2), .sixthTopLeft,
+            canvas.state.slot(of: 2), .sixthTopLeft,
             "the evicted middle third re-tiles into the free top-left sixth")
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthBottomLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthBottomLeft)
         XCTAssertEqual(gateway.frame(of: m), expectedRect(.sixthTopLeft, for: m))
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthBottomLeft, for: b))
     }
@@ -510,14 +522,14 @@ extension ReflowTests {
         controller.undoLastDisplacement()
 
         XCTAssertEqual(
-            controller.state.slot(of: 2), .sixthMiddle,
+            canvas.state.slot(of: 2), .sixthMiddle,
             "the re-housed window returns to the slot it was evicted from")
         XCTAssertEqual(gateway.frame(of: m), expectedRect(.sixthMiddle, for: m))
-        XCTAssertTrue(controller.state.slot(of: 3) == nil, "the requester untiles")
+        XCTAssertTrue(canvas.state.slot(of: 3) == nil, "the requester untiles")
         XCTAssertEqual(
             gateway.frame(of: r), CGRect(x: 100, y: 100, width: 500, height: 400),
             "restored to its pre-tile frame")
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthBottomLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthBottomLeft)
     }
 
     func testExpandedSurvivorNeverGrows() {
@@ -530,11 +542,11 @@ extension ReflowTests {
         controller.handleEvict()
 
         XCTAssertEqual(
-            controller.state.slot(of: 2), .sixthBottomLeft,
+            canvas.state.slot(of: 2), .sixthBottomLeft,
             "the expanded survivor keeps its slot")
         XCTAssertEqual(
             gateway.frame(of: b), expandedFrame,
             "the expanded survivor keeps covering the layout")
-        XCTAssertTrue(controller.state.slot(of: 1) == nil)
+        XCTAssertTrue(canvas.state.slot(of: 1) == nil)
     }
 }

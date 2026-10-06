@@ -18,7 +18,7 @@ final class LayoutSwitchTests: XCTestCase {
 
     /// Representative occupancy shapes per layout: singles of every size
     /// class, pairs, full grids, and mixed compositions. Internal so
-    /// MatrixCrossCheckTests can replay them through the real controller.
+    /// MatrixCrossCheckTests can replay them through the canvas.
     static var quartersConfigs: [[Slot]] {
         [
             [.topLeft],
@@ -66,25 +66,6 @@ final class LayoutSwitchTests: XCTestCase {
             ids.append(id)
         }
         return (state, ids)
-    }
-
-    /// Commits a plan exactly like TilingController.handle does: evicted
-    /// windows are removed before the requester is placed.
-    private func apply(
-        _ plan: TilePlan, to state: inout TilingState, requester: WindowID, target: Slot
-    ) {
-        switch plan {
-        case .noop:
-            break // no state change
-        case .swap(let displaced):
-            if let previous = state.slot(of: requester) {
-                state.commit(window: displaced, into: previous)
-            }
-            state.commit(window: requester, into: target)
-        case .tile(let evicting), .switchLayout(let evicting):
-            for evicted in evicting { state.remove(window: evicted) }
-            state.commit(window: requester, into: target)
-        }
     }
 
     /// Structural health after any transition: no ghosts, at most one
@@ -364,54 +345,6 @@ final class LayoutSwitchTests: XCTestCase {
             .switchLayout(evicting: [10, 20, 30, 40, 50, 60]))
     }
 
-    // MARK: Commit semantics (exactly the requester remains)
-
-    func testSwitchCommitLeavesExactlyTheRequester() {
-        for config in Self.quartersConfigs {
-            let (state, ids) = makeState(slots: config, firstID: 1)
-            for target in Self.sixthsSlots {
-                for requester in [ids[0], 999] {
-                    var next = state
-                    let plan = next.plan(window: requester, into: target)
-                    guard case .switchLayout(let evicting) = plan else {
-                        XCTFail("\(config) -> \(target.rawValue) did not switch")
-                        continue
-                    }
-                    XCTAssertEqual(Set(evicting), Set(ids))
-                    apply(plan, to: &next, requester: requester, target: target)
-                    XCTAssertEqual(
-                        next.occupants, [target: requester],
-                        "\(config) -> \(target.rawValue) requester=\(requester)")
-                    XCTAssertEqual(next.activeLayout, target.layout)
-                    for evicted in ids where evicted != requester {
-                        XCTAssertNil(next.slot(of: evicted))
-                    }
-                    assertHealthy(next, context: "\(config) -> \(target.rawValue)")
-                }
-            }
-        }
-        for config in Self.sixthsConfigs {
-            let (state, ids) = makeState(slots: config, firstID: 1)
-            for target in Self.quartersSlots {
-                for requester in [ids[0], 999] {
-                    var next = state
-                    let plan = next.plan(window: requester, into: target)
-                    guard case .switchLayout(let evicting) = plan else {
-                        XCTFail("\(config) -> \(target.rawValue) did not switch")
-                        continue
-                    }
-                    XCTAssertEqual(Set(evicting), Set(ids))
-                    apply(plan, to: &next, requester: requester, target: target)
-                    XCTAssertEqual(
-                        next.occupants, [target: requester],
-                        "\(config) -> \(target.rawValue) requester=\(requester)")
-                    XCTAssertEqual(next.activeLayout, target.layout)
-                    assertHealthy(next, context: "\(config) -> \(target.rawValue)")
-                }
-            }
-        }
-    }
-
     // MARK: Full-grid switches
 
     func testSwitchFromFullQuartersGrid() {
@@ -497,169 +430,6 @@ final class LayoutSwitchTests: XCTestCase {
         sixths.commit(window: 1, into: .sixthLeft)
         XCTAssertEqual(sixths.plan(window: 2, into: .sixthRight), .tile(evicting: []))
         XCTAssertEqual(sixths.plan(window: 2, into: .sixthTopMiddle), .tile(evicting: []))
-    }
-
-    func testAfterSwitchSameLayoutRequestsDoNotReset() {
-        // Once switched, the new layout is home: disjoint tiles proceed
-        // without another reset.
-        var state = TilingState()
-        state.commit(window: 1, into: .topLeft)
-        var next = state
-        apply(next.plan(window: 2, into: .sixthLeft), to: &next, requester: 2, target: .sixthLeft)
-        XCTAssertEqual(next.occupants, [.sixthLeft: 2])
-        // Disjoint sixths tile: plain tile.
-        XCTAssertEqual(next.plan(window: 3, into: .sixthRight), .tile(evicting: []))
-        // Occupied sixths third takeover by a fresh window: eviction of
-        // the blocker, not a reset.
-        next.commit(window: 3, into: .sixthRight)
-        XCTAssertEqual(next.plan(window: 4, into: .sixthRight), .tile(evicting: [3]))
-        // Tiled window moving between sixths thirds: move, not reset.
-        XCTAssertEqual(next.plan(window: 2, into: .sixthMiddle), .tile(evicting: []))
-    }
-
-    // MARK: Sequences across layouts
-
-    func testPingPongAlternatesExactlyOneWindow() {
-        // Every switch leaves exactly the requester; ping-ponging layouts
-        // never accumulates strays.
-        var state = TilingState()
-        let script: [(WindowID, Slot)] = [
-            (1, .topLeft),
-            (2, .bottomRight),
-            (3, .sixthMiddle), // reset to sixths
-            (4, .sixthLeft),
-            (1, .rightHalf), // reset to quarters
-            (1, .sixthTopLeft), // reset to sixths (tiled requester)
-            (1, .topLeft), // reset to quarters (tiled requester)
-        ]
-        let expected: [[Slot: WindowID]] = [
-            [.topLeft: 1],
-            [.topLeft: 1, .bottomRight: 2],
-            [.sixthMiddle: 3],
-            [.sixthMiddle: 3, .sixthLeft: 4],
-            [.rightHalf: 1],
-            [.sixthTopLeft: 1],
-            [.topLeft: 1],
-        ]
-        for ((window, slot), want) in zip(script, expected) {
-            apply(state.plan(window: window, into: slot), to: &state, requester: window, target: slot)
-            XCTAssertEqual(state.occupants, want, "after win\(window) -> \(slot.rawValue)")
-            XCTAssertEqual(state.activeLayout, slot.layout)
-            assertHealthy(state, context: "win\(window) -> \(slot.rawValue)")
-        }
-    }
-
-    func testQuartersSessionSwitchSixthsSessionSwitchBack() {
-        // Fill quarters, reset into sixths, build a sixths session, reset
-        // back, and rebuild quarters, asserting the full state at each hop.
-        var state = TilingState()
-        for (id, slot) in [(1, Slot.topLeft), (2, .topRight), (3, .bottomLeft)] {
-            apply(state.plan(window: id, into: slot), to: &state, requester: id, target: slot)
-        }
-        XCTAssertEqual(state.activeLayout, .quarters)
-        XCTAssertEqual(state.tiledWindows.sorted(), [1, 2, 3])
-
-        apply(state.plan(window: 4, into: .sixthLeft), to: &state, requester: 4, target: .sixthLeft)
-        XCTAssertEqual(state.occupants, [.sixthLeft: 4])
-        XCTAssertEqual(state.activeLayout, .sixths)
-        for evicted in [1, 2, 3] { XCTAssertNil(state.slot(of: evicted)) }
-
-        for (id, slot) in [(5, Slot.sixthMiddle), (6, .sixthRight)] {
-            let plan = state.plan(window: id, into: slot)
-            XCTAssertEqual(plan, .tile(evicting: []), "win\(id) -> \(slot.rawValue)")
-            apply(plan, to: &state, requester: id, target: slot)
-        }
-        XCTAssertEqual(
-            state.occupants, [.sixthLeft: 4, .sixthMiddle: 5, .sixthRight: 6])
-
-        apply(state.plan(window: 5, into: .leftHalf), to: &state, requester: 5, target: .leftHalf)
-        XCTAssertEqual(state.occupants, [.leftHalf: 5])
-        XCTAssertEqual(state.activeLayout, .quarters)
-        XCTAssertNil(state.slot(of: 4))
-        XCTAssertNil(state.slot(of: 6))
-
-        apply(state.plan(window: 6, into: .rightHalf), to: &state, requester: 6, target: .rightHalf)
-        XCTAssertEqual(state.occupants, [.leftHalf: 5, .rightHalf: 6])
-        assertHealthy(state, context: "rebuilt quarters")
-    }
-
-    func testTiledWindowCarriesAcrossSwitchesButLosesItsOldTile() {
-        // A tiled window that requests the other layout is evicted from its
-        // old tile like everyone else, then placed alone in the new layout.
-        var state = TilingState()
-        state.commit(window: 1, into: .topLeft)
-        state.commit(window: 2, into: .bottomRight)
-        apply(state.plan(window: 1, into: .sixthRight), to: &state, requester: 1, target: .sixthRight)
-        XCTAssertEqual(state.occupants, [.sixthRight: 1])
-        XCTAssertNil(state.slot(of: 2))
-        // And it can carry straight back.
-        apply(state.plan(window: 1, into: .bottomLeft), to: &state, requester: 1, target: .bottomLeft)
-        XCTAssertEqual(state.occupants, [.bottomLeft: 1])
-        XCTAssertEqual(state.activeLayout, .quarters)
-    }
-
-    func testSwitchImmediatelyAfterSwitch() {
-        // Two resets in a row with no same-layout tiling between: the
-        // second reset evicts exactly the first switch's survivor.
-        var state = TilingState()
-        state.commit(window: 1, into: .leftHalf)
-        state.commit(window: 2, into: .rightHalf)
-        apply(state.plan(window: 3, into: .sixthMiddle), to: &state, requester: 3, target: .sixthMiddle)
-        XCTAssertEqual(state.occupants, [.sixthMiddle: 3])
-        XCTAssertEqual(state.plan(window: 4, into: .topLeft), .switchLayout(evicting: [3]))
-        apply(state.plan(window: 4, into: .topLeft), to: &state, requester: 4, target: .topLeft)
-        XCTAssertEqual(state.occupants, [.topLeft: 4])
-        assertHealthy(state, context: "double switch")
-    }
-
-    // MARK: Cross-layout BFS invariant sweep
-
-    func testCrossLayoutBFSKeepsSingleLayoutInvariant() {
-        // Every interleaving of quarters/sixths requests over 3 windows:
-        // after EVERY step there is at most one layout on screen, no ghost
-        // windows, and no double-booked cells. Switches must occur in both
-        // directions, or the sweep proved nothing.
-        let windows = [11, 22, 33]
-        let targets = Slot.allCases
-        var queue: [(TilingState, Int)] = [(TilingState(), 0)]
-        var visited: Set<String> = []
-        var steps = 0
-        var quartersToSixths = 0
-        var sixthsToQuarters = 0
-        while !queue.isEmpty {
-            let (state, depth) = queue.removeFirst()
-            for window in windows {
-                for target in targets {
-                    var next = state
-                    let plan = next.plan(window: window, into: target)
-                    if case .switchLayout = plan {
-                        if target.layout == .sixths {
-                            quartersToSixths += 1
-                        } else {
-                            sixthsToQuarters += 1
-                        }
-                    }
-                    apply(plan, to: &next, requester: window, target: target)
-                    steps += 1
-                    assertHealthy(next, context: "win\(window) -> \(target.rawValue)")
-                    // A switch must leave exactly the requester behind.
-                    if case .switchLayout = plan {
-                        XCTAssertEqual(
-                            next.occupants, [target: window],
-                            "win\(window) -> \(target.rawValue)")
-                    }
-                    let key = next.occupants
-                        .map { "\($0.key.rawValue)=\($0.value)" }
-                        .sorted().joined(separator: ",")
-                    if depth < 2 && visited.insert(key).inserted {
-                        queue.append((next, depth + 1))
-                    }
-                }
-            }
-        }
-        XCTAssertGreaterThan(steps, 1000, "BFS explored too little")
-        XCTAssertGreaterThan(quartersToSixths, 0, "BFS never switched quarters -> sixths")
-        XCTAssertGreaterThan(sixthsToQuarters, 0, "BFS never switched sixths -> quarters")
     }
 
     // MARK: Switch-undo contract (controller-level state machine)

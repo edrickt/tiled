@@ -62,8 +62,7 @@ final class TilingController {
                 self.mutateSpace(space ?? .displayless) { $0.grid = updated }
             }),
         apply: { [weak self] rects, excluding in
-            guard let self else { return 0 }
-            return self.publishRects(rects, excluding: excluding)
+            self?.publishRects(rects, excluding: excluding)
         },
         onUntile: { [weak self] in self?.untileFromDrag($0) },
         scheduleDragEnd: scheduleDragEnd,
@@ -76,47 +75,15 @@ final class TilingController {
     private let screens: ScreenProvider
     /// Per-canvas tiling spaces: each display's each Mission Control
     /// Space runs its own occupancy, records, expansion, splitters, undo
-    /// chapters, and transient notices. The `state` / `grid` surface
-    /// below is derived from one canvas at a time, so menus and existing
-    /// tests keep working without a second copy of anything.
+    /// chapters, and transient notices. Reads go through `canvas(for:)`;
+    /// the coordinator keeps no derived second copy of any canvas.
     private var spaces: [TilingSpaceKey: TilingSpace] = [:]
-    /// The canvas the derived `state` surface reports: the one the last
-    /// action touched, else the focused canvas. Only the *key* is stored;
-    /// the occupancy is read from the canvas on demand, so the surface
-    /// cannot go stale or become a second owner of state `TilingSpace`
-    /// already holds.
-    private var surfaceSpace: TilingSpaceKey?
-    var state: TilingState {
-        spaceState(for: surfaceSpace ?? focusedSpaceKey())
-    }
-    /// Current grid. Owned by the focused canvas; menus and tests read it
-    /// through this forwarding surface.
-    var grid: GridLayout { focusedCanvas().grid }
-
     /// The coordinator's handle registry: one id per live handle. The
     /// record itself lives on the canvas holding the window; this table
     /// only answers "which id is this handle", and allocating a fresh id
     /// hands the window over to the handle->id space the canvases share.
     private var windowIDs: [WindowHandle: WindowID] = [:]
     private var nextID: WindowID = 1
-
-    /// Whether a displacement undo is available (menu item visibility).
-    var canUndoDisplacement: Bool { focusedCanvas().undoStack.isEmpty == false }
-
-    /// Count for the undo menu title (0 when unavailable).
-    var evictedCount: Int { focusedCanvas().undoStack.last?.snapshot.count ?? 0 }
-
-    /// Last layout-switch notice (shown in the status menu). A cross-layout
-    /// hotkey untiles every other tiled window; the notice always carries
-    /// the undo offer, so the first encounter teaches reversibility instead
-    /// of just reporting destruction. Cleared on the next tiling attempt.
-    /// Never overwrites a real error (refusals, restore failures win).
-    /// Per-canvas: the shared surface reads the focused canvas's space.
-    var lastNotice: String? { focusedCanvas().notice }
-
-    /// Last user-visible tiling failure (shown in the status menu).
-    /// Cleared on the next tiling attempt. Per-canvas, like `lastNotice`.
-    var lastTileError: String? { focusedCanvas().error }
 
     private var pruneTimer: Timer?
     private var screenObserver: NSObjectProtocol?
@@ -296,7 +263,6 @@ final class TilingController {
         }
         hasResolvedFocusedSpace = true
         lastFocusedSpace = key
-        noteSurfaceCanvas(key)
         onFocusedSpaceChange?()
     }
 
@@ -311,7 +277,6 @@ final class TilingController {
         if !hasResolvedFocusedSpace || key != lastFocusedSpace {
             hasResolvedFocusedSpace = true
             lastFocusedSpace = key
-            noteSurfaceCanvas(key)
             onFocusedSpaceChange?()
         }
         onChange?()
@@ -381,9 +346,7 @@ final class TilingController {
         // The reflow's survivors share the event's undo chapter: undo
         // restores the pre-event world in one ⌃⇧⌘Z (a move with no
         // eviction has no chapter of its own, so the reflow starts one).
-        // The canvas pushed the chapter; the coordinator only notes the
-        // canvas that acted and refreshes.
-        noteSurfaceCanvas(key)
+        // The canvas pushed the chapter; the coordinator refreshes.
         onChange?()
     }
 
@@ -409,10 +372,6 @@ final class TilingController {
         // window stayed tiled, so its record and observation survive.
         for evicted in outcome.forget {
             forgetBookkeeping(evicted)
-            // The window left management: re-resolve the shared surface
-            // to the focused canvas, exactly as the record drop always
-            // did.
-            noteSurfaceCanvas(nil)
         }
         for window in outcome.observe {
             observe(window: window)
@@ -501,11 +460,10 @@ final class TilingController {
         // a background display or Space while focus sits elsewhere.
         if !hasError {
             mutateSpace(errorSpace) {
-                $0.error = "\(name) couldn't be tiled: the app refused to resize it."
+                $0.error = TilingSpace.refusalMessage(windowName: name)
             }
         }
         onFeedback?(.refused(windowName: name))
-        noteSurfaceCanvas(errorSpace)
         onChange?()
         dbg("verify FAILED win\(id): silent ignore, rolled back")
     }
@@ -535,7 +493,7 @@ final class TilingController {
     /// names the window whose frame is the drag's source of truth; it is
     /// informational, since snapback rects DO name the (formerly) dragged
     /// window, with `excluding` nil.
-    private func publishRects(_ rects: [WindowID: CGRect], excluding: WindowID?) -> Int {
+    private func publishRects(_ rects: [WindowID: CGRect], excluding: WindowID?) {
         var byCanvas: [TilingSpaceKey: [WindowID: CGRect]] = [:]
         for (id, target) in rects {
             byCanvas[writeCanvas(for: id), default: [:]][id] = target
@@ -548,9 +506,6 @@ final class TilingController {
             }
         }
         onChange?()
-        // The tracker's apply contract counts refusals; the canvas owns
-        // refusal attribution now, and no caller reads the count.
-        return 0
     }
 
     /// Frame the tracker diffs against: the last pushed target when known,
@@ -744,8 +699,8 @@ final class TilingController {
     func untileAll() {
         pruneDeadWindows()
         // Untile-all dissolves only the focused canvas: other displays
-        // and Spaces keep their arrangements. The shared surface reads
-        // the focused canvas, so the legacy zero-arg form resolves it.
+        // and Spaces keep their arrangements, so the legacy zero-arg
+        // form resolves the focused canvas.
         untileAll(in: focusedSpaceKey())
     }
 
@@ -765,7 +720,6 @@ final class TilingController {
             $0.untileAll(context: placementContext(for: space))
         }
         apply(outcome, on: space)
-        noteSurfaceCanvas(space)
         onChange?()
     }
 
@@ -816,11 +770,6 @@ final class TilingController {
         onChange?()
         return true
     }
-
-    /// Whether a splitter backup is parked: drives the menu row title
-    /// ("Reset Splitters" vs "Restore Previous Splitters"). Reads the
-    /// focused canvas.
-    var hasSplitterBackup: Bool { focusedCanvas().splitterBackup != nil }
 
     /// The slot the focused window would return to if it is currently
     /// expanded; nil otherwise. Drives the expand row's stateful title:
@@ -938,7 +887,6 @@ final class TilingController {
         // A nil requester with an empty snapshot (untile-all chapter
         // whose windows all died) still consumes the entry: nothing to
         // restore, standard error above.
-        noteSurfaceCanvas(space)
         onChange?()
     }
 
@@ -1030,53 +978,6 @@ final class TilingController {
     /// captured once so a UI pass can read the glyph's layout and
     /// occupancy consistently even if focus moves between the reads.
     var focusedTilingSpace: TilingSpaceKey { focusedSpaceKey() }
-
-    var activeLayout: LayoutKind { activeLayout(in: focusedSpaceKey()) }
-
-    /// One canvas's layout.
-    func activeLayout(in space: TilingSpaceKey) -> LayoutKind {
-        spaces[space]?.state.activeLayout ?? .sixths
-    }
-
-    /// One display's currently shown canvas layout (the screen-based form
-    /// menus and tests use).
-    func activeLayout(on screen: ScreenID?) -> LayoutKind {
-        activeLayout(in: tilingKey(for: screen))
-    }
-
-    /// One canvas's occupancy.
-    func occupant(of slot: Slot, in space: TilingSpaceKey) -> WindowID? {
-        spaces[space]?.state.occupant(of: slot)
-    }
-
-    /// One display's currently shown canvas occupancy (the screen-based
-    /// form menus and tests use).
-    func occupant(of slot: Slot, on screen: ScreenID?) -> WindowID? {
-        occupant(of: slot, in: tilingKey(for: screen))
-    }
-
-    /// One canvas's pure state. Tests assert per-canvas occupancy through
-    /// this.
-    func state(in space: TilingSpaceKey) -> TilingState {
-        spaces[space]?.state ?? TilingState()
-    }
-
-    /// One display's currently shown canvas state (the screen-based form
-    /// menus and tests use).
-    func state(on screen: ScreenID?) -> TilingState {
-        state(in: tilingKey(for: screen))
-    }
-
-    /// One canvas's grid.
-    func grid(in space: TilingSpaceKey) -> GridLayout {
-        spaces[space]?.grid ?? GridLayout()
-    }
-
-    /// One display's currently shown canvas grid (the screen-based form
-    /// menus and tests use).
-    func grid(on screen: ScreenID?) -> GridLayout {
-        grid(in: tilingKey(for: screen))
-    }
 
     var tiledWindowsInfo: [TiledWindowInfo] {
         allTiledWindowsInfo()
@@ -1176,7 +1077,6 @@ final class TilingController {
             return
         }
         apply(outcome, on: key)
-        noteSurfaceCanvas(key)
         onChange?()
     }
 
@@ -1276,6 +1176,21 @@ final class TilingController {
 
     // MARK: Per-canvas spaces
 
+    /// The canvas currently shown on `screen` (nil resolves the main
+    /// display). Reads resolve through the same key the next action
+    /// would target, withheld-Space fallback included, so a menu or test
+    /// can never observe a different canvas than an action touches.
+    func canvas(for screen: ScreenID?) -> TilingSpace {
+        spaces[actionSpaceKey(for: screen)] ?? TilingSpace()
+    }
+
+    /// One canvas by key: the single scoped read surface. A key that has
+    /// never been used reads as an empty canvas (never nil), so callers
+    /// assert against the same shape an action would have created.
+    func canvas(for space: TilingSpaceKey) -> TilingSpace {
+        spaces[space] ?? TilingSpace()
+    }
+
     /// One tiling canvas's stored space, if it has been used yet. Keys
     /// carry both the display and the Mission Control Space; a nil Space
     /// id is the per-display fallback when the OS cannot name the Space.
@@ -1322,12 +1237,6 @@ final class TilingController {
     /// refusal attribution cannot drift apart.
     private func writeCanvas(for id: WindowID, fallback: TilingSpaceKey? = nil) -> TilingSpaceKey {
         spaceOf(window: id) ?? fallback ?? focusedSpaceKey()
-    }
-
-    /// Slot of a window in its own canvas (nil when untiled/unknown).
-    private func slotOfWindow(_ id: WindowID) -> Slot? {
-        guard let space = spaceOf(window: id) else { return nil }
-        return spaceState(for: space).slot(of: id)
     }
 
     /// Canvas key for a display: the Space shown there right now, resolved
@@ -1426,24 +1335,10 @@ final class TilingController {
         return infos.first?.id
     }
 
-    private func focusedCanvas() -> TilingSpace {
-        space(for: focusedSpaceKey()) ?? TilingSpace()
-    }
-
     /// Single-canvas fallback key: the main display when the provider
     /// reports screens, nil for a display-less environment (headless
     /// tests keep the legacy nil-keyed canvas and shared grid).
     private func fallbackScreen() -> ScreenID? {
         screens().first?.id
-    }
-
-    /// Reports which canvas the derived `state` surface describes: the
-    /// one that just changed. `space` nil re-resolves to the focused
-    /// canvas, which is what a focus change should show. Nothing is
-    /// copied: the occupancy is read from the canvas when asked, so a
-    /// mutation path that forgets this call leaves the surface pointing
-    /// at a canvas, never at a stale snapshot of one.
-    private func noteSurfaceCanvas(_ space: TilingSpaceKey?) {
-        surfaceSpace = space ?? focusedSpaceKey()
     }
 }

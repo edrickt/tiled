@@ -70,19 +70,19 @@ final class SpaceIndependenceTests: XCTestCase {
 
         switchTo(Self.spaceB)
         XCTAssertNil(
-            controller.occupant(of: .topLeft, on: Self.display.id),
+            controller.canvas(for: Self.display.id).state.occupant(of: .topLeft),
             "the fresh Space has its own empty occupancy")
         let b = addFocusedWindow()
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.display.id), b.id)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupant(of: .topLeft), b.id)
         let target = GridLayout().rect(for: .topLeft, in: Self.display.visibleFrame)
         XCTAssertEqual(gateway.frame(of: a), target, "the hidden Space keeps its tile")
         XCTAssertEqual(gateway.frame(of: b), target)
 
         switchTo(Self.spaceA)
         XCTAssertEqual(
-            controller.occupant(of: .topLeft, on: Self.display.id), a.id,
+            controller.canvas(for: Self.display.id).state.occupant(of: .topLeft), a.id,
             "swiping back restores the first Space's arrangement")
     }
 
@@ -94,14 +94,14 @@ final class SpaceIndependenceTests: XCTestCase {
         addFocusedWindow()
         controller.handle(slot: .sixthTopLeft)
 
-        XCTAssertEqual(controller.activeLayout(on: Self.display.id), .sixths)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.activeLayout, .sixths)
         switchTo(Self.spaceA)
 
         XCTAssertEqual(
-            controller.activeLayout(on: Self.display.id), .quarters,
+            controller.canvas(for: Self.display.id).state.activeLayout, .quarters,
             "the first Space kept quarters while the second used sixths")
-        XCTAssertNotNil(controller.occupant(of: .topLeft, on: Self.display.id))
-        XCTAssertNil(controller.occupant(of: .sixthTopLeft, on: Self.display.id))
+        XCTAssertNotNil(controller.canvas(for: Self.display.id).state.occupant(of: .topLeft))
+        XCTAssertNil(controller.canvas(for: Self.display.id).state.occupant(of: .sixthTopLeft))
     }
 
     func testLayoutSwitchOnlyDissolvesItsOwnSpace() {
@@ -109,7 +109,7 @@ final class SpaceIndependenceTests: XCTestCase {
         controller.handle(slot: .topLeft)
         let b = addFocusedWindow()
         controller.handle(slot: .topRight)
-        XCTAssertEqual(controller.state(on: Self.display.id).tiledWindows.count, 2)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.tiledWindows.count, 2)
 
         switchTo(Self.spaceB)
         let c = addFocusedWindow()
@@ -121,17 +121,17 @@ final class SpaceIndependenceTests: XCTestCase {
         gateway.focused = c
         controller.handle(slot: .sixthTopLeft)
 
-        XCTAssertEqual(controller.activeLayout(on: Self.display.id), .sixths)
-        XCTAssertEqual(controller.state(on: Self.display.id).slot(of: c.id), .sixthTopLeft)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.activeLayout, .sixths)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.slot(of: c.id), .sixthTopLeft)
         XCTAssertNil(
-            controller.state(on: Self.display.id).slot(of: d.id),
+            controller.canvas(for: Self.display.id).state.slot(of: d.id),
             "the layout switch untiled only this Space's other window")
-        XCTAssertNotNil(controller.lastNotice)
+        XCTAssertNotNil(controller.canvas(for: Self.display.id).notice)
 
         switchTo(Self.spaceA)
-        XCTAssertEqual(controller.activeLayout(on: Self.display.id), .quarters)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.display.id), a.id)
-        XCTAssertEqual(controller.occupant(of: .topRight, on: Self.display.id), b.id)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.activeLayout, .quarters)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupant(of: .topLeft), a.id)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupant(of: .topRight), b.id)
     }
 
     func testSameSlotCoexistsAcrossSpacesAndDisplays() {
@@ -146,18 +146,18 @@ final class SpaceIndependenceTests: XCTestCase {
             frame: CGRect(x: 2000, y: 100, width: 800, height: 600))
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.display.id), left.id)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupant(of: .topLeft), left.id)
         XCTAssertEqual(
-            controller.occupant(of: .topLeft, on: Self.otherDisplay.id), right.id,
+            controller.canvas(for: Self.otherDisplay.id).state.occupant(of: .topLeft), right.id,
             "the same window-server Space id on two displays still keys two canvases")
 
         // A layout switch on the right display's Space leaves the left
         // display's same-id canvas alone.
         gateway.focused = right
         controller.handle(slot: .sixthTopLeft)
-        XCTAssertEqual(controller.activeLayout(on: Self.otherDisplay.id), .sixths)
-        XCTAssertEqual(controller.activeLayout(on: Self.display.id), .quarters)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.display.id), left.id)
+        XCTAssertEqual(controller.canvas(for: Self.otherDisplay.id).state.activeLayout, .sixths)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.activeLayout, .quarters)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupant(of: .topLeft), left.id)
     }
 
     // MARK: Focus and menu scoping
@@ -172,17 +172,20 @@ final class SpaceIndependenceTests: XCTestCase {
         switchTo(Self.spaceB)
         XCTAssertEqual(reports, 1, "the first callback resolves the starting canvas")
         XCTAssertEqual(
-            controller.activeLayout, .sixths,
-            "the shared surface follows the newly visible canvas")
-        XCTAssertTrue(controller.state.occupants.isEmpty)
+            controller.canvas(for: controller.focusedTilingSpace).state.activeLayout, .sixths,
+            "the focused canvas follows the newly visible Space")
+        XCTAssertTrue(
+            controller.canvas(for: controller.focusedTilingSpace).state.occupants.isEmpty)
 
         switchTo(Self.spaceB)
         XCTAssertEqual(reports, 1, "re-reporting the same Space is not a canvas change")
 
         switchTo(Self.spaceA)
         XCTAssertEqual(reports, 2, "swiping back redraws the glyph for the other layout")
-        XCTAssertEqual(controller.activeLayout, .quarters)
-        XCTAssertNotNil(controller.state.occupant(of: .topLeft))
+        XCTAssertEqual(
+            controller.canvas(for: controller.focusedTilingSpace).state.activeLayout, .quarters)
+        XCTAssertNotNil(
+            controller.canvas(for: controller.focusedTilingSpace).state.occupant(of: .topLeft))
     }
 
     func testSpaceSwitchOnAnotherDisplayRefreshesTheMenuButNotTheGlyph() {
@@ -234,39 +237,43 @@ final class SpaceIndependenceTests: XCTestCase {
         gateway.kill(a)
         controller.pruneDeadWindows()
         switchTo(Self.spaceA)
-        XCTAssertNil(controller.state(on: Self.display.id).slot(of: a.id))
-        XCTAssertEqual(controller.state(on: Self.display.id).occupants, [:])
+        XCTAssertNil(controller.canvas(for: Self.display.id).state.slot(of: a.id))
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupants, [:])
 
         switchTo(Self.spaceB)
-        XCTAssertEqual(controller.occupant(of: .sixthTopLeft, on: Self.display.id), b.id)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupant(of: .sixthTopLeft), b.id)
     }
 
     // MARK: Per-canvas undo and splitters
 
     func testUndoHistoryIsPerSpace() {
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let keyB = TilingSpaceKey(screen: Self.display.id, space: Self.spaceB)
         addFocusedWindow()
         controller.handle(slot: .topLeft)
         let challenger = addFocusedWindow()
         controller.handle(slot: .topLeft)
-        XCTAssertTrue(controller.canUndoDisplacement)
+        XCTAssertFalse(controller.canvas(for: keyA).undoStack.isEmpty)
 
         var feedbacks: [TilingController.Feedback] = []
         controller.onFeedback = { feedbacks.append($0) }
         switchTo(Self.spaceB)
 
-        XCTAssertFalse(controller.canUndoDisplacement, "a fresh Space has no history")
+        XCTAssertTrue(
+            controller.canvas(for: keyB).undoStack.isEmpty,
+            "a fresh Space has no history")
         controller.undoLastDisplacement()
         guard case .nothingToUndo = feedbacks.first else {
             return XCTFail("expected .nothingToUndo in the fresh Space, got \(feedbacks)")
         }
 
         switchTo(Self.spaceA)
-        XCTAssertTrue(
-            controller.canUndoDisplacement,
+        XCTAssertFalse(
+            controller.canvas(for: keyA).undoStack.isEmpty,
             "the first Space's chapter survived the round trip")
         controller.undoLastDisplacement()
-        XCTAssertNotNil(controller.occupant(of: .topLeft, on: Self.display.id))
-        XCTAssertNil(controller.state(on: Self.display.id).slot(of: challenger.id))
+        XCTAssertNotNil(controller.canvas(for: Self.display.id).state.occupant(of: .topLeft))
+        XCTAssertNil(controller.canvas(for: Self.display.id).state.slot(of: challenger.id))
     }
 
     func testSplittersAreIndependentPerSpace() {
@@ -279,17 +286,17 @@ final class SpaceIndependenceTests: XCTestCase {
         var dragged = gateway.frame(of: handle)!
         dragged.size.width -= 60
         gateway.simulateChange(handle, to: dragged)
-        let moved = controller.grid(on: Self.display.id).columnSplit
+        let moved = controller.canvas(for: Self.display.id).grid.columnSplit
         XCTAssertNotEqual(moved, 0.5)
 
         switchTo(Self.spaceB)
         XCTAssertEqual(
-            controller.grid(on: Self.display.id), GridLayout(),
+            controller.canvas(for: Self.display.id).grid, GridLayout(),
             "the second Space starts from the default splitters")
 
         switchTo(Self.spaceA)
         XCTAssertEqual(
-            controller.grid(on: Self.display.id).columnSplit, moved, accuracy: 0.001,
+            controller.canvas(for: Self.display.id).grid.columnSplit, moved, accuracy: 0.001,
             "the first Space kept the dragged splitter")
     }
 
@@ -306,7 +313,7 @@ final class SpaceIndependenceTests: XCTestCase {
         controller.pruneDeadWindows()
 
         XCTAssertEqual(
-            controller.state(in: keyA).slot(of: b.id), .leftHalf,
+            controller.canvas(for: keyA).state.slot(of: b.id), .leftHalf,
             "the freed cells reflow in hidden-state logically")
         XCTAssertEqual(
             gateway.frame(of: b), frameBefore,
@@ -344,7 +351,7 @@ final class SpaceIndependenceTests: XCTestCase {
             return XCTFail("expected .refused, got \(feedbacks)")
         }
         XCTAssertNil(
-            controller.state(on: Self.display.id).slot(of: a.id),
+            controller.canvas(for: Self.display.id).state.slot(of: a.id),
             "the deferred placement rolls back rather than diverging")
     }
 

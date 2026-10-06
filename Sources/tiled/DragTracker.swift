@@ -77,8 +77,9 @@ final class DragTracker {
     }
 
     private let context: Context
-    /// Pushes computed rects (excluding the dragged window); reports refusals.
-    private let apply: (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Int
+    /// Pushes computed rects (excluding the dragged window). Refusal
+    /// attribution belongs to the canvas the push routes to.
+    private let apply: (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Void
     /// Called when a title-bar drag ends past the untile distance: the
     /// controller releases the slot and leaves the window where dropped.
     private let onUntile: (WindowID) -> Void
@@ -173,7 +174,7 @@ final class DragTracker {
     init(
         context: Context,
         gridProvider: GridProvider,
-        apply: @escaping (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Int,
+        apply: @escaping (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Void,
         onUntile: @escaping (WindowID) -> Void = { _ in },
         scheduleDragEnd: @escaping DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         log: @escaping (String) -> Void = { _ in }
@@ -574,7 +575,7 @@ final class DragTracker {
             // `excluding` names a window whose frame is the drag's source
             // of truth; nil is the snapback case (the dragged window itself
             // is the only rect). Either way the rects must be pushed.
-            _ = self.apply(rects, excluding)
+            self.apply(rects, excluding)
         }
     }
 

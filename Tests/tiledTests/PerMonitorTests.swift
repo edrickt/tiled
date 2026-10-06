@@ -54,8 +54,8 @@ final class PerMonitorTests: XCTestCase {
         let b = tileOnRight()
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: leftID), 1)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
+        XCTAssertEqual(controller.canvas(for: leftID).state.occupant(of: .topLeft), 1)
+        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
         XCTAssertEqual(
             gateway.frame(of: a), GridLayout().rect(for: .topLeft, in: Self.left.visibleFrame))
         XCTAssertEqual(
@@ -68,13 +68,15 @@ final class PerMonitorTests: XCTestCase {
         tileOnRight()
         controller.handle(slot: .sixthLeft)
 
-        XCTAssertEqual(controller.activeLayout(on: leftID), .quarters)
-        XCTAssertEqual(controller.activeLayout(on: rightID), .sixths)
-        // The focused monitor drives the shared surface: focusing left
-        // shows quarters, focusing right shows sixths.
-        XCTAssertEqual(controller.activeLayout, .sixths)
+        XCTAssertEqual(controller.canvas(for: leftID).state.activeLayout, .quarters)
+        XCTAssertEqual(controller.canvas(for: rightID).state.activeLayout, .sixths)
+        // Focusing a monitor scopes the read: focusing left shows
+        // quarters, focusing right shows sixths.
+        XCTAssertEqual(
+            controller.canvas(for: controller.focusedTilingSpace).state.activeLayout, .sixths)
         gateway.focused = gateway.issued[0]
-        XCTAssertEqual(controller.activeLayout, .quarters)
+        XCTAssertEqual(
+            controller.canvas(for: controller.focusedTilingSpace).state.activeLayout, .quarters)
     }
 
     func testFocusedScreenScopesLayoutAndOccupancyToFocusedDisplay() {
@@ -89,16 +91,16 @@ final class PerMonitorTests: XCTestCase {
 
         gateway.focused = left
         XCTAssertEqual(controller.focusedScreen, leftID)
-        XCTAssertEqual(controller.activeLayout(on: controller.focusedScreen), .quarters)
+        XCTAssertEqual(controller.canvas(for: controller.focusedScreen).state.activeLayout, .quarters)
         XCTAssertEqual(
-            controller.state(on: controller.focusedScreen).occupants,
+            controller.canvas(for: controller.focusedScreen).state.occupants,
             [.topLeft: 1])
 
         gateway.focused = right
         XCTAssertEqual(controller.focusedScreen, rightID)
-        XCTAssertEqual(controller.activeLayout(on: controller.focusedScreen), .sixths)
+        XCTAssertEqual(controller.canvas(for: controller.focusedScreen).state.activeLayout, .sixths)
         XCTAssertEqual(
-            controller.state(on: controller.focusedScreen).occupants,
+            controller.canvas(for: controller.focusedScreen).state.occupants,
             [.sixthLeft: 2])
     }
 
@@ -140,18 +142,18 @@ final class PerMonitorTests: XCTestCase {
         controller.handle(slot: .topRight)
         tileOnRight()
         controller.handle(slot: .sixthLeft)
-        XCTAssertEqual(controller.activeLayout(on: rightID), .sixths)
+        XCTAssertEqual(controller.canvas(for: rightID).state.activeLayout, .sixths)
 
         // The right monitor switches back to quarters: only its own window
         // is evicted, the left monitor's quarters session is untouched.
         gateway.focused = gateway.issued[2]
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.activeLayout(on: rightID), .quarters)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 3)
-        XCTAssertEqual(controller.activeLayout(on: leftID), .quarters)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: leftID), 1)
-        XCTAssertEqual(controller.occupant(of: .topRight, on: leftID), 2)
+        XCTAssertEqual(controller.canvas(for: rightID).state.activeLayout, .quarters)
+        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 3)
+        XCTAssertEqual(controller.canvas(for: leftID).state.activeLayout, .quarters)
+        XCTAssertEqual(controller.canvas(for: leftID).state.occupant(of: .topLeft), 1)
+        XCTAssertEqual(controller.canvas(for: leftID).state.occupant(of: .topRight), 2)
     }
 
     func testUndoRestoresOnlyItsOwnMonitor() {
@@ -163,20 +165,20 @@ final class PerMonitorTests: XCTestCase {
         let challenger = gateway.addWindow(frame: CGRect(x: 2100, y: 100, width: 500, height: 400))
         gateway.focused = challenger
         controller.handle(slot: .topLeft)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 3)
-        XCTAssertTrue(controller.canUndoDisplacement)
+        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 3)
+        XCTAssertFalse(controller.canvas(for: rightID).undoStack.isEmpty)
 
         controller.undoLastDisplacement()
 
         // The evicted window returns under a fresh id (its record was
         // pruned at eviction); the challenger is untiled. The left
         // monitor is untouched.
-        XCTAssertNotNil(controller.occupant(of: .topLeft, on: rightID))
-        XCTAssertNil(controller.state(on: rightID).slot(of: 3))
+        XCTAssertNotNil(controller.canvas(for: rightID).state.occupant(of: .topLeft))
+        XCTAssertNil(controller.canvas(for: rightID).state.slot(of: 3))
         XCTAssertEqual(
             gateway.frame(of: gateway.issued[1]),
             GridLayout().rect(for: .topLeft, in: Self.right.visibleFrame))
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: leftID), 1)
+        XCTAssertEqual(controller.canvas(for: leftID).state.occupant(of: .topLeft), 1)
     }
 
     func testUndoOnEmptyMonitorAnswersInsteadOfStealingHistory() {
@@ -185,7 +187,7 @@ final class PerMonitorTests: XCTestCase {
         let challenger = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 500, height: 400))
         gateway.focused = challenger
         controller.handle(slot: .topLeft)
-        XCTAssertTrue(controller.canUndoDisplacement)
+        XCTAssertFalse(controller.canvas(for: leftID).undoStack.isEmpty)
 
         // Focus the untouched right monitor: nothing destructive happened
         // there, so undo answers instead of reaching into the left
@@ -204,8 +206,8 @@ final class PerMonitorTests: XCTestCase {
         // untiles.
         gateway.focused = challenger
         controller.undoLastDisplacement()
-        XCTAssertNotNil(controller.occupant(of: .topLeft, on: leftID))
-        XCTAssertNil(controller.state(on: leftID).slot(of: 2))
+        XCTAssertNotNil(controller.canvas(for: leftID).state.occupant(of: .topLeft))
+        XCTAssertNil(controller.canvas(for: leftID).state.slot(of: 2))
     }
 
     func testSplittersAreIndependentPerMonitor() {
@@ -224,8 +226,8 @@ final class PerMonitorTests: XCTestCase {
         dragged.size.width -= 60
         gateway.simulateChange(leftHandle, to: dragged)
 
-        XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
-        XCTAssertEqual(controller.grid(on: rightID), GridLayout())
+        XCTAssertNotEqual(controller.canvas(for: leftID).grid.columnSplit, 0.5)
+        XCTAssertEqual(controller.canvas(for: rightID).grid, GridLayout())
     }
 
     func testResetDividersOnlyResetsTheFocusedMonitor() {
@@ -243,18 +245,18 @@ final class PerMonitorTests: XCTestCase {
             dragged.size.width -= 60
             gateway.simulateChange(handle, to: dragged)
         }
-        XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
-        XCTAssertNotEqual(controller.grid(on: rightID).columnSplit, 0.5)
+        XCTAssertNotEqual(controller.canvas(for: leftID).grid.columnSplit, 0.5)
+        XCTAssertNotEqual(controller.canvas(for: rightID).grid.columnSplit, 0.5)
 
         // Focus left and reset: left snaps even, right keeps its drag.
         gateway.focused = leftHandle
         controller.resetDividers()
 
-        XCTAssertEqual(controller.grid(on: leftID), GridLayout())
-        XCTAssertNotEqual(controller.grid(on: rightID).columnSplit, 0.5)
-        XCTAssertTrue(controller.hasSplitterBackup)
+        XCTAssertEqual(controller.canvas(for: leftID).grid, GridLayout())
+        XCTAssertNotEqual(controller.canvas(for: rightID).grid.columnSplit, 0.5)
+        XCTAssertTrue(controller.canvas(for: leftID).hasSplitterBackup)
         XCTAssertTrue(controller.restoreSplitters())
-        XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
+        XCTAssertNotEqual(controller.canvas(for: leftID).grid.columnSplit, 0.5)
     }
 
     func testDragResizeOnlyPushesItsOwnMonitor() {
@@ -284,7 +286,7 @@ final class PerMonitorTests: XCTestCase {
             // moved and its neighbor re-pushed onto the dragged grid,
             // the isolation claim must be two-sided, or a mutant that
             // deletes the re-push entirely would pass.
-            let grid = self.controller.grid(on: self.leftID)
+            let grid = self.controller.canvas(for: self.leftID).grid
             XCTAssertNotEqual(
                 grid.leftRowSplit, 0.5,
                 "the drag moved the left monitor's row splitter")
@@ -324,12 +326,12 @@ final class PerMonitorTests: XCTestCase {
         gateway.focused = gateway.issued[0]
         controller.untileAll()
 
-        XCTAssertNil(controller.occupant(of: .topLeft, on: leftID))
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
-        XCTAssertNotNil(controller.lastNotice)
+        XCTAssertNil(controller.canvas(for: leftID).state.occupant(of: .topLeft))
+        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
+        XCTAssertNotNil(controller.canvas(for: leftID).notice)
         controller.undoLastDisplacement()
-        XCTAssertNotNil(controller.occupant(of: .topLeft, on: leftID))
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
+        XCTAssertNotNil(controller.canvas(for: leftID).state.occupant(of: .topLeft))
+        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
     }
 
     func testPerScreenBulkActionsBypassFocus() {
@@ -350,23 +352,23 @@ final class PerMonitorTests: XCTestCase {
             dragged.size.width -= 60
             gateway.simulateChange(handle, to: dragged)
         }
-        XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
-        XCTAssertNotEqual(controller.grid(on: rightID).columnSplit, 0.5)
+        XCTAssertNotEqual(controller.canvas(for: leftID).grid.columnSplit, 0.5)
+        XCTAssertNotEqual(controller.canvas(for: rightID).grid.columnSplit, 0.5)
 
         // Focus stays right; everything below names the left screen.
         gateway.focused = rightHandle
         controller.untileAll(on: leftID)
-        XCTAssertNil(controller.occupant(of: .topLeft, on: leftID))
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
+        XCTAssertNil(controller.canvas(for: leftID).state.occupant(of: .topLeft))
+        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
         controller.undoLastDisplacement(on: leftID)
-        XCTAssertNotNil(controller.occupant(of: .topLeft, on: leftID))
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
+        XCTAssertNotNil(controller.canvas(for: leftID).state.occupant(of: .topLeft))
+        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
 
         controller.resetDividers(on: leftID)
-        XCTAssertEqual(controller.grid(on: leftID), GridLayout())
-        XCTAssertNotEqual(controller.grid(on: rightID).columnSplit, 0.5)
+        XCTAssertEqual(controller.canvas(for: leftID).grid, GridLayout())
+        XCTAssertNotEqual(controller.canvas(for: rightID).grid.columnSplit, 0.5)
         XCTAssertTrue(controller.restoreSplitters(on: leftID))
-        XCTAssertNotEqual(controller.grid(on: leftID).columnSplit, 0.5)
+        XCTAssertNotEqual(controller.canvas(for: leftID).grid.columnSplit, 0.5)
         XCTAssertFalse(controller.restoreSplitters(on: leftID))
     }
 
@@ -379,8 +381,8 @@ final class PerMonitorTests: XCTestCase {
         gateway.kill(leftHandle)
         controller.pruneDeadWindows()
 
-        XCTAssertNil(controller.occupant(of: .topLeft, on: leftID))
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 2)
+        XCTAssertNil(controller.canvas(for: leftID).state.occupant(of: .topLeft))
+        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
     }
 
     func testEvictionNeverCrossesMonitors() {
@@ -395,17 +397,15 @@ final class PerMonitorTests: XCTestCase {
         gateway.focused = challenger
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: rightID), 3)
-        XCTAssertNil(controller.state(on: rightID).slot(of: 2))
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: leftID), 1)
+        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 3)
+        XCTAssertNil(controller.canvas(for: rightID).state.slot(of: 2))
+        XCTAssertEqual(controller.canvas(for: leftID).state.occupant(of: .topLeft), 1)
     }
 
-    /// The derived surface reports the canvas an action touched, not the
-    /// display the user happens to be focused on. Every write form above
-    /// moves focus with the window it tiles, so this is the case that
-    /// distinguishes "the canvas that acted" from "the focused canvas":
-    /// a screen-scoped action on the unfocused monitor.
-    func testSurfaceReportsTheActedCanvasNotTheFocusedDisplay() {
+    /// A screen-scoped action on the unfocused monitor dissolves that
+    /// monitor's canvas and leaves the focused one alone. The read is
+    /// explicit per canvas: no derived surface reports the actor.
+    func testScreenScopedActionOnTheUnfocusedMonitorLeavesTheFocusedOneAlone() {
         let left = tileOnLeft()
         controller.handle(slot: .topLeft)
         tileOnRight()
@@ -415,11 +415,11 @@ final class PerMonitorTests: XCTestCase {
         controller.untileAll(on: rightID)
 
         XCTAssertTrue(
-            controller.state.occupants.isEmpty,
-            "the surface reports the right canvas, the one that just acted")
+            controller.canvas(for: rightID).state.occupants.isEmpty,
+            "the named canvas dissolved")
         XCTAssertEqual(
-            controller.occupant(of: .topLeft, on: leftID), 1,
-            "the left canvas is untouched")
-        XCTAssertNil(controller.occupant(of: .topLeft, on: rightID))
+            controller.canvas(for: leftID).state.occupant(of: .topLeft), 1,
+            "the focused canvas is untouched")
+        XCTAssertNil(controller.canvas(for: rightID).state.occupant(of: .topLeft))
     }
 }

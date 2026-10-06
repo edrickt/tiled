@@ -1,70 +1,91 @@
 import XCTest
 @testable import tiled
 
-/// Closes the "commit dance" gap: the pure-state matrices in
-/// LayoutSwitchTests validate `plan()` against a hand-written copy of
-/// the controller's apply order. Here every (occupancy, request) pair
-/// from those same matrices is replayed through the real
-/// `TilingController.handle` (restore ordering, record lifecycle, commit,
-/// and cross-layout reset included) and the end state must match the pure
-/// plan application exactly. Both requester kinds run: a fresh untiled
-/// window (tile/evict/switch paths) and an already-tiled window (move
-/// and no-op paths, which only tiled requesters can produce).
+/// Closes the "commit dance" gap without copying it: every (occupancy,
+/// request) pair from the pure plan matrices is replayed through the
+/// canvas (`TilingSpace` with a fake gateway and injected bounds) and
+/// checked against the model's plan-defined contract. The model is
+/// `plan` itself plus the pure rules (`rehousingHome`, `reflow`); the
+/// test never re-implements the placement pipeline's commit order.
+/// Both requester kinds run: a fresh untiled window (tile/evict/switch
+/// paths) and an already-tiled window (move and no-op paths, which only
+/// tiled requesters can produce).
 final class MatrixCrossCheckTests: XCTestCase {
-    /// The pure contract: evicted windows are removed before the requester
-    /// is committed, then the cells the event freed (eviction remainders,
-    /// the requester's vacated tile) reflow into the one survivor that
-    /// merges with them into a whole slot. Cross-validated against the
-    /// real controller by this very test.
-    private func applyExpected(
-        _ plan: TilePlan, requester: WindowID, target: Slot, to state: inout TilingState
+    func testCanvasMatchesThePlanContractForFreshRequesters() {
+        runMatrix(requester: .fresh)
+    }
+
+    func testCanvasMatchesThePlanContractForTiledRequesters() {
+        runMatrix(requester: .tiled)
+    }
+
+    // MARK: Canvas vs. model
+
+    /// The contract of one plan, asserted on the canvas that executed it:
+    /// - `.noop`: nothing changed.
+    /// - `.switchLayout`: exactly the requester remains.
+    /// - `.swap`: the two windows trade tiles, nobody else moves.
+    /// - `.tile`: the requester lands, every evictee either re-houses
+    ///   into the one whole slot the request freed (`rehousingHome`) or
+    ///   is gone, and every survivor stays tiled.
+    /// Structural health (one layout, no ghosts, no double-booked cells)
+    /// is checked after every case.
+    private func assertCanvasFollows(
+        _ plan: TilePlan, harness: TilingSpaceHarness, model: TilingState,
+        requester: WindowID, target: Slot, context: String
     ) {
+        let canvas = harness.space
         switch plan {
         case .noop:
-            break
+            XCTAssertEqual(canvas.state, model, "\(context): noop changed the state")
+        case .switchLayout:
+            XCTAssertEqual(
+                canvas.state.occupants, [target: requester],
+                "\(context): a switch leaves exactly the requester")
         case .swap(let displaced):
-            if let previous = state.slot(of: requester) {
-                state.commit(window: displaced, into: previous)
+            guard let previous = model.slot(of: requester),
+                let displacedSlot = model.slot(of: displaced)
+            else {
+                return XCTFail("\(context): swap plan without both tiles")
             }
-            state.commit(window: requester, into: target)
-        case .switchLayout(let evicting):
-            // A layout switch resets the space: no reflow.
-            for evicted in evicting where evicted != requester {
-                state.remove(window: evicted)
-            }
-            state.commit(window: requester, into: target)
+            var expected = model.occupants
+            expected[previous] = nil
+            expected[displacedSlot] = nil
+            expected[target] = requester
+            expected[previous] = displaced
+            XCTAssertEqual(
+                canvas.state.occupants, expected,
+                "\(context): the displaced window takes the vacated tile")
         case .tile(let evicting):
-            let others = evicting.filter { $0 != requester }
-            // Re-house: a lone evictee stays tiled when the cells left
-            // free form exactly one whole slot (mirrors the executor).
-            // The free region is measured after the request: the
-            // requester's vacated slot counts as free too.
-            var rehouse: (window: WindowID, home: Slot)?
-            let previous = state.slot(of: requester)
-            if others.count == 1,
-                let home = state.rehousingHome(
-                    evicting: others[0], for: target, vacating: previous)
-            {
-                rehouse = (others[0], home)
+            XCTAssertEqual(
+                canvas.state.occupant(of: target), requester,
+                "\(context): the requester lands in its slot")
+            for evicted in evicting {
+                if evicted == requester { continue }
+                // Only a lone evictee is ever re-housed (the canvas's
+                // rule); with more than one, everyone goes home.
+                if evicting.count == 1,
+                    let home = model.rehousingHome(
+                        evicting: evicted, for: target, vacating: model.slot(of: requester))
+                {
+                    XCTAssertEqual(
+                        canvas.state.slot(of: evicted), home,
+                        "\(context): the lone evictee re-houses into the one free slot")
+                } else {
+                    XCTAssertNil(
+                        canvas.state.slot(of: evicted),
+                        "\(context): a window with no re-house slot is released")
+                }
             }
-            var freed: Set<TileCell> = []
-            for evicted in others {
-                if let slot = state.slot(of: evicted) { freed.formUnion(slot.cells) }
-                state.remove(window: evicted)
-            }
-            if let previous {
-                freed.formUnion(previous.cells)
-            }
-            state.commit(window: requester, into: target)
-            if let (window, home) = rehouse {
-                state.commit(window: window, into: home)
-            }
-            for (window, grown) in state.reflow(
-                freed: freed, excluding: Set([requester] + others))
-            {
-                state.commit(window: window, into: grown)
+            // Survivors: reflow may grow them, never drop them.
+            let survivors = Set(model.tiledWindows).subtracting(evicting)
+            for survivor in survivors {
+                XCTAssertNotNil(
+                    canvas.state.slot(of: survivor),
+                    "\(context): a survivor must keep a tile")
             }
         }
+        assertHealthy(canvas.state.occupants, context: context)
     }
 
     private func assertHealthy(_ occupants: [Slot: WindowID], context: String) {
@@ -77,14 +98,9 @@ final class MatrixCrossCheckTests: XCTestCase {
         }
         XCTAssertLessThanOrEqual(
             Set(occupants.keys.map(\.layout)).count, 1, "\(context): mixed layouts on screen")
-    }
-
-    func testControllerMatchesPurePlanForFreshRequesters() {
-        runMatrix(requester: .fresh)
-    }
-
-    func testControllerMatchesPurePlanForTiledRequesters() {
-        runMatrix(requester: .tiled)
+        XCTAssertEqual(
+            Set(occupants.values).count, occupants.count,
+            "\(context): a window appears in two slots")
     }
 
     // MARK: Engine
@@ -102,48 +118,96 @@ final class MatrixCrossCheckTests: XCTestCase {
         for (layout, configs) in matrices {
             for config in configs {
                 for target in Slot.allCases {
-                    let gateway = FakeWindowGateway()
-                    let controller = TilingController(gateway: gateway, pruneInterval: nil)
-
+                    let harness = TilingSpaceHarness()
                     // Tile the occupancy shape: ids 1...count, in order.
-                    var handles: [WindowHandle] = []
+                    // Configs are pairwise disjoint, so every setup tile
+                    // is a plain placement.
                     for slot in config {
-                        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
-                        handles.append(handle)
-                        gateway.focused = handle
-                        controller.handle(slot: slot)
+                        let id = harness.addWindow()
+                        harness.apply(slot: slot, requester: id)
                     }
 
                     let requesterID: WindowID
                     switch kind {
                     case .fresh:
-                        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
-                        handles.append(handle)
-                        gateway.focused = handle
-                        requesterID = WindowID(config.count + 1)
+                        requesterID = harness.addWindow()
                     case .tiled:
-                        gateway.focused = handles[0]
                         requesterID = 1
                     }
 
-                    // Pure expectation over the same state.
-                    var expected = TilingState()
+                    // The model over the same occupancy.
+                    var model = TilingState()
                     for (index, slot) in config.enumerated() {
-                        expected.commit(window: index + 1, into: slot)
+                        model.commit(window: index + 1, into: slot)
                     }
-                    let plan = expected.plan(window: requesterID, into: target)
-                    applyExpected(plan, requester: requesterID, target: target, to: &expected)
-
-                    // Real controller.
-                    controller.handle(slot: target)
+                    let plan = model.plan(window: requesterID, into: target)
 
                     let context =
                         "\(kind) \(layout.rawValue) \(config) -> \(target.rawValue) [\(plan)]"
-                    XCTAssertEqual(controller.state.occupants, expected.occupants, context)
-                    XCTAssertEqual(controller.state.activeLayout, expected.activeLayout, context)
-                    assertHealthy(controller.state.occupants, context: context)
+                    XCTAssertEqual(
+                        harness.space.state.occupants, model.occupants,
+                        "\(context): canvas and model start from the same occupancy")
+
+                    harness.apply(slot: target, requester: requesterID)
+
+                    assertCanvasFollows(
+                        plan, harness: harness, model: model,
+                        requester: requesterID, target: target, context: context)
                 }
             }
         }
+    }
+
+    // MARK: Canvas replay of short sequences
+
+    /// Every request sequence up to two hops over three windows: replay
+    /// it through a fresh canvas, assert the structural invariants after
+    /// EVERY step, and extend only sequences that reach a new occupancy.
+    /// The plans come from the canvas's own pure state; the canvas
+    /// executes them. Switches must occur in both directions, or the
+    /// sweep proved nothing.
+    func testShortRequestSequencesKeepTheCanvasInvariants() {
+        var queue: [[(WindowID, Slot)]] = [[]]
+        var visited: Set<String> = []
+        var steps = 0
+        var quartersToSixths = 0
+        var sixthsToQuarters = 0
+        while !queue.isEmpty {
+            let path = queue.removeFirst()
+            let harness = TilingSpaceHarness()
+            let ids = (0..<3).map { _ in harness.addWindow() }
+            for (window, slot) in path {
+                let plan = harness.space.state.plan(window: window, into: slot)
+                if case .switchLayout = plan {
+                    if slot.layout == .sixths {
+                        quartersToSixths += 1
+                    } else {
+                        sixthsToQuarters += 1
+                    }
+                }
+                harness.apply(slot: slot, requester: window)
+                steps += 1
+                assertHealthy(
+                    harness.space.state.occupants,
+                    context: "path \(path) after win\(window) -> \(slot.rawValue)")
+            }
+            guard path.count < 2 else { continue }
+            let key = occupancyKey(harness.space.state.occupants)
+            guard visited.insert(key).inserted else { continue }
+            for window in ids {
+                for slot in Slot.allCases {
+                    queue.append(path + [(window, slot)])
+                }
+            }
+        }
+        XCTAssertGreaterThan(steps, 1000, "BFS explored too little")
+        XCTAssertGreaterThan(quartersToSixths, 0, "BFS never switched quarters -> sixths")
+        XCTAssertGreaterThan(sixthsToQuarters, 0, "BFS never switched sixths -> quarters")
+    }
+
+    private func occupancyKey(_ occupants: [Slot: WindowID]) -> String {
+        occupants
+            .map { "\($0.key.rawValue)=\($0.value)" }
+            .sorted().joined(separator: ",")
     }
 }

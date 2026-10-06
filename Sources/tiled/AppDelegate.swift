@@ -188,17 +188,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// One immutable pass over the state the icon reads: the active
     /// layout plus which icon cells are covered. The focused canvas
     /// (display plus Mission Control Space) is resolved once and both
-    /// reads scope to that key, so focus moving between the two lookups
-    /// can never mix two canvases' geometry and occupancy. Expanded
+    /// reads scope to it, so focus moving between the two lookups can
+    /// never mix two canvases' geometry and occupancy. Expanded
     /// windows keep their slot (an expanded window still owns its tile),
     /// so they still light it. The focused canvas drives the glyph, so
     /// the icon depicts the layout the next hotkey acts on, whether the
     /// user got there by focusing another display or swiping Spaces.
     private func iconSnapshot() -> StatusIcon.Snapshot {
-        let space = controller.focusedTilingSpace
+        let canvas = controller.canvas(for: controller.focusedScreen)
         return StatusIcon.snapshot(
-            layout: controller.activeLayout(in: space),
-            occupants: controller.state(in: space).occupants)
+            layout: canvas.state.activeLayout,
+            occupants: canvas.state.occupants)
     }
 
     /// The menu-bar glyph states the product's core idea twice over: the
@@ -437,32 +437,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// One immutable pass over the app state the menu reads.
     /// Fresh destructive-outcome notices (eviction, layout switch) live
-    /// in the menu beside the undo row that reverses them. `lastNotice`
-    /// clears on every new action; the menu carries each outcome until
-    /// the next one replaces it.
+    /// in the menu beside the undo row that reverses them: the canvas's
+    /// `notice` clears on every new action, so the menu carries each
+    /// outcome until the next one replaces it.
     private func menuSnapshot() -> MenuModel.Snapshot {
+        // One canvas read for the whole pass: every unscoped field
+        // describes the focused canvas's own surface.
+        let canvas = controller.canvas(for: controller.focusedTilingSpace)
         let warnings = activeWarnings
         let rows = controller.tiledWindowsInfo
         let presentation = Self.monitorPresentation(
             rows: rows,
             layoutForScreen: { screen in
-                guard let screen else { return controller.activeLayout }
-                return controller.activeLayout(on: screen)
+                // A row with no display tag describes the focused canvas
+                // (headless/legacy); tagged rows read their own screen.
+                if let screen {
+                    return controller.canvas(for: screen).state.activeLayout
+                }
+                return controller.canvas(for: controller.focusedTilingSpace).state.activeLayout
             })
         return MenuModel.Snapshot(
             isTrusted: controller.isTrusted,
             warnings: warnings.hotkeyWarnings,
-            notice: controller.lastNotice,
+            notice: canvas.notice,
             layoutTitle: presentation.statusLine,
-            activeLayout: controller.activeLayout,
+            activeLayout: canvas.state.activeLayout,
             tileError: warnings.tileError,
             hasHotkeyWarnings: hasHotkeyWarnings,
-            hasSplitterBackup: controller.hasSplitterBackup,
+            hasSplitterBackup: canvas.hasSplitterBackup,
             hasFocusedWindow: gateway.isTrusted && gateway.focusedWindow() != nil,
             expandedSlot: controller.expandedFocusedSlot,
             tiledWindows: presentation.tiledWindows,
-            canUndoDisplacement: controller.canUndoDisplacement,
-            evictedCount: controller.evictedCount,
+            canUndoDisplacement: !canvas.undoStack.isEmpty,
+            evictedCount: canvas.evictedCount,
             untileCount: controller.focusedTiledWindowsInfo.count,
             monitorSections: presentation.sections)
     }
@@ -601,7 +608,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Undo title names what returns: the evicted windows.
     private var undoDisplacementTitle: String {
-        MenuText.undoDisplacementTitle(evictedCount: controller.evictedCount)
+        let canvas = controller.canvas(for: controller.focusedTilingSpace)
+        return MenuText.undoDisplacementTitle(
+            evictedCount: canvas.evictedCount)
     }
 
     /// Bulk-action title names the consequence: restoring every window.
@@ -634,7 +643,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let label = hotkeyStore.binding(for: slot).label
             hotkeyWarnings.append(MenuText.hotkeyFailureWarning(label: label, slot: slot))
         }
-        return (tileError: controller.lastTileError, hotkeyWarnings: hotkeyWarnings)
+        return (tileError: controller.canvas(for: controller.focusedTilingSpace).error,
+                hotkeyWarnings: hotkeyWarnings)
     }
 
     // MARK: Actions
@@ -754,7 +764,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func resetDividers(_ sender: NSMenuItem) {
         // Two actions in sequence, like Reset Shortcuts: a reversible
         // reset first (fractions parked), then a restore of the backup.
-        if controller.hasSplitterBackup {
+        if controller.canvas(for: controller.focusedTilingSpace).hasSplitterBackup {
             controller.restoreSplitters()
             announce(
                 "Splitters restored to their pre-reset positions.",
@@ -825,13 +835,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             noticeFallback = "Already in \(SlotPresentation.title(of: slot))."
         case .refused(let name):
             text = MenuText.refusedAnnouncement(windowName: name)
-            noticeFallback = controller.lastTileError
+            noticeFallback = controller.canvas(for: controller.focusedTilingSpace).error
             announce(text, fallback: noticeFallback)
             refreshMenu()
             return
         case .expandRefused(let name):
             text = MenuText.expandRefusedAnnouncement(windowName: name)
-            noticeFallback = controller.lastTileError
+            noticeFallback = controller.canvas(for: controller.focusedTilingSpace).error
             announce(text, fallback: noticeFallback)
             refreshMenu()
             return

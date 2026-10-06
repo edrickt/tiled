@@ -1,4 +1,3 @@
-import AppKit
 import XCTest
 @testable import tiled
 
@@ -9,31 +8,38 @@ import XCTest
 /// controller's screen-ownership rule so assertions never hardcode real
 /// display pixels.
 final class ExpandToggleTests: XCTestCase {
+    /// Deterministic display: every produced frame is checked against this
+    /// rect, never the host Mac's screen.
+    private static let screen = ScreenInfo(
+        id: ScreenID(rawValue: 1),
+        frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        name: "Display 1")
+
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
     private var feedbacks: [TilingController.Feedback] = []
+
+    /// The canvas the test's single display tiles onto: reads go through
+    /// the same accessor actions do.
+    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
 
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
         feedbacks = []
         // No runloop timer: tests drive pruneDeadWindows directly.
-        controller = TilingController(gateway: gateway, pruneInterval: nil)
+        controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { [Self.screen] })
         controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
         controller.onChange = {}
     }
 
-    // MARK: Expected geometry (mirrors the controller's screen rule)
+    // MARK: Expected geometry (the injected screen)
 
     private func bounds(for frame: CGRect) -> CGRect {
-        let screens = NSScreen.screens
-        if let index = TilingController.owningScreenIndex(frames: screens.map(\.frame), for: frame) {
-            return screens[index].visibleFrame
-        }
-        if let index = TilingController.midpointScreenIndex(frames: screens.map(\.frame), for: frame) {
-            return screens[index].visibleFrame
-        }
-        return NSScreen.main?.visibleFrame ?? frame
+        Self.screen.visibleFrame
     }
 
     private func tileRect(_ slot: Slot, in frame: CGRect) -> CGRect {
@@ -41,19 +47,13 @@ final class ExpandToggleTests: XCTestCase {
     }
 
     /// Independent invariant: a produced frame must sit inside the
-    /// visible frame of the screen that owns the pre-toggle frame.
-    /// `bounds(for:)` mirrors the controller's ownership chain, so a
-    /// broken rule could agree with itself; containment is checked
-    /// against the screen API directly, which the mirroring cannot fake.
+    /// injected screen's visible frame. Containment is checked against
+    /// the screen value directly, which the tile math cannot fake.
     private func assertWithinOwningVisibleFrame(_ produced: CGRect, preToggle: CGRect) {
-        let screens = NSScreen.screens
-        guard let index = TilingController.owningScreenIndex(
-            frames: screens.map(\.frame), for: preToggle)
-        else { return } // off-screen: the fallback chain owns the frame
         XCTAssertTrue(
-            screens[index].visibleFrame.contains(produced),
-            "produced \(produced) escapes the owning screen's visible frame " +
-            "\(screens[index].visibleFrame)")
+            Self.screen.visibleFrame.contains(produced),
+            "produced \(produced) escapes the screen's visible frame " +
+            "\(Self.screen.visibleFrame)")
     }
 
     // MARK: Untiled windows
@@ -68,7 +68,7 @@ final class ExpandToggleTests: XCTestCase {
         let expanded = gateway.frame(of: handle)!
         XCTAssertEqual(expanded, bounds(for: original))
         assertWithinOwningVisibleFrame(expanded, preToggle: original)
-        XCTAssertTrue(controller.state.occupants.isEmpty, "expanding never tiles")
+        XCTAssertTrue(canvas.state.occupants.isEmpty, "expanding never tiles")
     }
 
     func testSecondPressRestoresPreviousFrame() {
@@ -108,7 +108,7 @@ final class ExpandToggleTests: XCTestCase {
 
         controller.handleExpandToggle()
 
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft, "expanding acts like focusing: the slot survives")
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft, "expanding acts like focusing: the slot survives")
         XCTAssertEqual(
             gateway.frame(of: handle),
             bounds(for: tileRect(.topLeft, in: CGRect(x: 0, y: 0, width: 800, height: 600))))
@@ -124,7 +124,7 @@ final class ExpandToggleTests: XCTestCase {
         controller.handleExpandToggle()
 
         XCTAssertEqual(gateway.frame(of: handle), tiledFrame)
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
     }
 
     func testExpandingDoesNotMoveOtherTiledWindows() {
@@ -140,8 +140,8 @@ final class ExpandToggleTests: XCTestCase {
         controller.handleExpandToggle()
 
         XCTAssertEqual(gateway.frame(of: b), bFrame, "expanding one window leaves its neighbors alone")
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
-        XCTAssertEqual(controller.state.slot(of: 2), .bottomRight)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 2), .bottomRight)
     }
 
     func testTilingBesideExpandedWindowLeavesItExpanded() {
@@ -160,8 +160,8 @@ final class ExpandToggleTests: XCTestCase {
         XCTAssertEqual(
             gateway.frame(of: a), expandedFrame,
             "tiling a neighbor into a disjoint slot never touches the expanded window")
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
-        XCTAssertEqual(controller.state.slot(of: 2), .topRight)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 2), .topRight)
 
         gateway.focused = a
         controller.handleExpandToggle()
@@ -181,7 +181,7 @@ final class ExpandToggleTests: XCTestCase {
         XCTAssertEqual(
             gateway.frame(of: handle),
             tileRect(.topLeft, in: CGRect(x: 0, y: 0, width: 800, height: 600)))
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
 
         // Expansion ended: the toggle expands again instead of collapsing.
         controller.handleExpandToggle()
@@ -198,7 +198,7 @@ final class ExpandToggleTests: XCTestCase {
         controller.handleExpandToggle()
         controller.handle(slot: .bottomRight)
 
-        XCTAssertEqual(controller.state.slot(of: 1), .bottomRight)
+        XCTAssertEqual(canvas.state.slot(of: 1), .bottomRight)
         XCTAssertEqual(
             gateway.frame(of: handle),
             tileRect(.bottomRight, in: CGRect(x: 0, y: 0, width: 800, height: 600)))
@@ -230,14 +230,14 @@ final class ExpandToggleTests: XCTestCase {
 
         gateway.focused = a
         controller.handleExpandToggle()
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
 
         // b requests a's slot while a covers the screen: a is evicted.
         gateway.focused = b
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.state.slot(of: 1), nil)
-        XCTAssertEqual(controller.state.slot(of: 2), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), nil)
+        XCTAssertEqual(canvas.state.slot(of: 2), .topLeft)
         XCTAssertEqual(
             gateway.frame(of: a), CGRect(x: 120, y: 90, width: 700, height: 500),
             "eviction restores the pre-tile frame and ends the expansion")
@@ -257,7 +257,7 @@ final class ExpandToggleTests: XCTestCase {
 
         controller.handleExpandToggle()
 
-        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(feedbacks.count, 1)
         guard case .noFocusedWindow = feedbacks[0] else {
             return XCTFail("expected .noFocusedWindow, got \(feedbacks[0])")
@@ -277,7 +277,7 @@ final class ExpandToggleTests: XCTestCase {
         guard case .expandRefused = feedbacks[0] else {
             return XCTFail("expected .expandRefused, got \(feedbacks[0])")
         }
-        XCTAssertNotNil(controller.lastTileError)
+        XCTAssertNotNil(canvas.error)
 
         // The window never expanded: the next press retries the expand.
         controller.handleExpandToggle()

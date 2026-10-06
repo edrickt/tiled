@@ -18,6 +18,10 @@ final class FakeGatewayFidelityTests: XCTestCase {
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
 
+    /// The canvas the test's single display tiles onto: reads go through
+    /// the same accessor actions do.
+    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
+
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
@@ -38,10 +42,10 @@ final class FakeGatewayFidelityTests: XCTestCase {
 
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.state.occupant(of: .topLeft), a.id)
+        XCTAssertEqual(canvas.state.occupant(of: .topLeft), a.id)
         XCTAssertEqual(
             gateway.frame(of: a), clamped,
             "the live frame is the app's applied rect, not the tile target")
-        XCTAssertEqual(controller.state.slot(of: a.id), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: a.id), .topLeft)
     }
 }

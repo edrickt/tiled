@@ -45,7 +45,6 @@ final class DragTrackerTests: XCTestCase {
             gridProvider: provider(),
             apply: { [weak self] rects, excluding in
                 self?.pushed.append((rects, excluding))
-                return 0
             },
             onUntile: { [weak self] in self?.untiled.append($0) },
             scheduleDragEnd: { [weak self] fire in
@@ -104,7 +103,6 @@ final class DragTrackerTests: XCTestCase {
             gridProvider: provider(),
             apply: { [weak self] rects, excluding in
                 self?.pushed.append((rects, excluding))
-                return 0
             },
             onUntile: { [weak self] in self?.untiled.append($0) },
             scheduleDragEnd: { [weak self] fire in
@@ -130,7 +128,6 @@ final class DragTrackerTests: XCTestCase {
             gridProvider: provider(),
             apply: { [weak self] rects, excluding in
                 self?.pushed.append((rects, excluding))
-                return 0
             },
             onUntile: { [weak self] in self?.untiled.append($0) },
             scheduleDragEnd: { [weak self] fire in
@@ -387,7 +384,6 @@ final class DragTrackerTests: XCTestCase {
             gridProvider: provider(),
             apply: { [weak self] rects, excluding in
                 self?.pushed.append((rects, excluding))
-                return 0
             },
             onUntile: { [weak self] in self?.untiled.append($0) },
             scheduleDragEnd: { [weak self] fire in

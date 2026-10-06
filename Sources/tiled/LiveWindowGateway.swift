@@ -869,7 +869,7 @@ final class LiveWindowGateway: WindowGateway {
     /// transient class retries, with a short backoff, on the calling
     /// thread: hotkey handling already blocks the main runloop on the AX
     /// round-trip itself, and an asynchronous retry would break the
-    /// executor's synchronous all-or-nothing writes.
+    /// placement's synchronous all-or-nothing writes.
     enum AXWrite {
         /// The error class worth retrying: the app could not complete the
         /// request right now. Everything else (unsupported attribute,

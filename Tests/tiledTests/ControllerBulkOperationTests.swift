@@ -8,6 +8,14 @@ import XCTest
 /// restored frames, the one-step undo lifecycle, feedback callbacks, and
 /// notice clearing.
 final class ControllerBulkOperationTests: XCTestCase {
+    /// Deterministic display: written rects are checked against this
+    /// rect, never the host Mac's screen.
+    private static let screen = ScreenInfo(
+        id: ScreenID(rawValue: 1),
+        frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        name: "Display 1")
+
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
     private var feedbacks: [TilingController.Feedback] = []
@@ -16,10 +24,16 @@ final class ControllerBulkOperationTests: XCTestCase {
     /// removed explicitly or they leak for the process lifetime.
     private var observers: [NSObjectProtocol] = []
 
+    /// The canvas the test's single display tiles onto: reads go through
+    /// the same accessor actions do.
+    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
+
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
-        controller = TilingController(gateway: gateway, pruneInterval: nil, deathConfirmation: 0)
+        controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { [Self.screen] }, deathConfirmation: 0)
         controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
         controller.onChange = { [weak self] in self?.changeCount += 1 }
     }
@@ -42,13 +56,11 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     /// The rect the controller would write for `slot` right now: the live
-    /// grid evaluated in the owning screen's visible frame (mirrors the
+    /// grid evaluated in the injected screen's visible frame (mirrors the
     /// controller's `visibleBounds` + tracker `rect(for:)`).
     private func expectedRect(_ slot: Slot, for handle: WindowHandle) -> CGRect {
-        let frame = gateway.frame(of: handle)!
-        let screens = NSScreen.screens
-        let index = TilingController.owningScreenIndex(frames: screens.map(\.frame), for: frame) ?? 0
-        return controller.grid.rect(for: slot, in: screens[index].visibleFrame)
+        controller.canvas(for: Self.screen.id).grid.rect(
+            for: slot, in: Self.screen.visibleFrame)
     }
 
     // MARK: Untile restores frames
@@ -57,11 +69,11 @@ final class ControllerBulkOperationTests: XCTestCase {
         let handle = addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
         let original = gateway.frame(of: handle)!
         controller.handle(slot: .topLeft)
-        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
 
         controller.untile(window: 1)
 
-        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(
             gateway.frame(of: handle), original,
             "untile writes the pre-tile frame back")
@@ -69,7 +81,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
     func testUntileUnknownWindowIsSafe() {
         controller.untile(window: 99)
-        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertTrue(feedbacks.isEmpty)
     }
 
@@ -81,11 +93,11 @@ final class ControllerBulkOperationTests: XCTestCase {
         let bOriginal = gateway.frame(of: b)!
         gateway.focused = b
         controller.handle(slot: .topRight)
-        XCTAssertEqual(controller.state.tiledWindows.count, 2)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 2)
 
         controller.untileAll()
 
-        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(gateway.frame(of: a), aOriginal)
         XCTAssertEqual(gateway.frame(of: b), bOriginal)
     }
@@ -105,10 +117,10 @@ final class ControllerBulkOperationTests: XCTestCase {
         // frame), b lands in the sixths slot.
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
-        XCTAssertTrue(controller.canUndoDisplacement)
-        XCTAssertEqual(controller.evictedCount, 1)
-        XCTAssertNotNil(controller.lastNotice)
-        XCTAssertEqual(controller.state.slot(of: 2), .sixthLeft)
+        XCTAssertFalse(canvas.undoStack.isEmpty)
+        XCTAssertEqual(canvas.evictedCount, 1)
+        XCTAssertNotNil(canvas.notice)
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft)
         XCTAssertEqual(
             gateway.frame(of: a), aOriginal,
             "eviction restores the pre-tile frame immediately")
@@ -118,17 +130,17 @@ final class ControllerBulkOperationTests: XCTestCase {
         // The evicted window returns to its slot under a fresh id (its
         // record was pruned at switch); the requester is untiled with its
         // original frame back.
-        XCTAssertEqual(controller.state.tiledWindows.count, 1)
-        XCTAssertNotNil(controller.state.occupant(of: .topLeft))
-        XCTAssertEqual(controller.state.slot(of: 2), nil)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
+        XCTAssertNotNil(canvas.state.occupant(of: .topLeft))
+        XCTAssertEqual(canvas.state.slot(of: 2), nil)
         XCTAssertEqual(
             gateway.frame(of: a), expectedRect(.topLeft, for: a),
             "undo re-tiles the evicted window into its old slot")
         XCTAssertEqual(
             gateway.frame(of: b), bOriginal,
             "undo restores the requester's pre-tile frame")
-        XCTAssertFalse(controller.canUndoDisplacement)
-        XCTAssertEqual(controller.evictedCount, 0)
+        XCTAssertTrue(canvas.undoStack.isEmpty)
+        XCTAssertEqual(canvas.evictedCount, 0)
     }
 
     func testUndoIsSingleStep() {
@@ -141,13 +153,13 @@ final class ControllerBulkOperationTests: XCTestCase {
         // Requester b switches; a is evicted and offers undo.
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
-        XCTAssertTrue(controller.canUndoDisplacement)
+        XCTAssertFalse(canvas.undoStack.isEmpty)
 
         controller.undoLastDisplacement()
-        XCTAssertFalse(controller.canUndoDisplacement)
+        XCTAssertTrue(canvas.undoStack.isEmpty)
 
         controller.undoLastDisplacement()
-        XCTAssertEqual(controller.state.tiledWindows.count, 1, "second undo is a no-op")
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1, "second undo is a no-op")
     }
 
     func testNewSwitchPushesHistoryInsteadOfReplacingIt() {
@@ -160,35 +172,35 @@ final class ControllerBulkOperationTests: XCTestCase {
         // Cross-layout switch #1: a is evicted (undo names a).
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
-        XCTAssertTrue(controller.canUndoDisplacement)
-        XCTAssertEqual(controller.evictedCount, 1)
+        XCTAssertFalse(canvas.undoStack.isEmpty)
+        XCTAssertEqual(canvas.evictedCount, 1)
 
         // Switch #2 back to quarters: b is evicted. The old undo is NOT
         // gone; history stacks, newest last.
         let c = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 400, height: 300))
         gateway.focused = c
         controller.handle(slot: .bottomRight)
-        XCTAssertTrue(controller.canUndoDisplacement, "the new switch offers its own undo")
-        XCTAssertEqual(controller.evictedCount, 1)
+        XCTAssertFalse(canvas.undoStack.isEmpty, "the new switch offers its own undo")
+        XCTAssertEqual(canvas.evictedCount, 1)
         XCTAssertEqual(
-            controller.lastNotice,
+            canvas.notice,
             "Switched to Quarters \u{00B7} 1 window untiled. "
                 + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
 
         controller.undoLastDisplacement()
-        XCTAssertEqual(controller.state.slot(of: 3), nil, "requester c is untiled by undo")
+        XCTAssertEqual(canvas.state.slot(of: 3), nil, "requester c is untiled by undo")
         XCTAssertNotNil(
-            controller.state.occupant(of: .sixthLeft),
+            canvas.state.occupant(of: .sixthLeft),
             "undo #2 returns b (not a) to its slot")
-        XCTAssertNil(controller.state.occupant(of: .topLeft))
-        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+        XCTAssertNil(canvas.state.occupant(of: .topLeft))
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
 
         // Walking back again returns a to its slot: depth, not amnesia.
         controller.undoLastDisplacement()
         XCTAssertNotNil(
-            controller.state.occupant(of: .topLeft),
+            canvas.state.occupant(of: .topLeft),
             "undo #1 returns a to its slot")
-        XCTAssertFalse(controller.canUndoDisplacement, "history exhausted")
+        XCTAssertTrue(canvas.undoStack.isEmpty, "history exhausted")
     }
 
     func testUndoHistoryIsBoundedByDepthNotAmnesia() {
@@ -205,7 +217,7 @@ final class ControllerBulkOperationTests: XCTestCase {
             gateway.focused = handle
             controller.handle(slot: i.isMultiple(of: 2) ? .topLeft : .sixthLeft)
         }
-        XCTAssertTrue(controller.canUndoDisplacement)
+        XCTAssertFalse(canvas.undoStack.isEmpty)
         // Each of the five oldest deletions is gone, so each undo must
         // consume a real chapter. Asserting only the end state (stack
         // empty) also passed with a depth-2 stack, where three of these
@@ -218,7 +230,7 @@ final class ControllerBulkOperationTests: XCTestCase {
                 "undo #\(index) answered .nothingToUndo: the depth-5 history lost a chapter")
         }
         XCTAssertFalse(
-            controller.canUndoDisplacement,
+            !canvas.undoStack.isEmpty,
             "five undos exhaust the depth-5 history")
         feedbacks.removeAll()
         controller.undoLastDisplacement()
@@ -230,7 +242,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
     func testEmptyUndoStackAnswersInsteadOfSilence() {
         addFocusedWindow()
-        XCTAssertFalse(controller.canUndoDisplacement)
+        XCTAssertTrue(canvas.undoStack.isEmpty)
         feedbacks.removeAll()
         controller.undoLastDisplacement()
         XCTAssertEqual(feedbacks.count, 1, "an empty undo still answers")
@@ -248,10 +260,10 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.focused = a
         controller.handle(slot: .sixthLeft)
 
-        XCTAssertEqual(controller.state.slot(of: 1), .sixthLeft)
-        XCTAssertNil(controller.lastNotice)
-        XCTAssertFalse(controller.canUndoDisplacement)
-        XCTAssertEqual(controller.evictedCount, 0)
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthLeft)
+        XCTAssertNil(canvas.notice)
+        XCTAssertTrue(canvas.undoStack.isEmpty)
+        XCTAssertEqual(canvas.evictedCount, 0)
     }
 
     func testUndoAfterRequesterDied() {
@@ -267,11 +279,11 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.kill(b)
         controller.undoLastDisplacement()
 
-        XCTAssertEqual(controller.state.tiledWindows.count, 1)
-        XCTAssertNotNil(controller.state.occupant(of: .topLeft),
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
+        XCTAssertNotNil(canvas.state.occupant(of: .topLeft),
             "the evictee still returns to its slot")
-        XCTAssertNil(controller.state.occupant(of: .sixthLeft))
-        XCTAssertEqual(controller.lastNotice, "Undid displacement \u{00B7} 1 window restored.")
+        XCTAssertNil(canvas.state.occupant(of: .sixthLeft))
+        XCTAssertEqual(canvas.notice, "Undid displacement \u{00B7} 1 window restored.")
     }
 
     func testUndoAfterEvicteeDied() {
@@ -287,10 +299,10 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.undoLastDisplacement()
 
         XCTAssertEqual(
-            controller.lastTileError, "Couldn't restore the evicted windows.")
-        XCTAssertTrue(controller.state.occupants.isEmpty,
+            canvas.error, "Couldn't restore the evicted windows.")
+        XCTAssertTrue(canvas.state.occupants.isEmpty,
             "requester untiled by undo; dead evictee skipped")
-        XCTAssertFalse(controller.canUndoDisplacement)
+        XCTAssertTrue(canvas.undoStack.isEmpty)
     }
 
     func testPreTileFrameSurvivesLayoutSwitches() {
@@ -305,7 +317,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .sixthLeft)
         gateway.focused = handle
         controller.handle(slot: .rightHalf)
-        XCTAssertEqual(controller.state.slot(of: 1), .rightHalf)
+        XCTAssertEqual(canvas.state.slot(of: 1), .rightHalf)
 
         controller.untile(window: 1)
         XCTAssertEqual(
@@ -324,21 +336,21 @@ final class ControllerBulkOperationTests: XCTestCase {
         // itself undoable (the notice + ⌃⌥⇧⌘Z carry it). Both windows are
         // tiled, so the chapter covers both.
         controller.untileAll()
-        XCTAssertTrue(controller.canUndoDisplacement, "untile-all is itself undoable")
-        XCTAssertEqual(controller.evictedCount, 2)
-        XCTAssertEqual(controller.lastNotice, "Untiled 2 windows. Press ⌃⌥⇧⌘Z to undo.")
+        XCTAssertFalse(canvas.undoStack.isEmpty, "untile-all is itself undoable")
+        XCTAssertEqual(canvas.evictedCount, 2)
+        XCTAssertEqual(canvas.notice, "Untiled 2 windows. Press ⌃⌥⇧⌘Z to undo.")
         controller.undoLastDisplacement()
         // Undo re-tiles each dissolved window into its slot (under fresh
-        // ids, since untile-all cleared the records, so the executor reissues
-        // them, exactly as it does for pruned undo handles). The
+        // ids, since untile-all cleared the records, so the canvas
+        // reissues them, exactly as it does for pruned undo handles). The
         // arrangement returns, and the chapter is consumed.
         XCTAssertNotNil(
-            controller.state.occupant(of: .topLeft),
+            canvas.state.occupant(of: .topLeft),
             "undo re-tiles the dissolved window into its slot")
         XCTAssertNotNil(
-            controller.state.occupant(of: .topRight),
+            canvas.state.occupant(of: .topRight),
             "both dissolved windows return under fresh ids")
-        XCTAssertFalse(controller.canUndoDisplacement, "the chapter is consumed")
+        XCTAssertTrue(canvas.undoStack.isEmpty, "the chapter is consumed")
     }
 
     // MARK: Feedback
@@ -382,9 +394,9 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.untile(window: 1)
 
         XCTAssertEqual(
-            controller.lastTileError,
+            canvas.error,
             "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
-        XCTAssertNil(controller.state.slot(of: 1),
+        XCTAssertNil(canvas.state.slot(of: 1),
             "slot released even though the frame restore was refused")
     }
 
@@ -400,9 +412,9 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.untileAll()
 
         XCTAssertEqual(
-            controller.lastTileError,
+            canvas.error,
             "Couldn't restore 2 windows: they may still be sitting in their old tiles.")
-        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
     }
 
     func testNoopHotkeyPreservesNotices() {
@@ -413,14 +425,14 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .topRight)
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
-        XCTAssertNotNil(controller.lastNotice)
+        XCTAssertNotNil(canvas.notice)
 
         // Strict no-op: no state, error, or menu side effects; the
         // already-tiled feedback fires, but the notice survives untouched.
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
 
-        XCTAssertNotNil(controller.lastNotice, "no-op must not clear the notice")
+        XCTAssertNotNil(canvas.notice, "no-op must not clear the notice")
         XCTAssertEqual(feedbacks.count, 1)
         guard case .alreadyTiled = feedbacks[0] else {
             return XCTFail("expected .alreadyTiled, got \(feedbacks[0])")
@@ -449,9 +461,9 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft,
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft,
             "the gateway reported success, so occupancy commits")
-        XCTAssertNil(controller.lastTileError, "no refusal: the write 'succeeded'")
+        XCTAssertNil(canvas.error, "no refusal: the write 'succeeded'")
         XCTAssertTrue(feedbacks.isEmpty)
         XCTAssertEqual(gateway.frame(of: handle), original,
             "the app ignored the resize; screen and state disagree until the next assertion")
@@ -482,24 +494,24 @@ final class ControllerBulkOperationTests: XCTestCase {
         var dragged = gateway.frame(of: a)!
         dragged.size.width -= 60
         gateway.simulateChange(a, to: dragged)
-        XCTAssertNotEqual(controller.grid.columnSplit, 0.5, "drag moved the splitter")
+        XCTAssertNotEqual(canvas.grid.columnSplit, 0.5, "drag moved the splitter")
 
         controller.resetDividers()
 
-        XCTAssertEqual(controller.grid, GridLayout())
+        XCTAssertEqual(canvas.grid, GridLayout())
         XCTAssertEqual(
             gateway.frame(of: a), expectedRect(.topLeft, for: a),
             "reset re-tiles occupants at the default grid")
-        XCTAssertNil(controller.lastTileError)
+        XCTAssertNil(canvas.error)
         // One destructive action, one receipt: the reset parks the
         // displaced fractions for a one-step restore.
-        XCTAssertTrue(controller.hasSplitterBackup, "reset keeps receipts")
+        XCTAssertTrue(canvas.hasSplitterBackup, "reset keeps receipts")
         XCTAssertTrue(controller.restoreSplitters(), "the backup restores")
         XCTAssertNotEqual(
-            controller.grid.columnSplit, 0.5, accuracy: 0.001,
+            canvas.grid.columnSplit, 0.5, accuracy: 0.001,
             "restore returns the dragged splitter")
         XCTAssertFalse(
-            controller.hasSplitterBackup, "restoring consumes the backup")
+            canvas.hasSplitterBackup, "restoring consumes the backup")
         XCTAssertFalse(
             controller.restoreSplitters(), "no backup left: second restore is a no-op")
     }
@@ -517,13 +529,13 @@ final class ControllerBulkOperationTests: XCTestCase {
         var dragged = gateway.frame(of: a)!
         dragged.size.width -= 60
         gateway.simulateChange(a, to: dragged)
-        XCTAssertNotEqual(controller.grid.columnSplit, 0.5)
+        XCTAssertNotEqual(canvas.grid.columnSplit, 0.5)
 
         gateway.refuseNextWrites(a)
         controller.resetDividers()
 
         XCTAssertEqual(
-            controller.lastTileError,
+            canvas.error,
             "Couldn't move that window: the app refused to resize it.",
             "the re-assertion refusal surfaces, never silence")
     }
@@ -541,7 +553,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         var dragged = gateway.frame(of: a)!
         dragged.size.width -= 60
         gateway.simulateChange(a, to: dragged)
-        XCTAssertNotEqual(controller.grid.columnSplit, 0.5)
+        XCTAssertNotEqual(canvas.grid.columnSplit, 0.5)
 
         // Two apps refuse at once: the refusal names the count instead of
         // reusing the singular sentence. Both windows must actually be
@@ -555,7 +567,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.resetDividers()
 
         XCTAssertEqual(
-            controller.lastTileError,
+            canvas.error,
             "Couldn't move 2 windows: an app refused to resize.")
     }
 
@@ -564,12 +576,12 @@ final class ControllerBulkOperationTests: XCTestCase {
     func testPruneDropsDeadWindows() {
         let handle = addFocusedWindow()
         controller.handle(slot: .topLeft)
-        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
 
         gateway.kill(handle)
         controller.pruneDeadWindows()
 
-        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
     }
 
     // MARK: Destroyed notifications
@@ -586,13 +598,13 @@ final class ControllerBulkOperationTests: XCTestCase {
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
         gateway.focused = b
         controller.handle(slot: .topRight)
-        XCTAssertEqual(controller.state.tiledWindows.count, 2)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 2)
         changeCount = 0
 
         gateway.kill(a)
         gateway.simulateDestroyed(a)
 
-        XCTAssertEqual(controller.state.tiledWindows.count, 1, "the dead window released its slot")
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1, "the dead window released its slot")
         XCTAssertGreaterThan(changeCount, 0, "the release announced itself for a menu/icon refresh")
     }
 
@@ -606,7 +618,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         gateway.simulateDestroyed(handle)
 
-        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
     }
 
     func testDestroyedNotificationWithUnknownLivenessKeepsTheSlot() {
@@ -620,7 +632,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         gateway.simulateDestroyed(handle)
 
-        XCTAssertEqual(controller.state.tiledWindows.count, 1, "a maybe never untiles")
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1, "a maybe never untiles")
     }
 
     func testPruneTimerFiresAndReleasesSlots() {
@@ -629,19 +641,24 @@ final class ControllerBulkOperationTests: XCTestCase {
         // bypass by driving pruneDeadWindows directly.
         let gateway = FakeWindowGateway()
         var changes = 0
-        let timed = TilingController(gateway: gateway, pruneInterval: 0.05, deathConfirmation: 0)
+        let timed = TilingController(
+            gateway: gateway, pruneInterval: 0.05,
+            screens: { [Self.screen] }, deathConfirmation: 0)
         timed.onChange = { changes += 1 }
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         timed.handle(slot: .topLeft)
-        XCTAssertEqual(timed.state.tiledWindows.count, 1)
+        XCTAssertEqual(
+            timed.canvas(for: timed.focusedTilingSpace).state.tiledWindows.count, 1)
 
         gateway.kill(handle)
         let waited = XCTestExpectation(description: "prune timer fired")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { waited.fulfill() }
         wait(for: [waited], timeout: 1.0)
 
-        XCTAssertTrue(timed.state.occupants.isEmpty, "the timer pruned the ghost")
+        XCTAssertTrue(
+            timed.canvas(for: timed.focusedTilingSpace).state.occupants.isEmpty,
+            "the timer pruned the ghost")
         XCTAssertGreaterThan(changes, 1, "prune announced the change for a menu refresh")
     }
 

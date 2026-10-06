@@ -647,7 +647,7 @@ struct TilingSpace {
     private func refusal(for id: WindowID, context: Context) -> Refusal {
         let name = appName(id, context: context) ?? "That window"
         return Refusal(
-            message: "\(name) couldn't be tiled: the app refused to resize it.",
+            message: Self.refusalMessage(windowName: name),
             windowName: name)
     }
 
@@ -806,7 +806,7 @@ struct TilingSpace {
                 rects[move.window] = grid.rect(for: move.to, in: context.boundsOf(current))
             }
         }
-        if writeReflow(rects, context: context) > 0 {
+        if writeRects(rects, context: context) > 0 {
             var rolled = state
             for move in moves { rolled.commit(window: move.window, into: move.from) }
             state = rolled
@@ -817,7 +817,7 @@ struct TilingSpace {
                     oldRects[move.window] = grid.rect(for: move.from, in: context.boundsOf(current))
                 }
             }
-            _ = writeReflow(oldRects, context: context)
+            _ = writeRects(oldRects, context: context)
             return []
         }
         context.log("reflow \(moves.map { "win\($0.window)->\($0.to.rawValue)" }.joined(separator: ", "))")
@@ -826,11 +826,12 @@ struct TilingSpace {
         }
     }
 
-    /// Performs one reflow push through the shared write policy, counting
-    /// refusals and recording the generic refusal message on this canvas.
-    /// Deferred (off-Space) writes are not failures: the FrameWriter has
-    /// already marked the canvas stale and the grown state stands.
-    private mutating func writeReflow(_ rects: [WindowID: CGRect], context: Context) -> Int {
+    /// Performs one coalesced push through the shared write policy,
+    /// counting refusals and recording the generic refusal message on
+    /// this canvas. Deferred (off-Space) writes are not failures: the
+    /// FrameWriter has already marked the canvas stale and the pushed
+    /// state stands. Shared by reflow and the tracker's publish path.
+    private mutating func writeRects(_ rects: [WindowID: CGRect], context: Context) -> Int {
         var failed = 0
         for (id, target) in rects {
             guard let record = records[id] else { continue }
@@ -853,6 +854,13 @@ struct TilingSpace {
         count == 1
             ? "Couldn't move that window: the app refused to resize it."
             : "Couldn't move \(count) windows: an app refused to resize."
+    }
+
+    /// The standard refusal sentence for a window whose resize its app
+    /// refused. One declaration, so the placement branch and the late
+    /// convergence rollback cannot drift apart.
+    static func refusalMessage(windowName name: String) -> String {
+        "\(name) couldn't be tiled: the app refused to resize it."
     }
 
     // MARK: Untile / evict / release
@@ -1145,6 +1153,10 @@ struct TilingSpace {
     /// ("Reset Splitters" vs "Restore Previous Splitters").
     var hasSplitterBackup: Bool { splitterBackup != nil }
 
+    /// Count for the undo menu title: the freshest chapter's windows, or
+    /// 0 when no chapter is parked.
+    var evictedCount: Int { undoStack.last?.snapshot.count ?? 0 }
+
     // MARK: Reassert / publish
 
     /// Recomputes and pushes rects for this canvas's occupants under its
@@ -1173,19 +1185,7 @@ struct TilingSpace {
     mutating func publish(
         rects: [WindowID: CGRect], excluding: WindowID?, context: Context
     ) -> Outcome {
-        var failed = 0
-        for (id, target) in rects {
-            guard let record = records[id] else { continue }
-            if context.frameWriter.write(
-                id, handle: record.handle, to: target, on: context.space, check: .rollback)
-                == .refused
-            {
-                failed += 1
-            }
-        }
-        if failed > 0 {
-            error = Self.refusalMessage(count: failed)
-        }
+        _ = writeRects(rects, context: context)
         return Outcome()
     }
 }

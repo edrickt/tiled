@@ -1,4 +1,3 @@
-import AppKit
 import XCTest
 @testable import tiled
 
@@ -7,9 +6,17 @@ import XCTest
 /// dance in the test (cf. LayoutSwitchTests' "commits a plan exactly like
 /// handle does" helpers). The fake stands in for AX.
 final class ControllerGatewayTests: XCTestCase {
-    /// Screen the fake tiles onto. `owningScreenIndex` falls back to
-    /// midpoint-then-main with no screens, so tests assert state + frames
-    /// written to the fake, never absolute screen pixels.
+    /// Deterministic display: tile geometry comes from this rect, never
+    /// the host Mac's screen.
+    private static let screen = ScreenInfo(
+        id: ScreenID(rawValue: 1),
+        frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        name: "Display 1")
+
+    /// Screen the fake tiles onto. Every window frame stays inside the
+    /// injected rect, so state + written frames are checked against known
+    /// bounds, never absolute host pixels.
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
     /// Drag-end fires captured from the injectable scheduler (latest wins).
@@ -42,11 +49,21 @@ final class ControllerGatewayTests: XCTestCase {
                 self?.verifyFires.append(fire)
                 return { self?.verifyCancels += 1 }
             },
+            screens: { [Self.screen] },
             // Tests drive death directly: no confirmation window, so a
             // killed handle prunes on the first call (the transient-death
             // tests build their own controller with the real window).
             deathConfirmation: 0,
             now: { [self] in clock })
+    }
+
+    /// The canvas the test's single display tiles onto.
+    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
+
+    /// One canvas of a controller built inside a test (the setup
+    /// controller is not always the one acting).
+    private func localCanvas(_ controller: TilingController) -> TilingSpace {
+        controller.canvas(for: controller.focusedTilingSpace)
     }
 
     // MARK: Hotkey entry point
@@ -57,8 +74,8 @@ final class ControllerGatewayTests: XCTestCase {
 
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
-        XCTAssertEqual(controller.state.occupant(of: .topLeft), 1)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        XCTAssertEqual(canvas.state.occupant(of: .topLeft), 1)
     }
 
     func testHandleWithNoFocusedWindowIsSafeNoop() {
@@ -66,8 +83,8 @@ final class ControllerGatewayTests: XCTestCase {
 
         controller.handle(slot: .topLeft)
 
-        XCTAssertTrue(controller.state.occupants.isEmpty)
-        XCTAssertNil(controller.lastTileError)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
+        XCTAssertNil(canvas.error)
     }
 
     func testRetileOwnSlotIsNoop() {
@@ -77,8 +94,8 @@ final class ControllerGatewayTests: XCTestCase {
 
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
-        XCTAssertNil(controller.lastTileError)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        XCTAssertNil(canvas.error)
     }
 
     func testRefusedResizeRollsBackAndReports() {
@@ -88,8 +105,8 @@ final class ControllerGatewayTests: XCTestCase {
 
         controller.handle(slot: .topLeft)
 
-        XCTAssertNil(controller.state.slot(of: 1))
-        XCTAssertNotNil(controller.lastTileError)
+        XCTAssertNil(canvas.state.slot(of: 1))
+        XCTAssertNotNil(canvas.error)
     }
 
     // MARK: Observation wiring
@@ -125,7 +142,7 @@ final class ControllerGatewayTests: XCTestCase {
         moved.size.width -= 60
         gateway.simulateChange(handle, to: moved)
         XCTAssertNotEqual(
-            controller.grid.columnSplit, 0.5,
+            canvas.grid.columnSplit, 0.5,
             "the surviving handler still routes drags after two retiles")
     }
 
@@ -164,19 +181,15 @@ final class ControllerGatewayTests: XCTestCase {
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 1.0)
-        // A real screen exists in the test process, so the grid runs in
-        // real visible-frame coordinates: the expectation is derived from
-        // the screen that owns the dragged window, not from one author's
-        // display height. The dragged top edge ended 70pt above its pre-drag
+        // The grid runs in the injected screen's visible-frame
+        // coordinates: the dragged top edge ended 70pt above its pre-drag
         // position (a swallowed 10pt echo, then a 60pt escape), so the row
         // split must equal (final top edge - bounds.minY) / height.
         // Pure splitter math belongs to GridLayoutTests.
         let final = gateway.frame(of: bottom)!
-        let screens = NSScreen.screens
-        let owner = TilingController.owningScreenIndex(frames: screens.map(\.frame), for: final) ?? 0
-        let bounds = screens[owner].visibleFrame
+        let bounds = Self.screen.visibleFrame
         let expectedSplit = (final.maxY - bounds.minY) / bounds.height
-        XCTAssertEqual(self.controller.grid.leftRowSplit, expectedSplit, accuracy: 0.01)
+        XCTAssertEqual(self.canvas.grid.leftRowSplit, expectedSplit, accuracy: 0.01)
     }
 
     func testResizingTwoThirdsThroughItsAdjacentThirdCentersHiddenDivider() {
@@ -201,8 +214,8 @@ final class ControllerGatewayTests: XCTestCase {
         gateway.simulateChange(third, to: moved)
 
         XCTAssertEqual(
-            controller.grid.sixthsLeftSplit,
-            controller.grid.sixthsRightSplit / 2,
+            canvas.grid.sixthsLeftSplit,
+            canvas.grid.sixthsRightSplit / 2,
             accuracy: 0.01,
             "the hidden divider stays at the midpoint of the resized two-thirds window")
     }
@@ -236,8 +249,8 @@ final class ControllerGatewayTests: XCTestCase {
     func testDragPastUntileDistanceUntilesWhereDropped() {
         let drag = tileAndDrag(60, 60) // net displacement ~170pt
 
-        XCTAssertNil(controller.state.slot(of: 1), "long drag releases the slot")
-        XCTAssertNil(controller.state.occupant(of: .topLeft))
+        XCTAssertNil(canvas.state.slot(of: 1), "long drag releases the slot")
+        XCTAssertNil(canvas.state.occupant(of: .topLeft))
         XCTAssertEqual(
             gateway.frame(of: drag.handle), drag.finalFrame,
             "the untiled window stays where the user dropped it")
@@ -261,10 +274,10 @@ final class ControllerGatewayTests: XCTestCase {
 
         gateway.kill(handle)
         controller.pruneDeadWindows()
-        XCTAssertNil(controller.state.slot(of: 1), "prune released the slot")
+        XCTAssertNil(canvas.state.slot(of: 1), "prune released the slot")
         dragEndFires.last?()
-        XCTAssertNil(controller.state.slot(of: 1))
-        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertNil(canvas.state.slot(of: 1))
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
     }
 
     func testPruneKeepsBusyWindows() {
@@ -274,13 +287,13 @@ final class ControllerGatewayTests: XCTestCase {
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         controller.handle(slot: .topLeft)
-        XCTAssertNotNil(controller.state.slot(of: 1))
+        XCTAssertNotNil(canvas.state.slot(of: 1))
         gateway.busy.insert(handle)
 
         controller.pruneDeadWindows()
 
         XCTAssertEqual(
-            controller.state.slot(of: 1), .topLeft,
+            canvas.state.slot(of: 1), .topLeft,
             "an unanswerable probe must never prune a live window")
     }
 
@@ -293,13 +306,13 @@ final class ControllerGatewayTests: XCTestCase {
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         controller.handle(slot: .topLeft)
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
         gateway.hideFrames.insert(handle)
 
         verifyFires.forEach { $0() }
 
         XCTAssertEqual(
-            controller.state.slot(of: 1), .topLeft,
+            canvas.state.slot(of: 1), .topLeft,
             "an unreadable frame must not roll the placement back")
     }
 
@@ -320,21 +333,21 @@ final class ControllerGatewayTests: XCTestCase {
 
         transient.pruneDeadWindows()
         XCTAssertEqual(
-            transient.state.slot(of: 1), .topLeft,
+            localCanvas(transient).state.slot(of: 1), .topLeft,
             "one dead probe is a maybe, never an eviction")
 
         // Still dead but inside the window: still a maybe.
         clock = clock.addingTimeInterval(1)
         transient.pruneDeadWindows()
         XCTAssertEqual(
-            transient.state.slot(of: 1), .topLeft,
+            localCanvas(transient).state.slot(of: 1), .topLeft,
             "death inside the confirmation window does not release the slot")
 
         // The transient recovers (the lid reopens, probes answer again).
         gateway.probeDead.remove(handle)
         transient.pruneDeadWindows()
         XCTAssertEqual(
-            transient.state.slot(of: 1), .topLeft,
+            localCanvas(transient).state.slot(of: 1), .topLeft,
             "a recovered probe clears the pending death")
     }
 
@@ -351,12 +364,12 @@ final class ControllerGatewayTests: XCTestCase {
         gateway.probeDead.insert(handle)
 
         timed.pruneDeadWindows()
-        XCTAssertEqual(timed.state.slot(of: 1), .topLeft, "first sighting only marks")
+        XCTAssertEqual(localCanvas(timed).state.slot(of: 1), .topLeft, "first sighting only marks")
 
         clock = clock.addingTimeInterval(4)
         timed.pruneDeadWindows()
         XCTAssertNil(
-            timed.state.slot(of: 1),
+            localCanvas(timed).state.slot(of: 1),
             "death confirmed across the window releases the slot")
     }
 
@@ -400,7 +413,7 @@ final class ControllerGatewayTests: XCTestCase {
         // Untiling cleared the record, so the re-tile runs under a fresh
         // window id; resolve it from the occupancy, not the old id.
         XCTAssertNotNil(
-            controller.state.occupant(of: .topLeft),
+            canvas.state.occupant(of: .topLeft),
             "a no-op placement write must not read as a silent ignore")
         XCTAssertEqual(gateway.frame(of: handle), tileRect)
     }
@@ -435,7 +448,7 @@ final class ControllerGatewayTests: XCTestCase {
         for fire in verifyFires { fire() }
 
         XCTAssertNotNil(
-            controller.state.occupant(of: .topLeft),
+            canvas.state.occupant(of: .topLeft),
             "a grid-rounded placement must not read as a silent ignore")
     }
 
@@ -474,17 +487,17 @@ final class ControllerGatewayTests: XCTestCase {
         for fire in verifyFires { fire() }
 
         XCTAssertEqual(
-            controller.state.slot(of: 3), .topRight,
+            canvas.state.slot(of: 3), .topRight,
             "a no-op re-push must never evict the uninvolved window")
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft, "echoed re-push keeps the window tiled")
-        XCTAssertEqual(controller.state.slot(of: 2), .bottomLeft, "dragged window stays tiled")
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft, "echoed re-push keeps the window tiled")
+        XCTAssertEqual(canvas.state.slot(of: 2), .bottomLeft, "dragged window stays tiled")
     }
 
     func testShortDragSnapsBackIntoTile() {
         let drag = tileAndDrag(10, 10) // net displacement ~28pt
         let expectation = XCTestExpectation(description: "snapback")
         DispatchQueue.main.async {
-            XCTAssertEqual(self.controller.state.slot(of: 1), .topLeft, "still tiled")
+            XCTAssertEqual(self.canvas.state.slot(of: 1), .topLeft, "still tiled")
             XCTAssertEqual(
                 self.gateway.frame(of: drag.handle), drag.tiledFrame,
                 "the window snapped back to its slot rect")
@@ -510,21 +523,21 @@ final class ControllerGatewayTests: XCTestCase {
         let e = gateway.addWindow(frame: CGRect(x: 60, y: 60, width: 600, height: 400))
         gateway.focused = e
         controller.handle(slot: .topLeft) // evicts d
-        XCTAssertEqual(controller.state.occupant(of: .topLeft), 3)
+        XCTAssertEqual(canvas.state.occupant(of: .topLeft), 3)
 
         controller.undoLastDisplacement() // d returns (fresh id 4)
-        XCTAssertEqual(controller.state.slot(of: 4), .topLeft, "d reissued under a fresh id")
+        XCTAssertEqual(canvas.state.slot(of: 4), .topLeft, "d reissued under a fresh id")
 
         controller.undoLastDisplacement() // a returns; d must yield
-        XCTAssertEqual(controller.state.occupant(of: .topLeft), 5, "a reissued under a fresh id")
-        XCTAssertNil(controller.state.slot(of: 4), "d stepped aside, not silently clobbered")
+        XCTAssertEqual(canvas.state.occupant(of: .topLeft), 5, "a reissued under a fresh id")
+        XCTAssertNil(canvas.state.slot(of: 4), "d stepped aside, not silently clobbered")
         XCTAssertEqual(
             gateway.frame(of: d), CGRect(x: 50, y: 50, width: 700, height: 500),
             "d restored to its pre-tile frame, not left overlapping a's tile")
         XCTAssertEqual(
             gateway.frame(of: e), CGRect(x: 60, y: 60, width: 600, height: 400),
             "e stayed untiled at its pre-tile frame")
-        XCTAssertEqual(controller.state.tiledWindows.count, 1)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
     }
 
     // MARK: Expansion vs. tiling
@@ -537,13 +550,13 @@ final class ControllerGatewayTests: XCTestCase {
         gateway.focused = a
         controller.handle(slot: .topLeft)
         controller.handleExpandToggle()
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft, "expansion keeps the slot")
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft, "expansion keeps the slot")
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
         gateway.focused = b
         controller.handle(slot: .leftHalf)
 
-        XCTAssertEqual(controller.state.slot(of: 2), .leftHalf)
-        XCTAssertNil(controller.state.slot(of: 1), "the blocker was evicted")
+        XCTAssertEqual(canvas.state.slot(of: 2), .leftHalf)
+        XCTAssertNil(canvas.state.slot(of: 1), "the blocker was evicted")
         XCTAssertEqual(
             gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 600),
             "a was restored to its pre-tile frame, not left expanded")
@@ -555,15 +568,15 @@ final class ControllerGatewayTests: XCTestCase {
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         controller.handle(slot: .topLeft)
-        XCTAssertEqual(controller.state.occupant(of: .topLeft), 1)
+        XCTAssertEqual(canvas.state.occupant(of: .topLeft), 1)
 
         gateway.kill(handle)
         let other = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
         gateway.focused = other
         controller.handle(slot: .topRight)
 
-        XCTAssertNil(controller.state.slot(of: 1))
-        XCTAssertEqual(controller.state.occupant(of: .topRight), 2)
+        XCTAssertNil(canvas.state.slot(of: 1))
+        XCTAssertEqual(canvas.state.occupant(of: .topRight), 2)
     }
 
     // MARK: Convergence verification (silent ignores)
@@ -580,8 +593,8 @@ final class ControllerGatewayTests: XCTestCase {
 
         verifyFires.last?()
 
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
-        XCTAssertNil(controller.lastTileError)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        XCTAssertNil(canvas.error)
     }
 
     func testSilentIgnoreRollsBackAtVerification() {
@@ -592,12 +605,12 @@ final class ControllerGatewayTests: XCTestCase {
         gateway.focused = handle
         gateway.silentIgnore.insert(handle)
         controller.handle(slot: .topLeft)
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft, "commits at write time")
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft, "commits at write time")
 
         verifyFires.last?()
 
-        XCTAssertNil(controller.state.slot(of: 1), "rolled back like a refusal")
-        XCTAssertNotNil(controller.lastTileError)
+        XCTAssertNil(canvas.state.slot(of: 1), "rolled back like a refusal")
+        XCTAssertNotNil(canvas.error)
     }
 
     func testUserDragBeforeVerificationLeavesTheWindowAlone() {
@@ -614,8 +627,8 @@ final class ControllerGatewayTests: XCTestCase {
 
         verifyFires.last?()
 
-        XCTAssertEqual(controller.state.slot(of: 1), .topLeft)
-        XCTAssertNil(controller.lastTileError)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        XCTAssertNil(canvas.error)
     }
 
     func testNewerPlacementSupersedesItsVerification() {
@@ -631,11 +644,11 @@ final class ControllerGatewayTests: XCTestCase {
         controller.handle(slot: .topRight)
         XCTAssertEqual(verifyCancels, 1, "the first check was superseded")
         XCTAssertEqual(
-            controller.state.slot(of: 1), .topRight,
+            canvas.state.slot(of: 1), .topRight,
             "the superseded check rolls back nothing")
         verifyFires.last?()
         XCTAssertNil(
-            controller.state.slot(of: 1),
+            canvas.state.slot(of: 1),
             "the second check judges the second (also ignored) write")
     }
 
@@ -647,12 +660,12 @@ final class ControllerGatewayTests: XCTestCase {
         gateway.silentIgnore.insert(handle)
         controller.handle(slot: .topLeft)
         controller.untile(window: 1)
-        XCTAssertTrue(controller.state.occupants.isEmpty)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
 
         verifyFires.last?()
 
-        XCTAssertTrue(controller.state.occupants.isEmpty)
-        XCTAssertNil(controller.lastTileError)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
+        XCTAssertNil(canvas.error)
     }
 
 

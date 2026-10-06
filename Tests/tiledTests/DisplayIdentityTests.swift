@@ -122,8 +122,8 @@ final class DisplayIdentityTests: XCTestCase {
 
         XCTAssertEqual(gateway.frame(of: leftHandle), leftTiled)
         XCTAssertEqual(gateway.frame(of: rightHandle), rightTiled)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.left.id), leftHandle.id)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.right.id), rightHandle.id)
+        XCTAssertEqual(controller.canvas(for: Self.left.id).state.occupant(of: .topLeft), leftHandle.id)
+        XCTAssertEqual(controller.canvas(for: Self.right.id).state.occupant(of: .topLeft), rightHandle.id)
     }
 
     func testUnpluggedDisplayKeepsItsCanvasForReplug() {
@@ -141,7 +141,7 @@ final class DisplayIdentityTests: XCTestCase {
         // Give the right canvas a distinctive splitter state, so replug
         // has to restore more than the default screen geometry.
         dragRightEdge(rightHandle, by: -60, on: gateway)
-        let movedGrid = controller.grid(on: Self.right.id)
+        let movedGrid = controller.canvas(for: Self.right.id).grid
         XCTAssertNotEqual(movedGrid.columnSplit, 0.5)
         let draggedFrame = gateway.frame(of: rightHandle)!
 
@@ -151,7 +151,7 @@ final class DisplayIdentityTests: XCTestCase {
             gateway.frame(of: rightHandle), draggedFrame,
             "an unplugged display's window is not written in the dark")
         XCTAssertEqual(
-            controller.grid(on: Self.right.id), movedGrid,
+            controller.canvas(for: Self.right.id).grid, movedGrid,
             "its canvas state survives the unplug")
 
         // Replug into the first provider slot: identity must come from the
@@ -162,6 +162,6 @@ final class DisplayIdentityTests: XCTestCase {
             gateway.frame(of: rightHandle),
             movedGrid.rect(for: .topLeft, in: Self.right.visibleFrame),
             "replug reasserts the kept canvas against the display's bounds")
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.left.id), leftHandle.id)
+        XCTAssertEqual(controller.canvas(for: Self.left.id).state.occupant(of: .topLeft), leftHandle.id)
     }
 }

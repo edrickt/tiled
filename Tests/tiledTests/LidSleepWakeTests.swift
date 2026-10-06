@@ -66,7 +66,7 @@ final class LidSleepWakeTests: XCTestCase {
     func testTilesSurviveLidCloseAndOpen() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.builtIn.id), 1)
+        XCTAssertEqual(controller.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft), 1)
 
         // Lid closed: the display vanishes; the system fires the
         // screen-parameters notification.
@@ -78,7 +78,7 @@ final class LidSleepWakeTests: XCTestCase {
         postScreenChange()
 
         XCTAssertEqual(
-            controller.occupant(of: .topLeft, on: Self.builtIn.id), 1,
+            controller.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft), 1,
             "the window keeps its slot across lid close/open")
         XCTAssertEqual(
             gateway.frame(of: a),
@@ -105,7 +105,7 @@ final class LidSleepWakeTests: XCTestCase {
         postScreenChange()
 
         XCTAssertEqual(
-            controller.occupant(of: .topLeft, on: Self.builtIn.id), 1,
+            controller.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft), 1,
             "the window keeps its slot across lid close/open with a rescale")
         XCTAssertEqual(
             gateway.frame(of: a),
@@ -127,7 +127,7 @@ final class LidSleepWakeTests: XCTestCase {
 
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)
-        XCTAssertEqual(controller.occupant(of: .topLeft, on: Self.builtIn.id), 1)
+        XCTAssertEqual(controller.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft), 1)
 
         // Lid closed: built-in vanishes; the system relocates its
         // windows onto the external display (two streamed ticks, like
@@ -146,7 +146,7 @@ final class LidSleepWakeTests: XCTestCase {
         fireDragEnds()
 
         XCTAssertEqual(
-            controller.occupant(of: .topLeft, on: Self.builtIn.id), 1,
+            controller.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft), 1,
             "the window keeps its slot across a clamshell lid cycle")
     }
 }
