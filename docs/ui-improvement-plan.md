@@ -117,7 +117,7 @@ the cursor; coordinate those checks before running them.
 
 ## Next step
 
-Review the first batch, then complete the remaining live audit (see
+The first batch is implemented and reviewed. Complete the remaining live audit (see
 `docs/ui-audit.md` for findings and access blockers) and choose the next small
 implementation tasks in the sequence above. A runnable mockup is optional if a visual choice
 cannot be settled from screenshots; it is not required for this planning phase.

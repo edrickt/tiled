@@ -41,6 +41,10 @@ then passed. Final `swift test`: 587 tests passed, zero failures. `git diff
 --check` passed. Screenshot review confirms the corrected diagram, current and
 disabled binding text, and guidance visible at the minimum window size.
 
+Independent [Standards and Spec review](ui-first-batch-review.md) found no
+blocking issues: zero documented-standard violations, two optional cleanup
+suggestions, and zero spec findings.
+
 ## Visual evidence
 
 Captures use the actual Settings views compiled from the current checkout in an
