@@ -72,16 +72,30 @@ final class TilingStateTests: XCTestCase {
 
     // MARK: Tile swapping
 
-    func testTiledRequesterOverSingleBlockerSwaps() {
-        // The report's example: top-left and bottom-left sixths plus the
-        // right two-thirds. Tiling the top-left sixth into the middle
-        // third swaps with the two-thirds window instead of evicting it:
-        // the two-thirds window lands in the requester's vacated sixth.
+    func testBlockerInsideTheTargetStillSwaps() {
+        // The report's example, inverted: the middle third sits inside
+        // the right two-thirds a tiled requester is asking for. The
+        // blocker has no leftover of its own, so the step-aside cannot
+        // fire and the vacated tile still offers a landing: swap stands.
         var state = TilingState()
         state.commit(window: a, into: .sixthTopLeft)
-        state.commit(window: b, into: .sixthBottomLeft)
-        state.commit(window: c, into: .sixthsRightTwoThirds)
-        XCTAssertEqual(state.plan(window: a, into: .sixthMiddle), .swap(displaced: c))
+        state.commit(window: b, into: .sixthMiddle)
+        state.commit(window: c, into: .sixthBottomLeft)
+        XCTAssertEqual(
+            state.plan(window: a, into: .sixthsRightTwoThirds), .swap(displaced: b))
+    }
+
+    func testTiledRequesterStepsTheContainingBlockerAside() {
+        // Left, middle, and right thirds; the right third requests the
+        // bottom-left sixth. The left third contains the target with a
+        // clean leftover — the top-left sixth — so it steps aside into
+        // its own strip instead of trading tiles across the screen: the
+        // plan is an eviction the commit re-houses, not a swap.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthLeft)
+        state.commit(window: b, into: .sixthMiddle)
+        state.commit(window: c, into: .sixthRight)
+        XCTAssertEqual(state.plan(window: c, into: .sixthBottomLeft), .tile(evicting: [a]))
     }
 
     func testTiledRequesterIntoExactOccupiedSlotSwaps() {

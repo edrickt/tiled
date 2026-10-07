@@ -1,10 +1,12 @@
 import XCTest
 @testable import tiled
 
-/// Tile swapping through `TilingController.handle`: a tiled requester
-/// swapping tiles with the one window in its way. Pins the report's
-/// example end to end: the request is honored, the displaced window
-/// lands in the vacated tile, and undo swaps back.
+/// Tile displacement through `TilingController.handle`: a tiled
+/// requester's way is cleared without untangling anyone. A blocker that
+/// *contains* the target with a clean leftover steps aside into it (the
+/// report's example); any other single blocker swaps into the vacated
+/// tile. Pins both end to end: the request is honored, the displaced
+/// window keeps its tiling, and undo puts everything back.
 final class SwapTests: XCTestCase {
     /// Deterministic display: written rects are checked against this
     /// rect, never the host Mac's screen.
@@ -49,28 +51,31 @@ final class SwapTests: XCTestCase {
             for: slot, in: Self.screen.visibleFrame)
     }
 
-    func testSwapHonorsTileRequestAndMovesDisplacedIntoVacatedTile() {
+    func testRequestInsideABlockerStepsTheBlockerAside() {
         let (a, b, c) = tileSixthsSession()
 
-        // Tile the top-left sixth into the middle third: the request is
-        // honored, and the right two-thirds window moves into the vacated
-        // sixth instead of being untiled.
+        // Tile the top-left sixth into the middle third: the middle
+        // third sits inside the right two-thirds, whose leftover — the
+        // right third — is a clean slot. The two-thirds window steps
+        // aside into it instead of trading tiles across the screen, and
+        // the vacated top-left sixth flows down into the bottom-left
+        // sixth via reflow.
         gateway.focused = a
         controller.handle(slot: .sixthMiddle)
 
         XCTAssertEqual(canvas.state.slot(of: 1), .sixthMiddle)
         XCTAssertEqual(
-            canvas.state.slot(of: 3), .sixthTopLeft,
-            "the displaced window takes the requester's vacated tile")
-        XCTAssertEqual(canvas.state.slot(of: 2), .sixthBottomLeft, "bystanders stay put")
+            canvas.state.slot(of: 3), .sixthRight,
+            "the containing blocker steps into its own leftover")
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft, "the bystander absorbs the vacated tile")
         XCTAssertEqual(canvas.state.tiledWindows.count, 3, "nobody was untiled")
         XCTAssertEqual(
             gateway.frame(of: a), expectedRect(.sixthMiddle, for: a))
         XCTAssertEqual(
-            gateway.frame(of: c), expectedRect(.sixthTopLeft, for: c))
+            gateway.frame(of: c), expectedRect(.sixthRight, for: c))
     }
 
-    func testSwapNoticesNamesDisplacedAppAndUndo() {
+    func testStepAsideNoticeNamesDisplacedAppAndUndo() {
         let (a, _, _) = tileSixthsSession()
 
         gateway.focused = a
@@ -81,7 +86,7 @@ final class SwapTests: XCTestCase {
             canvas.notice?.contains("TestApp") ?? false,
             "the notice names the displaced app")
         XCTAssertTrue(
-            canvas.notice?.contains("Top Left Sixth") ?? false,
+            canvas.notice?.contains("Right Third") ?? false,
             "the notice names the displaced window's landing tile")
         XCTAssertTrue(
             canvas.notice?.contains("Z") ?? false,
@@ -136,48 +141,55 @@ final class SwapTests: XCTestCase {
             "no focus call for the eviction itself")
     }
 
-    func testSwapUndoSwapsBack() {
-        let (a, _, c) = tileSixthsSession()
+    func testStepAsideUndoRestoresEveryone() {
+        let (a, b, c) = tileSixthsSession()
         gateway.focused = a
         controller.handle(slot: .sixthMiddle)
-        XCTAssertEqual(canvas.evictedCount, 2, "both swap partners are recoverable")
+        XCTAssertEqual(
+            canvas.evictedCount, 3,
+            "the stepped-aside window, the requester, and the reflow are recoverable")
 
         controller.undoLastDisplacement()
 
-        // Both windows re-tile into their former slots. Records were
-        // reissued by the shared undo machinery, so ids are fresh (the
-        // same shape as an eviction undo's restored windows).
+        // Every window re-tiles into its former slot. The requester's
+        // record was reissued by the shared undo machinery, so its id is
+        // fresh (the same shape as an eviction undo's restored windows);
+        // the stepped-aside and reflowed windows kept theirs.
         XCTAssertNil(canvas.state.slot(of: 1))
-        XCTAssertNil(canvas.state.slot(of: 3))
+        XCTAssertEqual(canvas.state.slot(of: 3), .sixthsRightTwoThirds)
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthBottomLeft)
         XCTAssertNotNil(canvas.state.occupant(of: .sixthTopLeft))
-        XCTAssertNotNil(canvas.state.occupant(of: .sixthsRightTwoThirds))
         XCTAssertEqual(
             gateway.frame(of: a), expectedRect(.sixthTopLeft, for: a),
             "undo re-tiles the requester into its old tile")
         XCTAssertEqual(
             gateway.frame(of: c), expectedRect(.sixthsRightTwoThirds, for: c),
-            "undo re-tiles the displaced window into its own tile")
+            "undo re-tiles the stepped-aside window into its own tile")
+        XCTAssertEqual(
+            gateway.frame(of: b), expectedRect(.sixthBottomLeft, for: b),
+            "undo undoes the reflow that absorbed the vacated tile")
         XCTAssertTrue(canvas.undoStack.isEmpty)
     }
 
-    func testSwapCollapsesExpandedDisplacedWindow() {
+    func testExpandedBlockerUntanglesInsteadOfSteppingAside() {
         let (a, _, c) = tileSixthsSession()
 
-        // Expand the window that is about to be displaced; the swap must
-        // bring it back to earth in its new tile, not leave it expanded
-        // across the screen while holding a slot.
+        // Expand the window that is in the way; expanded windows come
+        // back to earth by untangling, never by moving — so the
+        // step-aside is skipped and the plain eviction stands.
         gateway.focused = c
         controller.handleExpandToggle()
         gateway.focused = a
         controller.handle(slot: .sixthMiddle)
 
-        XCTAssertEqual(canvas.state.slot(of: 3), .sixthTopLeft)
+        XCTAssertNil(canvas.state.slot(of: 3))
         gateway.focused = c
         XCTAssertNil(
             controller.expandedFocusedSlot,
-            "the displaced window's expansion died with the swap")
+            "the expanded window's expansion died with the eviction")
         XCTAssertEqual(
-            gateway.frame(of: c), expectedRect(.sixthTopLeft, for: c),
-            "the displaced window sits collapsed in its new tile")
+            gateway.frame(of: c), CGRect(x: 1200, y: 100, width: 500, height: 400),
+            "the expanded window is restored to its pre-tile frame")
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthMiddle, "the requester still lands")
     }
 }

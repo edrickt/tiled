@@ -62,10 +62,17 @@ final class UndoIntegrityTests: XCTestCase {
 
     // MARK: Undo vs. the plan rules
 
-    func testUndoDisplacesAnOverlappingWindowInsteadOfDoubleBookingCells() {
-        // a holds the left half; b evicts it by taking top left (chapter:
-        // a -> leftHalf); c takes the free bottom left, which overlaps
-        // a's half but is not in the chapter. Undo must step c aside.
+    func testUndoReturnsAStepAsideBlockerToItsEvictionSlot() {
+        // a holds the left half; b's top-left request steps a aside into
+        // the bottom-left quad (chapter: a -> leftHalf, requester b);
+        // c's bottom-left request then evicts a plainly from its
+        // step-aside slot (chapter: a -> bottomLeft, requester c). Undo
+        // must return a to the slot it was evicted from — the bottom-
+        // left quad, not its original half — release c, and book no
+        // cell twice: b's top-left quad never overlaps a's return.
+        // (Before the step-aside rule existed, b's request untiled a
+        // and this chapter dance instead pinned undo stepping c aside
+        // out of a's returning half.)
         let a = focusNewWindow()
         controller.handle(slot: .leftHalf)
         let b = focusNewWindow(CGRect(x: 50, y: 50, width: 700, height: 500))
@@ -76,14 +83,15 @@ final class UndoIntegrityTests: XCTestCase {
         controller.undoLastDisplacement()
 
         XCTAssertTrue(doubledCells.isEmpty, "undo left cells double-booked")
-        XCTAssertNotNil(canvas.state.occupant(of: .leftHalf), "a returns to its half")
-        XCTAssertNil(canvas.state.slot(of: 3), "c's quad overlaps a's half and must yield")
+        XCTAssertEqual(
+            canvas.state.occupant(of: .bottomLeft), 1,
+            "a returns to the slot it was evicted from, its step-aside quad")
+        XCTAssertNil(canvas.state.slot(of: 3), "c's request is undone and c releases")
         XCTAssertEqual(
             gateway.frame(of: c), CGRect(x: 60, y: 60, width: 600, height: 400),
-            "c restored to its pre-tile frame, not left under a's half")
-        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
-        // b was the chapter's requester: undo releases it like any requester.
-        XCTAssertNil(canvas.state.slot(of: 2))
+            "c restored to its pre-tile frame")
+        XCTAssertEqual(canvas.state.slot(of: 2), .topLeft, "b keeps the quad it stepped into")
+        XCTAssertEqual(canvas.state.tiledWindows.count, 2)
     }
 
     func testUndoOfLayoutSwitchDisplacesTheOtherLayoutsOccupants() {
@@ -187,7 +195,12 @@ final class UndoIntegrityTests: XCTestCase {
             canvas.state.occupant(of: .sixthRight), 2,
             "undo returns the victim to the slot it was evicted from")
         XCTAssertNil(canvas.state.occupant(of: .sixthLeft))
-        XCTAssertNil(canvas.state.slot(of: 1), "the requester is released by undo")
+        XCTAssertNil(
+            canvas.state.slot(of: 1),
+            "the requester's id was reissued by the shared undo machinery")
+        XCTAssertNotNil(
+            canvas.state.occupant(of: .sixthsLeftTwoThirds),
+            "the tiled requester returns to the slot it vacated")
     }
 
     func testUntileAllDropsAChapterItCouldNotRebuild() {

@@ -503,8 +503,18 @@ struct TilingSpace {
         {
             rehouse = (evicted[0], home)
         }
-        let snapshot = evicted.compactMap { evictedID in
+        var snapshot = evicted.compactMap { evictedID in
             snapshotEntry(for: evictedID, fallback: slot, space: context.space)
+        }
+        // A tiled requester's vacated tile joins the chapter, exactly as
+        // in a swap chapter: undo returns the requester to the slot it
+        // vacated instead of releasing a window that was tiled before
+        // the request. A fresh requester adds no entry: its undo is the
+        // pre-tile restore.
+        if let previous,
+            let entry = snapshotEntry(for: id, fallback: previous, space: context.space)
+        {
+            snapshot.append(entry)
         }
         let restoreFailures = restore(
             evicted.filter { $0 != rehouse?.window }, context: context)

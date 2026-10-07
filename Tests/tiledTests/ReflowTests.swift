@@ -272,6 +272,80 @@ final class ReflowTests: XCTestCase {
             nil)
     }
 
+    func testBlockerContainingTheTargetReHousesIntoItsOwnLeftover() {
+        // A left third blocking a top-left sixth request contains it:
+        // its leftover (its slot minus the target) is exactly the
+        // bottom-left sixth, so the blocker steps down into that slot
+        // instead of untangling.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthLeft)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: a, for: .sixthTopLeft),
+            .sixthBottomLeft)
+    }
+
+    func testBlockerStepsUpWhenTheRequestTakesItsBottom() {
+        // The same containment rule runs both ways: a left third
+        // blocking a bottom-left sixth request steps up into the
+        // top-left sixth.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthLeft)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: a, for: .sixthBottomLeft),
+            .sixthTopLeft)
+    }
+
+    func testHalfBlockerReHousesIntoTheOppositeQuad() {
+        // Quarters: a left half blocking a top-left quad request steps
+        // down into the bottom-left quad.
+        var state = TilingState()
+        state.commit(window: a, into: .leftHalf)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: a, for: .topLeft),
+            .bottomLeft)
+    }
+
+    func testTwoThirdsBlockerReHousesWhenItsLeftoverIsClean() {
+        // A left two-thirds blocking a left-third request contains it
+        // with a clean leftover — the middle third — so it shrinks into
+        // that slot. Its corner-sixth siblings leave L-shaped leftovers
+        // and re-house nowhere (see the L test below).
+        var state = TilingState()
+        state.commit(window: a, into: .sixthsLeftTwoThirds)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: a, for: .sixthLeft),
+            .sixthMiddle)
+    }
+
+    func testOccupiedLeftoverNeverReHousesEvenOnAnOvercommittedBoard() {
+        // Defensive: a valid board never holds a slot inside the
+        // evictee's leftover (it would double-book the evictee's cells),
+        // so containment's occupancy check cannot fire in production.
+        // The pure rule still refuses to guess on an overcommitted
+        // board — and the free-region rule then offers the whole board
+        // minus the target and the intruder, exactly the right
+        // two-thirds, so the blocker re-tiles there rather than
+        // untangling. Only when no rule finds a whole slot does the
+        // window untile.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthLeft)
+        state.commit(window: c, into: .sixthBottomLeft)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: a, for: .sixthTopLeft),
+            .sixthsRightTwoThirds)
+    }
+
+    func testTwoThirdsBlockingACornerSixthNeverReHouses() {
+        // The left two-thirds minus the top-left sixth is an L-shape,
+        // not a slot: the blocker untangles instead of being squeezed
+        // into a region nobody can name.
+        var state = TilingState()
+        state.commit(window: a, into: .sixthsLeftTwoThirds)
+        XCTAssertEqual(
+            state.rehousingHome(evicting: a, for: .sixthTopLeft),
+            nil)
+    }
+
     func testQuartersEvicteeReHousesAcrossTheBoard() {
         // The left half request over top-left, top-right, bottom-left
         // evicts the bottom-left quad; the cells left free are exactly
@@ -525,10 +599,10 @@ extension ReflowTests {
             canvas.state.slot(of: 2), .sixthMiddle,
             "the re-housed window returns to the slot it was evicted from")
         XCTAssertEqual(gateway.frame(of: m), expectedRect(.sixthMiddle, for: m))
-        XCTAssertTrue(canvas.state.slot(of: 3) == nil, "the requester untiles")
+        XCTAssertTrue(canvas.state.slot(of: 3) == nil, "the requester's id was reissued by the shared undo machinery")
         XCTAssertEqual(
-            gateway.frame(of: r), CGRect(x: 100, y: 100, width: 500, height: 400),
-            "restored to its pre-tile frame")
+            gateway.frame(of: r), expectedRect(.sixthRight, for: r),
+            "the tiled requester returns to the slot it vacated, not its pre-tile frame")
         XCTAssertEqual(canvas.state.slot(of: 1), .sixthBottomLeft)
     }
 

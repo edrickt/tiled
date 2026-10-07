@@ -137,8 +137,32 @@ final class TilingSpaceTests: XCTestCase {
     // MARK: Swap
 
     func testSwapMovesBothWindowsAndKeepsThemTiled() {
-        // The report's example: the top-left sixth swaps into the middle
-        // third with the right two-thirds window; nobody is untiled.
+        // The exact-slot swap: the top-left quad requests the top-right
+        // quad its occupant holds. The blocker has no leftover of its
+        // own, so it takes the requester's vacated tile; nobody is
+        // untiled.
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topRight, requester: b)
+
+        let outcome = harness.apply(slot: .topRight, requester: a)
+
+        XCTAssertNil(space.error)
+        XCTAssertEqual(outcome.result, .placed)
+        XCTAssertEqual(space.state.slot(of: a), .topRight)
+        XCTAssertEqual(
+            space.state.slot(of: b), .topLeft,
+            "the displaced window takes the tile the requester vacated")
+        XCTAssertEqual(harness.frame(of: a), harness.rect(.topRight))
+        XCTAssertEqual(harness.frame(of: b), harness.rect(.topLeft))
+    }
+
+    func testTiledRequesterIntoAContainingBlockerStepsItAside() {
+        // The report's example, now a step-aside: the top-left sixth
+        // requests the middle third held inside the right two-thirds.
+        // The two-thirds window shrinks into its own leftover — the
+        // right third — instead of trading tiles across the screen.
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .sixthTopLeft, requester: a)
@@ -150,13 +174,13 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(outcome.result, .placed)
         XCTAssertEqual(space.state.slot(of: a), .sixthMiddle)
         XCTAssertEqual(
-            space.state.slot(of: b), .sixthTopLeft,
-            "the displaced window takes the tile the requester vacated")
+            space.state.slot(of: b), .sixthRight,
+            "the containing blocker steps into its own leftover")
         XCTAssertEqual(harness.frame(of: a), harness.rect(.sixthMiddle))
-        XCTAssertEqual(harness.frame(of: b), harness.rect(.sixthTopLeft))
+        XCTAssertEqual(harness.frame(of: b), harness.rect(.sixthRight))
     }
 
-    func testSwapKeepsBothPreTileFrames() {
+    func testStepAsideKeepsBothPreTileFrames() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         let aFrame = CGRect(x: 5, y: 6, width: 300, height: 200)
@@ -166,6 +190,9 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .sixthTopLeft, requester: a)
         harness.apply(slot: .sixthsRightTwoThirds, requester: b)
 
+        // The request now steps the blocker aside rather than swapping;
+        // either way both windows keep the pre-tile frames they arrived
+        // with.
         harness.apply(slot: .sixthMiddle, requester: a)
 
         XCTAssertEqual(space.records[a]?.preTileFrame, aFrame)
@@ -175,40 +202,40 @@ final class TilingSpaceTests: XCTestCase {
     func testSwapRefusalByDisplacedMovesNothing() {
         let a = harness.addWindow()
         let b = harness.addWindow()
-        harness.apply(slot: .sixthTopLeft, requester: a)
-        harness.apply(slot: .sixthsRightTwoThirds, requester: b)
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topRight, requester: b)
         harness.gateway.refuseNextWrites(harness.handle(of: b)!)
 
-        harness.apply(slot: .sixthMiddle, requester: a)
+        harness.apply(slot: .topRight, requester: a)
 
         XCTAssertNotNil(space.error)
-        XCTAssertEqual(space.state.slot(of: a), .sixthTopLeft, "the requester stays put")
-        XCTAssertEqual(space.state.slot(of: b), .sixthsRightTwoThirds, "the displaced window stays put")
+        XCTAssertEqual(space.state.slot(of: a), .topLeft, "the requester stays put")
+        XCTAssertEqual(space.state.slot(of: b), .topRight, "the displaced window stays put")
         XCTAssertTrue(space.undoStack.isEmpty)
     }
 
     func testSwapRefusalByRequesterRollsDisplacedBack() {
         let a = harness.addWindow()
         let b = harness.addWindow()
-        harness.apply(slot: .sixthTopLeft, requester: a)
-        harness.apply(slot: .sixthsRightTwoThirds, requester: b)
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topRight, requester: b)
         harness.gateway.refuseNextWrites(harness.handle(of: a)!)
 
-        harness.apply(slot: .sixthMiddle, requester: a)
+        harness.apply(slot: .topRight, requester: a)
 
         XCTAssertNotNil(space.error)
-        XCTAssertEqual(space.state.slot(of: a), .sixthTopLeft)
-        XCTAssertEqual(space.state.slot(of: b), .sixthsRightTwoThirds, "rolled back to its own tile")
+        XCTAssertEqual(space.state.slot(of: a), .topLeft)
+        XCTAssertEqual(space.state.slot(of: b), .topRight, "rolled back to its own tile")
         // The displaced window's first write succeeded, so it visibly sits
         // in the requester's vacated tile unless the rollback writes it
         // home. State alone cannot see that: an unwritten rollback leaves
         // screen and state disagreeing while this test stays green.
         XCTAssertEqual(
-            harness.frame(of: b), harness.rect(.sixthsRightTwoThirds),
+            harness.frame(of: b), harness.rect(.topRight),
             "the displaced window is written back to its own tile")
     }
 
-    func testSwapNoticesAndSnapshotsBothForUndo() {
+    func testStepAsideNoticesAndSnapshotsBothForUndo() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .sixthTopLeft, requester: a)
@@ -218,14 +245,14 @@ final class TilingSpaceTests: XCTestCase {
 
         XCTAssertEqual(
             space.notice,
-            "TestApp moved to Top Left Sixth to make room. "
+            "TestApp moved to Right Third to make room. "
                 + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
         XCTAssertEqual(space.undoStack.last?.requester, a)
         let snapshot = try! XCTUnwrap(space.undoStack.last?.snapshot)
         XCTAssertEqual(snapshot.count, 2, "both windows are undoable")
         XCTAssertTrue(
             snapshot.contains { $0.slot == .sixthsRightTwoThirds },
-            "the displaced window's undo entry names its own former tile")
+            "the stepped-aside window's undo entry names its own former tile")
         XCTAssertTrue(
             snapshot.contains { $0.slot == .sixthTopLeft },
             "the requester's undo entry names its vacated tile")
@@ -386,6 +413,69 @@ final class TilingSpaceTests: XCTestCase {
             space.notice?.contains("to make room") ?? false,
             "no re-house notice for a request that never landed")
         XCTAssertNotNil(space.undoStack.last, "the eviction itself is undoable")
+    }
+
+    func testContainmentRehouseStepsTheBlockerAsideThroughTheCanvas() {
+        // A left third blocks a fresh window's top-left sixth request:
+        // the third steps down into its own leftover — the bottom-left
+        // sixth — instead of untangling.
+        let third = harness.addWindow()
+        harness.apply(slot: .sixthLeft, requester: third)
+        let fresh = harness.addWindow()
+
+        harness.apply(slot: .sixthTopLeft, requester: fresh)
+
+        XCTAssertNil(space.error)
+        XCTAssertEqual(space.state.slot(of: fresh), .sixthTopLeft)
+        XCTAssertEqual(
+            space.state.slot(of: third), .sixthBottomLeft,
+            "the blocking third steps aside instead of losing its tiling")
+        XCTAssertEqual(harness.frame(of: third), harness.rect(.sixthBottomLeft))
+        XCTAssertTrue(
+            space.notice?.contains("to make room") ?? false,
+            "the step-aside is narrated like any re-house")
+        XCTAssertEqual(space.undoStack.last?.requester, fresh)
+        XCTAssertEqual(
+            space.undoStack.last?.snapshot.first?.slot, .sixthLeft,
+            "undo returns the blocker to its full slot")
+    }
+
+    func testTwoBlockersEvictWithoutSteppingAside() {
+        // Middle third AND right third block a right two-thirds
+        // request: two blockers, so there is no lone evictee to
+        // re-house — everyone untangles. (For quarter and sixth targets
+        // geometry allows at most one blocker: every slot overlapping a
+        // one-cell-tall target contains it, and two of those would
+        // double-book cells.)
+        let middle = harness.addWindow()
+        harness.apply(slot: .sixthMiddle, requester: middle)
+        let right = harness.addWindow()
+        harness.apply(slot: .sixthRight, requester: right)
+        let fresh = harness.addWindow()
+
+        harness.apply(slot: .sixthsRightTwoThirds, requester: fresh)
+
+        XCTAssertEqual(space.state.slot(of: fresh), .sixthsRightTwoThirds)
+        XCTAssertNil(space.state.slot(of: middle))
+        XCTAssertNil(space.state.slot(of: right))
+    }
+
+    func testStepAsideWinsOverSwap() {
+        // A tiled requester whose target sits inside a containing
+        // blocker steps the blocker aside instead of swapping: the left
+        // third shrinks into its own bottom-left sixth rather than
+        // teleporting into the vacated top-middle sixth.
+        let third = harness.addWindow()
+        harness.apply(slot: .sixthLeft, requester: third)
+        let mover = harness.addWindow()
+        harness.apply(slot: .sixthTopMiddle, requester: mover)
+
+        harness.apply(slot: .sixthTopLeft, requester: mover)
+
+        XCTAssertEqual(space.state.slot(of: mover), .sixthTopLeft)
+        XCTAssertEqual(
+            space.state.slot(of: third), .sixthBottomLeft,
+            "the third steps aside into its own strip, not the vacated sixth")
     }
 
     // MARK: Reflow

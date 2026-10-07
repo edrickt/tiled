@@ -816,17 +816,23 @@ final class TilingController {
         // tile: every current occupant the restoration would land on
         // (overlapping cells) or contradict (the other layout) is untiled
         // to its pre-tile frame first. Undo can therefore never
-        // double-book a cell or leave two layouts on one canvas. Only the
-        // window an entry is about is exempt from that entry; a chapter's
-        // own requester still steps aside where it would block a restore,
+        // double-book a cell or leave two layouts on one canvas. Chapter
+        // members are exempt: each has an entry of its own that re-places
+        // it (a swap or step-aside chapter's destinations may overlap one
+        // another), so untiling one would only churn its identity — its
+        // entry restores it in place. A chapter's own requester without
+        // an entry still steps aside where it would block a restore,
         // exactly as before.
+        let chapterHandles = Set(entry.snapshot.map(\.handle))
         var blockers: Set<WindowID> = []
         for evicted in entry.snapshot {
             let destination = evicted.space ?? space
             for (slot, current) in spaceState(for: destination).occupants
             where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {
                 guard let handle = spaces[destination]?.handle(of: current),
-                      handle != evicted.handle else { continue }
+                      handle != evicted.handle,
+                      !chapterHandles.contains(handle)
+                else { continue }
                 blockers.insert(current)
             }
         }

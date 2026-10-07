@@ -34,7 +34,7 @@ Untiling a window to make room, restoring its pre-tile frame; what `plan` return
 _Avoid_: displacement, removal
 
 **Swap**:
-A tiled requester trading tiles with the single window blocking its target: the blocker lands in the tile the requester vacated, nobody is untiled. The vacated tile must be disjoint from the target, or the request falls back to eviction.
+A tiled requester trading tiles with the single window blocking its target: the blocker lands in the tile the requester vacated, nobody is untiled. The vacated tile must be disjoint from the target, or the request falls back to eviction. A blocker that contains the target with a clean leftover never swaps — it steps aside instead (see Re-house), keeping its own strip.
 _Avoid_: exchange, trade, tile swap (in prose; the code name is `swap`)
 
 **Reflow**:
@@ -42,8 +42,8 @@ Absorbing freed cells: when a tiled window leaves the layout (eviction, untile, 
 _Avoid_: growth, backfill, gap-filling (the code name is `reflow`)
 
 **Re-house**:
-Keeping an evictee tiled: when an eviction leaves exactly one whole slot free, the evicted window re-tiles into it (the middle third making room for the right two-thirds moves into the free top-left sixth) instead of being untiled; a region that is not exactly one slot falls back to untile-and-restore. Its undo entry returns it to the slot it was evicted from.
-_Avoid_: relocation, re-assignment, re-seat
+Keeping an evictee tiled instead of untangling it. Two rules, both exact-or-nil: when an eviction leaves exactly one whole slot free, the evicted window re-tiles into it (the middle third making room for the right two-thirds moves into the free top-left sixth); and when the evictee's own slot contains the requested slot and its leftover — its slot minus the request — is exactly one whole slot, the blocker steps aside into that leftover (the left third requested at its top sixth steps down into the bottom-left sixth, the left half into the bottom-left quad, a two-thirds into the third its request leaves clean). The step-aside covers tiled requesters too: it wins over a swap, because the blocker keeps its own strip instead of teleporting to the requester's vacated tile, whose cells then reflow to a neighbor. A region or leftover that is not exactly one slot falls back to untile-and-restore, and expanded windows never step aside — they untangle. Undo puts the whole chapter back: each moved window returns to the slot it was evicted from, which for a step-aside is its original full slot, and a tiled requester returns to the slot it vacated.
+_Avoid_: relocation, re-assignment, re-seat, displacement (an eviction untiles; a re-house moves, and never the reverse)
 
 **Expand**:
 Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it.

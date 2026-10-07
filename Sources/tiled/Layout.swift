@@ -430,9 +430,11 @@ typealias WindowID = Int
 enum TilePlan: Equatable {
     /// Place the window; the listed windows must be untiled (restored) first.
     case tile(evicting: [WindowID])
-    /// The requester is tiled and exactly one window overlaps the target:
-    /// the two swap tiles: the displaced window moves into the slot the
-    /// requester vacates; nobody is untiled or restored.
+    /// The requester is tiled and exactly one window overlaps the target
+    /// without containing it (a containing blocker with a clean leftover
+    /// steps aside instead): the two swap tiles, the displaced window
+    /// moves into the slot the requester vacates; nobody is untiled or
+    /// restored.
     case swap(displaced: WindowID)
     /// The request targets a different layout than the active one: every
     /// tiled window is untiled (restored), the layout switches, and the
@@ -494,8 +496,11 @@ struct TilingState: Equatable {
     /// Decides what happens when `window` requests `slot`: the requester
     /// owns `slot` after the move. A tiled requester swaps with a single
     /// overlapping window (the displaced window takes the tile the
-    /// requester vacated); otherwise every overlapping window is evicted
-    /// (restored to its pre-tile frame).
+    /// requester vacates) — unless that blocker's slot contains the
+    /// target with a clean leftover, in which case the plan is an
+    /// ordinary eviction the commit re-houses: the blocker steps aside
+    /// into its own strip instead of trading tiles. Otherwise every
+    /// overlapping window is evicted (restored to its pre-tile frame).
     func plan(window: WindowID, into slot: Slot) -> TilePlan {
         if occupantBySlot[slot] == window { return .noop }
         if !occupantBySlot.isEmpty, slot.layout != activeLayout {
@@ -510,9 +515,13 @@ struct TilingState: Equatable {
         // The vacated tile must not overlap the target (the displaced
         // window would land inside the requester's new tile), and more
         // than one blocker (or an untiled requester with no tile to
-        // offer) falls back to eviction.
+        // offer) falls back to eviction. A blocker that contains the
+        // target with a clean leftover steps aside instead — nearer,
+        // and the requester's vacated tile frees up for reflow — so
+        // the swap only stands when no such home exists.
         if blockers.count == 1, let previous = self.slot(of: window),
-            !previous.overlaps(slot)
+            !previous.overlaps(slot),
+            stepAsideHome(evictee: blockers[0], for: slot) == nil
         {
             return .swap(displaced: blockers[0])
         }
@@ -536,26 +545,57 @@ struct TilingState: Equatable {
         }
     }
 
+    /// The containment step-aside home: when `evictee`'s slot contains
+    /// `target` and its leftover (its slot minus the target) is exactly
+    /// one whole slot of the target's layout that no other occupant
+    /// holds, that slot is where the blocker steps aside (the left third
+    /// requested at its top sixth steps down into the bottom-left
+    /// sixth). Shared by `plan`, where a step-aside overrides a swap,
+    /// and `rehousingHome`, so the plan and the commit can never
+    /// disagree about whether one exists.
+    private func stepAsideHome(evictee: WindowID, for target: Slot) -> Slot? {
+        guard let current = slot(of: evictee), current.overlaps(target) else { return nil }
+        let leftover = current.cells.subtracting(target.cells)
+        guard leftover.count < current.cells.count,
+            let aside = Slot.allCases.first(where: {
+                $0.layout == target.layout && $0.cells == leftover
+            }),
+            !occupantBySlot.contains(where: { occupant in
+                occupant.value != evictee && !occupant.key.cells.isDisjoint(with: leftover)
+            })
+        else { return nil }
+        return aside
+    }
+
     /// The slot a lone evicted window can move into instead of losing
-    /// its tiling: once the requester takes `target`, the cells left free
-    /// form a region; when that region is exactly one whole slot of the
-    /// target's layout, the evictee re-tiles into it (the middle third
-    /// making room for the right two-thirds moves into the free top-left
-    /// sixth). Exact-or-empty, like reflow: a region that is not exactly
-    /// one slot (two quarters, an L-shape, nothing) leaves the eviction
-    /// untouched, so the window untiles to its pre-tile frame instead —
-    /// there is no unambiguous home to guess. The region may include
-    /// cells that were free before the request: the evictee has nowhere
-    /// else to go, and a whole free slot is a whole free slot.
+    /// its tiling. Two rules, both exact-or-nil — there is no
+    /// unambiguous home to guess, so a near miss leaves the eviction
+    /// untouched and the window untiles to its pre-tile frame:
+    ///
+    /// - Step-aside (containment): see `stepAsideHome`. Checked first:
+    ///   it keeps the evictee adjacent to the request.
+    /// - Free region: once the requester takes `target`, the cells left
+    ///   free form a region; when that region is exactly one whole slot
+    ///   of the target's layout, the evictee re-tiles into it (the
+    ///   middle third making room for the right two-thirds moves into
+    ///   the free top-left sixth). The region may include cells that
+    ///   were free before the request: the evictee has nowhere else to
+    ///   go, and a whole free slot is a whole free slot.
+    ///
+    /// A caller that omits `previous` computes the pre-request region
+    /// for the free-region rule, which is only correct for an untiled
+    /// requester. (The step-aside rule ignores `previous`: a requester
+    /// whose vacated slot reached the evictee's leftover would have to
+    /// span both target and leftover — the evictee's own slot.)
     func rehousingHome(
         evicting evictee: WindowID, for target: Slot, vacating previous: Slot? = nil
     ) -> Slot? {
+        if let aside = stepAsideHome(evictee: evictee, for: target) { return aside }
         guard let current = slot(of: evictee), current.overlaps(target) else { return nil }
-        // The free region is the one the request leaves behind: the target
-        // is taken by the requester, the evictee's own slot is freed, and
-        // the requester's vacated slot is freed too (it is still committed
-        // here). A caller that omits `previous` computes the pre-request
-        // region, which is only correct for an untiled requester.
+        // Free region: the free region is the one the request leaves
+        // behind: the target is taken by the requester, the evictee's
+        // own slot is freed, and the requester's vacated slot is freed
+        // too (it is still committed here).
         var occupied = target.cells
         for (slot, window) in occupantBySlot
         where window != evictee && slot != previous {
