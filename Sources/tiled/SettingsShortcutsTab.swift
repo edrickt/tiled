@@ -125,10 +125,27 @@ final class ShortcutsTab: NSObject {
         // each header, deliberately separate from the disclosure control,
         // which only collapses.
         for layout in [LayoutKind.quarters, LayoutKind.sixths] {
-            stack.addArrangedSubview(sectionHeader(for: layout))
+            let header = sectionHeader(for: layout)
+            stack.addArrangedSubview(header)
             if !collapsedSections.contains(layout) {
-                for slot in Slot.allCases where slot.layout == layout {
-                    stack.addArrangedSubview(shortcutRow(for: slot))
+                stack.setCustomSpacing(8, after: header)
+                let groups: [(title: String, slots: [Slot])] = layout == .quarters
+                    ? [("Quads", SlotPresentation.quartersQuads),
+                       ("Halves", SlotPresentation.quartersHalves)]
+                    : [("Corners", SlotPresentation.sixthsCorners),
+                       ("Thirds", SlotPresentation.sixthsThirds),
+                       ("Two-Thirds", SlotPresentation.sixthsTwoThirds)]
+                for (index, group) in groups.enumerated() {
+                    if index > 0, let previous = stack.arrangedSubviews.last {
+                        stack.setCustomSpacing(12, after: previous)
+                    }
+                    let label = NSTextField(labelWithString: group.title)
+                    label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+                    label.textColor = .secondaryLabelColor
+                    stack.addArrangedSubview(label)
+                    for slot in group.slots {
+                        stack.addArrangedSubview(shortcutRow(for: slot))
+                    }
                 }
             }
             if layout == .quarters {
@@ -264,7 +281,7 @@ final class ShortcutsTab: NSObject {
         let button = RecorderButton(slot: slot)
         button.target = self
         button.action = #selector(recorderClicked(_:))
-        // The footer paragraph explains the contract, but a tooltip meets
+        // The leading paragraph explains the contract, but a tooltip meets
         // the user at the control itself.
         button.toolTip = "Click to record a new combo; Esc keeps the old one, ⌫ disables."
         // Armed/cancelled states change only the button title; announce

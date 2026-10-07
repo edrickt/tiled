@@ -4,6 +4,8 @@ Status: approved direction; source audit recorded in `docs/ui-audit.md`.
 Rendered Settings screenshot audit completed using isolated current-source
 views; menu, permission, and interaction checks pending. First implementation
 batch completed; see `docs/ui-first-batch.md` for its scope and evidence.
+The user accepted that batch; shortcut subgroup alignment is implemented in
+the next batch documented in `docs/ui-shortcut-groups.md`.
 
 ## Goal
 
