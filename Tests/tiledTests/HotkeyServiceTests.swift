@@ -12,6 +12,34 @@ final class HotkeyServiceTests: XCTestCase {
             HotkeyService.settingsModifiers,
             UInt32(controlKey | optionKey | shiftKey | cmdKey))
         XCTAssertEqual(HotkeyService.settingsKeyCode, UInt32(kVK_ANSI_Comma))
+        XCTAssertEqual(HotkeyService.settingsDefaultBinding.label, "⌃⌥⇧⌘,")
+    }
+
+    /// Every configurable action — 17 slots + 5 app actions — gets a
+    /// stable Carbon id, and no two share one: a collision would make one
+    /// hotkey silently trigger another action.
+    func testEveryActionHasAUniqueHotkeyID() {
+        let ids = HotkeyAction.allCases.map(\.hotkeyID)
+        XCTAssertEqual(ids.count, HotkeyAction.allCases.count)
+        XCTAssertEqual(Set(ids).count, ids.count)
+        XCTAssertEqual(HotkeyAction.allCases.count, Slot.allCases.count + HotkeyAction.appActions.count)
+    }
+
+    /// App actions carry their identity: display titles for the Shortcuts
+    /// tab rows and conflict messages, plus stable storage keys that keep
+    /// slot overrides written by earlier builds resolvable.
+    func testAppActionTitlesAndStorageKeys() {
+        XCTAssertEqual(HotkeyAction.expand.title, "Expand to Fill Screen")
+        XCTAssertEqual(HotkeyAction.evict.title, "Evict Focused Window")
+        XCTAssertEqual(HotkeyAction.resetSplitters.title, "Reset Splitters")
+        XCTAssertEqual(HotkeyAction.settings.title, "Open Settings")
+        XCTAssertEqual(HotkeyAction.undo.title, "Undo Last Switch")
+        XCTAssertEqual(HotkeyAction.expand.storageKey, "action.expand")
+        for slot in Slot.allCases {
+            XCTAssertEqual(
+                HotkeyAction.slot(slot).storageKey, slot.rawValue,
+                "slot storage keys must stay the raw value for persistence compat")
+        }
     }
 
     func testSettingsHotkeyIDCannotCollideWithSlotIDs() {
@@ -24,7 +52,7 @@ final class HotkeyServiceTests: XCTestCase {
         // Sits beside the quarters ⌥⇧ set but on Return, which no slot uses.
         XCTAssertEqual(HotkeyService.expandModifiers, UInt32(shiftKey | optionKey))
         XCTAssertEqual(HotkeyService.expandKeyCode, UInt32(kVK_Return))
-        XCTAssertEqual(HotkeyService.expandBinding.label, "⌥⇧⏎")
+        XCTAssertEqual(HotkeyService.expandDefaultBinding.label, "⌥⇧⏎")
     }
 
     func testExpandHotkeyIDCannotCollideWithSlotOrSettingsIDs() {
@@ -44,7 +72,7 @@ final class HotkeyServiceTests: XCTestCase {
         // on ⌫ (kVK_Delete), which no slot uses.
         XCTAssertEqual(HotkeyService.evictModifiers, UInt32(shiftKey | optionKey))
         XCTAssertEqual(HotkeyService.evictKeyCode, UInt32(kVK_Delete))
-        XCTAssertEqual(HotkeyService.evictBinding.label, "⌥⇧⌫")
+        XCTAssertEqual(HotkeyService.evictDefaultBinding.label, "⌥⇧⌫")
     }
 
     func testResetSplittersComboIsOptionShiftR() {
@@ -52,11 +80,11 @@ final class HotkeyServiceTests: XCTestCase {
         // sixths ⌥⇧ set but on R, which no slot defaults to.
         XCTAssertEqual(HotkeyService.resetSplittersModifiers, UInt32(shiftKey | optionKey))
         XCTAssertEqual(HotkeyService.resetSplittersKeyCode, UInt32(kVK_ANSI_R))
-        XCTAssertEqual(HotkeyService.resetSplittersBinding.label, "⌥⇧R")
+        XCTAssertEqual(HotkeyService.resetSplittersDefaultBinding.label, "⌥⇧R")
     }
 
     func testUndoComboIsAllFourModifiersPlusZ() {
-        // The menu's undo row and MenuText.undoHotkeyWarning both promise
+        // The menu's undo row and the undo failure warning both promise
         // ⌃⌥⇧⌘Z. Pinned here so a keycode drift cannot make the advertised
         // combo a dead one.
         XCTAssertEqual(

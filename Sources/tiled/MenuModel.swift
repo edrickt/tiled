@@ -116,10 +116,10 @@ enum MenuModel {
     }
 
     /// Builds the full menu from a snapshot. `binding` supplies each
-    /// slot's live label so custom bindings show and disabled slots
+    /// action's live label so custom bindings show and disabled actions
     /// render without a combo.
     static func items(
-        snapshot: Snapshot, binding: (Slot) -> HotkeyBinding
+        snapshot: Snapshot, binding: (HotkeyAction) -> HotkeyBinding
     ) -> [Item] {
         var items: [Item] = []
 
@@ -222,11 +222,11 @@ enum MenuModel {
             items.append(Item(title: "Tile Focused Window", children: tileChildren))
             items.append(Item(
                 title: MenuText.expandItemTitle(
-                    label: HotkeyService.expandBinding.label,
+                    label: binding(.expand).label,
                     expandedSlot: snapshot.expandedSlot),
                 action: .toggleExpand))
             items.append(Item(
-                title: MenuText.evictItemTitle(label: HotkeyService.evictBinding.label),
+                title: MenuText.evictItemTitle(label: binding(.evict).label),
                 action: .evictFocusedWindow))
             items.append(.separator())
 
@@ -262,12 +262,12 @@ enum MenuModel {
                 items.append(.separator())
                 if snapshot.canUndoDisplacement {
                     // The combo lives in the title, not a key equivalent: the
-                    // global undo is ⌃⌥⇧⌘Z from anywhere, and a ⌘Z glyph here
+                    // global undo is a global hotkey, and a ⌘Z glyph here
                     // would teach a combo that only works with this menu open
                     // (and undoes in the wrong app everywhere else).
                     items.append(Item(
                         title: MenuText.undoDisplacementTitle(evictedCount: snapshot.evictedCount)
-                            + " · \u{2303}\u{2325}\u{21E7}\u{2318}Z",
+                            + (binding(.undo).label.map { " · \($0)" } ?? ""),
                         action: .undoSwitch))
                 }
                 items.append(Item(
@@ -276,7 +276,7 @@ enum MenuModel {
                 items.append(Item(
                     title: (snapshot.hasSplitterBackup
                         ? "Restore Previous Splitters" : "Reset Splitters")
-                        + " · \(HotkeyService.resetSplittersBinding.label ?? "")",
+                        + (binding(.resetSplitters).label.map { " · \($0)" } ?? ""),
                     action: .resetDividers))
             }
         } else {
@@ -295,10 +295,10 @@ enum MenuModel {
     /// One clickable equivalent per global hotkey: the shortcut stays in
     /// the title text, since firing both would tile-then-untile.
     private static func tileItem(
-        _ slot: Slot, _ binding: (Slot) -> HotkeyBinding
+        _ slot: Slot, _ binding: (HotkeyAction) -> HotkeyBinding
     ) -> Item {
         Item(
-            title: MenuText.tileItemTitle(slot: slot, label: binding(slot).label),
+            title: MenuText.tileItemTitle(slot: slot, label: binding(.slot(slot)).label),
             action: .tileSlot(slot))
     }
 
@@ -306,12 +306,12 @@ enum MenuModel {
     /// back. The row itself doesn't act (no click-focus surprise); the
     /// submenu leads with the distinctive action so opening it pays off.
     private static func windowItem(
-        _ window: Snapshot.TiledWindow, _ binding: (Slot) -> HotkeyBinding
+        _ window: Snapshot.TiledWindow, _ binding: (HotkeyAction) -> HotkeyBinding
     ) -> Item {
         Item(
             title: MenuText.windowLine(
                 slot: window.slot, appName: window.appName,
-                label: binding(window.slot).label),
+                label: binding(.slot(window.slot)).label),
             children: [
                 Item(title: "Untile This Window", action: .untileWindow(window.id)),
                 Item(title: "Focus \(window.appName ?? "Window")", action: .focusWindow(window.id)),

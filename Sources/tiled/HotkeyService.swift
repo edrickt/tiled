@@ -33,79 +33,71 @@ extension Slot {
     }
 }
 
-/// Registers the global ⌥⇧ hotkeys via Carbon's RegisterEventHotKey
-/// (still the most reliable global hotkey mechanism on macOS).
+/// Registers the global hotkeys via Carbon's RegisterEventHotKey (still
+/// the most reliable global hotkey mechanism on macOS). Every action —
+/// slots and app actions alike — registers from the store, so a user
+/// rebinds ⌥⇧R or ⌃⌥⇧⌘Z exactly like ⌥⇧U.
 final class HotkeyService {
-    /// Reserved Carbon id for the fixed expand toggle hotkey (⌥⇧⏎).
-    /// Slot ids occupy 1...allCases.count and the Settings fallback id is
-    /// 999, so 998 can never collide.
+    // MARK: App-action Carbon ids
+    //
+    // Reserved ids for the five app actions. Slot ids occupy
+    // 1...allCases.count, so 995–999 can never collide with them (or each
+    // other); the table tests pin that.
+
+    /// Expand toggle (default ⌥⇧⏎).
     static let expandHotkeyID: UInt32 = 998
-    /// The expand combo: ⌥⇧⏎, fixed; slot shortcuts are remappable, this
-    /// one rides beside them like the Settings fallback.
+    /// Evict focused window (default ⌥⇧⌫).
+    static let evictHotkeyID: UInt32 = 996
+    /// Reset splitters (default ⌥⇧R).
+    static let resetSplittersHotkeyID: UInt32 = 995
+    /// Settings fallback (default ⌃⌥⇧⌘,): opens Settings even when the
+    /// menu-bar icon is hidden.
+    static let settingsHotkeyID: UInt32 = 999
+    /// Global undo (default ⌃⌥⇧⌘Z).
+    static let undoHotkeyID: UInt32 = 997
+
+    // MARK: App-action factory defaults
+    //
+    // The combos the fixed build shipped with. They are defaults now, not
+    // constants: the store resolves each action's live binding, and the
+    // Shortcuts tab can change any of them. The expand/evict/reset
+    // combos sit beside the sixths ⌥⇧ set but on keys no slot defaults
+    // to; Settings and undo are deliberately over-modified (all four
+    // modifiers) so they collide with nothing out of the box.
+
     static let expandModifiers = UInt32(shiftKey | optionKey)
     static let expandKeyCode = UInt32(kVK_Return)
+    static let expandDefaultBinding = HotkeyBinding(
+        modifiers: expandModifiers, keyCode: expandKeyCode)
 
-    /// The fixed expand binding, for menu labels and registration.
-    static let expandBinding = HotkeyBinding(modifiers: expandModifiers, keyCode: expandKeyCode)
-
-    /// Reserved Carbon id for the fixed evict hotkey (⌥⇧⌫). Slot ids
-    /// occupy 1...allCases.count and the other fixed ids are 997-999,
-    /// so 996 can never collide.
-    static let evictHotkeyID: UInt32 = 996
-    /// The evict combo: ⌥⇧⌫, fixed; slot shortcuts are remappable, this
-    /// one rides beside them like the expand toggle.
     static let evictModifiers = UInt32(shiftKey | optionKey)
     static let evictKeyCode = UInt32(kVK_Delete)
+    static let evictDefaultBinding = HotkeyBinding(
+        modifiers: evictModifiers, keyCode: evictKeyCode)
 
-    /// The fixed evict binding, for menu labels and registration.
-    static let evictBinding = HotkeyBinding(modifiers: evictModifiers, keyCode: evictKeyCode)
-
-    /// Reserved Carbon id for the fixed reset-splitters hotkey (⌥⇧R).
-    /// Slot ids occupy 1...allCases.count and the other fixed ids are
-    /// 996-999, so 995 can never collide.
-    static let resetSplittersHotkeyID: UInt32 = 995
-    /// The reset-splitters combo: ⌥⇧R, fixed; slot shortcuts are
-    /// remappable, this one rides beside them like the expand toggle.
     static let resetSplittersModifiers = UInt32(shiftKey | optionKey)
     static let resetSplittersKeyCode = UInt32(kVK_ANSI_R)
-
-    /// The fixed reset-splitters binding, for menu labels and registration.
-    static let resetSplittersBinding = HotkeyBinding(
+    static let resetSplittersDefaultBinding = HotkeyBinding(
         modifiers: resetSplittersModifiers, keyCode: resetSplittersKeyCode)
 
-    /// Reserved Carbon id for the Settings fallback hotkey (⌃⌥⇧⌘,).
-    /// Slot ids occupy 1...allCases.count, so this can never collide.
-    static let settingsHotkeyID: UInt32 = 999
-    /// The fallback combo: deliberately over-modified so it collides with
-    /// nothing (all four modifiers + comma).
     static let settingsModifiers = UInt32(controlKey | optionKey | shiftKey | cmdKey)
     static let settingsKeyCode = UInt32(kVK_ANSI_Comma)
+    static let settingsDefaultBinding = HotkeyBinding(
+        modifiers: settingsModifiers, keyCode: settingsKeyCode)
 
-    /// Reserved Carbon id for the global undo hotkey (⌃⌥⇧⌘Z). Same
-    /// over-modified pattern as the Settings fallback so it collides with
-    /// nothing; 997 never collides with slot ids, 998, or 999.
-    static let undoHotkeyID: UInt32 = 997
     static let undoModifiers = UInt32(controlKey | optionKey | shiftKey | cmdKey)
     static let undoKeyCode = UInt32(kVK_ANSI_Z)
+    static let undoDefaultBinding = HotkeyBinding(
+        modifiers: undoModifiers, keyCode: undoKeyCode)
 
-    /// Where a Carbon hotkey event routes. Extracted from carbonCallback
-    /// so a table test pins it: a routing typo here turns a global
-    /// hotkey into a dead key while the menu still advertises it.
-    enum Route: Equatable {
-        case slot(Slot)
-        case expand
-        case evict
-        case settings
-        case undo
-        case resetSplitters
-    }
-
-    /// Pure id → route mapping over the slot table the callback holds.
-    /// Unknown ids return nil (the callback answers eventNotHandledErr,
-    /// letting the event fall through to other apps).
+    /// Pure id → action mapping over the slot table the callback holds.
+    /// Extracted from carbonCallback so a table test pins it: a routing
+    /// typo here turns a global hotkey into a dead key while the menu
+    /// still advertises it. Unknown ids return nil (the callback answers
+    /// eventNotHandledErr, letting the event fall through to other apps).
     static func route(
         forHotKeyID id: UInt32, slotByID: [UInt32: Slot]
-    ) -> Route? {
+    ) -> HotkeyAction? {
         if let slot = slotByID[id] { return .slot(slot) }
         switch id {
         case expandHotkeyID: return .expand
@@ -118,20 +110,12 @@ final class HotkeyService {
     }
 
     private final class Context {
-        var handler: ((Slot) -> Void)?
-        var expandHandler: (() -> Void)?
-        var evictHandler: (() -> Void)?
-        var settingsHandler: (() -> Void)?
-        var undoHandler: (() -> Void)?
-        var resetSplittersHandler: (() -> Void)?
-        let slotByID: [UInt32: Slot]
+        var handler: ((HotkeyAction) -> Void)?
+        let actionByID: [UInt32: HotkeyAction]
 
         init() {
-            var map: [UInt32: Slot] = [:]
-            for slot in Slot.allCases {
-                map[slot.hotkeyID] = slot
-            }
-            slotByID = map
+            actionByID = Dictionary(
+                uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID, $0) })
         }
     }
 
@@ -145,68 +129,19 @@ final class HotkeyService {
     private static var handlerInstalled = false
     private let store: HotkeyStore
 
-    /// Slots whose global hotkey could not be registered (likely owned by
-    /// another app). Surfaced in the status menu; never just logged.
-    private(set) var failedSlots: [Slot] = []
+    /// Actions whose global hotkey could not be registered (likely owned
+    /// by another app). Surfaced in the status menu and the Shortcuts tab;
+    /// never just logged.
+    private(set) var failedActions: [HotkeyAction] = []
 
-    var handler: ((Slot) -> Void)? {
+    /// Fired for every registered hotkey. The handler switches on the
+    /// action; one entry point replaces the per-combo handler properties
+    /// so adding an action can never forget a dispatch branch (the
+    /// switch is exhaustive).
+    var handler: ((HotkeyAction) -> Void)? {
         get { context.handler }
         set { context.handler = newValue }
     }
-
-    /// Fired by the fixed ⌥⇧⏎ combo: toggles the focused window between
-    /// expanded (fills the screen) and its previous tile.
-    var expandHandler: (() -> Void)? {
-        get { context.expandHandler }
-        set { context.expandHandler = newValue }
-    }
-
-    /// Whether the expand combo registered (false = owned by another app).
-    private(set) var expandHotkeyFailed = false
-
-    /// Fired by the fixed ⌥⇧⌫ combo: evicts the focused window
-    /// (restores its pre-tile frame and releases its slot).
-    var evictHandler: (() -> Void)? {
-        get { context.evictHandler }
-        set { context.evictHandler = newValue }
-    }
-
-    /// Whether the evict combo registered (false = owned by another app).
-    private(set) var evictHotkeyFailed = false
-
-    /// Fired by the ⌃⌥⇧⌘, fallback combo: opens Settings even when the
-    /// menu-bar icon is hidden (the icon is otherwise the only handle).
-    var settingsHandler: (() -> Void)? {
-        get { context.settingsHandler }
-        set { context.settingsHandler = newValue }
-    }
-
-    /// Whether the fallback combo registered (false = owned by another app).
-    private(set) var settingsHotkeyFailed = false
-
-    /// Fired by the fixed ⌃⌥⇧⌘Z combo: undoes the last layout switch from
-    /// anywhere. The switch is triggered by global hotkeys while other apps
-    /// are frontmost, so the undo must be global too: a menu-open ⌘Z
-    /// would undo in the wrong app.
-    var undoHandler: (() -> Void)? {
-        get { context.undoHandler }
-        set { context.undoHandler = newValue }
-    }
-
-    /// Whether the undo combo registered (false = owned by another app).
-    private(set) var undoHotkeyFailed = false
-
-    /// Fired by the fixed ⌥⇧R combo: snaps the focused canvas's splitters
-    /// back to defaults (or restores the parked ones when a backup exists),
-    /// keeping every window tiled.
-    var resetSplittersHandler: (() -> Void)? {
-        get { context.resetSplittersHandler }
-        set { context.resetSplittersHandler = newValue }
-    }
-
-    /// Whether the reset-splitters combo registered (false = owned by
-    /// another app).
-    private(set) var resetSplittersHotkeyFailed = false
 
     init(store: HotkeyStore = HotkeyStore()) {
         self.store = store
@@ -215,9 +150,9 @@ final class HotkeyService {
     }
 
     /// Unregisters everything and registers from the store again.
-    /// Called after the user edits bindings in Settings; failedSlots is
-    /// recomputed, so newly freed (or newly conflicted) slots surface in
-    /// the menu without a relaunch.
+    /// Called after the user edits bindings in Settings; failedActions is
+    /// recomputed, so newly freed (or newly conflicted) actions surface
+    /// in the menu without a relaunch.
     func reload() {
         for ref in hotKeyRefs {
             if let ref { UnregisterEventHotKey(ref) }
@@ -227,99 +162,26 @@ final class HotkeyService {
     }
 
     private func registerHotkeys() {
-        failedSlots = []
-        settingsHotkeyFailed = false
-        expandHotkeyFailed = false
-        evictHotkeyFailed = false
-        undoHotkeyFailed = false
-        resetSplittersHotkeyFailed = false
-        var resetRef: EventHotKeyRef?
-        if RegisterEventHotKey(
-            Self.resetSplittersKeyCode,
-            Self.resetSplittersModifiers,
-            EventHotKeyID(signature: Self.signature, id: Self.resetSplittersHotkeyID),
-            GetApplicationEventTarget(),
-            0,
-            &resetRef) == noErr
-        {
-            hotKeyRefs.append(resetRef)
-        } else {
-            resetSplittersHotkeyFailed = true
-            NSLog("Tiled: failed to register reset splitters hotkey")
-        }
-        var evictRef: EventHotKeyRef?
-        if RegisterEventHotKey(
-            Self.evictKeyCode,
-            Self.evictModifiers,
-            EventHotKeyID(signature: Self.signature, id: Self.evictHotkeyID),
-            GetApplicationEventTarget(),
-            0,
-            &evictRef) == noErr
-        {
-            hotKeyRefs.append(evictRef)
-        } else {
-            evictHotkeyFailed = true
-            NSLog("Tiled: failed to register evict hotkey")
-        }
-        var expandRef: EventHotKeyRef?
-        if RegisterEventHotKey(
-            Self.expandKeyCode,
-            Self.expandModifiers,
-            EventHotKeyID(signature: Self.signature, id: Self.expandHotkeyID),
-            GetApplicationEventTarget(),
-            0,
-            &expandRef) == noErr
-        {
-            hotKeyRefs.append(expandRef)
-        } else {
-            expandHotkeyFailed = true
-            NSLog("Tiled: failed to register expand hotkey")
-        }
-        var settingsRef: EventHotKeyRef?
-        if RegisterEventHotKey(
-            Self.settingsKeyCode,
-            Self.settingsModifiers,
-            EventHotKeyID(signature: Self.signature, id: Self.settingsHotkeyID),
-            GetApplicationEventTarget(),
-            0,
-            &settingsRef) == noErr
-        {
-            hotKeyRefs.append(settingsRef)
-        } else {
-            settingsHotkeyFailed = true
-            NSLog("Tiled: failed to register settings fallback hotkey")
-        }
-        var undoRef: EventHotKeyRef?
-        if RegisterEventHotKey(
-            Self.undoKeyCode,
-            Self.undoModifiers,
-            EventHotKeyID(signature: Self.signature, id: Self.undoHotkeyID),
-            GetApplicationEventTarget(),
-            0,
-            &undoRef) == noErr
-        {
-            hotKeyRefs.append(undoRef)
-        } else {
-            undoHotkeyFailed = true
-            NSLog("Tiled: failed to register undo hotkey")
-        }
-        for slot in Slot.allCases {
-            let binding = store.binding(for: slot)
-            // A disabled slot registers nothing and warns about nothing.
+        failedActions = []
+        for action in HotkeyAction.allCases {
+            let binding = store.binding(for: action)
+            // A disabled action registers nothing and warns about nothing.
             guard let keyCode = binding.keyCode else { continue }
             var ref: EventHotKeyRef?
             let status = RegisterEventHotKey(
                 keyCode,
                 binding.modifiers,
-                EventHotKeyID(signature: Self.signature, id: slot.hotkeyID),
+                EventHotKeyID(signature: Self.signature, id: action.hotkeyID),
                 GetApplicationEventTarget(),
                 0,
                 &ref)
             if status == noErr {
                 hotKeyRefs.append(ref)
             } else {
-                failedSlots.append(slot)
-                NSLog("Tiled: failed to register hotkey for %@ (osstatus %d)", slot.rawValue, status)
+                failedActions.append(action)
+                NSLog(
+                    "Tiled: failed to register hotkey for %@ (osstatus %d)",
+                    action.title, status)
             }
         }
     }
@@ -351,27 +213,10 @@ final class HotkeyService {
             &hotKeyID)
         guard status == noErr else { return status }
         let context = Unmanaged<Context>.fromOpaque(userData!).takeUnretainedValue()
-        switch HotkeyService.route(forHotKeyID: hotKeyID.id, slotByID: context.slotByID) {
-        case .expand:
-            DispatchQueue.main.async { context.expandHandler?() }
-            return noErr
-        case .evict:
-            DispatchQueue.main.async { context.evictHandler?() }
-            return noErr
-        case .settings:
-            DispatchQueue.main.async { context.settingsHandler?() }
-            return noErr
-        case .undo:
-            DispatchQueue.main.async { context.undoHandler?() }
-            return noErr
-        case .resetSplitters:
-            DispatchQueue.main.async { context.resetSplittersHandler?() }
-            return noErr
-        case .slot(let slot):
-            DispatchQueue.main.async { context.handler?(slot) }
-            return noErr
-        case nil:
+        guard let action = context.actionByID[hotKeyID.id] else {
             return OSStatus(eventNotHandledErr)
         }
+        DispatchQueue.main.async { context.handler?(action) }
+        return noErr
     }
 }

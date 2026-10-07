@@ -38,10 +38,38 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(MenuText.evictItemTitle(label: nil), "Evict Focused Window")
     }
 
-    func testEvictHotkeyWarningNamesComboAndRecovery() {
+    func testHotkeyFailureWarningNamesActionRecovery() {
+        // App actions carry their own recovery advice, so the sentence
+        // names the action and the way back.
         XCTAssertEqual(
-            MenuText.evictHotkeyWarning(),
-            "The evict shortcut (⌥⇧⌫) could not be registered; "
+            MenuText.hotkeyFailureWarning(
+                label: "⌥⇧⌫", title: "Evict Focused Window",
+                recovery: "quit and reopen Tiled to try again."),
+            "The Evict Focused Window shortcut (⌥⇧⌫) could not be registered; "
+                + "quit and reopen Tiled to try again.")
+        XCTAssertEqual(
+            MenuText.hotkeyFailureWarning(
+                label: "⌃⌥⇧⌘,", title: "Open Settings",
+                recovery: "quit and reopen Tiled to get back to Settings while hidden."),
+            "The Open Settings shortcut (⌃⌥⇧⌘,) could not be registered; "
+                + "quit and reopen Tiled to get back to Settings while hidden.")
+        XCTAssertEqual(
+            MenuText.hotkeyFailureWarning(
+                label: "⌃⌥⇧⌘Z", title: "Undo Last Switch",
+                recovery: "undo the last displacement from the Tiled menu instead."),
+            "The Undo Last Switch shortcut (⌃⌥⇧⌘Z) could not be registered; "
+                + "undo the last displacement from the Tiled menu instead.")
+        XCTAssertEqual(
+            MenuText.hotkeyFailureWarning(
+                label: "⌥⇧R", title: "Reset Splitters",
+                recovery: "reset splitters from the Tiled menu instead."),
+            "The Reset Splitters shortcut (⌥⇧R) could not be registered; "
+                + "reset splitters from the Tiled menu instead.")
+        XCTAssertEqual(
+            MenuText.hotkeyFailureWarning(
+                label: "⌥⇧⏎", title: "Expand to Fill Screen",
+                recovery: "quit and reopen Tiled to try again."),
+            "The Expand to Fill Screen shortcut (⌥⇧⏎) could not be registered; "
                 + "quit and reopen Tiled to try again.")
     }
 
@@ -56,38 +84,17 @@ final class MenuTextTests: XCTestCase {
 
     // MARK: Warnings
 
-    func testSettingsHotkeyWarningNamesComboAndRecovery() {
-        XCTAssertEqual(
-            MenuText.settingsHotkeyWarning(),
-            "The Settings shortcut (⌃⌥⇧⌘,) could not be registered; "
-                + "quit and reopen Tiled to get back to Settings while hidden.")
-    }
-
     func testHotkeyFailureWarningNamesLabelAndSlot() {
         XCTAssertEqual(
-            MenuText.hotkeyFailureWarning(label: "⌥⇧U", slot: .topLeft),
+            MenuText.hotkeyFailureWarning(label: "⌥⇧U", title: "Top Left"),
             "⌥⇧U could not be registered; “Top Left” has no hotkey. "
                 + "Another Tiled shortcut or a system shortcut may already use it.")
     }
 
-    func testHotkeyFailureWarningFallsBackToSlotNameWithoutSelfContradiction() {
+    func testHotkeyFailureWarningFallsBackToActionNameWithoutSelfContradiction() {
         XCTAssertEqual(
-            MenuText.hotkeyFailureWarning(label: nil, slot: .sixthLeft),
+            MenuText.hotkeyFailureWarning(label: nil, title: "Left Third"),
             "The shortcut for “Left Third” could not be registered: it has no hotkey.")
-    }
-
-    func testUndoHotkeyWarningNamesComboAndMenuRecovery() {
-        XCTAssertEqual(
-            MenuText.undoHotkeyWarning(),
-            "The undo shortcut (⌃⌥⇧⌘Z) could not be registered; "
-                + "undo the last displacement from the Tiled menu instead.")
-    }
-
-    func testExpandHotkeyWarningNamesComboAndRecovery() {
-        XCTAssertEqual(
-            MenuText.expandHotkeyWarning(),
-            "The expand shortcut (⌥⇧⏎) could not be registered; "
-                + "quit and reopen Tiled to try again.")
     }
 
     // MARK: Menu rows

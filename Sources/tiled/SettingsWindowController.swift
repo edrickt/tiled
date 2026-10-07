@@ -40,11 +40,12 @@ final class SettingsWindowController: NSWindowController {
     /// Called after any binding change so the delegate can re-register
     /// hotkeys and refresh the menu.
     var onHotkeysChange: (() -> Void)?
-    /// Slots whose global hotkey lost registration (owned by another app),
-    /// forwarded to the Shortcuts tab so a cross-app failure surfaces
-    /// beside the recorder that accepted the combo, not only in the menu.
-    var failedSlotsProvider: (() -> [Slot])? {
-        didSet { shortcutsTab.failedSlotsProvider = failedSlotsProvider }
+    /// Actions whose global hotkey lost registration (owned by another
+    /// app), forwarded to the Shortcuts tab so a cross-app failure
+    /// surfaces beside the recorder that accepted the combo, not only in
+    /// the menu.
+    var failedActionsProvider: (() -> [HotkeyAction])? {
+        didSet { shortcutsTab.failedActionsProvider = failedActionsProvider }
     }
     /// Whether the Settings fallback hotkey (⌃⌥⇧⌘,) is currently
     /// registered, forwarded to General so the hide-icon confirm never

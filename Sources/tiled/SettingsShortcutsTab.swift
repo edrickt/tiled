@@ -1,8 +1,45 @@
 import AppKit
 
-/// The Shortcuts tab: one recorder row per slot, grouped under collapsible
-/// layout headers, mirroring the Tile Focused Window submenu so the two
-/// never disagree about grouping.
+/// The Shortcuts tab's collapsible sections: the five app actions, then
+/// the two tiling layouts. Raw values persist in the
+/// "collapsedShortcutSections" defaults array.
+enum ShortcutSection: String {
+    case appActions
+    case quarters
+    case sixths
+
+    var title: String {
+        switch self {
+        case .appActions: "App Actions"
+        case .quarters: "Quarters"
+        case .sixths: "Sixths"
+        }
+    }
+
+    var rowCount: Int {
+        switch self {
+        case .appActions: HotkeyAction.appActions.count
+        case .quarters: Slot.allCases.filter { $0.layout == .quarters }.count
+        case .sixths: Slot.allCases.filter { $0.layout == .sixths }.count
+        }
+    }
+
+    /// The layout a section covers, nil for App Actions (whose rows
+    /// disable one at a time; no bulk button).
+    var layout: LayoutKind? {
+        switch self {
+        case .appActions: nil
+        case .quarters: .quarters
+        case .sixths: .sixths
+        }
+    }
+}
+
+/// The Shortcuts tab: one recorder row per configurable hotkey — the 17
+/// tiling slots grouped under collapsible layout headers (mirroring the
+/// Tile Focused Window submenu so the two never disagree about grouping),
+/// plus an App Actions section for the global combos (expand, evict,
+/// reset splitters, Settings, undo).
 ///
 /// Owns rows, sections, parked bindings, collapse state, the recorder
 /// lifecycle, and conflict display + announcements. The shell reads
@@ -19,18 +56,19 @@ final class ShortcutsTab: NSObject {
     /// below is a dead end, so this tab leads with the same fix row the
     /// other tabs show.
     var isTrustedProvider: (() -> Bool)?
-    /// Slots whose global hotkey could not register (owned by another
+    /// Actions whose global hotkey could not register (owned by another
     /// app). Probed after every re-registration and on show, so a combo
     /// the recorder accepted but the system refused never masquerades as
     /// a success in this tab.
-    var failedSlotsProvider: (() -> [Slot])?
+    var failedActionsProvider: (() -> [HotkeyAction])?
     /// Opens the Accessibility permission pane.
     var onOpenAccessibilitySettings: (() -> Void)?
 
-    private var recorderButtons: [Slot: RecorderButton] = [:]
+    private var recorderButtons: [HotkeyAction: RecorderButton] = [:]
     /// The per-section bulk buttons, so a binding change that does not
     /// rebuild the view (the recorder's clear or a recorded combo) can
-    /// still refresh their labels. See `refreshBulkButtons`.
+    /// still refresh their labels. See `refreshBulkButtons`. Layout
+    /// sections only: the App Actions rows disable one at a time.
     private var bulkButtons: [LayoutKind: NSButton] = [:]
     private var conflictLabel: NSTextField!
     private var permissionRow: NSStackView?
@@ -40,10 +78,10 @@ final class ShortcutsTab: NSObject {
     /// announced instead of being a silent layout jump.
     private var lastKnownTrusted: Bool?
 
-    /// First visible recorder in slot order, for initial-focus placement.
+    /// First visible recorder in action order, for initial-focus placement.
     /// Top Left may not exist when Quarters is collapsed.
     var firstRecorder: RecorderButton? {
-        Slot.allCases.lazy.compactMap { self.recorderButtons[$0] }.first
+        HotkeyAction.allCases.lazy.compactMap { self.recorderButtons[$0] }.first
     }
 
     init(hotkeyStore: HotkeyStore, defaults: UserDefaults = .standard) {
@@ -110,7 +148,7 @@ final class ShortcutsTab: NSObject {
         // the text itself covers every moment after.
         stack.addArrangedSubview(conflictLabel)
 
-        // Teach recording before the first control, not below seventeen rows.
+        // Teach recording before the first control, not below the rows.
         let hint = NSTextField(wrappingLabelWithString:
             "Click a shortcut, press a new combo; Esc keeps the old one, ⌫ disables.")
         hint.textColor = .secondaryLabelColor
@@ -122,33 +160,42 @@ final class ShortcutsTab: NSObject {
 
         // Headers show row counts so a collapsed section still communicates
         // its size. Bulk enable/disable lives in the small button beside
-        // each header, deliberately separate from the disclosure control,
-        // which only collapses.
-        for layout in [LayoutKind.quarters, LayoutKind.sixths] {
-            let header = sectionHeader(for: layout)
+        // each layout header, deliberately separate from the disclosure
+        // control, which only collapses. App Actions leads: the five
+        // global combos are the fewest-used but hardest-to-discover rows.
+        for section in [ShortcutSection.appActions, .quarters, .sixths] {
+            let header = sectionHeader(for: section)
             stack.addArrangedSubview(header)
-            if !collapsedSections.contains(layout) {
+            if !collapsedSections.contains(section) {
                 stack.setCustomSpacing(8, after: header)
-                let groups: [(title: String, slots: [Slot])] = layout == .quarters
-                    ? [("Quads", SlotPresentation.quartersQuads),
-                       ("Halves", SlotPresentation.quartersHalves)]
-                    : [("Corners", SlotPresentation.sixthsCorners),
-                       ("Thirds", SlotPresentation.sixthsThirds),
-                       ("Two-Thirds", SlotPresentation.sixthsTwoThirds)]
-                for (index, group) in groups.enumerated() {
-                    if index > 0, let previous = stack.arrangedSubviews.last {
-                        stack.setCustomSpacing(12, after: previous)
+                switch section {
+                case .appActions:
+                    for action in HotkeyAction.appActions {
+                        stack.addArrangedSubview(shortcutRow(for: action))
                     }
-                    let label = NSTextField(labelWithString: group.title)
-                    label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-                    label.textColor = .secondaryLabelColor
-                    stack.addArrangedSubview(label)
-                    for slot in group.slots {
-                        stack.addArrangedSubview(shortcutRow(for: slot))
+                case .quarters, .sixths:
+                    let layout = section == .quarters ? LayoutKind.quarters : .sixths
+                    let groups: [(title: String, slots: [Slot])] = layout == .quarters
+                        ? [("Quads", SlotPresentation.quartersQuads),
+                           ("Halves", SlotPresentation.quartersHalves)]
+                        : [("Corners", SlotPresentation.sixthsCorners),
+                           ("Thirds", SlotPresentation.sixthsThirds),
+                           ("Two-Thirds", SlotPresentation.sixthsTwoThirds)]
+                    for (index, group) in groups.enumerated() {
+                        if index > 0, let previous = stack.arrangedSubviews.last {
+                            stack.setCustomSpacing(12, after: previous)
+                        }
+                        let label = NSTextField(labelWithString: group.title)
+                        label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+                        label.textColor = .secondaryLabelColor
+                        stack.addArrangedSubview(label)
+                        for slot in group.slots {
+                            stack.addArrangedSubview(shortcutRow(for: .slot(slot)))
+                        }
                     }
                 }
             }
-            if layout == .quarters {
+            if section == .appActions {
                 let spacer = NSView(frame: NSRect(x: 0, y: 0, width: 0, height: 8))
                 stack.addArrangedSubview(spacer)
             }
@@ -184,8 +231,8 @@ final class ShortcutsTab: NSObject {
     /// Also re-probes trust, so the permission row tracks reality every
     /// time the tab is shown or its content is rebuilt.
     func reload() {
-        for (slot, button) in recorderButtons {
-            button.showBinding(hotkeyStore.binding(for: slot))
+        for (action, button) in recorderButtons {
+            button.showBinding(hotkeyStore.binding(for: action))
         }
         refreshBulkButtons()
         refreshPermissionState()
@@ -230,12 +277,14 @@ final class ShortcutsTab: NSObject {
     /// announced, not just shown. Probed on every reload, since failures
     /// can predate this window (set at launch or while it was hidden).
     private func surfaceHotkeyFailures() {
-        guard let failedSlotsProvider else { return }
-        let failed = failedSlotsProvider()
+        guard let failedActionsProvider else { return }
+        let failed = failedActionsProvider()
         guard !failed.isEmpty else { return }
-        let messages = failed.map {
+        let messages = failed.map { action in
             MenuText.hotkeyFailureWarning(
-                label: hotkeyStore.binding(for: $0).label, slot: $0)
+                label: hotkeyStore.binding(for: action).label,
+                title: action.title,
+                recovery: action.registrationRecovery)
         }
         showConflict(messages.joined(separator: "\n"))
     }
@@ -265,12 +314,12 @@ final class ShortcutsTab: NSObject {
         bulkButtons = [:]
     }
 
-    private func shortcutRow(for slot: Slot) -> NSView {
+    private func shortcutRow(for action: HotkeyAction) -> NSView {
         let row = NSStackView()
         row.orientation = .horizontal
         row.spacing = 12
 
-        let label = NSTextField(labelWithString: SlotPresentation.title(of: slot))
+        let label = NSTextField(labelWithString: action.title)
         label.font = .systemFont(ofSize: NSFont.systemFontSize)
         row.addArrangedSubview(label)
 
@@ -278,7 +327,7 @@ final class ShortcutsTab: NSObject {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         row.addArrangedSubview(spacer)
 
-        let button = RecorderButton(slot: slot)
+        let button = RecorderButton(action: action)
         button.target = self
         button.action = #selector(recorderClicked(_:))
         // The leading paragraph explains the contract, but a tooltip meets
@@ -288,38 +337,35 @@ final class ShortcutsTab: NSObject {
         // both, so keyboard and VoiceOver users get the same state the
         // mouse path sees. Fires on arm (the monitor starts listening)
         // and on silent tab-away cancel (no decision, no visual trace).
-        button.onArmed = { [weak self] armedSlot in
+        button.onArmed = { [weak self] armedAction in
             self?.announce(
-                "Capturing a shortcut for \(SlotPresentation.title(of: armedSlot)): press a combo, or Esc to keep the old one.")
+                "Capturing a shortcut for \(armedAction.title): press a combo, or Esc to keep the old one.")
         }
-        button.onSilentCancel = { [weak self] cancelledSlot in
-            self?.announce(
-                "\(SlotPresentation.title(of: cancelledSlot)) kept its old shortcut.")
+        button.onSilentCancel = { [weak self] cancelledAction in
+            self?.announce("\(cancelledAction.title) kept its old shortcut.")
         }
-        recorderButtons[slot] = button
+        recorderButtons[action] = button
         row.addArrangedSubview(button)
         return row
     }
 
     /// Section header row: a borderless chevron + title button (collapse
-    /// only) plus a small Enable/Disable-all button with its scope in the
-    /// title ("Enable all 6"). Two controls, two jobs; the header never
-    /// pretends to be the bulk toggle.
+    /// only) plus, for the layout sections, a small Enable/Disable-all
+    /// button with its scope in the title ("Enable all 6"). Two controls,
+    /// two jobs; the header never pretends to be the bulk toggle.
     ///
     /// (Not a .disclosure bezel: that cell refuses to draw its title on
     /// current macOS: it renders a bare triangle no matter how the title
     /// is set, and never exposes it to accessibility. A borderless button
     /// with an SF Symbol chevron renders and reads reliably.)
-    private func sectionHeader(for layout: LayoutKind) -> NSView {
-        let name = layout == .quarters ? "Quarters" : "Sixths"
-        let count = Slot.allCases.filter { $0.layout == layout }.count
-        let collapsed = collapsedSections.contains(layout)
+    private func sectionHeader(for section: ShortcutSection) -> NSView {
+        let collapsed = collapsedSections.contains(section)
         let row = NSStackView()
         row.orientation = .horizontal
         row.spacing = 8
 
         let header = NSButton(
-            title: "\(name) (\(count))",
+            title: "\(section.title) (\(section.rowCount))",
             target: self, action: #selector(sectionToggled(_:)))
         header.isBordered = false
         header.setButtonType(.momentaryPushIn)
@@ -332,10 +378,10 @@ final class ShortcutsTab: NSObject {
         header.imagePosition = .imageLeading
         header.contentTintColor = .secondaryLabelColor
         header.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        header.identifier = NSUserInterfaceItemIdentifier(layout.rawValue)
+        header.identifier = NSUserInterfaceItemIdentifier(section.rawValue)
         header.toolTip = collapsed
-            ? "Show \(name) shortcuts"
-            : "Hide \(name) shortcuts"
+            ? "Show \(section.title) shortcuts"
+            : "Hide \(section.title) shortcuts"
         row.addArrangedSubview(header)
 
         // Enable-all restores up to a whole section at once: name the
@@ -343,16 +389,18 @@ final class ShortcutsTab: NSObject {
         // Rounded bezel, not inline: beside the bold borderless header,
         // unbordered gray text reads disabled, but this is the section's
         // second live control, and it must look like one.
-        let bulk = NSButton(
-            title: bulkPresentation(for: layout).title,
-            target: self, action: #selector(sectionBulkToggled(_:)))
-        bulk.bezelStyle = .rounded
-        bulk.controlSize = .small
-        bulk.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        bulk.identifier = NSUserInterfaceItemIdentifier("bulk-\(layout.rawValue)")
-        bulk.toolTip = bulkPresentation(for: layout).toolTip
-        bulkButtons[layout] = bulk
-        row.addArrangedSubview(bulk)
+        if let layout = section.layout {
+            let bulk = NSButton(
+                title: bulkPresentation(for: layout).title,
+                target: self, action: #selector(sectionBulkToggled(_:)))
+            bulk.bezelStyle = .rounded
+            bulk.controlSize = .small
+            bulk.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            bulk.identifier = NSUserInterfaceItemIdentifier("bulk-\(layout.rawValue)")
+            bulk.toolTip = bulkPresentation(for: layout).toolTip
+            bulkButtons[layout] = bulk
+            row.addArrangedSubview(bulk)
+        }
         return row
     }
 
@@ -381,12 +429,12 @@ final class ShortcutsTab: NSObject {
             for slot in Slot.allCases where slot.layout == layout {
                 let current = hotkeyStore.binding(for: slot)
                 let restored: HotkeyBinding?
-                if let parked = parkedBinding(for: slot) {
+                if let parked = parkedBinding(for: .slot(slot)) {
                     if current.keyCode != nil, current != parked {
                         // Edited after the disable: the park is stale,
                         // the edit wins. Drop the park, keep the combo,
                         // and say so; the live region exists for this.
-                        clearParkedBinding(for: slot)
+                        clearParkedBinding(for: .slot(slot))
                         keptEdits.append(SlotPresentation.title(of: slot))
                         restored = nil
                     } else {
@@ -404,13 +452,10 @@ final class ShortcutsTab: NSObject {
                 // leave a slot that renders enabled but never registers.
                 switch hotkeyStore.apply(restored, for: slot) {
                 case .applied:
-                    clearParkedBinding(for: slot)
+                    clearParkedBinding(for: .slot(slot))
                 case .duplicate(let owners):
-                    let names = owners.map { SlotPresentation.title(of: $0) }
-                        .joined(separator: ", ")
+                    let names = owners.map(\.title).joined(separator: ", ")
                     clashes.append("\(SlotPresentation.title(of: slot)) (\(names))")
-                case .reserved(let name):
-                    clashes.append("\(SlotPresentation.title(of: slot)) (Tiled's \(name))")
                 }
             }
             // Registration runs before the rebuild so the fresh rows can
@@ -434,12 +479,12 @@ final class ShortcutsTab: NSObject {
             for slot in Slot.allCases where slot.layout == layout {
                 let current = hotkeyStore.binding(for: slot)
                 if current.keyCode != nil {
-                    parkBinding(current, for: slot)
+                    parkBinding(current, for: .slot(slot))
                 }
                 hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: slot)
             }
             // Registration first: the rebuilt rows read the fresh
-            // failedSlots, not the pre-toggle set.
+            // failedActions, not the pre-toggle set.
             onHotkeysChange?()
             rebuildContent(restoringFocusTo: "bulk-\(layout.rawValue)")
         }
@@ -489,34 +534,37 @@ final class ShortcutsTab: NSObject {
         return nil
     }
 
-    private func parkedKey(for slot: Slot) -> String {
-        "parkedHotkey.\(slot.rawValue)"
+    private func parkedKey(for action: HotkeyAction) -> String {
+        "parkedHotkey.\(action.storageKey)"
     }
 
-    private func parkedBinding(for slot: Slot) -> HotkeyBinding? {
-        guard let dict = defaults.dictionary(forKey: parkedKey(for: slot)),
+    private func parkedBinding(for action: HotkeyAction) -> HotkeyBinding? {
+        guard let dict = defaults.dictionary(forKey: parkedKey(for: action)),
               let modifiers = dict["modifiers"] as? Int,
               let code = dict["keyCode"] as? Int, code >= 0
         else { return nil }
         return HotkeyBinding(modifiers: UInt32(modifiers), keyCode: UInt32(code))
     }
 
-    private func parkBinding(_ binding: HotkeyBinding, for slot: Slot) {
+    private func parkBinding(_ binding: HotkeyBinding, for action: HotkeyAction) {
         defaults.set(
             ["modifiers": Int(binding.modifiers),
              "keyCode": binding.keyCode.map(Int.init) ?? -1],
-            forKey: parkedKey(for: slot))
+            forKey: parkedKey(for: action))
     }
 
-    private func clearParkedBinding(for slot: Slot) {
-        defaults.removeObject(forKey: parkedKey(for: slot))
+    private func clearParkedBinding(for action: HotkeyAction) {
+        defaults.removeObject(forKey: parkedKey(for: action))
     }
 
     /// Collapsible section state, persisted so the tab reopens as left.
-    private var collapsedSections: Set<LayoutKind> {
+    /// Raw values are stable strings: "quarters"/"sixths" were the
+    /// original LayoutKind raw values, so earlier builds' stored state
+    /// still resolves.
+    private var collapsedSections: Set<ShortcutSection> {
         get {
             let raw = defaults.stringArray(forKey: "collapsedShortcutSections") ?? []
-            return Set(raw.compactMap(LayoutKind.init(rawValue:)))
+            return Set(raw.compactMap(ShortcutSection.init(rawValue:)))
         }
         set {
             defaults.set(newValue.map(\.rawValue), forKey: "collapsedShortcutSections")
@@ -524,20 +572,20 @@ final class ShortcutsTab: NSObject {
     }
 
     @objc private func sectionToggled(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue, let layout = LayoutKind(rawValue: id) else {
-            return
-        }
+        guard let id = sender.identifier?.rawValue,
+              let section = ShortcutSection(rawValue: id)
+        else { return }
         // The chevron is a momentary button: state lives in
         // collapsedSections, and the rebuild draws the new chevron.
         var collapsed = collapsedSections
-        if collapsed.contains(layout) {
-            collapsed.remove(layout)
+        if collapsed.contains(section) {
+            collapsed.remove(section)
         } else {
-            collapsed.insert(layout)
+            collapsed.insert(section)
         }
         collapsedSections = collapsed
         // The header that triggered this lives in the old view.
-        rebuildContent(restoringFocusTo: layout.rawValue)
+        rebuildContent(restoringFocusTo: section.rawValue)
     }
 
     @objc private func recorderClicked(_ sender: RecorderButton) {
@@ -545,14 +593,14 @@ final class ShortcutsTab: NSObject {
         // otherwise re-arm it disarms it instead, so a stray click away
         // leaves nothing stuck mid-record.
         if sender.isRecording {
-            sender.showBinding(hotkeyStore.binding(for: sender.slot))
+            sender.showBinding(hotkeyStore.binding(for: sender.hotkeyAction))
             clearConflict()
             return
         }
         // End any other in-progress record first: exactly one recorder is
         // armed at a time.
-        for (slot, button) in recorderButtons where button.isRecording && button !== sender {
-            button.showBinding(hotkeyStore.binding(for: slot))
+        for (action, button) in recorderButtons where button.isRecording && button !== sender {
+            button.showBinding(hotkeyStore.binding(for: action))
         }
         sender.beginRecording { [weak self, weak sender] outcome in
             guard let self, let sender else { return }
@@ -561,10 +609,10 @@ final class ShortcutsTab: NSObject {
     }
 
     private func finishRecording(_ button: RecorderButton, outcome: HotkeyRecorder.Outcome) {
-        let slot = button.slot
+        let action = button.hotkeyAction
         switch outcome {
         case .cancel:
-            button.showBinding(hotkeyStore.binding(for: slot))
+            button.showBinding(hotkeyStore.binding(for: action))
             clearConflict()
         case .clear:
             // A stray ⌫ must not silently discard a tuned combo: park the
@@ -572,54 +620,46 @@ final class ShortcutsTab: NSObject {
             // next Enable-all restores it), and say what happened; the
             // footer names the owner on clashes; the clear path owes the
             // same courtesy.
-            let previous = hotkeyStore.binding(for: slot)
+            let previous = hotkeyStore.binding(for: action)
             if previous.keyCode != nil {
-                parkBinding(previous, for: slot)
+                parkBinding(previous, for: action)
             }
-            hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: slot)
-            button.showBinding(hotkeyStore.binding(for: slot))
+            hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: action)
+            button.showBinding(hotkeyStore.binding(for: action))
             if let label = previous.label {
                 showConflict(
-                    "\(SlotPresentation.title(of: slot)) disabled: " +
-                    "its old combo (\(label)) is parked; Enable all restores it.")
+                    "\(action.title) disabled: " +
+                    "its old combo (\(label)) is parked; re-record or reset to restore it.")
             } else {
                 clearConflict()
             }
             onHotkeysChange?()
         case .binding(let candidate):
-            switch hotkeyStore.apply(candidate, for: slot) {
+            switch hotkeyStore.apply(candidate, for: action) {
             case .applied:
                 button.showBinding(candidate)
                 clearConflict()
                 onHotkeysChange?()
-                // Re-registration may have failed for this slot (the
+                // Re-registration may have failed for this action (the
                 // combo is owned by another app): say so here, where the
                 // combo was just recorded, instead of letting the menu be
                 // the only witness.
-                if failedSlotsProvider?().contains(slot) == true {
+                if failedActionsProvider?().contains(action) == true {
                     showConflict(
-                        MenuText.hotkeyFailureWarning(label: candidate.label, slot: slot))
+                        MenuText.hotkeyFailureWarning(
+                            label: candidate.label, title: action.title,
+                            recovery: action.registrationRecovery))
                 }
-            case .duplicate(let slots):
+            case .duplicate(let actions):
                 // Keep the old binding and say, in words, who owns the
                 // combo: a shake alone left users retrying the same combo
                 // forever. Announced to VoiceOver, not just shown.
-                button.showBinding(hotkeyStore.binding(for: slot))
+                button.showBinding(hotkeyStore.binding(for: action))
                 button.shake()
-                let owners = slots.map { SlotPresentation.title(of: $0) }.joined(separator: ", ")
+                let owners = actions.map(\.title).joined(separator: ", ")
                 let message =
                     "\(candidate.label ?? "That combo") is already used by \(owners); " +
-                    "\(SlotPresentation.title(of: slot)) kept its old shortcut."
-                showConflict(message)
-                NSLog("Tiled: %@", message)
-            case .reserved(let name):
-                // Tiled's own fixed combo: storing it would leave the slot
-                // with a hotkey that can never register.
-                button.showBinding(hotkeyStore.binding(for: slot))
-                button.shake()
-                let message =
-                    "\(candidate.label ?? "That combo") is Tiled's own \(name) shortcut; " +
-                    "\(SlotPresentation.title(of: slot)) kept its old shortcut."
+                    "\(action.title) kept its old shortcut."
                 showConflict(message)
                 NSLog("Tiled: %@", message)
             }
@@ -681,7 +721,7 @@ final class ShortcutsTab: NSObject {
     /// reset never silently destroys the first snapshot).
     private func confirmAndReset(_ sender: NSButton) {
         let alert = NSAlert()
-        alert.messageText = "Reset all \(Slot.allCases.count) shortcuts to defaults?"
+        alert.messageText = "Reset all \(HotkeyAction.allCases.count) shortcuts to defaults?"
         alert.informativeText = anyResetBackup()
             ? "This replaces your previous backup; those combos will be gone. "
                 + "Your current combos become the new backup."
@@ -689,8 +729,8 @@ final class ShortcutsTab: NSObject {
         alert.addButton(withTitle: "Reset Shortcuts")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        for slot in Slot.allCases {
-            parkResetBackup(hotkeyStore.binding(for: slot), for: slot)
+        for action in HotkeyAction.allCases {
+            parkResetBackup(hotkeyStore.binding(for: action), for: action)
         }
         hotkeyStore.resetAll()
         onHotkeysChange?()
@@ -699,20 +739,23 @@ final class ShortcutsTab: NSObject {
     }
 
     /// Restores the combos parked by the last reset: an exact snapshot,
-    /// including disabled slots. A snapshot entry that names one of
-    /// Tiled's fixed combos is skipped: those register first and the slot
-    /// would never fire.
+    /// including disabled actions. Each entry goes through the same
+    /// duplicate gate as a recording: a snapshot combo the user has
+    /// since (re)assigned elsewhere is reported, never stored past the
+    /// gate (which would leave an action that renders enabled but never
+    /// registers).
     private func restoreResetBackup(_ sender: NSButton) {
         var skipped: [String] = []
-        for slot in Slot.allCases {
-            guard let backup = resetBackupBinding(for: slot) else { continue }
-            if let name = HotkeyStore.reservedOwner(of: backup) {
-                skipped.append("\(SlotPresentation.title(of: slot)) (Tiled's \(name))")
-                clearResetBackup(for: slot)
-                continue
+        for action in HotkeyAction.allCases {
+            guard let backup = resetBackupBinding(for: action) else { continue }
+            clearResetBackup(for: action)
+            switch hotkeyStore.apply(backup, for: action) {
+            case .applied:
+                break
+            case .duplicate(let owners):
+                let names = owners.map(\.title).joined(separator: ", ")
+                skipped.append("\(action.title) (taken by \(names))")
             }
-            hotkeyStore.set(backup, for: slot)
-            clearResetBackup(for: slot)
         }
         onHotkeysChange?()
         reload()
@@ -724,30 +767,30 @@ final class ShortcutsTab: NSObject {
 
     /// Reset uses its own backup keys, never the Disable-all park keys:
     /// resetting must not corrupt a section park mid-flight.
-    private func resetBackupKey(for slot: Slot) -> String {
-        "resetBackupHotkey.\(slot.rawValue)"
+    private func resetBackupKey(for action: HotkeyAction) -> String {
+        "resetBackupHotkey.\(action.storageKey)"
     }
 
-    private func resetBackupBinding(for slot: Slot) -> HotkeyBinding? {
-        guard let dict = defaults.dictionary(forKey: resetBackupKey(for: slot)),
+    private func resetBackupBinding(for action: HotkeyAction) -> HotkeyBinding? {
+        guard let dict = defaults.dictionary(forKey: resetBackupKey(for: action)),
               let modifiers = dict["modifiers"] as? Int,
               let code = dict["keyCode"] as? Int
         else { return nil }
         return HotkeyBinding(modifiers: UInt32(modifiers), keyCode: code >= 0 ? UInt32(code) : nil)
     }
 
-    private func parkResetBackup(_ binding: HotkeyBinding, for slot: Slot) {
+    private func parkResetBackup(_ binding: HotkeyBinding, for action: HotkeyAction) {
         defaults.set(
             ["modifiers": Int(binding.modifiers),
              "keyCode": binding.keyCode.map(Int.init) ?? -1],
-            forKey: resetBackupKey(for: slot))
+            forKey: resetBackupKey(for: action))
     }
 
-    private func clearResetBackup(for slot: Slot) {
-        defaults.removeObject(forKey: resetBackupKey(for: slot))
+    private func clearResetBackup(for action: HotkeyAction) {
+        defaults.removeObject(forKey: resetBackupKey(for: action))
     }
 
     private func anyResetBackup() -> Bool {
-        Slot.allCases.contains { resetBackupBinding(for: $0) != nil }
+        HotkeyAction.allCases.contains { resetBackupBinding(for: $0) != nil }
     }
 }

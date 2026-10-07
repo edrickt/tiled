@@ -36,7 +36,8 @@ final class ShortcutsGroupingTests: XCTestCase {
         let headings = Set(["Quads", "Halves", "Corners", "Thirds", "Two-Thirds"])
         let sequence = descendants(of: view).compactMap { view -> String? in
             if let recorder = view as? RecorderButton {
-                return recorder.slot.rawValue
+                if case .slot(let slot) = recorder.hotkeyAction { return slot.rawValue }
+                return recorder.hotkeyAction.title
             }
             if let label = view as? NSTextField, headings.contains(label.stringValue) {
                 return label.stringValue
@@ -45,6 +46,8 @@ final class ShortcutsGroupingTests: XCTestCase {
         }
 
         XCTAssertEqual(sequence, [
+            "Expand to Fill Screen", "Evict Focused Window", "Reset Splitters",
+            "Open Settings", "Undo Last Switch",
             "Quads", "topLeft", "topRight", "bottomLeft", "bottomRight",
             "Halves", "leftHalf", "rightHalf",
             "Corners", "sixthTopLeft", "sixthTopMiddle", "sixthTopRight",
@@ -54,7 +57,8 @@ final class ShortcutsGroupingTests: XCTestCase {
         ])
         XCTAssertEqual(store.binding(for: .sixthMiddle), custom)
         XCTAssertEqual(descendants(of: view).compactMap { $0 as? RecorderButton }
-            .first { $0.slot == .sixthMiddle }?.accessibilityValue() as? String, "A")
+            .first { $0.hotkeyAction == .slot(.sixthMiddle) }?.accessibilityValue() as? String,
+            "A")
     }
 
     func testCollapsingQuartersHidesItsSubgroupsAndKeepsSixthsAsTheFirstRecorder() throws {
@@ -71,13 +75,33 @@ final class ShortcutsGroupingTests: XCTestCase {
         XCTAssertTrue(labels.contains("Corners"))
         XCTAssertTrue(labels.contains("Thirds"))
         XCTAssertTrue(labels.contains("Two-Thirds"))
-        XCTAssertEqual(tab.firstRecorder?.slot, .sixthTopLeft)
-        XCTAssertEqual(descendants(of: view).compactMap { $0 as? RecorderButton }.count, 11)
+        // Quarters collapses, but App Actions stays visible above Sixths,
+        // so the first recorder is still the first slot row of Sixths.
+        XCTAssertEqual(tab.firstRecorder?.hotkeyAction, .slot(.sixthTopLeft))
+        XCTAssertEqual(descendants(of: view).compactMap { $0 as? RecorderButton }.count, 16)
 
         // Collapse is persisted: a new tab reopens with the same layout hidden.
         let reopened = ShortcutsTab(hotkeyStore: store, defaults: defaults)
         _ = reopened.build(size: NSSize(width: 440, height: 480), window: nil)
-        XCTAssertEqual(reopened.firstRecorder?.slot, .sixthTopLeft)
+        XCTAssertEqual(reopened.firstRecorder?.hotkeyAction, .slot(.sixthTopLeft))
+    }
+
+    func testCollapsingAppActionsHidesOnlyThoseFiveRows() throws {
+        let tab = ShortcutsTab(hotkeyStore: store, defaults: defaults)
+        var view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        tab.onContentRebuilt = { view = $0 }
+        let header = try XCTUnwrap(descendants(of: view).compactMap { $0 as? NSButton }
+            .first { $0.title == "App Actions (5)" })
+        header.performClick(nil)
+
+        let labels = descendants(of: view).compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertFalse(labels.contains("Expand to Fill Screen"))
+        XCTAssertFalse(labels.contains("Undo Last Switch"))
+        XCTAssertTrue(labels.contains("Quads"))
+        // Quarters is expanded and starts right after the collapsed
+        // section, so its first recorder leads.
+        XCTAssertEqual(tab.firstRecorder?.hotkeyAction, .slot(.topLeft))
+        XCTAssertEqual(descendants(of: view).compactMap { $0 as? RecorderButton }.count, 17)
     }
 
     func testSixthsBulkActionStillCoversEverySubgroupAndLeavesQuartersAlone() throws {

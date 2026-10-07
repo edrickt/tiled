@@ -160,19 +160,18 @@ enum SlotPresentation {
     }
 }
 
-/// Persists per-slot hotkey bindings in UserDefaults. Missing entries fall
-/// back to the factory defaults (today's fixed ⌥⇧⌘ / ⌥⇧ set), so a fresh
-/// install behaves exactly like the current hardcoded build.
+/// Persists per-action hotkey bindings in UserDefaults. Missing entries
+/// fall back to the factory defaults (the ⌥⇧⌘ / ⌥⇧ slot set plus the
+/// app actions' original combos), so a fresh install behaves exactly like
+/// the build where the app actions were hardcoded.
 final class HotkeyStore {
     /// What `apply` decided.
     enum ApplyResult: Equatable {
         case applied
-        case duplicate(slots: [Slot])
-        /// The combo belongs to one of Tiled's own fixed shortcuts
-        /// (expand, evict, Settings, undo). Storing it would leave the
-        /// slot with a hotkey that can never register, because the fixed
-        /// combos register first.
-        case reserved(name: String)
+        /// The combo is already bound by the named actions. Conflicts are
+        /// mutual: a slot claiming ⌥⇧R and Reset Splitters claiming ⌥⇧U
+        /// are the same refusal, so there is no separate "reserved" case.
+        case duplicate(actions: [HotkeyAction])
     }
     private let defaults: UserDefaults
     private static let prefix = "hotkey."
@@ -181,84 +180,82 @@ final class HotkeyStore {
         self.defaults = defaults
     }
 
-    /// The factory default for a slot: today's fixed modifiers + key.
+    /// The factory default for an action: the slot layouts' modifiers +
+    /// key, or the app actions' original combos.
+    static func defaultBinding(for action: HotkeyAction) -> HotkeyBinding {
+        action.defaultBinding
+    }
+
+    /// The factory default for a slot: its layout's modifiers + key.
     static func defaultBinding(for slot: Slot) -> HotkeyBinding {
         HotkeyBinding(modifiers: slot.modifiers, keyCode: slot.keyCode)
     }
 
-    func binding(for slot: Slot) -> HotkeyBinding {
-        guard let dict = defaults.dictionary(forKey: Self.key(for: slot)),
+    func binding(for action: HotkeyAction) -> HotkeyBinding {
+        guard let dict = defaults.dictionary(forKey: Self.key(for: action)),
               let modifiers = dict["modifiers"] as? Int,
               let code = dict["keyCode"] as? Int
         else {
-            return Self.defaultBinding(for: slot)
+            return Self.defaultBinding(for: action)
         }
         // A negative keyCode is the disabled encoding; a negative modifiers
         // is corrupt data (never written by set) and must not reach
         // UInt32 (a trap). Fall back to the factory default like any
         // other unreadable entry.
-        guard modifiers >= 0 else { return Self.defaultBinding(for: slot) }
+        guard modifiers >= 0 else { return Self.defaultBinding(for: action) }
         return HotkeyBinding(
             modifiers: UInt32(modifiers), keyCode: code >= 0 ? UInt32(code) : nil)
     }
 
-    func set(_ binding: HotkeyBinding, for slot: Slot) {
-        defaults.set(
-            ["modifiers": Int(binding.modifiers), "keyCode": binding.keyCode.map(Int.init) ?? -1],
-            forKey: Self.key(for: slot))
+    func binding(for slot: Slot) -> HotkeyBinding {
+        binding(for: HotkeyAction.slot(slot))
     }
 
-    /// Drops every override; all slots return to factory defaults.
+    func set(_ binding: HotkeyBinding, for action: HotkeyAction) {
+        defaults.set(
+            ["modifiers": Int(binding.modifiers), "keyCode": binding.keyCode.map(Int.init) ?? -1],
+            forKey: Self.key(for: action))
+    }
+
+    func set(_ binding: HotkeyBinding, for slot: Slot) {
+        set(binding, for: HotkeyAction.slot(slot))
+    }
+
+    /// Drops every override; all actions return to factory defaults.
     func resetAll() {
-        for slot in Slot.allCases {
-            defaults.removeObject(forKey: Self.key(for: slot))
+        for action in HotkeyAction.allCases {
+            defaults.removeObject(forKey: Self.key(for: action))
         }
     }
 
-    /// Stores `candidate` for `slot` unless another slot already uses it
-    /// or the combo belongs to a fixed shortcut. Rejected candidates leave
-    /// the store untouched so the caller can shake and keep the old
-    /// binding. Disabled bindings never collide.
+    /// Stores `candidate` for `action` unless any other action — slot or
+    /// app action — already uses it. Rejected candidates leave the store
+    /// untouched so the caller can shake and keep the old binding.
+    /// Disabled bindings never collide.
     @discardableResult
-    func apply(_ candidate: HotkeyBinding, for slot: Slot) -> ApplyResult {
-        if let name = Self.reservedOwner(of: candidate) { return .reserved(name: name) }
-        let clashes = duplicates(of: candidate, ignoring: slot)
-        guard clashes.isEmpty else { return .duplicate(slots: clashes) }
-        set(candidate, for: slot)
+    func apply(_ candidate: HotkeyBinding, for action: HotkeyAction) -> ApplyResult {
+        let clashes = duplicates(of: candidate, ignoring: action)
+        guard clashes.isEmpty else { return .duplicate(actions: clashes) }
+        set(candidate, for: action)
         return .applied
     }
 
-    /// The five fixed combos slots may not take. The registrations live in
-    /// `HotkeyService`; the store owns the conflict decision so the bulk
-    /// restore paths cannot bypass it with `set`.
-    static var reservedCombos: [(name: String, binding: HotkeyBinding)] {
-        [
-            ("Expand", HotkeyService.expandBinding),
-            ("Evict", HotkeyService.evictBinding),
-            ("Settings", HotkeyBinding(
-                modifiers: HotkeyService.settingsModifiers,
-                keyCode: HotkeyService.settingsKeyCode)),
-            ("Undo", HotkeyBinding(
-                modifiers: HotkeyService.undoModifiers,
-                keyCode: HotkeyService.undoKeyCode)),
-            ("Reset Splitters", HotkeyService.resetSplittersBinding),
-        ]
+    /// Convenience for slot call sites: same gate, same refusal.
+    @discardableResult
+    func apply(_ candidate: HotkeyBinding, for slot: Slot) -> ApplyResult {
+        apply(candidate, for: HotkeyAction.slot(slot))
     }
 
-    /// The fixed shortcut that owns `candidate`, if any.
-    static func reservedOwner(of candidate: HotkeyBinding) -> String? {
-        guard candidate.keyCode != nil else { return nil }
-        return reservedCombos.first { $0.binding == candidate }?.name
-    }
-
-    /// Slots (other than `ignored`) whose stored binding equals `candidate`.
-    /// Disabled bindings never collide with anything.
-    func duplicates(of candidate: HotkeyBinding, ignoring ignored: Slot) -> [Slot] {
+    /// Actions (other than `ignored`) whose stored binding equals
+    /// `candidate`. Disabled bindings never collide with anything.
+    func duplicates(
+        of candidate: HotkeyBinding, ignoring ignored: HotkeyAction
+    ) -> [HotkeyAction] {
         guard candidate.keyCode != nil else { return [] }
-        return Slot.allCases.filter { $0 != ignored && binding(for: $0) == candidate }
+        return HotkeyAction.allCases.filter { $0 != ignored && binding(for: $0) == candidate }
     }
 
-    private static func key(for slot: Slot) -> String {
-        prefix + slot.rawValue
+    private static func key(for action: HotkeyAction) -> String {
+        prefix + action.storageKey
     }
 }

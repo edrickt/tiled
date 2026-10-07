@@ -126,8 +126,12 @@ final class HotkeyBindingTests: XCTestCase {
         store.set(
             HotkeyBinding(modifiers: UInt32(controlKey), keyCode: UInt32(kVK_ANSI_F)),
             for: .topLeft)
+        store.set(
+            HotkeyBinding(modifiers: UInt32(controlKey), keyCode: UInt32(kVK_ANSI_F)),
+            for: .expand)
         store.resetAll()
         XCTAssertEqual(store.binding(for: .topLeft), HotkeyStore.defaultBinding(for: .topLeft))
+        XCTAssertEqual(store.binding(for: .expand), HotkeyService.expandDefaultBinding)
     }
 
     // MARK: Application (duplicate-safe writes for the Shortcuts tab)
@@ -140,31 +144,60 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertEqual(store.binding(for: .topLeft), custom)
     }
 
-    func testApplyRejectsFixedShortcutCombos() {
+    func testApplyRejectsAppActionDefaults() {
         let store = makeStore()
         let before = store.binding(for: .topLeft)
-        for (name, binding) in HotkeyStore.reservedCombos {
+        // Conflicts are mutual: an app action's default may not be stolen
+        // by a slot, exactly as when those combos were hardcoded.
+        for action in HotkeyAction.appActions {
             XCTAssertEqual(
-                store.apply(binding, for: .topLeft),
-                .reserved(name: name),
-                "\(name) must never be stolen by a slot")
+                store.apply(action.defaultBinding, for: .topLeft),
+                .duplicate(actions: [action]),
+                "\(action.title) default must never be stolen by a slot")
             XCTAssertEqual(store.binding(for: .topLeft), before, "rejection leaves the store")
         }
-        XCTAssertEqual(store.apply(HotkeyService.expandBinding, for: .sixthLeft),
-                       .reserved(name: "Expand"))
     }
 
-    func testResetSplittersComboIsReserved() {
-        // ⌥⇧R is the fixed Reset Splitters combo: no slot may claim it.
-        // Pinned separately from the loop over reservedCombos, which
-        // passes vacuously until the combo is actually added to it.
-        XCTAssertEqual(
-            HotkeyStore.reservedOwner(of: HotkeyService.resetSplittersBinding),
-            "Reset Splitters")
+    func testResetSplittersDefaultIsOwnedByItsAppAction() {
+        // ⌥⇧R defaults to the Reset Splitters action: no slot may claim it.
         let store = makeStore()
         XCTAssertEqual(
-            store.apply(HotkeyService.resetSplittersBinding, for: .topLeft),
-            .reserved(name: "Reset Splitters"))
+            store.apply(HotkeyService.resetSplittersDefaultBinding, for: .topLeft),
+            .duplicate(actions: [.resetSplitters]))
+    }
+
+    func testSlotDefaultIsOwnedByItsSlotWhenClaimedByAnAppAction() {
+        // And the reverse direction: the app actions may not steal a
+        // slot's live combo either.
+        let store = makeStore()
+        XCTAssertEqual(
+            store.apply(HotkeyStore.defaultBinding(for: .topLeft), for: .expand),
+            .duplicate(actions: [.slot(.topLeft)]))
+        XCTAssertEqual(
+            store.binding(for: .expand), HotkeyService.expandDefaultBinding,
+            "rejection leaves the store")
+    }
+
+    func testAppActionBindingsPersistAndRoundTrip() {
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let custom = HotkeyBinding(
+            modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_F))
+        HotkeyStore(defaults: defaults).set(custom, for: .resetSplitters)
+        XCTAssertEqual(
+            HotkeyStore(defaults: defaults).binding(for: .resetSplitters), custom)
+        // A fresh store still returns factory defaults for untouched actions.
+        XCTAssertEqual(
+            HotkeyStore(defaults: defaults).binding(for: .undo),
+            HotkeyService.undoDefaultBinding)
+    }
+
+    func testDisabledAppActionPersists() {
+        let defaults = UserDefaults(suiteName: suiteName)!
+        HotkeyStore(defaults: defaults).set(
+            HotkeyBinding(modifiers: 0, keyCode: nil), for: .expand)
+        XCTAssertEqual(
+            HotkeyStore(defaults: defaults).binding(for: .expand),
+            HotkeyBinding(modifiers: 0, keyCode: nil))
     }
 
     func testApplyRejectsDuplicateWithoutStoring() {
@@ -174,7 +207,7 @@ final class HotkeyBindingTests: XCTestCase {
         let dup = HotkeyStore.defaultBinding(for: .topLeft)
         XCTAssertEqual(
             store.apply(dup, for: .topRight),
-            HotkeyStore.ApplyResult.duplicate(slots: [.topLeft]))
+            HotkeyStore.ApplyResult.duplicate(actions: [.slot(.topLeft)]))
         XCTAssertEqual(
             store.binding(for: .topRight), HotkeyStore.defaultBinding(for: .topRight))
     }
@@ -190,11 +223,14 @@ final class HotkeyBindingTests: XCTestCase {
     func testDuplicateDetectionIgnoresDisabledAndSelf() {
         let store = makeStore()
         let dup = HotkeyStore.defaultBinding(for: .topLeft)
-        XCTAssertEqual(store.duplicates(of: dup, ignoring: .topRight), [.topLeft])
-        XCTAssertTrue(store.duplicates(of: dup, ignoring: .topLeft).isEmpty)
+        XCTAssertEqual(
+            store.duplicates(of: dup, ignoring: .slot(.topRight)), [.slot(.topLeft)])
         XCTAssertTrue(
-            store.duplicates(of: HotkeyBinding(modifiers: 0, keyCode: nil), ignoring: .topLeft)
-                .isEmpty)
+            store.duplicates(of: dup, ignoring: .slot(.topLeft)).isEmpty)
+        XCTAssertTrue(
+            store.duplicates(
+                of: HotkeyBinding(modifiers: 0, keyCode: nil), ignoring: .slot(.topLeft)
+            ).isEmpty)
     }
 
     // MARK: Corrupt stored data
@@ -231,7 +267,7 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertNil(binding.label)
         // A stored disabled binding never collides with a real combo.
         XCTAssertTrue(store.duplicates(
-            of: HotkeyStore.defaultBinding(for: .topLeft), ignoring: .topRight).isEmpty)
+            of: HotkeyStore.defaultBinding(for: .topLeft), ignoring: .slot(.topRight)).isEmpty)
     }
 
     func testStoredNegativeModifiersFallsBackToDefaults() {

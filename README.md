@@ -38,33 +38,27 @@ under **Tile Focused Window** in the menu bar menu.
 | ⌥⇧H   | Left two-thirds    |
 | ⌥⇧;   | Right two-thirds   |
 
-### Fixed combos
+### App actions
 
-These don't share the ⌥⇧ modifier and can't be remapped:
+These don't share the ⌥⇧ modifier, but every one of them is remappable too:
 
 | Key    | Action |
 |--------|--------|
+| ⌥⇧⏎    | Expand the focused window to fill the screen (not fullscreen mode) |
+| ⌥⇧⌫    | Evict the focused window: untile it and restore its pre-tile frame |
+| ⌥⇧R    | Reset Splitters: snap the focused canvas's splitters back to even splits, keeping every window tiled |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
 | ⌃⌥⇧⌘Z   | Undo the last displacement (a layout switch, an eviction, a swap, or a reflow, from anywhere) |
 
 ### Expand (⌥⇧⏎)
 
-| Key  | Action                                                        |
-|------|---------------------------------------------------------------|
-| ⌥⇧⏎  | Expand the focused window to fill the screen (not fullscreen mode) |
-
 Press ⌥⇧⏎ again and the window returns to its previous tile, or to its
 previous frame if it wasn't tiled. The layout is never erased: a tiled
 window keeps its slot while expanded (the expanded window just covers the
 others, like focusing does), and tiling a neighbor into a free tile leaves
-the expanded window alone. This shortcut is fixed; the slot shortcuts
-above are the remappable ones.
+the expanded window alone.
 
 ### Evict (⌥⇧⌫)
-
-| Key  | Action                                                        |
-|------|---------------------------------------------------------------|
-| ⌥⇧⌫  | Evict the focused window: untile it and restore its pre-tile frame  |
 
 Evicting restores the focused window to its pre-tile frame and releases
 its slot. When a tiling request evicts a window, the victim keeps its
@@ -82,18 +76,13 @@ when both flanks could grow). The same reflow runs whenever a tiled
 window leaves the layout (untile, drag-out, closing the window) or moves
 to a free tile, and ⌃⌥⇧⌘Z undoes it together with the event that
 caused it. A hole no neighbor can merge into exactly stays empty.
-Like Expand, this shortcut is fixed.
 
 ### Reset Splitters (⌥⇧R)
-
-| Key  | Action                                                        |
-|------|---------------------------------------------------------------|
-| ⌥⇧R  | Snap the focused canvas's splitters back to even splits, keeping every window tiled |
 
 Press ⌥⇧R again and the previous splitter positions come back (the same
 row in the menu flips to **Restore Previous Splitters** for the same
 one-step restore). Windows stay in their slots either way; only the sizes
-change. Like Expand and Evict, this shortcut is fixed.
+change.
 
 First launch opens Settings on a Welcome tab: focus any window and press the
 Top Left shortcut (⌥⇧⌘U by default), with a miniature preview showing what
@@ -105,14 +94,15 @@ Dismiss the guide once; reopen it anytime from the menu bar menu → Tiled Guide
 The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
 
 Shortcuts are remappable: open the Shortcuts tab, click a shortcut, and
-press a new combo. Esc keeps the old one, ⌫ disables that slot.
+press a new combo. This covers every hotkey Tiled registers — the 17 slot
+shortcuts and the 5 app actions (Expand, Evict, Reset Splitters, Settings,
+Undo). Esc keeps the old one, ⌫ disables that action.
 Disable or re-enable a whole layout at once with the Enable/Disable all
 button beside each section header; your combos are parked aside and
 restored unchanged.
 
-If two tiled slots use the same combo, the Shortcuts tab names the conflict
-and keeps the old binding until you pick a free one, and a combo that
-matches one of Tiled's fixed shortcuts is refused the same way. If a
+If two shortcuts use the same combo, the Shortcuts tab names the conflict
+and keeps the old binding until you pick a free one. If a
 shortcut fails to register, the menu says so. macOS does not report
 another app owning a global shortcut to a non-exclusive registrant (the
 key simply goes elsewhere), so Tiled can surface a dead combo but cannot
@@ -296,7 +286,7 @@ CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
 ## Status / roadmap
 
 - [x] Menu bar app (LSUIElement), Accessibility permission flow
-- [x] 21 global hotkeys (17 remappable slots + 4 fixed, Carbon RegisterEventHotKey) + clickable menu equivalents
+- [x] 22 global hotkeys (17 slot + 5 app-action, all remappable, Carbon RegisterEventHotKey) + clickable menu equivalents
 - [x] In-app keyboard-shortcut reference
 - [x] Pure, unit-tested tiling state with eviction and layout-switch rules
 - [x] Fixed-rect tiling via the Accessibility API

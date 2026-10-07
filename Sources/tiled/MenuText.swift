@@ -17,8 +17,8 @@ enum MenuText {
         count == 1 ? "Untile 1 Window" : "Untile \(count) Windows"
     }
 
-    /// The expand toggle's menu row; the combo is fixed, so the label is
-    /// always present in practice. `expandedSlot` names the slot an
+    /// The expand toggle's menu row; the combo is user-configurable, so
+    /// the label comes from the store. `expandedSlot` names the slot an
     /// expanded focused window returns to: when a window is expanded the
     /// row says where the toggle goes back: a stateless toggle would
     /// leave the user guessing what "expand" means right now.
@@ -28,8 +28,8 @@ enum MenuText {
         return "Return to \(SlotPresentation.title(of: expandedSlot))\(combo)"
     }
 
-    /// The evict row; the combo is fixed, so the label is always present
-    /// in practice. Mirrors the expand row: the shortcut stays in the
+    /// The evict row; the combo is user-configurable, so the label comes
+    /// from the store. Mirrors the expand row: the shortcut stays in the
     /// title text, since a key equivalent would fire both.
     static func evictItemTitle(label: String?) -> String {
         let combo = label.map { " · \($0)" } ?? ""
@@ -48,51 +48,23 @@ enum MenuText {
 
     // MARK: Warnings
 
-    /// The fallback Settings combo lost registration. Carbon reports only
-    /// a same-process collision through `eventHotKeyExistsErr`; another
-    /// app's non-exclusive registration neither blocks nor reports, so
-    /// the wording must not blame an app that cannot be detected.
-    static func settingsHotkeyWarning() -> String {
-        "The Settings shortcut (\u{2303}\u{2325}\u{21E7}\u{2318},) could not be registered; "
-            + "quit and reopen Tiled to get back to Settings while hidden."
-    }
-
-    /// A slot's global hotkey lost registration. `label` nil means the slot
-    /// has no readable binding; the warning names the slot either way,
-    /// without the self-contradicting “Disabled is already used” reading.
-    static func hotkeyFailureWarning(label: String?, slot: Slot) -> String {
-        let title = SlotPresentation.title(of: slot)
+    /// A hotkey lost registration. For app actions the sentence names the
+    /// action and its recovery path (`registrationRecovery`); for slots
+    /// it names the general suspects instead. `label` nil means the
+    /// action has no readable binding; the warning names the action
+    /// either way, without the self-contradicting “Disabled is already
+    /// used” reading.
+    static func hotkeyFailureWarning(
+        label: String?, title: String, recovery: String? = nil
+    ) -> String {
         guard let label else {
             return "The shortcut for “\(title)” could not be registered: it has no hotkey."
         }
+        if let recovery {
+            return "The \(title) shortcut (\(label)) could not be registered; \(recovery)"
+        }
         return "\(label) could not be registered; “\(title)” has no hotkey. "
             + "Another Tiled shortcut or a system shortcut may already use it."
-    }
-
-    /// The fixed expand combo lost registration.
-    static func expandHotkeyWarning() -> String {
-        "The expand shortcut (⌥⇧⏎) could not be registered; "
-            + "quit and reopen Tiled to try again."
-    }
-
-    /// The fixed evict combo lost registration.
-    static func evictHotkeyWarning() -> String {
-        "The evict shortcut (⌥⇧⌫) could not be registered; "
-            + "quit and reopen Tiled to try again."
-    }
-
-    /// The fixed undo combo lost registration. The menu row still works,
-    /// so the recovery is named, not a relaunch.
-    static func undoHotkeyWarning() -> String {
-        "The undo shortcut (⌃⌥⇧⌘Z) could not be registered; "
-            + "undo the last displacement from the Tiled menu instead."
-    }
-
-    /// The fixed reset-splitters combo lost registration. The menu row
-    /// still works, so the recovery is named, not a relaunch.
-    static func resetSplittersHotkeyWarning() -> String {
-        "The reset splitters shortcut (⌥⇧R) could not be registered; "
-            + "reset splitters from the Tiled menu instead."
     }
 
     // MARK: Menu rows

@@ -20,6 +20,7 @@ final class WelcomeTab: NSObject {
     private(set) var dismissButton: NSButton?
     private var permissionRow: NSStackView!
     private var stepsField: NSTextField?
+    private var behaviorNoteField: NSTextField?
 
     init(hotkeyStore: HotkeyStore) {
         self.hotkeyStore = hotkeyStore
@@ -164,11 +165,11 @@ final class WelcomeTab: NSObject {
         // where the user can meet them before they happen: drag-out's
         // snap-back ("my window snapped back!") and Expand's
         // cover-don't-release semantics ("did it break my layout?"). One
-        // sentence each; the README holds the full rules.
-        let behaviorNote = NSTextField(wrappingLabelWithString:
-            "Drag a tiled window far and it comes untiled where you drop it; " +
-            "a short drag snaps back into its tile. ⌥⇧⏎ expands a window " +
-            "without releasing its slot; press it again to return.")
+        // sentence each; the README holds the full rules. The expand combo
+        // is read live: a remapped binding teaches itself, never ⌥⇧⏎.
+        behaviorNoteField = NSTextField(wrappingLabelWithString: "")
+        let behaviorNote = behaviorNoteField!
+        refreshBehaviorNote()
         behaviorNote.textColor = .secondaryLabelColor
         behaviorNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stack.addArrangedSubview(behaviorNote)
@@ -212,6 +213,17 @@ final class WelcomeTab: NSObject {
                 "3. Set a shortcut in Settings → Shortcuts.\n" +
                 "Top Left's shortcut is disabled."
         }
+        refreshBehaviorNote()
+    }
+
+    /// Rewrites the behavior note from the store, so a remapped expand
+    /// combo teaches itself instead of the stale ⌥⇧⏎ default.
+    private func refreshBehaviorNote() {
+        let expand = hotkeyStore.binding(for: .expand).label ?? "the Expand shortcut"
+        behaviorNoteField?.stringValue =
+            "Drag a tiled window far and it comes untiled where you drop it; " +
+            "a short drag snaps back into its tile. \(expand) expands a window " +
+            "without releasing its slot; press it again to return."
     }
 
     /// Re-probes trust for an already-built Welcome view; the shell's

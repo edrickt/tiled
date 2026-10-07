@@ -1,36 +1,43 @@
 import AppKit
 
-/// A shortcut-recorder button for one slot: click to arm, press a combo to
-/// commit. While armed it shows "Press shortcut…" and captures the next
-/// keyDown via a local event monitor; anything `HotkeyRecorder` ignores
-/// (bare keys, lone modifiers) keeps it armed instead of cancelling.
+/// A shortcut-recorder button for one action (a tiling slot or an app
+/// action): click to arm, press a combo to commit. While armed it shows
+/// "Press shortcut…" and captures the next keyDown via a local event
+/// monitor; anything `HotkeyRecorder` ignores (bare keys, lone modifiers)
+/// keeps it armed instead of cancelling.
 ///
-/// Disabled slots (no binding) render as "Disabled"; armed-then-cancelled
+/// Disabled actions (no binding) render as "Disabled"; armed-then-cancelled
 /// restores the previous label via `showBinding`.
 final class RecorderButton: NSButton {
-    let slot: Slot
+    let hotkeyAction: HotkeyAction
     private(set) var isRecording = false
     private var monitor: Any?
     private var windowCloseObserver: NSObjectProtocol?
     private var completion: ((HotkeyRecorder.Outcome) -> Void)?
     /// Fires when a recorder arms: announce that the next keypress will be
     /// captured, so the state change is never visual-only.
-    var onArmed: ((Slot) -> Void)?
+    var onArmed: ((HotkeyAction) -> Void)?
     /// Fires when a recorder disarms via tab-away with no decision.
-    var onSilentCancel: ((Slot) -> Void)?
+    var onSilentCancel: ((HotkeyAction) -> Void)?
 
-    init(slot: Slot) {
-        self.slot = slot
+    init(action: HotkeyAction) {
+        self.hotkeyAction = action
         super.init(frame: .zero)
         bezelStyle = .rounded
         setButtonType(.momentaryPushIn)
-        // The slot's row label is a separate static text with no
-        // association to this button: without the next line a VoiceOver
-        // user tabbing the Shortcuts tab hears seventeen anonymous
-        // buttons ("⌥⇧U, button" or worse, "Disabled, button"). The
-        // button names its slot; the binding is the value.
-        setAccessibilityLabel("\(SlotPresentation.title(of: slot)) shortcut")
+        // The row label is a separate static text with no association to
+        // this button: without the next line a VoiceOver user tabbing the
+        // Shortcuts tab hears anonymous buttons ("⌥⇧U, button" or worse,
+        // "Disabled, button"). The button names its action; the binding is
+        // the value.
+        setAccessibilityLabel("\(action.title) shortcut")
         setAccessibilityValue("disabled")
+    }
+
+    /// The tiling slot this recorder drives, when it drives one.
+    var slot: Slot? {
+        if case .slot(let slot) = hotkeyAction { return slot }
+        return nil
     }
 
     @available(*, unavailable)
@@ -95,7 +102,7 @@ final class RecorderButton: NSButton {
         // not announced, and a VoiceOver user gets no cue that the next
         // keypress will be captured (Esc cancels). The controller posts
         // the announcement; the button owns the moment it fires.
-        onArmed?(slot)
+        onArmed?(hotkeyAction)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             return self.routeRecordedEvent(event)
@@ -183,7 +190,7 @@ final class RecorderButton: NSButton {
         }
         // Tabbing away mid-record disarms with no decision and no visual
         // trace: say so, so the state change is never silent.
-        onSilentCancel?(slot)
+        onSilentCancel?(hotkeyAction)
     }
 
     private func stopMonitoring() {

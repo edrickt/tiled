@@ -10,12 +10,12 @@ import XCTest
 /// distinguishable controls, not seventeen anonymous buttons.
 final class RecorderButtonAccessibilityTests: XCTestCase {
     func testInitLabelsTheSlot() {
-        let button = RecorderButton(slot: .topLeft)
+        let button = RecorderButton(action: .slot(.topLeft))
         XCTAssertEqual(button.accessibilityLabel(), "Top Left shortcut")
     }
 
     func testValueCarriesTheBinding() {
-        let button = RecorderButton(slot: .topLeft)
+        let button = RecorderButton(action: .slot(.topLeft))
         // keyCode 0 is kVK_ANSI_A: the value must carry the rendered label,
         // not just any non-nil string (e.g. "disabled").
         button.showBinding(HotkeyBinding(modifiers: 0, keyCode: 0))
@@ -25,14 +25,14 @@ final class RecorderButtonAccessibilityTests: XCTestCase {
     }
 
     func testBeginRecordingMarksTheValueAsRecording() {
-        let button = RecorderButton(slot: .leftHalf)
+        let button = RecorderButton(action: .slot(.leftHalf))
         button.beginRecording { _ in }
         XCTAssertEqual(button.accessibilityValue() as? String, "recording")
         button.showBinding(HotkeyBinding(modifiers: 0, keyCode: nil))
     }
 
     func testDisabledInitRendersDisabledValue() {
-        let button = RecorderButton(slot: .sixthRight)
+        let button = RecorderButton(action: .slot(.sixthRight))
         XCTAssertEqual(button.accessibilityValue() as? String, "disabled")
     }
 }
@@ -60,7 +60,7 @@ final class RecorderButtonRoutingTests: XCTestCase {
     }
 
     func testDecisiveKeyFiresCompletionExactlyOnceAndDisarms() {
-        let button = RecorderButton(slot: .topLeft)
+        let button = RecorderButton(action: .slot(.topLeft))
         button.showBinding(HotkeyBinding(modifiers: 0, keyCode: nil))
         var outcomes: [HotkeyRecorder.Outcome] = []
         button.beginRecording { outcomes.append($0) }
@@ -84,7 +84,7 @@ final class RecorderButtonRoutingTests: XCTestCase {
     }
 
     func testNonDecisiveKeyIsSwallowedAndStaysArmed() {
-        let button = RecorderButton(slot: .leftHalf)
+        let button = RecorderButton(action: .slot(.leftHalf))
         var fired = 0
         button.beginRecording { _ in fired += 1 }
 
@@ -97,10 +97,10 @@ final class RecorderButtonRoutingTests: XCTestCase {
     }
 
     func testPassThroughKeySilentlyCancels() {
-        let button = RecorderButton(slot: .sixthMiddle)
+        let button = RecorderButton(action: .slot(.sixthMiddle))
         let stored = HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_K))
         button.showBinding(stored)
-        var silentCancels: [Slot] = []
+        var silentCancels: [HotkeyAction] = []
         button.onSilentCancel = { silentCancels.append($0) }
         var fired = 0
         button.beginRecording { _ in fired += 1 }
@@ -112,7 +112,7 @@ final class RecorderButtonRoutingTests: XCTestCase {
         XCTAssertNotNil(passed, "navigation keys pass through")
         XCTAssertEqual(fired, 0, "the pending completion is dropped, not fired")
         XCTAssertFalse(button.isRecording)
-        XCTAssertEqual(silentCancels, [.sixthMiddle])
+        XCTAssertEqual(silentCancels, [.slot(.sixthMiddle)])
         XCTAssertEqual(
             button.accessibilityValue() as? String, "⌥K",
             "the label reverts to the stored binding")
@@ -121,13 +121,13 @@ final class RecorderButtonRoutingTests: XCTestCase {
     func testArmingAnnouncesAndDisarmRevertsTheDisabledLabel() {
         // Armed → silent cancel with no stored binding reverts to the
         // disabled label, and onArmed announced the capture window.
-        let button = RecorderButton(slot: .bottomRight)
-        var armed: [Slot] = []
+        let button = RecorderButton(action: .slot(.bottomRight))
+        var armed: [HotkeyAction] = []
         button.onArmed = { armed.append($0) }
         button.showBinding(HotkeyBinding(modifiers: 0, keyCode: nil))
 
         button.beginRecording { _ in }
-        XCTAssertEqual(armed, [.bottomRight], "arming announces the capture window")
+        XCTAssertEqual(armed, [.slot(.bottomRight)], "arming announces the capture window")
         XCTAssertEqual(button.accessibilityValue() as? String, "recording")
 
         _ = button.routeRecordedEvent(keyDown(keyCode: UInt16(kVK_Tab)))
@@ -183,7 +183,7 @@ final class ShortcutsBulkEnableTests: XCTestCase {
     }
 
     private func findRecorder(slot: Slot, in view: NSView) -> RecorderButton? {
-        if let button = view as? RecorderButton, button.slot == slot { return button }
+        if let button = view as? RecorderButton, button.hotkeyAction == .slot(slot) { return button }
         for subview in view.subviews {
             if let hit = findRecorder(slot: slot, in: subview) { return hit }
         }

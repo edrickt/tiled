@@ -43,8 +43,8 @@ final class MenuModelTests: XCTestCase {
 
     private var defaultBinding = HotkeyStore.defaultBinding(for: .topLeft)
     private func items(_ snap: MenuModel.Snapshot) -> [MenuModel.Item] {
-        MenuModel.items(snapshot: snap) { [self] slot in
-            slot == .topLeft ? defaultBinding : HotkeyStore.defaultBinding(for: slot)
+        MenuModel.items(snapshot: snap) { [self] action in
+            action == .slot(.topLeft) ? defaultBinding : action.defaultBinding
         }
     }
 
@@ -228,14 +228,14 @@ final class MenuModelTests: XCTestCase {
     /// The tile submenu lists the active layout only, so the custom-label
     /// test forces sixths (the disabled slot under test is a sixth).
     func testTileItemsCarryLiveLabelsFromTheStore() {
-        let model = MenuModel.items(snapshot: snapshot(activeLayout: .sixths)) { slot in
-            switch slot {
-            case .sixthTopLeft:
+        let model = MenuModel.items(snapshot: snapshot(activeLayout: .sixths)) { action in
+            switch action {
+            case .slot(.sixthTopLeft):
                 return HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_Q))
-            case .sixthRight:
+            case .slot(.sixthRight):
                 return HotkeyBinding(modifiers: 0, keyCode: nil) // disabled slot
             default:
-                return HotkeyStore.defaultBinding(for: slot)
+                return action.defaultBinding
             }
         }
         let tile = model.first { $0.title == "Tile Focused Window" }!

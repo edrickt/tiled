@@ -136,12 +136,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionWindowController?.close()
         permissionWindowController = nil
         let service = HotkeyService(store: hotkeyStore)
-        service.handler = { [weak self] slot in self?.controller.handle(slot: slot) }
-        service.expandHandler = { [weak self] in self?.controller.handleExpandToggle() }
-        service.evictHandler = { [weak self] in self?.controller.handleEvict() }
-        service.settingsHandler = { [weak self] in self?.showSettings(nil) }
-        service.undoHandler = { [weak self] in self?.performUndoSwitch() }
-        service.resetSplittersHandler = { [weak self] in self?.controller.resetDividers() }
+        // One entry point for every global hotkey, slot or app action:
+        // the switch is exhaustive, so a new action can never be
+        // registered and then silently dropped here.
+        service.handler = { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case .slot(let slot): controller.handle(slot: slot)
+            case .expand: controller.handleExpandToggle()
+            case .evict: controller.handleEvict()
+            case .settings: self.showSettings(nil)
+            case .undo: self.performUndoSwitch()
+            case .resetSplitters: controller.resetDividers()
+            }
+        }
         hotkeys = service
         // Focus moving to another window can change which display drives
         // the glyph with no tiling action at all. The gateway re-targets
@@ -627,25 +635,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// wrong subsystem. Failures are reported here, never only logged.
     /// Labels come from the store so they reflect custom bindings.
     private var activeWarnings: (tileError: String?, hotkeyWarnings: [String]) {
-        var hotkeyWarnings: [String] = []
-        if hotkeys?.settingsHotkeyFailed == true {
-            hotkeyWarnings.append(MenuText.settingsHotkeyWarning())
-        }
-        if hotkeys?.undoHotkeyFailed == true {
-            hotkeyWarnings.append(MenuText.undoHotkeyWarning())
-        }
-        if hotkeys?.resetSplittersHotkeyFailed == true {
-            hotkeyWarnings.append(MenuText.resetSplittersHotkeyWarning())
-        }
-        if hotkeys?.expandHotkeyFailed == true {
-            hotkeyWarnings.append(MenuText.expandHotkeyWarning())
-        }
-        if hotkeys?.evictHotkeyFailed == true {
-            hotkeyWarnings.append(MenuText.evictHotkeyWarning())
-        }
-        for slot in hotkeys?.failedSlots ?? [] {
-            let label = hotkeyStore.binding(for: slot).label
-            hotkeyWarnings.append(MenuText.hotkeyFailureWarning(label: label, slot: slot))
+        let hotkeyWarnings = (hotkeys?.failedActions ?? []).map { action in
+            MenuText.hotkeyFailureWarning(
+                label: hotkeyStore.binding(for: action).label,
+                title: action.title,
+                recovery: action.registrationRecovery)
         }
         return (tileError: controller.canvas(for: controller.focusedTilingSpace).error,
                 hotkeyWarnings: hotkeyWarnings)
@@ -696,15 +690,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The Shortcuts tab surfaces cross-app registration failures
             // beside the recorder that accepted the combo, not only in
             // the status menu.
-            controller.failedSlotsProvider = { [weak self] in
-                self?.hotkeys?.failedSlots ?? []
+            controller.failedActionsProvider = { [weak self] in
+                self?.hotkeys?.failedActions ?? []
             }
             // General's hide-icon confirm names a recovery combo only when
             // it is actually registered: never a dead promise while
             // removing the last visible handle to the app.
             controller.isSettingsHotkeyRegisteredProvider = { [weak self] in
                 guard let hotkeys = self?.hotkeys else { return false }
-                return !hotkeys.settingsHotkeyFailed
+                return !hotkeys.failedActions.contains(.settings)
             }
             settingsController = controller
         }
@@ -713,12 +707,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// True when at least one global hotkey lost registration: the menu
     /// then pairs its warnings with an "Open Shortcuts…" action row.
     private var hasHotkeyWarnings: Bool {
-        hotkeys?.settingsHotkeyFailed == true
-            || hotkeys?.expandHotkeyFailed == true
-            || hotkeys?.evictHotkeyFailed == true
-            || hotkeys?.undoHotkeyFailed == true
-            || hotkeys?.resetSplittersHotkeyFailed == true
-            || !(hotkeys?.failedSlots ?? []).isEmpty
+        !(hotkeys?.failedActions ?? []).isEmpty
     }
 
     @objc private func showGuide(_ sender: Any?) {
