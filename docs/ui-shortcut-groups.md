@@ -58,3 +58,43 @@ some document height in exchange for easier scanning; no recorder is removed.
 The taller screenshots show the entire list for inspection, not a new default
 window size. VoiceOver navigation and installed-app end-to-end checks remain
 separate from these source-view tests and screenshots.
+
+## Standards review
+
+Independent review used the same user-confirmed UI-work baseline:
+`git diff b4ee077...956a999`. No documented-standard violations found. New
+subgroup labels use native AppKit controls, semantic colors, existing domain
+vocabulary, and shared `SlotPresentation` slot arrays. The README's test gate
+passed with 590 tests.
+
+Still-existing optional findings from the first batch:
+
+- **Primitive Obsession:** `SlotPreviewView.swift` uses `case 2: displayCol =
+  col / 2`, `case 3: …`, `default: displayCol = col`, with callers passing
+  `displayColumns: 2`. A projection enum could clarify that existing interface.
+- **Duplicated Code:** the small recursive test view-tree helpers could be
+  shared. `ShortcutsGroupingTests.swift:26–28` adds another occurrence of
+  `[view] + view.subviews.flatMap { descendants(of: $0) }`, already present in
+  `ShortcutsGuidanceTests`. Its isolated-preferences fixture also resembles
+  `WelcomeInstructionsTests`.
+
+No distinct production-code smell was identified in the subgroup change.
+Disposition: retain these small local helpers and the existing preview
+interface; the optional cleanup opportunities do not block this batch.
+
+## Spec review
+
+No findings.
+
+The five static subgroup labels match the existing menu arrays and preserve
+all 17 recorders and their order. Native labels introduce no keyboard stops;
+recorder accessibility names, collapse/rebuild focus restoration, bindings,
+and layout-wide bulk actions remain unchanged.
+
+Rendered evidence shows readable guidance at minimum size and all groups in
+taller captures. No unauthorized menu, engine, or window-size changes found.
+Deferred installed-app and VoiceOver checks are not missing batch requirements.
+
+Summary: Standards has zero hard violations and two continuing low-priority
+cleanup opportunities (test duplication gains a new occurrence); Spec has
+zero findings. Neither axis found a blocking issue.
