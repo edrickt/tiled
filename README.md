@@ -30,13 +30,20 @@ under **Tile Focused Window** in the menu bar menu.
 | ⌥⇧I   | Top middle sixth   |
 | ⌥⇧O   | Top right sixth    |
 | ⌥⇧M   | Bottom left sixth  |
-| ⌥⇧,   | Bottom middle sixth|
+| ⌥⇧,   | Bottom middle sixth |
 | ⌥⇧.   | Bottom right sixth |
 | ⌥⇧J   | Left third         |
 | ⌥⇧K   | Middle third       |
 | ⌥⇧L   | Right third        |
 | ⌥⇧H   | Left two-thirds    |
 | ⌥⇧;   | Right two-thirds   |
+
+### Fixed combos
+
+These don't share the ⌥⇧ modifier and can't be remapped:
+
+| Key    | Action |
+|--------|--------|
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
 | ⌃⌥⇧⌘Z   | Undo the last displacement (a layout switch, an eviction, a swap, or a reflow, from anywhere) |
 
@@ -51,7 +58,7 @@ previous frame if it wasn't tiled. The layout is never erased: a tiled
 window keeps its slot while expanded (the expanded window just covers the
 others, like focusing does), and tiling a neighbor into a free tile leaves
 the expanded window alone. This shortcut is fixed; the slot shortcuts
-below are the remappable ones.
+above are the remappable ones.
 
 ### Evict (⌥⇧⌫)
 
@@ -60,10 +67,14 @@ below are the remappable ones.
 | ⌥⇧⌫  | Evict the focused window: untile it and restore its pre-tile frame  |
 
 Evicting restores the focused window to its pre-tile frame and releases
-its slot. When a tiling request evicts a window and leaves exactly one
-whole slot free, the victim re-tiles into that slot instead (the middle
-third making room for the right two-thirds moves into the top-left sixth)
-and only untangles when no single slot fits. The freed cells reflow: a neighboring tile that merges with
+its slot. When a tiling request evicts a window, the victim keeps its
+tiling whenever a whole slot fits: if its own slot overlaps the target and
+the leftover (its slot minus the target) is exactly one whole slot, it
+steps aside into that leftover (the left third asked for its top sixth
+steps down into the bottom-left sixth); otherwise, when the request leaves
+exactly one whole slot free, the victim re-tiles into that slot (the middle
+third making room for the right two-thirds moves into the top-left sixth).
+It untangles only when neither fits. The freed cells reflow: a neighboring tile that merges with
 them into a whole slot grows into it — evict the bottom-left sixth and
 the top-left sixth expands into the left third; free the middle third
 and the right third becomes the right two-thirds (the right side wins
@@ -102,13 +113,18 @@ tell you which app took it.
 - Tiling a window into a slot **evicts** any window occupying an overlapping
   slot. Evicted windows are restored to their pre-tile frames.
   - Two quads occupied on one side + the half key → both quads are evicted.
-  - A half occupied + a quad key on that side → the half window is evicted.
+  - A half occupied + a quad key on that side → the half window steps aside
+    into the other quad on that side when it's free; only then is it evicted.
 - **Swap:** a tiled window tiling into a slot blocked by exactly one other
-  tiled window swaps with it instead of evicting: the blocker moves into the
-  tile the requester vacated, and both stay tiled. Focus follows the
-  displaced window into the tile it landed in. (With more than one window in
-  the way, or from an untiled window, the request evicts as above, and focus
-  stays put.) Undo swaps back.
+  tiled window swaps with it instead of evicting — unless the blocker's
+  slot overlaps the target and its leftover (its slot minus the target) is
+  exactly one whole slot, in which case the blocker steps aside into that
+  leftover instead (see the re-house rule under Evict). Otherwise the
+  blocker moves into the tile the requester vacated (which never overlaps
+  the target), and both stay tiled. Focus follows the displaced window
+  into the tile it landed in. (With more than one window in the way, or
+  from an untiled window, the request evicts as above, and focus stays
+  put.) Undo swaps back.
 - Tiling a window into its own tile does nothing: no restore, no reassert.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.
@@ -137,8 +153,7 @@ tell you which app took it.
 - Quarters and sixths are mutually exclusive per canvas: requesting a slot
   in the other layout untiles every tiled window on that canvas and
   switches that canvas's layout. The menu names the switch and how to undo
-  it ("Switched to Sixths · 3 windows untiled. Undo (⌃⌥⇧⌘Z) is one step,
-  from anywhere. Safe to explore: destruction is always reversible.
+  it ("Switched to Sixths · 3 windows untiled. Press ⌃⌥⇧⌘Z to undo.").
 - A display change (unplug, rearrange, resolution) re-asserts every visible
   canvas immediately. Canvas identity follows the physical monitor's
   CoreGraphics display number, so reordering screens never moves a monitor's
@@ -160,7 +175,8 @@ monitors and Spaces, so dragging an edge on one canvas never moves tiles on
 another. A two-thirds window resizes as two equal one-thirds: the hidden
 splitter inside it follows its outer edge, staying at the midpoint.
 **Reset Splitters** in the menu snaps the focused canvas's splitters back
-to even splits.
+to even splits. After a drag the same row is titled **Restore Previous
+Splitters**, restoring the pre-drag splits instead.
 
 ## Building & running
 
@@ -169,7 +185,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 ```bash
 swift build          # debug build
 swift test           # layout-engine unit tests
-./scripts/make-app.sh # release build bundled as build/tiled.app
+./scripts/make-app.sh # release build bundled as build/Tiled.app
 ```
 
 ### Running during development
@@ -196,7 +212,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (581 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (601 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~10s per mutant |
@@ -269,7 +285,7 @@ CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
 ## Status / roadmap
 
 - [x] Menu bar app (LSUIElement), Accessibility permission flow
-- [x] 17 global hotkeys (Carbon RegisterEventHotKey) + clickable menu equivalents
+- [x] 21 global hotkeys (17 remappable slots + 4 fixed, Carbon RegisterEventHotKey) + clickable menu equivalents
 - [x] In-app keyboard-shortcut reference
 - [x] Pure, unit-tested tiling state with eviction and layout-switch rules
 - [x] Fixed-rect tiling via the Accessibility API

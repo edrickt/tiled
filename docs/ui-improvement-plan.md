@@ -1,11 +1,11 @@
 # UI improvement plan
 
-Status: approved direction; source audit recorded in `docs/ui-audit.md`.
+Status: approved direction; source audit recorded in `.scratch/ui-polish/ui-audit.md`.
 Rendered Settings screenshot audit completed using isolated current-source
 views; menu, permission, and interaction checks pending. First implementation
-batch completed; see `docs/ui-first-batch.md` for its scope and evidence.
+batch completed; see `.scratch/ui-polish/ui-first-batch.md` for its scope and evidence.
 The user accepted that batch; shortcut subgroup alignment is implemented in
-the next batch documented in `docs/ui-shortcut-groups.md`.
+the next batch documented in `.scratch/ui-polish/ui-shortcut-groups.md`.
 
 ## Goal
 
@@ -120,6 +120,6 @@ the cursor; coordinate those checks before running them.
 ## Next step
 
 The first batch is implemented and reviewed. Complete the remaining live audit (see
-`docs/ui-audit.md` for findings and access blockers) and choose the next small
+`.scratch/ui-polish/ui-audit.md` for findings and access blockers) and choose the next small
 implementation tasks in the sequence above. A runnable mockup is optional if a visual choice
 cannot be settled from screenshots; it is not required for this planning phase.

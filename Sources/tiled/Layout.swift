@@ -431,10 +431,10 @@ enum TilePlan: Equatable {
     /// Place the window; the listed windows must be untiled (restored) first.
     case tile(evicting: [WindowID])
     /// The requester is tiled and exactly one window overlaps the target
-    /// without containing it (a containing blocker with a clean leftover
-    /// steps aside instead): the two swap tiles, the displaced window
-    /// moves into the slot the requester vacates; nobody is untiled or
-    /// restored.
+    /// without leaving a step-aside home (a blocker whose leftover — its
+    /// slot minus the target — is exactly one whole slot steps aside
+    /// instead): the two swap tiles, the displaced window moves into the
+    /// slot the requester vacates; nobody is untiled or restored.
     case swap(displaced: WindowID)
     /// The request targets a different layout than the active one: every
     /// tiled window is untiled (restored), the layout switches, and the
@@ -496,11 +496,12 @@ struct TilingState: Equatable {
     /// Decides what happens when `window` requests `slot`: the requester
     /// owns `slot` after the move. A tiled requester swaps with a single
     /// overlapping window (the displaced window takes the tile the
-    /// requester vacates) — unless that blocker's slot contains the
-    /// target with a clean leftover, in which case the plan is an
-    /// ordinary eviction the commit re-houses: the blocker steps aside
-    /// into its own strip instead of trading tiles. Otherwise every
-    /// overlapping window is evicted (restored to its pre-tile frame).
+    /// requester vacates) — unless that blocker's leftover (its slot
+    /// minus the target) is exactly one whole slot, in which case the
+    /// plan is an ordinary eviction the commit re-houses: the blocker
+    /// steps aside into its own strip instead of trading tiles.
+    /// Otherwise every overlapping window is evicted (restored to its
+    /// pre-tile frame).
     func plan(window: WindowID, into slot: Slot) -> TilePlan {
         if occupantBySlot[slot] == window { return .noop }
         if !occupantBySlot.isEmpty, slot.layout != activeLayout {
@@ -515,10 +516,10 @@ struct TilingState: Equatable {
         // The vacated tile must not overlap the target (the displaced
         // window would land inside the requester's new tile), and more
         // than one blocker (or an untiled requester with no tile to
-        // offer) falls back to eviction. A blocker that contains the
-        // target with a clean leftover steps aside instead — nearer,
-        // and the requester's vacated tile frees up for reflow — so
-        // the swap only stands when no such home exists.
+        // offer) falls back to eviction. A blocker whose leftover (its
+        // slot minus the target) is a clean whole slot steps aside
+        // instead — nearer, and the requester's vacated tile frees up
+        // for reflow — so the swap only stands when no such home exists.
         if blockers.count == 1, let previous = self.slot(of: window),
             !previous.overlaps(slot),
             stepAsideHome(evictee: blockers[0], for: slot) == nil
@@ -545,14 +546,16 @@ struct TilingState: Equatable {
         }
     }
 
-    /// The containment step-aside home: when `evictee`'s slot contains
-    /// `target` and its leftover (its slot minus the target) is exactly
-    /// one whole slot of the target's layout that no other occupant
-    /// holds, that slot is where the blocker steps aside (the left third
-    /// requested at its top sixth steps down into the bottom-left
-    /// sixth). Shared by `plan`, where a step-aside overrides a swap,
-    /// and `rehousingHome`, so the plan and the commit can never
-    /// disagree about whether one exists.
+    /// The step-aside home: when `evictee`'s slot overlaps `target` and
+    /// its leftover (its slot minus the target) is exactly one whole
+    /// slot of the target's layout that no other occupant holds, that
+    /// slot is where the blocker steps aside (the left third requested
+    /// at its top sixth steps down into the bottom-left sixth; the one
+    /// overlap that is not a containment — a left two-thirds blocking a
+    /// right two-thirds request — steps aside into the left third).
+    /// Shared by `plan`, where a step-aside overrides a swap, and
+    /// `rehousingHome`, so the plan and the commit can never disagree
+    /// about whether one exists.
     private func stepAsideHome(evictee: WindowID, for target: Slot) -> Slot? {
         guard let current = slot(of: evictee), current.overlaps(target) else { return nil }
         let leftover = current.cells.subtracting(target.cells)
@@ -572,7 +575,7 @@ struct TilingState: Equatable {
     /// unambiguous home to guess, so a near miss leaves the eviction
     /// untouched and the window untiles to its pre-tile frame:
     ///
-    /// - Step-aside (containment): see `stepAsideHome`. Checked first:
+    /// - Step-aside: see `stepAsideHome`. Checked first:
     ///   it keeps the evictee adjacent to the request.
     /// - Free region: once the requester takes `target`, the cells left
     ///   free form a region; when that region is exactly one whole slot

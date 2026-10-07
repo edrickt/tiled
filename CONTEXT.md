@@ -9,11 +9,11 @@ A named tile a window can occupy (Top Left, Left Third, …), defined by its set
 _Avoid_: tile, zone, region
 
 **Layout**:
-One of two mutually exclusive geometries per tiling space: quarters (2×2 plus halves) or sixths (3×2 grid plus thirds and two-thirds). Each display's each Space runs its own.
+One of two mutually exclusive geometries per tiling space: quarters (2×2 plus halves) or sixths (3×2 grid plus thirds and two-thirds). Each display's each Space runs its own. A request in the other layout switches the space's layout, untileing every tiled window, rather than coexisting.
 _Avoid_: mode, grid
 
 **Space**:
-A macOS Mission Control desktop (the thing a three-finger swipe up moves between), identified by its window-server id. A window belongs to one Space on one display; Spaces exist independently per display when "Displays have separate Spaces" is on.
+A macOS Mission Control desktop, identified by its window-server id. A window belongs to one Space on one display; Spaces exist independently per display when "Displays have separate Spaces" is on.
 _Avoid_: desktop, workspace, virtual desktop
 
 **Tiling space (canvas)**:
@@ -34,7 +34,7 @@ Untiling a window to make room, restoring its pre-tile frame; what `plan` return
 _Avoid_: displacement, removal
 
 **Swap**:
-A tiled requester trading tiles with the single window blocking its target: the blocker lands in the tile the requester vacated, nobody is untiled. The vacated tile must be disjoint from the target, or the request falls back to eviction. A blocker that contains the target with a clean leftover never swaps — it steps aside instead (see Re-house), keeping its own strip.
+A tiled requester trading tiles with the single window blocking its target: the blocker lands in the tile the requester vacated, nobody is untiled. The vacated tile must be disjoint from the target, or the request falls back to eviction. A blocker whose leftover (its slot minus the target) is exactly one whole slot never swaps — it steps aside instead (see Re-house), keeping its own strip.
 _Avoid_: exchange, trade, tile swap (in prose; the code name is `swap`)
 
 **Reflow**:
@@ -42,11 +42,11 @@ Absorbing freed cells: when a tiled window leaves the layout (eviction, untile, 
 _Avoid_: growth, backfill, gap-filling (the code name is `reflow`)
 
 **Re-house**:
-Keeping an evictee tiled instead of untangling it. Two rules, both exact-or-nil: when an eviction leaves exactly one whole slot free, the evicted window re-tiles into it (the middle third making room for the right two-thirds moves into the free top-left sixth); and when the evictee's own slot contains the requested slot and its leftover — its slot minus the request — is exactly one whole slot, the blocker steps aside into that leftover (the left third requested at its top sixth steps down into the bottom-left sixth, the left half into the bottom-left quad, a two-thirds into the third its request leaves clean). The step-aside covers tiled requesters too: it wins over a swap, because the blocker keeps its own strip instead of teleporting to the requester's vacated tile, whose cells then reflow to a neighbor. A region or leftover that is not exactly one slot falls back to untile-and-restore, and expanded windows never step aside — they untangle. Undo puts the whole chapter back: each moved window returns to the slot it was evicted from, which for a step-aside is its original full slot, and a tiled requester returns to the slot it vacated.
+Keeping an evictee tiled instead of untangling it. Two rules, step-aside checked first, both exact-or-nil: when the evictee's slot overlaps the requested slot and its leftover — its slot minus the request — is exactly one whole slot, the blocker steps aside into that leftover (the left third requested at its top sixth steps down into the bottom-left sixth, the left half into the bottom-left quad, a two-thirds into the third its request leaves clean; the one overlap that is not a containment — a left two-thirds blocking a right two-thirds request — steps aside into the left third); otherwise, when the cells left free after the request form exactly one whole slot, the evicted window re-tiles into that slot (with the bottom-left sixth occupied, the middle third making room for the right two-thirds moves into the free top-left sixth). A region or leftover that is not exactly one slot falls back to untile-and-restore, and expanded windows never re-house — they untangle (see Expand). The step-aside covers tiled requesters too: it wins over a swap, because the blocker keeps its own strip instead of teleporting to the requester's vacated tile, whose cells then reflow to a neighbor. Undo puts the whole chapter back: each moved window returns to the slot it was evicted from, which for a step-aside is its original full slot, and a tiled requester returns to the slot it vacated.
 _Avoid_: relocation, re-assignment, re-seat, displacement (an eviction untiles; a re-house moves, and never the reverse)
 
 **Expand**:
-Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it.
+Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it. An expanded window never grows (see Reflow) and never re-houses or steps aside (see Re-house); on eviction it untangles.
 _Avoid_: maximize, zoom, fullscreen
 
 **Drag-out**:
@@ -62,5 +62,6 @@ The controller's opaque reference to a managed window, issued by the window gate
 _Avoid_: window id (that's the pure-state key), element
 
 **Plan execution**:
-Committing a decided plan (tile or switch): snapshot, restore, place, rollback, and notice logic. Owned by the tiling space's placement pipeline; the controller keeps focus, pruning, and dispatch.
+Committing a decided plan (tile, swap, or switch): snapshot, restore, place, rollback, and notice logic. Owned by the tiling space's placement pipeline; the controller keeps focus, pruning, and dispatch.
+_Code_: `TilingSpace.execute(decision:)`
 _Avoid_: placement (which is only the place step), commit
