@@ -291,7 +291,18 @@ final class MenuModelTests: XCTestCase {
         XCTAssertTrue(withoutUndo.contains { $0.action == .untileAll })
         XCTAssertTrue(withoutUndo.contains { $0.action == .resetDividers })
         let reset = withoutUndo.first { $0.action == .resetDividers }
-        XCTAssertEqual(reset?.title, "Reset Splitters")
+        XCTAssertEqual(reset?.title, "Reset Splitters · ⌥⇧R")
+    }
+
+    func testResetSplittersRowAdvertisesTheGlobalCombo() {
+        // ⌥⇧R is a global hotkey: like the undo row, the combo lives in
+        // the title text, not a key equivalent that only works with the
+        // menu open.
+        let row = items(snapshot(tiledWindows: [
+            .init(id: 1, slot: .topLeft, appName: nil),
+        ])).first { $0.action == .resetDividers }
+        XCTAssertEqual(row?.title, "Reset Splitters · ⌥⇧R")
+        XCTAssertEqual(row?.keyEquivalent, "")
     }
 
     func testUntileAllTitleCountsTheFocusedCanvasOnly() {
@@ -313,14 +324,14 @@ final class MenuModelTests: XCTestCase {
             .init(id: 1, slot: .topLeft, appName: nil),
         ]))
         XCTAssertEqual(
-            plain.first { $0.action == .resetDividers }?.title, "Reset Splitters")
+            plain.first { $0.action == .resetDividers }?.title, "Reset Splitters · ⌥⇧R")
         let backedUp = items(snapshot(
             hasSplitterBackup: true,
             tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)]))
         // One destructive action, one receipt: the row becomes its own undo.
         XCTAssertEqual(
             backedUp.first { $0.action == .resetDividers }?.title,
-            "Restore Previous Splitters")
+            "Restore Previous Splitters · ⌥⇧R")
     }
 
     func testMultiMonitorWindowsGroupUnderDisplayHeaders() {

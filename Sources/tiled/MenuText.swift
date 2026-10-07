@@ -88,6 +88,13 @@ enum MenuText {
             + "undo the last displacement from the Tiled menu instead."
     }
 
+    /// The fixed reset-splitters combo lost registration. The menu row
+    /// still works, so the recovery is named, not a relaunch.
+    static func resetSplittersHotkeyWarning() -> String {
+        "The reset splitters shortcut (⌥⇧R) could not be registered; "
+            + "reset splitters from the Tiled menu instead."
+    }
+
     // MARK: Menu rows
 
     /// One line of the tiled-windows list: slot, app, and live combo.

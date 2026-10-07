@@ -84,6 +84,17 @@ to a free tile, and ⌃⌥⇧⌘Z undoes it together with the event that
 caused it. A hole no neighbor can merge into exactly stays empty.
 Like Expand, this shortcut is fixed.
 
+### Reset Splitters (⌥⇧R)
+
+| Key  | Action                                                        |
+|------|---------------------------------------------------------------|
+| ⌥⇧R  | Snap the focused canvas's splitters back to even splits, keeping every window tiled |
+
+Press ⌥⇧R again and the previous splitter positions come back (the same
+row in the menu flips to **Restore Previous Splitters** for the same
+one-step restore). Windows stay in their slots either way; only the sizes
+change. Like Expand and Evict, this shortcut is fixed.
+
 First launch opens Settings on a Welcome tab: focus any window and press the
 Top Left shortcut (⌥⇧⌘U by default), with a miniature preview showing what
 Top Left covers. The guide shows your current binding; if it's disabled,
@@ -174,9 +185,9 @@ column never moves the other, and the same independence holds between
 monitors and Spaces, so dragging an edge on one canvas never moves tiles on
 another. A two-thirds window resizes as two equal one-thirds: the hidden
 splitter inside it follows its outer edge, staying at the midpoint.
-**Reset Splitters** in the menu snaps the focused canvas's splitters back
-to even splits. After a drag the same row is titled **Restore Previous
-Splitters**, restoring the pre-drag splits instead.
+**Reset Splitters** in the menu (or ⌥⇧R) snaps the focused canvas's
+splitters back to even splits. After a drag the same row is titled
+**Restore Previous Splitters**, restoring the pre-drag splits instead.
 
 ## Building & running
 

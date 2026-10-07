@@ -60,6 +60,19 @@ final class HotkeyService {
     /// The fixed evict binding, for menu labels and registration.
     static let evictBinding = HotkeyBinding(modifiers: evictModifiers, keyCode: evictKeyCode)
 
+    /// Reserved Carbon id for the fixed reset-splitters hotkey (⌥⇧R).
+    /// Slot ids occupy 1...allCases.count and the other fixed ids are
+    /// 996-999, so 995 can never collide.
+    static let resetSplittersHotkeyID: UInt32 = 995
+    /// The reset-splitters combo: ⌥⇧R, fixed; slot shortcuts are
+    /// remappable, this one rides beside them like the expand toggle.
+    static let resetSplittersModifiers = UInt32(shiftKey | optionKey)
+    static let resetSplittersKeyCode = UInt32(kVK_ANSI_R)
+
+    /// The fixed reset-splitters binding, for menu labels and registration.
+    static let resetSplittersBinding = HotkeyBinding(
+        modifiers: resetSplittersModifiers, keyCode: resetSplittersKeyCode)
+
     /// Reserved Carbon id for the Settings fallback hotkey (⌃⌥⇧⌘,).
     /// Slot ids occupy 1...allCases.count, so this can never collide.
     static let settingsHotkeyID: UInt32 = 999
@@ -84,6 +97,7 @@ final class HotkeyService {
         case evict
         case settings
         case undo
+        case resetSplitters
     }
 
     /// Pure id → route mapping over the slot table the callback holds.
@@ -98,6 +112,7 @@ final class HotkeyService {
         case evictHotkeyID: return .evict
         case settingsHotkeyID: return .settings
         case undoHotkeyID: return .undo
+        case resetSplittersHotkeyID: return .resetSplitters
         default: return nil
         }
     }
@@ -108,6 +123,7 @@ final class HotkeyService {
         var evictHandler: (() -> Void)?
         var settingsHandler: (() -> Void)?
         var undoHandler: (() -> Void)?
+        var resetSplittersHandler: (() -> Void)?
         let slotByID: [UInt32: Slot]
 
         init() {
@@ -180,6 +196,18 @@ final class HotkeyService {
     /// Whether the undo combo registered (false = owned by another app).
     private(set) var undoHotkeyFailed = false
 
+    /// Fired by the fixed ⌥⇧R combo: snaps the focused canvas's splitters
+    /// back to defaults (or restores the parked ones when a backup exists),
+    /// keeping every window tiled.
+    var resetSplittersHandler: (() -> Void)? {
+        get { context.resetSplittersHandler }
+        set { context.resetSplittersHandler = newValue }
+    }
+
+    /// Whether the reset-splitters combo registered (false = owned by
+    /// another app).
+    private(set) var resetSplittersHotkeyFailed = false
+
     init(store: HotkeyStore = HotkeyStore()) {
         self.store = store
         Self.installEventHandler(with: context)
@@ -204,6 +232,21 @@ final class HotkeyService {
         expandHotkeyFailed = false
         evictHotkeyFailed = false
         undoHotkeyFailed = false
+        resetSplittersHotkeyFailed = false
+        var resetRef: EventHotKeyRef?
+        if RegisterEventHotKey(
+            Self.resetSplittersKeyCode,
+            Self.resetSplittersModifiers,
+            EventHotKeyID(signature: Self.signature, id: Self.resetSplittersHotkeyID),
+            GetApplicationEventTarget(),
+            0,
+            &resetRef) == noErr
+        {
+            hotKeyRefs.append(resetRef)
+        } else {
+            resetSplittersHotkeyFailed = true
+            NSLog("Tiled: failed to register reset splitters hotkey")
+        }
         var evictRef: EventHotKeyRef?
         if RegisterEventHotKey(
             Self.evictKeyCode,
@@ -320,6 +363,9 @@ final class HotkeyService {
             return noErr
         case .undo:
             DispatchQueue.main.async { context.undoHandler?() }
+            return noErr
+        case .resetSplitters:
+            DispatchQueue.main.async { context.resetSplittersHandler?() }
             return noErr
         case .slot(let slot):
             DispatchQueue.main.async { context.handler?(slot) }

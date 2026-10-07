@@ -154,6 +154,19 @@ final class HotkeyBindingTests: XCTestCase {
                        .reserved(name: "Expand"))
     }
 
+    func testResetSplittersComboIsReserved() {
+        // ⌥⇧R is the fixed Reset Splitters combo: no slot may claim it.
+        // Pinned separately from the loop over reservedCombos, which
+        // passes vacuously until the combo is actually added to it.
+        XCTAssertEqual(
+            HotkeyStore.reservedOwner(of: HotkeyService.resetSplittersBinding),
+            "Reset Splitters")
+        let store = makeStore()
+        XCTAssertEqual(
+            store.apply(HotkeyService.resetSplittersBinding, for: .topLeft),
+            .reserved(name: "Reset Splitters"))
+    }
+
     func testApplyRejectsDuplicateWithoutStoring() {
         let store = makeStore()
         // topRight's factory default differs from topLeft's, so forcing

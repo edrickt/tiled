@@ -141,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         service.evictHandler = { [weak self] in self?.controller.handleEvict() }
         service.settingsHandler = { [weak self] in self?.showSettings(nil) }
         service.undoHandler = { [weak self] in self?.performUndoSwitch() }
+        service.resetSplittersHandler = { [weak self] in self?.controller.resetDividers() }
         hotkeys = service
         // Focus moving to another window can change which display drives
         // the glyph with no tiling action at all. The gateway re-targets
@@ -633,6 +634,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if hotkeys?.undoHotkeyFailed == true {
             hotkeyWarnings.append(MenuText.undoHotkeyWarning())
         }
+        if hotkeys?.resetSplittersHotkeyFailed == true {
+            hotkeyWarnings.append(MenuText.resetSplittersHotkeyWarning())
+        }
         if hotkeys?.expandHotkeyFailed == true {
             hotkeyWarnings.append(MenuText.expandHotkeyWarning())
         }
@@ -713,6 +717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             || hotkeys?.expandHotkeyFailed == true
             || hotkeys?.evictHotkeyFailed == true
             || hotkeys?.undoHotkeyFailed == true
+            || hotkeys?.resetSplittersHotkeyFailed == true
             || !(hotkeys?.failedSlots ?? []).isEmpty
     }
 

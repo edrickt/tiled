@@ -47,6 +47,14 @@ final class HotkeyServiceTests: XCTestCase {
         XCTAssertEqual(HotkeyService.evictBinding.label, "⌥⇧⌫")
     }
 
+    func testResetSplittersComboIsOptionShiftR() {
+        // Fixed like expand's ⌥⇧⏎ and evict's ⌥⇧⌫: it sits beside the
+        // sixths ⌥⇧ set but on R, which no slot defaults to.
+        XCTAssertEqual(HotkeyService.resetSplittersModifiers, UInt32(shiftKey | optionKey))
+        XCTAssertEqual(HotkeyService.resetSplittersKeyCode, UInt32(kVK_ANSI_R))
+        XCTAssertEqual(HotkeyService.resetSplittersBinding.label, "⌥⇧R")
+    }
+
     func testUndoComboIsAllFourModifiersPlusZ() {
         // The menu's undo row and MenuText.undoHotkeyWarning both promise
         // ⌃⌥⇧⌘Z. Pinned here so a keycode drift cannot make the advertised
@@ -72,6 +80,14 @@ final class HotkeyServiceTests: XCTestCase {
         XCTAssertNotEqual(HotkeyService.evictHotkeyID, HotkeyService.expandHotkeyID)
         XCTAssertNotEqual(HotkeyService.evictHotkeyID, HotkeyService.settingsHotkeyID)
         XCTAssertNotEqual(HotkeyService.evictHotkeyID, HotkeyService.undoHotkeyID)
+    }
+
+    func testResetSplittersHotkeyIDCannotCollideWithSlotOrFixedIDs() {
+        XCTAssertLessThan(UInt32(Slot.allCases.count), HotkeyService.resetSplittersHotkeyID)
+        XCTAssertNotEqual(HotkeyService.resetSplittersHotkeyID, HotkeyService.expandHotkeyID)
+        XCTAssertNotEqual(HotkeyService.resetSplittersHotkeyID, HotkeyService.evictHotkeyID)
+        XCTAssertNotEqual(HotkeyService.resetSplittersHotkeyID, HotkeyService.settingsHotkeyID)
+        XCTAssertNotEqual(HotkeyService.resetSplittersHotkeyID, HotkeyService.undoHotkeyID)
     }
 
     func testQuartersAndSixthsModifierSets() {
@@ -113,7 +129,10 @@ final class HotkeyServiceTests: XCTestCase {
         XCTAssertEqual(
             HotkeyService.route(forHotKeyID: HotkeyService.undoHotkeyID, slotByID: slotByID),
             .undo)
-        for unknown: UInt32 in [0, 500, 995, 1000] {
+        XCTAssertEqual(
+            HotkeyService.route(forHotKeyID: HotkeyService.resetSplittersHotkeyID, slotByID: slotByID),
+            .resetSplitters)
+        for unknown: UInt32 in [0, 500, 994, 1000] {
             XCTAssertNil(
                 HotkeyService.route(forHotKeyID: unknown, slotByID: slotByID),
                 "unknown id \(unknown) must fall through")

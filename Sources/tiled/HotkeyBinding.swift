@@ -228,7 +228,7 @@ final class HotkeyStore {
         return .applied
     }
 
-    /// The four fixed combos slots may not take. The registrations live in
+    /// The five fixed combos slots may not take. The registrations live in
     /// `HotkeyService`; the store owns the conflict decision so the bulk
     /// restore paths cannot bypass it with `set`.
     static var reservedCombos: [(name: String, binding: HotkeyBinding)] {
@@ -241,6 +241,7 @@ final class HotkeyStore {
             ("Undo", HotkeyBinding(
                 modifiers: HotkeyService.undoModifiers,
                 keyCode: HotkeyService.undoKeyCode)),
+            ("Reset Splitters", HotkeyService.resetSplittersBinding),
         ]
     }
 

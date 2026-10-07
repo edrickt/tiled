@@ -274,8 +274,9 @@ enum MenuModel {
                     title: MenuText.untileAllTitle(count: snapshot.untileCount),
                     action: .untileAll))
                 items.append(Item(
-                    title: snapshot.hasSplitterBackup
-                        ? "Restore Previous Splitters" : "Reset Splitters",
+                    title: (snapshot.hasSplitterBackup
+                        ? "Restore Previous Splitters" : "Reset Splitters")
+                        + " · \(HotkeyService.resetSplittersBinding.label ?? "")",
                     action: .resetDividers))
             }
         } else {
