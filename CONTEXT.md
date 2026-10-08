@@ -65,3 +65,8 @@ _Avoid_: window id (that's the pure-state key), element
 Committing a decided plan (tile, swap, or switch): snapshot, restore, place, rollback, and notice logic. Owned by the tiling space's placement pipeline; the controller keeps focus, pruning, and dispatch.
 _Code_: `TilingSpace.execute(decision:)`
 _Avoid_: placement (which is only the place step), commit
+
+**Expected write**:
+A frame push whose whole life one owner holds: armed before the gateway call, its echo consumed, and its convergence judged one verify-delay later. A silent ignore — the app accepted the write and never moved — reverts the write's claimed effect: a layout write releases the window, a cover toggle restores the expansion it changed.
+_Avoid_: pending write, in-flight write, verification
+_Code_: `WriteExpectations`

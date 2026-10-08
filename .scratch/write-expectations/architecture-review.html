@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — tiled</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .chip { font-size: 0.75rem; line-height: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }
+      .mermaid { display: flex; justify-content: center; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <!-- Header -->
+      <header class="space-y-4">
+        <p class="text-xs uppercase tracking-widest text-slate-500">Architecture review</p>
+        <div class="flex items-end justify-between gap-4 flex-wrap">
+          <h1 class="font-serif text-4xl">tiled</h1>
+          <p class="text-sm text-slate-500 pb-1">2026-10-08 · HEAD <code class="font-mono">fabb338</code> · 608 tests green · 7 candidates · 8 suspected defects</p>
+        </div>
+        <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 border-t border-slate-200 pt-3">
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 border border-slate-400 bg-white"></span> module</span>
+          <span class="flex items-center gap-2"><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4"/></svg> seam</span>
+          <span class="flex items-center gap-2"><svg width="22" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke="#dc2626" stroke-width="2"/><path d="M16 1 L22 4 L16 7 Z" fill="#dc2626"/></svg> leak</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-3 deep"></span> deep module</span>
+        </div>
+        <p class="text-sm text-slate-600">Walked <code class="font-mono">Sources/tiled</code> (9,432 lines) and <code class="font-mono">Tests/tiledTests</code> (42 files), weighted to the hot spots: <code class="font-mono">TilingController</code> · <code class="font-mono">TilingSpace</code> · <code class="font-mono">LiveWindowGateway</code> · <code class="font-mono">AppDelegate</code> · <code class="font-mono">Layout</code> · <code class="font-mono">DragTracker</code>. The pure planning core, the canvas, the drag loop, and the gateway's pure policies held up — candidates start at their seams, not their interiors.</p>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- A1 -->
+        <article id="c-a1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">A1 · Give a write's expectation one owner, from arm to verdict</h2>
+            <div class="flex gap-2">
+              <span class="text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 px-3 py-1">Strong</span>
+              <span class="text-xs rounded-full bg-slate-100 text-slate-600 px-3 py-1">in-process</span>
+            </div>
+          </div>
+          <p class="font-mono text-sm text-slate-600">Sources/tiled/FrameWriter.swift · Sources/tiled/DragTracker.swift · Sources/tiled/TilingController.swift · Sources/tiled/TilingSpace.swift</p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">Before — the life of one expected write, split four ways</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex flex-col justify-between">
+                <div class="flex items-stretch gap-1 text-center">
+                  <div class="flex-1 border-l-4 border-emerald-500 bg-white rounded p-2">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-500">arm</div>
+                    <div class="text-[11px] mt-2 text-emerald-700">FrameWriter</div>
+                  </div>
+                  <div class="flex items-center text-slate-400">→</div>
+                  <div class="flex-1 border-l-4 border-indigo-500 bg-white rounded p-2">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-500">echo watch</div>
+                    <div class="text-[11px] mt-2 text-indigo-700">DragTracker</div>
+                  </div>
+                  <div class="flex items-center text-slate-400">→</div>
+                  <div class="flex-1 border-l-4 border-indigo-500 bg-white rounded p-2">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-500">settle · expire</div>
+                    <div class="text-[11px] mt-2 text-indigo-700">DragTracker</div>
+                  </div>
+                  <div class="flex items-center text-slate-400">→</div>
+                  <div class="flex-1 border-l-4 border-indigo-500 bg-white rounded p-2">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-500">verdict</div>
+                    <div class="text-[11px] mt-2 text-indigo-700">DragTracker</div>
+                  </div>
+                  <div class="flex items-center text-slate-400">→</div>
+                  <div class="flex-1 border-l-4 border-amber-500 bg-white rounded p-2">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-500">consequence</div>
+                    <div class="text-[11px] mt-2 text-amber-700">TilingController</div>
+                  </div>
+                </div>
+                <p class="text-xs text-slate-600 mt-3"><code class="font-mono">TilingSpace</code> separately decides whether a check exists at all — <code class="font-mono">.none</code> / <code class="font-mono">.rollback</code> (TilingSpace.swift:758-759, :848-849).</p>
+                <p class="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 mt-2">expand / collapse schedules no check — “no rollback path yet” (FrameWriter.swift:29-35); a silently ignored expand records <code class="font-mono">expanded[id]</code> while nothing moved (TilingSpace.swift:1033-1037).</p>
+              </div>
+            </figure>
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">After — one owner for arm → verdict → consequence</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex items-center justify-center">
+                <div class="deep rounded-lg p-5 w-full space-y-3 text-white">
+                  <div class="bg-white/10 border border-white/20 rounded p-2 text-center">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-300">interface</div>
+                    <div class="text-sm font-mono">write(to:) → verdict</div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2 text-[11px] text-slate-400">
+                    <span class="border border-white/10 rounded px-2 py-1">arm expectation</span>
+                    <span class="border border-white/10 rounded px-2 py-1">watch the echo</span>
+                    <span class="border border-white/10 rounded px-2 py-1">settle · expire</span>
+                    <span class="border border-white/10 rounded px-2 py-1">rollback consequence</span>
+                  </div>
+                  <p class="text-xs text-slate-300">expand &amp; collapse ride the same path; five mutants already guard the rules.</p>
+                </div>
+              </div>
+            </figure>
+          </div>
+
+          <div class="space-y-2">
+            <p><span class="font-semibold">Problem.</span> One write's life is split four ways: <code class="font-mono">FrameWriter</code> arms the expectation and may schedule a check (:89, :94), <code class="font-mono">DragTracker</code> watches the echo and renders the verdict (:197-202, :291-354), <code class="font-mono">TilingController</code> owns the schedulers and the rollback consequence (:423-432, :445-469), and the canvas decides whether a write is verified at all — with the reason for <code class="font-mono">.none</code> living only in a comment (:750-753).</p>
+            <p><span class="font-semibold">Solution.</span> One owner holds the whole life of an expected write — arm, echo, convergence, consequence — so a call site states only where the window goes and expand/collapse stop being an exception.</p>
+          </div>
+          <ul class="text-sm text-slate-700 grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc list-inside">
+            <li>One owner per write verdict</li>
+            <li>Expand gains a consequence path</li>
+            <li>Bugs concentrate in one module</li>
+            <li>One seam: arm → silence → rollback</li>
+          </ul>
+        </article>
+
+        <!-- A2 -->
+        <article id="c-a2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">A2 · One outcome, announced once</h2>
+            <div class="flex gap-2">
+              <span class="text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 px-3 py-1">Strong</span>
+              <span class="text-xs rounded-full bg-slate-100 text-slate-600 px-3 py-1">in-process</span>
+            </div>
+          </div>
+          <p class="font-mono text-sm text-slate-600">Sources/tiled/AppDelegate.swift · Sources/tiled/TilingController.swift · Sources/tiled/MenuText.swift</p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">Before — two channels answer the same action</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex items-center">
+                <div class="w-full space-y-4">
+                  <div class="w-48 mx-auto border border-slate-300 bg-white rounded p-2 text-center text-sm">Evict on an untiled window</div>
+                  <div class="flex justify-center gap-3">
+                    <div class="max-w-[220px] border border-red-300 bg-red-50 rounded-xl rounded-bl-none p-3 text-xs"><span class="block text-[10px] uppercase tracking-wider text-red-600 mb-1">controller outcome</span>“That window isn't tiled: nothing to evict.”<br/><span class="text-slate-500 font-mono">AppDelegate.swift:842-844</span></div>
+                    <div class="max-w-[220px] border border-amber-300 bg-amber-50 rounded-xl rounded-br-none p-3 text-xs"><span class="block text-[10px] uppercase tracking-wider text-amber-600 mb-1">delegate announcement</span>“Focused window evicted.”<br/><span class="text-slate-500 font-mono">AppDelegate.swift:743-746</span></div>
+                  </div>
+                  <p class="text-xs text-slate-600 text-center">Same shape for undo on an empty stack (:804-810 vs :858-860) and for untile-all on an empty canvas (:748-755). No test drives the delegate actions.</p>
+                </div>
+              </div>
+            </figure>
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">After — the typed outcome is the only voice</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex items-center">
+                <div class="w-full space-y-4">
+                  <div class="w-48 mx-auto border border-slate-300 bg-white rounded p-2 text-center text-sm">Evict</div>
+                  <div class="flex justify-center"><svg width="12" height="26"><line x1="6" y1="0" x2="6" y2="18" stroke="#64748b" stroke-width="2"/><path d="M3 18 L6 26 L9 18 Z" fill="#64748b"/></svg></div>
+                  <div class="deep rounded-lg p-3 text-center text-white text-sm max-w-[240px] mx-auto">one announcement per action<span class="block text-[11px] text-slate-300 mt-1">driven by <code class="font-mono">Outcome</code>; copy stays in MenuText</span></div>
+                  <p class="text-xs text-slate-600 text-center">Outcomes are already pure and tested — the delegate becomes a mapping.</p>
+                </div>
+              </div>
+            </figure>
+          </div>
+
+          <div class="space-y-2">
+            <p><span class="font-semibold">Problem.</span> The controller types an outcome and posts <code class="font-mono">onFeedback</code> (:137-157, :1081-1084), then the delegate's action methods announce success unconditionally — so one action speaks two contradictory sentences, and the tests only pin the delegate's pure helpers.</p>
+            <p><span class="font-semibold">Solution.</span> One announcement per action, driven by the typed outcome the controller already computes; the delegate adds no success sentence of its own.</p>
+          </div>
+          <ul class="text-sm text-slate-700 grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc list-inside">
+            <li>One announcement per action</li>
+            <li>Pure outcomes reused, not re-guessed</li>
+            <li>Contradictions impossible by shape</li>
+            <li>Delegate becomes a mapping</li>
+          </ul>
+        </article>
+
+        <!-- A3 -->
+        <article id="c-a3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">A3 · Make the death standard's assembly as testable as its decision table</h2>
+            <div class="flex gap-2">
+              <span class="text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 px-3 py-1">Strong</span>
+              <span class="text-xs rounded-full bg-slate-100 text-slate-600 px-3 py-1">mock</span>
+            </div>
+          </div>
+          <p class="font-mono text-sm text-slate-600">Sources/tiled/LiveWindowGateway.swift · Sources/tiled/TilingController.swift · Sources/tiled/WindowGateway.swift · Tests/tiledTests/FakeWindowGateway.swift</p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">Before — the gathering is only met through a coarse fake</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex flex-col justify-center gap-2">
+                <p class="text-xs text-red-700">the only way tests meet this path:</p>
+                <div class="border border-red-300 bg-red-50 rounded p-2 text-xs text-center">FakeWindowGateway.liveness — a four-state switch (FakeWindowGateway.swift:129-134)</div>
+                <div class="flex items-center gap-2"><span class="text-red-500">⇣</span><span class="text-[10px] uppercase tracking-wider text-slate-500">cannot express: app answers, no frame matches · unreadable frame · element churn</span></div>
+                <div class="border-l-4 border-slate-400 bg-white rounded p-2 text-xs">prune loop — once per managed record (TilingController.swift:642-649)</div>
+                <div class="border-l-4 border-slate-400 bg-white rounded p-2 text-xs">liveness() gathering — app element · whole window list · every frame read (LiveWindowGateway.swift:212-273)</div>
+                <div class="border-l-4 border-emerald-500 bg-white rounded p-2 text-xs">pure decision table — pinned by AXLivenessTests (:754-768)</div>
+                <p class="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">A failed probe walks the app's whole window list (LiveWindowGateway.swift:227-251, :242) once per record, on the main runloop (:189-200) — a hotkey press triggers it too (TilingController.swift:306).</p>
+              </div>
+            </figure>
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">After — split at the seam: gather from the app, decide from facts</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex flex-col justify-center gap-2">
+                <div class="border-l-4 border-slate-400 bg-white rounded p-2 text-xs">prune pass — asks each app once</div>
+                <div class="flex items-center gap-2"><span class="text-slate-400">⇣</span><span class="text-[10px] uppercase tracking-wider text-slate-500">gathering adapter: what the app answered (list, frames, baseline)</span></div>
+                <div class="deep rounded-lg p-4 text-white space-y-2">
+                  <div class="text-[10px] uppercase tracking-wider text-slate-300">deep module</div>
+                  <div class="text-sm">death decision — exact scenarios</div>
+                  <div class="text-[11px] text-slate-300 border border-white/10 rounded px-2 py-1">“app answers, no frame matches” is a test case, not prose (:234-251)</div>
+                </div>
+                <p class="text-xs text-slate-600">Ghost slots and false deaths — the highest-consequence runtime decisions — get a direct table.</p>
+              </div>
+            </figure>
+          </div>
+
+          <div class="space-y-2">
+            <p><span class="font-semibold">Problem.</span> <code class="font-mono">liveness(of:)</code> gathers fresh app elements, whole window lists, and every listed frame, then feeds a pure table (:212-273 → :754-768) — but no test drives the gathering, and the same call is unbounded work on the main runloop.</p>
+            <p><span class="font-semibold">Solution.</span> Separate what the app answered (list contents, frame reads, baseline) from what it means, so the death decision is exercised by exact scenarios; make one prune pass ask each app once.</p>
+          </div>
+          <ul class="text-sm text-slate-700 grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc list-inside">
+            <li>Death decision gets a table</li>
+            <li>Ambiguous cases become tests</li>
+            <li>One pass, one app walk</li>
+            <li>Main runloop stops stalling</li>
+          </ul>
+        </article>
+
+        <!-- A4 -->
+        <article id="c-a4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">A4 · One owner for restoring an undo chapter across canvases</h2>
+            <div class="flex gap-2">
+              <span class="text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 px-3 py-1">Strong</span>
+              <span class="text-xs rounded-full bg-slate-100 text-slate-600 px-3 py-1">in-process</span>
+            </div>
+          </div>
+          <p class="font-mono text-sm text-slate-600">Sources/tiled/TilingController.swift · Sources/tiled/TilingSpace.swift · Sources/tiled/Layout.swift</p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">Before — chapter restoration written twice</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] relative">
+                <div class="absolute left-4 top-10 w-56 border-2 border-indigo-300 bg-indigo-50 rounded-lg p-3 text-xs">
+                  <span class="block text-[10px] uppercase tracking-wider text-indigo-600 mb-1">TilingSpace.undo</span>
+                  restore · retile · narrate (:304-360)
+                  <span class="block mt-1 text-slate-500">requester branch: harness-only (:308-310)</span>
+                </div>
+                <div class="absolute left-32 top-32 w-64 border-2 border-amber-300 bg-amber-50 rounded-lg p-3 text-xs">
+                  <span class="block text-[10px] uppercase tracking-wider text-amber-600 mb-1">TilingController driver</span>
+                  pop · blockers · grouping · notice precedence · re-decides what the canvas decided (:805-892)
+                </div>
+                <div class="absolute left-6 bottom-6 right-6 text-red-700 bg-red-50 border border-red-200 rounded p-2 text-xs">partial failure swallowed — success narrated when one canvas erred (:878-885); six mutants miss this driver entirely.</div>
+              </div>
+            </figure>
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">After — one named behaviour, owned where the canvas table lives</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex items-center justify-center">
+                <div class="deep rounded-lg p-5 w-full space-y-3 text-white">
+                  <div class="bg-white/10 border border-white/20 rounded p-2 text-center text-sm">chapter restoration</div>
+                  <div class="grid grid-cols-2 gap-2 text-[11px] text-slate-400">
+                    <span class="border border-white/10 rounded px-2 py-1">step-aside admission</span>
+                    <span class="border border-white/10 rounded px-2 py-1">per-canvas grouping</span>
+                    <span class="border border-white/10 rounded px-2 py-1">notice / error precedence</span>
+                    <span class="border border-white/10 rounded px-2 py-1">partial failure surfaced</span>
+                  </div>
+                  <p class="text-xs text-slate-300">Invoked once by the controller; the canvas supplies restore/commit primitives.</p>
+                </div>
+              </div>
+            </figure>
+          </div>
+
+          <div class="space-y-2">
+            <p><span class="font-semibold">Problem.</span> Undo is the app's stated safety promise (:786-792) yet its cross-canvas rules are written twice and its least reachable path: the canvas narrates its own restore (:351-358), the controller re-decides everything (:878-892), and the canvas's requester branch is unreachable in production (the controller passes <code class="font-mono">nil</code>, :867).</p>
+            <p><span class="font-semibold">Solution.</span> Make chapter restoration one named behaviour the controller invokes — it is the only holder of the canvas table — with the canvas supplying its own restore/commit primitives; delete the dead branch.</p>
+          </div>
+          <ul class="text-sm text-slate-700 grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc list-inside">
+            <li>Chapter restore owned once</li>
+            <li>Partial failure reaches the user</li>
+            <li>Dead canvas branch deleted</li>
+            <li>One seam for undo integrity</li>
+          </ul>
+        </article>
+
+        <!-- A5 -->
+        <article id="c-a5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">A5 · One codec for a binding at rest</h2>
+            <div class="flex gap-2">
+              <span class="text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 px-3 py-1">Strong</span>
+              <span class="text-xs rounded-full bg-slate-100 text-slate-600 px-3 py-1">in-process</span>
+            </div>
+          </div>
+          <p class="font-mono text-sm text-slate-600">Sources/tiled/HotkeyBinding.swift · Sources/tiled/SettingsShortcutsTab.swift</p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">Before — one persisted shape, three decoders, one guard</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex items-center">
+                <table class="w-full text-xs bg-white rounded border border-slate-200">
+                  <thead><tr class="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200"><th class="text-left p-2">reader · writer</th><th class="p-2">guard</th><th class="p-2">write path</th></tr></thead>
+                  <tbody>
+                    <tr class="border-b border-slate-100"><td class="p-2 font-mono">HotkeyStore.binding</td><td class="p-2 text-center text-emerald-600">✓</td><td class="p-2 text-center text-emerald-600">✓</td></tr>
+                    <tr class="border-b border-slate-100"><td class="p-2 font-mono">ShortcutsTab.parkedBinding</td><td class="p-2 text-center text-red-600">✗ traps</td><td class="p-2 text-center text-red-600">✗</td></tr>
+                    <tr><td class="p-2 font-mono">resetBackupBinding</td><td class="p-2 text-center text-red-600">✗ traps</td><td class="p-2 text-center text-red-600">✗</td></tr>
+                  </tbody>
+                </table>
+
+              </div>
+            </figure>
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">After — one codec owns encode, decode, and the convention</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex items-center justify-center">
+                <div class="w-full space-y-3">
+                  <div class="grid grid-cols-3 gap-2 text-center text-[11px]">
+                    <span class="border border-slate-300 bg-white rounded p-2 font-mono">store</span>
+                    <span class="border border-slate-300 bg-white rounded p-2 font-mono">park</span>
+                    <span class="border border-slate-300 bg-white rounded p-2 font-mono">reset backup</span>
+                  </div>
+                  <div class="flex justify-center"><svg width="12" height="22"><line x1="6" y1="0" x2="6" y2="15" stroke="#64748b" stroke-width="2"/><path d="M3 15 L6 22 L9 15 Z" fill="#64748b"/></svg></div>
+                  <div class="deep rounded-lg p-4 text-white text-center">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-300">deep module</div>
+                    <div class="text-sm">binding codec — guards + negative-keyCode convention in one place</div>
+                  </div>
+                  <p class="text-xs text-slate-600 text-center">One corrupt-data table exercises every reader; no path can trap.</p>
+                </div>
+              </div>
+            </figure>
+          </div>
+
+          <div class="space-y-2">
+            <p><span class="font-semibold">Problem.</span> The same <code class="font-mono">["modifiers": Int, "keyCode": Int]</code> shape is decoded three times under three rules: <code class="font-mono">HotkeyStore.binding</code> guards <code class="font-mono">modifiers &gt;= 0</code> — its comment says corrupt data “must not reach UInt32 (a trap)” (:202-205) — while <code class="font-mono">parkedBinding</code> (:541-547) and <code class="font-mono">resetBackupBinding</code> (:774-780) construct <code class="font-mono">UInt32(modifiers)</code> unguarded. Zero mutants target the codec.</p>
+            <p><span class="font-semibold">Solution.</span> One codec owns the persisted shape for the store, the park, and the reset backup — encode, decode, convention — while the tab keeps only editing behaviour.</p>
+          </div>
+          <ul class="text-sm text-slate-700 grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc list-inside">
+            <li>Corrupt storage cannot trap</li>
+            <li>One validation table</li>
+            <li>Format change is one edit</li>
+            <li>Three readers, one rule</li>
+          </ul>
+        </article>
+
+        <!-- A6 -->
+        <article id="c-a6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">A6 · One refresh pass owns the status item and the menu</h2>
+            <div class="flex gap-2">
+              <span class="text-xs font-semibold rounded-full bg-amber-100 text-amber-800 px-3 py-1">Worth exploring</span>
+              <span class="text-xs rounded-full bg-slate-100 text-slate-600 px-3 py-1">in-process</span>
+            </div>
+          </div>
+          <p class="font-mono text-sm text-slate-600">Sources/tiled/AppDelegate.swift · Sources/tiled/MenuModel.swift · Sources/tiled/StatusIcon.swift</p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">Before — two diff implementations, many writers</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-white p-4 min-h-[280px]">
+                <pre class="mermaid">
+flowchart LR
+  E["menuNeedsUpdate"] --> P["refreshPlan"]
+  F["focus change"] --> Q["refreshFocusedDisplay"]
+  H["hotkey change"] --> P
+  E --> S["icon + menu snapshots"]
+  P --> S
+  Q --> S
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class P,Q leak
+                </pre>
+              </div>
+            </figure>
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">After — one pass, one writer per snapshot</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-white p-4 min-h-[280px]">
+                <pre class="mermaid">
+flowchart LR
+  E["menuNeedsUpdate"] --> P["one refresh pass"]
+  F["focus change"] --> P
+  H["hotkey change"] --> P
+  P --> S["one writer per snapshot"]
+  classDef deep fill:#0f172a,color:#ffffff,stroke:#0f172a;
+  class P deep
+                </pre>
+              </div>
+            </figure>
+          </div>
+
+          <div class="space-y-2">
+            <p><span class="font-semibold">Problem.</span> The diff decision has two implementations — <code class="font-mono">refreshPlan</code> (:389-399) and <code class="font-mono">refreshFocusedDisplay</code> (:359-364) — the icon has three writers (:187-195, :347-351, :912-919), and <code class="font-mono">menuSnapshot()</code> claims “one immutable pass” but re-resolves focus three times (:455, :466, :477). One mutant guards all of it.</p>
+            <p><span class="font-semibold">Solution.</span> One refresh pass computes both snapshots once and owns both diffs; open-menu deferral and focus-driven redraw become decisions of that pass.</p>
+          </div>
+          <ul class="text-sm text-slate-700 grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc list-inside">
+            <li>Staleness reasoned once</li>
+            <li>One writer per snapshot</li>
+            <li>Focus resolved once per pass</li>
+            <li>Deferral rule in one place</li>
+          </ul>
+        </article>
+
+        <!-- A7 -->
+        <article id="c-a7" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h2 class="font-serif text-2xl">A7 · One dependency value and a testable tab lifecycle</h2>
+            <div class="flex gap-2">
+              <span class="text-xs font-semibold rounded-full bg-amber-100 text-amber-800 px-3 py-1">Worth exploring</span>
+              <span class="text-xs rounded-full bg-slate-100 text-slate-600 px-3 py-1">in-process</span>
+            </div>
+          </div>
+          <p class="font-mono text-sm text-slate-600">Sources/tiled/SettingsWindowController.swift · Sources/tiled/SettingsGeneralTab.swift · Sources/tiled/SettingsWelcomeTab.swift · Sources/tiled/SettingsShortcutsTab.swift</p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">Before — six forwarded closures, hand-built rebuilds, a dead resize path</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-white p-4 min-h-[280px]">
+                <pre class="mermaid">
+flowchart LR
+  AD["AppDelegate"] -->|"6 closures"| SW["SettingsWindowController"]
+  SW --> G["General tab"]
+  SW --> W["Welcome tab"]
+  SW --> S["Shortcuts tab"]
+  S -. buildSize frozen .-> R["windowDidResize — never fires"]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class R leak
+                </pre>
+              </div>
+            </figure>
+            <figure>
+              <figcaption class="chip text-slate-500 mb-2">After — one dependency value, named lifecycle methods</figcaption>
+              <div class="rounded-lg border border-slate-200 bg-stone-100 p-4 min-h-[280px] flex items-center justify-center">
+                <div class="w-full space-y-3">
+                  <div class="deep rounded-lg p-3 text-center text-white text-sm">one dependency value<span class="block text-[11px] text-slate-300">replaces six forwarded closures (:22-58)</span></div>
+                  <div class="grid grid-cols-3 gap-2 text-center text-[11px]">
+                    <span class="border border-slate-300 bg-white rounded p-2">General</span>
+                    <span class="border border-slate-300 bg-white rounded p-2">Welcome</span>
+                    <span class="border border-slate-300 bg-white rounded p-2">Shortcuts</span>
+                  </div>
+                  <p class="text-xs text-slate-600 text-center">Which tab exists, where focus lands, what size a rebuild uses — named methods a headless test drives.</p>
+                </div>
+              </div>
+            </figure>
+          </div>
+
+          <div class="space-y-2">
+            <p><span class="font-semibold">Problem.</span> The wiring is six closures fanned by <code class="font-mono">didSet</code> (:22-58), tab views rebuilt by hand (:154-179, :200-241), and <code class="font-mono">windowDidResize</code> (:276-280) can never run — nothing assigns the window delegate — so a later rebuild uses the build-time <code class="font-mono">size</code> (SettingsShortcutsTab.swift:495, :513-515). No tests, no mutants.</p>
+            <p><span class="font-semibold">Solution.</span> Hand the window one dependency value instead of six forwarded closures, and move tab-lifecycle decisions behind named methods a headless test can drive.</p>
+          </div>
+          <ul class="text-sm text-slate-700 grid sm:grid-cols-2 gap-x-8 gap-y-1 list-disc list-inside">
+            <li>Resize path lives again</li>
+            <li>One wiring point</li>
+            <li>Tabs drivable headless</li>
+            <li>Stale-size rebuild fixed</li>
+          </ul>
+        </article>
+
+      </section>
+
+      <!-- Top recommendation -->
+      <section id="top-recommendation" class="space-y-4">
+        <h2 class="font-serif text-2xl">Top recommendation</h2>
+        <div class="rounded-xl deep text-white p-6 space-y-2">
+          <p class="text-xs uppercase tracking-widest text-slate-400">Start here</p>
+          <h3 class="font-serif text-2xl">A1 · Give a write's expectation one owner</h3>
+          <p class="text-sm text-slate-200">The write expectation's life is split four ways, and one path — expand — has no verdict at all. One owner makes silent non-convergence impossible and gives the suite one seam to drive arm → silence → rollback. A close second: A3, where the highest-consequence runtime decision (release a slot or keep it) currently has no testable assembly.</p>
+          <a href="#c-a1" class="inline-block text-xs uppercase tracking-wider text-emerald-300 underline underline-offset-4">Jump to A1 →</a>
+        </div>
+      </section>
+
+      <!-- Suspected defects -->
+      <section id="defects" class="space-y-4">
+        <h2 class="font-serif text-2xl">Suspected defects <span class="text-base text-slate-500 font-sans">— found during the walk, not yet caught by a failing test</span></h2>
+        <div class="rounded-xl border border-slate-200 bg-white p-6">
+          <ol class="text-sm text-slate-700 space-y-2 list-decimal list-inside">
+            <li>Contradictory announcements from delegate actions — <code class="font-mono">AppDelegate.swift:743-746, :754-755, :858-860</code> vs <code class="font-mono">TilingController.swift:804-810, :1081-1084</code> <span class="text-slate-400">(→ A2)</span></li>
+            <li>Corrupt-defaults trap — unguarded <code class="font-mono">UInt32(modifiers)</code> at <code class="font-mono">SettingsShortcutsTab.swift:544-546, :776-779</code> <span class="text-slate-400">(→ A5)</span></li>
+            <li>Dead resize path / stale rebuild size — <code class="font-mono">SettingsWindowController.swift:276-280</code> never runs; <code class="font-mono">SettingsShortcutsTab.swift:495, :513-515</code> <span class="text-slate-400">(→ A7)</span></li>
+            <li>Unbounded prune work on the main runloop — <code class="font-mono">TilingController.swift:642-649</code>; <code class="font-mono">LiveWindowGateway.swift:227-251, :242, :51</code> <span class="text-slate-400">(→ A3)</span></li>
+            <li>Partial undo failure swallowed — <code class="font-mono">TilingController.swift:878-885</code> <span class="text-slate-400">(→ A4)</span></li>
+            <li>Deferred off-Space write reported as an app refusal — <code class="font-mono">FrameWriter.swift:74-78</code>; <code class="font-mono">TilingSpace.swift:758-768</code></li>
+            <li>Carbon hotkey handler outlives its instance (unretained context, <code class="font-mono">handlerInstalled</code> never reset) — <code class="font-mono">HotkeyService.swift:189-201, :215, :128-129</code></li>
+            <li>Clear-recorder advice names the wrong recovery — <code class="font-mono">SettingsShortcutsTab.swift:629-634</code> vs <code class="font-mono">:263-271, :426-460, :770-791</code></li>
+          </ol>
+          <p class="text-xs text-slate-500 mt-4">Each is a hypothesis: take it to <code class="font-mono">/diagnosing-bugs</code> for a tight red loop before touching code. Candidates cover 1–5 structurally; 6–8 are standalone.</p>
+        </div>
+      </section>
+
+    </main>
+  </body>
+</html>
