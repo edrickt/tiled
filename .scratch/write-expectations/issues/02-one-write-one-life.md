@@ -1,7 +1,7 @@
 # Stage 2 - One write, one life
 
-Status: TODO
-Blocked by: stage 1.
+Status: DONE at `281614c` ("Dissolve FrameWriter into WriteExpectations"), master.
+Blocked by: stage 1 (done).
 Blocks: - (closes the arc).
 
 ## What ships
@@ -69,3 +69,30 @@ Blocks: - (closes the arc).
 - `code-review` on both axes against stage 1's commit.
 - Commit on `master` in the repo's style with gate evidence in the body; update this ticket and the
   README table; the arc closes.
+
+## Evidence
+
+- `swift build`: clean, zero warnings.
+- `swift test`: 629/629 (was 621). `FrameWriterTests` dissolves: its four policy cases re-point into
+  `WriteExpectationsTests`, the `.none`-check case dies with the flag, and eight owner cases are new
+  (policy ordering, consequence firing, token carriage, converged silence, supersede, forget). The
+  controller's late-verify cases re-point through the consequence port and pin discard + message +
+  feedback + onChange; `ExpandToggleTests` gains the cover-toggle revert in both directions plus the
+  retile leg, and `ControllerGatewayTests` gains the two widening cases (silent-ignored
+  `.switchLayout` placement and undo retile roll back).
+- `python3 tools/mutation/mutate.py`: 54/54 caught, none STALE. The five `FrameWriter` entries
+  re-point to `WriteExpectations.swift` against their new source text ("check never armed" replaces
+  "rollback check inverted"); "supersede dropped", "expand silent ignore skips the revert", and
+  "collapse silent ignore skips the revert" are new.
+- `code-review` on both axes against `e495f86`:
+  - Spec: one real gap - the retile leg of cover-toggle had no fired-check test, so a `revertTo`
+    mutation there would have survived; fixed by `testSilentlyIgnoredRetileRestoresTheExpansion`.
+    One scope-creep note - the harness recorded consequences no test read; the recorder is removed.
+    Everything else checked out: policy moved line-for-line, deletions complete, widening lands via
+    `applyLayout`/`writeRects`, gateway-direct restores untouched.
+  - Standards (glossary + smell baseline; no repo standards files): vocabulary drift fixed
+    ("in-flight" in comments, `verifyDelay` -> `checkDelay`, the new cover-toggle debug line);
+    the duplicated refusal-surfacing skeleton shared by the two consequence bodies is now one
+    `surfaceIgnoredWrite` helper. Judgement calls accepted as settled design: `slotCommit` /
+    `coverToggle` are the arc's own token names, the `revertTo: CGRect?` nil sentinel mirrors the
+    `expanded` record it restores, and the test files keep their own scheduler scaffolding.

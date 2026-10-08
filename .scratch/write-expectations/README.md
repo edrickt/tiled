@@ -6,11 +6,13 @@ grilling on 2026-10-08; this file is the single source of truth for the design a
 
 ## Where this is
 
-Stage 1 is DONE at `e495f86` ("Home the write expectation store in WriteExpectations"): the store
-lives in `WriteExpectations`, the tracker consumes its verdicts, FrameWriter arms through the owner,
-621 tests green, 51/51 mutants caught. Stage 2 remains, unblocked. When the arc was written, `master`
-at `fabb338` held 608 tests green and 50/50 mutants. `CONTEXT.md` carries the term **Expected write**
-(`_Code_: WriteExpectations`).
+Both stages are DONE and the arc is closed at `281614c` ("Dissolve FrameWriter into
+WriteExpectations"). `WriteExpectations` owns a frame push's whole life: the shared write policy, the
+armed expectation, the tick verdicts, the late check with its supersede/forget rules, the consequence
+tokens, and intent; `FrameWriter`, the `Check` flag, `Outcome.verify`, and the controller-side
+scheduling are gone. 629 tests green, 54/54 mutants caught. Stage 1 was `e495f86`; when the arc was
+written, `master` at `fabb338` held 608 tests green and 50/50 mutants. `CONTEXT.md` carries the term
+**Expected write** (`_Code_: WriteExpectations`).
 
 ## The design (settled)
 
@@ -48,7 +50,7 @@ at `fabb338` held 608 tests green and 50/50 mutants. `CONTEXT.md` carries the te
 | # | Ticket | Delivers | Blocked by | Status |
 |---|---|---|---|---|
 | 1 | `issues/01-home-the-store.md` | `WriteExpectations` holds the store; tracker consumes; FrameWriter arms through it | - | DONE (`e495f86`) |
-| 2 | `issues/02-one-write-one-life.md` | FrameWriter dissolves; unconditional deduped checks; both consequence tokens; the widening; arc closes | 1 | TODO |
+| 2 | `issues/02-one-write-one-life.md` | FrameWriter dissolves; unconditional deduped checks; both consequence tokens; the widening; arc closes | 1 | DONE (`281614c`) |
 
 ## Running one stage in a fresh session
 
