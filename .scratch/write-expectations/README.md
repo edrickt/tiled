@@ -102,5 +102,9 @@ mutation-table target stays live and caught.
   `UInt32` trap guards, so the store, the Disable-all park, and the reset backup
   share one rule; defect 2's unguarded `UInt32(modifiers)` is gone, the park's
   live-only rule sits symmetrically in its read/write pair, and five mutants now
-  guard the codec. Candidates A6-A7 and defects 6-8 from the review report remain
-  unclaimed.
+  guard the codec.
+- Candidate A6 ("One refresh pass owns the status item and the menu") is done at
+  `21c771c`: `captureMenuBar()` resolves focus once and builds both snapshots,
+  the pure `refreshPlan` owns both diffs and the open-menu deferral,
+  `refreshFocusedDisplay` is gone, and the icon and menu each have one writer.
+  Candidate A7 and defects 6-8 from the review report remain unclaimed.
