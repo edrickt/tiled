@@ -96,5 +96,11 @@ mutation-table target stays live and caught.
   the controller owns chapter restoration once (step-aside admission, grouping,
   notice/error precedence), the dead canvas requester branch and `UndoOutcome`
   are gone, and defect 5's partial undo failure now surfaces ahead of the success
-  sentence. Candidates A5-A7 and defects 6-8 from the review report remain
+  sentence.
+- Candidate A5 ("One codec for a binding at rest") is done at `311778f`:
+  `HotkeyBindingCodec` owns the persisted shape, the disabled sentinel, and the
+  `UInt32` trap guards, so the store, the Disable-all park, and the reset backup
+  share one rule; defect 2's unguarded `UInt32(modifiers)` is gone, the park's
+  live-only rule sits symmetrically in its read/write pair, and five mutants now
+  guard the codec. Candidates A6-A7 and defects 6-8 from the review report remain
   unclaimed.
