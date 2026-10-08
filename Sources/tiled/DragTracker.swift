@@ -6,16 +6,18 @@ import Foundation
 ///
 /// Previously interleaved with placement records inside TilingController;
 /// the real bugs hid in how echo entries interacted with edge diffs, not
-/// in either alone. Now the whole loop (echo suppression, edge
-/// detection, splitter updates, apply coalescing) lives behind one
-/// interface and is testable through it with a fake gateway.
+/// in either alone. Now the drag loop (edge detection, splitter updates,
+/// apply coalescing) lives behind one interface and is testable through
+/// it with a fake gateway, while `WriteExpectations` owns our writes'
+/// echo entries and classifies each tick.
 ///
 /// Protocol: the controller feeds each gateway callback to
 /// `handleChange`, and every rect the tracker computes via
 /// `rect(for:in:)`; the dragged window's own edge is the source of truth
 /// and is skipped on re-push so the tracker never fights an in-progress
-/// native drag. Writes are bookkept as expected frames so our own echoes
-/// don't recurse.
+/// native drag. `handleChange` consumes the owner's verdict per tick:
+/// swallowed ticks never reach the edge diff, a live tick diffs against
+/// the last-known frame.
 ///
 /// Edge drags resize only the dragged window while the button is down:
 /// splitter fractions commit live, but the neighbor re-pushes wait for
@@ -48,10 +50,6 @@ final class DragTracker {
         var frameOf: (WindowID) -> CGRect?
         var boundsOf: (CGRect) -> CGRect
         var occupants: () -> [Slot: WindowID]
-        /// Clock for echo-bookkeeping timestamps. Injectable so tests can
-        /// fast-forward past the stale-write window without waiting on a
-        /// real 3-second timeout.
-        var now: () -> Date = Date.init
         /// Canvas owning a tiled window (its display plus Mission
         /// Control Space). Nil = legacy single-canvas mode: the shared
         /// `grid` serves everyone, and all per-canvas paths fall back to
@@ -77,6 +75,10 @@ final class DragTracker {
     }
 
     private let context: Context
+    /// Owns our writes' echo entries and classifies each gateway tick;
+    /// the tracker keeps only drag state (last-known frames, drags,
+    /// pending pushes).
+    private let expectations: WriteExpectations
     /// Pushes computed rects (excluding the dragged window). Refusal
     /// attribution belongs to the canvas the push routes to.
     private let apply: (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Void
@@ -85,8 +87,6 @@ final class DragTracker {
     private let onUntile: (WindowID) -> Void
     private let log: (String) -> Void
     private var lastKnownFrames: [WindowID: CGRect] = [:]
-    /// Frames recently pushed (echo suppression).
-    private var expectedFrames: [WindowID: ExpectedWrite] = [:]
 
     /// In-progress title-bar drag for one window: frame at drag start,
     /// latest frame, moved-tick count, and the pending drag-end canceller.
@@ -106,22 +106,6 @@ final class DragTracker {
     /// re-push they imply waits for the click to lift (see `mouseLifted`).
     private var pendingResizeApplies: [TilingSpaceKey?: WindowID] = [:]
 
-    private static let echoTolerance: CGFloat = 32
-    /// Writes within this distance of the window's current frame are
-    /// no-ops: the app changes nothing and emits no AX notification, so
-    /// marking them expected would leave an echo entry that never
-    /// converges, and the late convergence check would read that silence
-    /// as a silent ignore and evict an already-correct window. Skipped
-    /// writes are success: state already agrees with the screen.
-    static let noOpWriteTolerance: CGFloat = 1
-    private static let staleWrite: TimeInterval = 3
-    /// Post-converge settle window: macOS animation tails run ~0.2-0.5s,
-    /// so 1s swallows them with margin while barely extending the blind
-    /// prefix on a drag-out that starts the instant a write lands (a real
-    /// drag escapes the moment it leaves the tolerance radius anyway,
-    /// landing the splitter on its absolute position; only the untile
-    /// distance, measured from the first escaped tick, can read short).
-    private static let settleWindow: TimeInterval = 1
     /// Minimum edge travel that counts as a drag (below this is jitter).
     private static let edgeMoveThreshold: CGFloat = 1
     /// Origin drag distance past which a title-bar drag untiles the window.
@@ -156,22 +140,8 @@ final class DragTracker {
         return { item.cancel() }
     }
 
-    private struct ExpectedWrite {
-        let frame: CGRect
-        /// Last observed sum-of-edge-deltas from `frame`. Starts at infinity;
-        /// only a strictly increasing distance means a user took over.
-        var lastDistance: CGFloat
-        /// Write time, or the consume moment once settled: bounds both
-        /// the unapplied-write wait and the post-converge settle window.
-        var date: Date
-        /// True once a tick landed within tolerance: the write applied and
-        /// the window is settling. Close ticks keep being swallowed for
-        /// `settleWindow` so the animation tail is never mistaken for a
-        /// drag; a tick beyond tolerance ends settling and processes live.
-        var settled: Bool
-    }
-
     init(
+        expectations: WriteExpectations,
         context: Context,
         gridProvider: GridProvider,
         apply: @escaping (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Void,
@@ -179,6 +149,7 @@ final class DragTracker {
         scheduleDragEnd: @escaping DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         log: @escaping (String) -> Void = { _ in }
     ) {
+        self.expectations = expectations
         self.context = context
         self.gridProvider = gridProvider
         self.apply = apply
@@ -189,72 +160,30 @@ final class DragTracker {
 
     private let scheduleDragEnd: DragEndScheduler
 
-    // MARK: Tracking
+    // MARK: Pushed targets
 
-    /// Notes a rect we pushed, so its echo is swallowed, not mistaken for
-    /// a drag. Also seeds the last-known frame for edge diffing. Any
-    /// in-progress drag on the window is dropped: its baseline is stale.
-    func markExpected(_ id: WindowID, _ frame: CGRect) {
-        expectedFrames[id] = ExpectedWrite(
-            frame: frame, lastDistance: .infinity, date: context.now(), settled: false)
+    /// A frame write for `id` is in flight (or the drag loop scheduled a
+    /// push for it): the target we asked for becomes the diff baseline,
+    /// and any in-progress drag is dropped - its baseline predates the
+    /// write, so its eventual snapback/untile decision would be stale.
+    /// The owner arms the echo expectation separately.
+    func notePushed(_ id: WindowID, _ frame: CGRect) {
         lastKnownFrames[id] = frame
         clearDrag(id)
     }
 
-    /// Last rect pushed for `id` (via `markExpected`), if any: our
-    /// intent for the window, as opposed to whatever the gateway last
-    /// reported. Lets diffing prefer intent over echoes.
-    func lastPushedTarget(for id: WindowID) -> CGRect? {
-        expectedFrames[id]?.frame
-    }
-
-    /// Convergence verdict for one pending write, read by the controller's
-    /// late verification. Nil = inconclusive, leave the window alone:
-    /// the entry is gone (consumed by success, cleared by takeover, or
-    /// superseded by a newer write) or frames arrived but never settled.
-    /// `.ignored` = the write never took effect and nothing echoed.
-    /// `.converged` = a tick landed within tolerance of the target.
-    enum Convergence { case converged, ignored }
-    func convergence(for id: WindowID) -> Convergence? {
-        guard let entry = expectedFrames[id] else { return nil }
-        if entry.settled { return .converged }
-        guard entry.lastDistance == .infinity else { return nil }
-        // Total echo silence alone is not a silent ignore: apps that
-        // round frames to an internal grid (Terminal rounds to character
-        // cells) can absorb a write whose target sits within their
-        // rounding distance: the frame does not actually change, so no
-        // notification is emitted. Before calling it ignored, check the
-        // live frame directly: within the echo tolerance of the target
-        // means the write took effect (or needed no effect). An
-        // UNREADABLE live frame is also not a silent ignore: it is a
-        // can't-judge. During a lid close/open the frame read fails for
-        // live windows, and judging that as ignored rolled fresh
-        // placements back (observed on live AX); benefit of the doubt
-        // applies — the next write re-verifies.
-        guard let live = context.liveFrameOf(id) else {
-            expectedFrames[id] = nil
-            log("convergence win\(id): live frame unreadable, skipping")
-            return nil
-        }
-        if Self.framesClose(entry.frame, live, tolerance: Self.echoTolerance)
-        {
-            expectedFrames[id] = nil
-            log("convergence win\(id): silent but at target (live=\(live))")
-            return .converged
-        }
-        return .ignored
-    }
+    // MARK: Forgetting
 
     /// Forgets a window: untile, restore, and prune paths call this so
-    /// stale echo entries never swallow a future drag on a recycled id.
-    /// Push targets are intentionally kept: undo chapters replay writes
-    /// for ids whose frames were restored out from under them, and the
-    /// intent (last pushed target) must survive the record clearing.
-    /// Fresh `markExpected` calls overwrite; only recycled ids could
-    /// collide, and those re-mark on their first new write.
+    /// stale echo entries never swallow a future drag on a recycled id,
+    /// and a pending convergence check never rolls back a window that
+    /// already moved on. The owner clears the echo entry and cancels the
+    /// check but keeps the intent (undo chapters replay writes for ids
+    /// whose frames were restored out from under them); the tracker drops
+    /// its diff baseline and any in-flight drag.
     func forget(_ id: WindowID) {
         lastKnownFrames[id] = nil
-        expectedFrames[id] = nil
+        expectations.forget(id)
         clearDrag(id)
     }
 
@@ -277,80 +206,52 @@ final class DragTracker {
 
     // MARK: Change entry point
 
-    /// Feeds one gateway change callback through echo suppression and edge
-    /// detection. `slotOf` returning nil means untiled: ignored, since
-    /// observation registrations outlive records.
+    /// Feeds one gateway change callback through the expectation owner's
+    /// verdict and edge detection. `slotOf` returning nil means untiled:
+    /// ignored, since observation registrations outlive records.
     func handleChange(id: WindowID, frame: CGRect) {
         guard context.slotOf(id) != nil else { return }
         log("notif win\(id) frame=\(frame)")
 
-        // Echo suppression: our writes apply (often animated) as a stream of
-        // notifications converging on the requested frame. Swallow them; a
-        // tick that moves AWAY from the target means a real user drag took
-        // over, so we clear the entry and process it.
-        if var entry = expectedFrames[id] {
-            if Self.framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
-                if entry.settled,
-                    context.now().timeIntervalSince(entry.date) > Self.settleWindow
-                {
-                    // Settling over, but this tick already proved close:
-                    // swallow it against the target rather than falling
-                    // into the escape check below, whose stale
-                    // lastDistance would misread any tail offset as a
-                    // takeover. The next tick processes fully live.
-                    expectedFrames[id] = nil
-                    lastKnownFrames[id] = frame
-                    log("echo win\(id) settle-expired")
-                    return
-                } else {
-                    let wasSettled = entry.settled
-                    if !wasSettled {
-                        // Write converged: keep swallowing close ticks
-                        // through the settle window instead of going live:
-                        // the animation tail is still in flight, and its
-                        // absolute positions must never reach the splitters.
-                        entry.settled = true
-                        entry.date = context.now()
-                        entry.lastDistance = 0
-                        expectedFrames[id] = entry
-                        log("echo win\(id) consumed")
-                    } else {
-                        log("echo win\(id) settling")
-                    }
-                    // A pure-origin drift inside the radius is a hand on
-                    // the title bar, not animation settling (settling moves
-                    // edges): track the drag so snapback/untile still work
-                    // for grabs that start the instant a write lands.
-                    // Splitters stay untouched: processMove never moves
-                    // them, and the snapback rect is the grid truth.
-                    if wasSettled, let previous = lastKnownFrames[id],
-                        previous.size == frame.size, previous.origin != frame.origin
-                    {
-                        lastKnownFrames[id] = frame
-                        processMove(windowID: id, from: previous, to: frame)
-                        return
-                    }
-                    lastKnownFrames[id] = frame
-                    return
-                }
-            } else if entry.settled {
-                expectedFrames[id] = nil // left the radius; live below
-                log("echo win\(id) settle-end")
-            }
-            let distance = Self.frameDistance(entry.frame, frame)
-            if distance > entry.lastDistance + 1 {
-                expectedFrames[id] = nil // user took over
-                log("echo win\(id) ESCAPE dist=\(distance) last=\(entry.lastDistance)")
-            } else if context.now().timeIntervalSince(entry.date) > Self.staleWrite {
-                expectedFrames[id] = nil // write never applied; stop waiting
-                log("echo win\(id) stale")
-            } else {
-                entry.lastDistance = distance
-                expectedFrames[id] = entry
+        // Echo suppression: our writes apply (often animated) as a stream
+        // of notifications converging on the requested frame. The owner
+        // classifies each tick against the pending expectation; a tick
+        // that moves AWAY from the target means a real user drag took
+        // over, and processes live below.
+        switch expectations.classify(id, frame: frame) {
+        case .live:
+            break
+        case .settleExpired, .consumed:
+            // Swallowed: the write converged (or its settle window just
+            // ended on a close tick). Re-seed the diff baseline and stop.
+            lastKnownFrames[id] = frame
+            return
+        case .settling:
+            // A pure-origin drift inside the radius is a hand on the
+            // title bar, not animation settling (settling moves edges):
+            // track the drag so snapback/untile still work for grabs
+            // that start the instant a write lands. Splitters stay
+            // untouched: processMove never moves them, and the snapback
+            // rect is the grid truth.
+            if let previous = lastKnownFrames[id],
+                previous.size == frame.size, previous.origin != frame.origin
+            {
                 lastKnownFrames[id] = frame
-                log("echo win\(id) converging dist=\(distance)")
+                processMove(windowID: id, from: previous, to: frame)
                 return
             }
+            lastKnownFrames[id] = frame
+            return
+        case .converging:
+            // Swallowed: the tick moved toward the target but has not
+            // reached it. The owner tracks the distance; seed the
+            // baseline so a later takeover diffs correctly.
+            lastKnownFrames[id] = frame
+            return
+        case .settleEnd, .escape, .stale:
+            // The entry is gone (settling ended, the user took over, or
+            // the write never applied): process the tick live below.
+            break
         }
 
         // Diff against the previous frame of ANY kind. Drags that change a
@@ -552,7 +453,8 @@ final class DragTracker {
             // evict an already-correct window. Live frame, not intent;
             // intent equals the target by definition.
             if let live = context.liveFrameOf(id),
-                Self.close(live, rect, tolerance: Self.noOpWriteTolerance)
+                WriteExpectations.close(
+                    live, rect, tolerance: WriteExpectations.noOpWriteTolerance)
             {
                 log("skip win\(id) no-op write rect=\(rect)")
                 continue
@@ -570,30 +472,17 @@ final class DragTracker {
             let excluding = self.pendingExclusion
             self.pendingExclusion = nil
             for (id, rect) in rects {
-                self.markExpected(id, rect)
+                // The push is scheduled, not written yet: prime the
+                // owner's intent for the target the write policy is about
+                // to push, and move the drag loop's baseline to it. The
+                // write itself arms the expectation.
+                self.expectations.noteIntent(id, rect)
+                self.notePushed(id, rect)
             }
             // `excluding` names a window whose frame is the drag's source
             // of truth; nil is the snapback case (the dragged window itself
             // is the only rect). Either way the rects must be pushed.
             self.apply(rects, excluding)
         }
-    }
-
-    // MARK: Geometry helpers
-
-    private static func framesClose(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
-        abs(a.minX - b.minX) <= tolerance && abs(a.maxX - b.maxX) <= tolerance
-            && abs(a.minY - b.minY) <= tolerance && abs(a.maxY - b.maxY) <= tolerance
-    }
-
-    /// True when `a` and `b` differ by at most `tolerance` per edge.
-    static func close(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
-        framesClose(a, b, tolerance: tolerance)
-    }
-
-    /// Sum of per-edge deltas between two frames.
-    private static func frameDistance(_ a: CGRect, _ b: CGRect) -> CGFloat {
-        abs(a.minX - b.minX) + abs(a.maxX - b.maxX)
-            + abs(a.minY - b.minY) + abs(a.maxY - b.maxY)
     }
 }

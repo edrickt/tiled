@@ -32,8 +32,8 @@
  [
   "Layout.swift",
   "rehousingHome guard drops the overlap requirement",
-  "guard let current = slot(of: evictee), current.overlaps(target) else { return nil }",
-  "guard let current = slot(of: evictee) else { return nil }"
+  "        guard let current = slot(of: evictee), current.overlaps(target) else { return nil }\n        // Free region:",
+  "        guard let current = slot(of: evictee) else { return nil }\n        // Free region:"
  ],
  [
   "TilingSpace.swift",
@@ -144,10 +144,16 @@
   "private static let untileDragDistance: CGFloat = 10000"
  ],
  [
-  "DragTracker.swift",
+  "WriteExpectations.swift",
   "stale-write window widened to 3600s",
-  "} else if context.now().timeIntervalSince(entry.date) > Self.staleWrite {",
-  "} else if context.now().timeIntervalSince(entry.date) > Self.staleWrite + 3600 {"
+  "now().timeIntervalSince(entry.date) > Self.staleWrite {",
+  "now().timeIntervalSince(entry.date) > Self.staleWrite + 3600 {"
+ ],
+ [
+  "WriteExpectations.swift",
+  "intent cleared by forget",
+  "        expected[id] = nil\n        cancelCheck(id)",
+  "        expected[id] = nil\n        intents[id] = nil\n        cancelCheck(id)"
  ],
  [
   "Layout.swift",
@@ -272,7 +278,7 @@
  [
   "FrameWriter.swift",
   "no-op write pushed anyway (expectation never converges)",
-  "        if let live = gateway.frame(of: handle),\n            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
+  "        if let live = gateway.frame(of: handle),\n            WriteExpectations.close(live, target, tolerance: WriteExpectations.noOpWriteTolerance)\n        {\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
   ""
  ],
  [

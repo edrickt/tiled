@@ -81,7 +81,7 @@ struct FrameWriter {
         // would never converge and the late check would misread an
         // already-correct window.
         if let live = gateway.frame(of: handle),
-            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)
+            WriteExpectations.close(live, target, tolerance: WriteExpectations.noOpWriteTolerance)
         {
             log("write win\(id) no-op skip target=\(target)")
             return .skippedNoOp

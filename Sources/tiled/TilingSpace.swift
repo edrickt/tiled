@@ -70,6 +70,9 @@ struct TilingSpace {
         let gateway: WindowGateway
         let frameWriter: FrameWriter
         let tracker: DragTracker
+        /// The write-expectation owner: untile-all primes the slot rects
+        /// its undo will write through it.
+        let expectations: WriteExpectations
         let boundsOf: (CGRect) -> CGRect
         /// The canvas every write without a better owner belongs to: the
         /// canvas this action is running on.
@@ -954,7 +957,7 @@ struct TilingSpace {
             for (slot, id) in chapter {
                 if let record = records[id] {
                     let target = grid.rect(for: slot, in: context.boundsOf(record.preTileFrame))
-                    context.tracker.markExpected(id, target)
+                    context.expectations.noteIntent(id, target)
                 }
             }
         }

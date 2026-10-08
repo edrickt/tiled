@@ -21,6 +21,17 @@ final class TilingController {
     /// Convergence-check scheduler for the late silent-ignore verification.
     /// Injectable so tests fire verifications without waiting 3.5s.
     private let scheduleVerify: DragTracker.DragEndScheduler
+    /// The one owner of every frame push's expectation: armed before the
+    /// gateway call, its echo trail watched tick by tick, its late
+    /// convergence judged one verify-delay later. Held here and injected
+    /// into the write policy, the drag loop, and the placement pipeline
+    /// (untile-all's intent priming). Lazy so its closures can capture
+    /// self.
+    private lazy var expectations = WriteExpectations(
+        now: now,
+        liveFrameOf: { [weak self] id in self?.liveFrameForTracker(id) },
+        cancelCheck: { [weak self] id in self?.cancelVerification(id) },
+        log: { [weak self] in self?.dbg($0) })
     /// The one frame-write policy every push path shares: no-op skip,
     /// off-Space deferral, echo marking, and the convergence check each
     /// write declares. Lazy so its closures can capture self.
@@ -32,7 +43,8 @@ final class TilingController {
             self.staleSpaces.insert(space)
         },
         markExpected: { [weak self] id, target in
-            self?.tracker.markExpected(id, target)
+            self?.expectations.noteExpected(id, target)
+            self?.tracker.notePushed(id, target)
         },
         scheduleCheck: { [weak self] id, space in
             self?.scheduleVerification(of: [id], on: space)
@@ -42,8 +54,10 @@ final class TilingController {
     /// The drag-resize loop. Lazy so its context closures can capture
     /// self: the tracker decides (echo, edges, splitters), this module
     /// performs writes via `publishRects` and serves record reads. Grids
-    /// live on the canvases and travel through `GridProvider`.
+    /// live on the canvases and travel through `GridProvider`; echo
+    /// entries live in `expectations` and travel through `classify`.
     private lazy var tracker: DragTracker = DragTracker(
+        expectations: expectations,
         context: DragTracker.Context(
             slotOf: { [weak self] in self?.trackedSlot(of: $0) },
             frameOf: { [weak self] in self?.frameForTracker($0) },
@@ -400,6 +414,7 @@ final class TilingController {
             gateway: gateway,
             frameWriter: frameWriter,
             tracker: tracker,
+            expectations: expectations,
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
             space: key,
             allocateID: { [weak self] handle in
@@ -446,7 +461,7 @@ final class TilingController {
         guard let errorSpace = spaceOf(window: id),
             spaces[errorSpace]?.state.slot(of: id) != nil
         else { return }
-        guard tracker.convergence(for: id) == .ignored else { return }
+        guard expectations.convergence(for: id) == .ignored else { return }
         // Name the window before its record goes; the rollback itself
         // writes nothing (the write never took effect).
         let name = appName(for: id) ?? "That window"
@@ -515,7 +530,7 @@ final class TilingController {
     /// compares against this, and it must be our intent, not the echo.
     private func frameForTracker(_ id: WindowID) -> CGRect? {
         guard let record = record(of: id) else { return nil }
-        if let pushed = tracker.lastPushedTarget(for: id) { return pushed }
+        if let pushed = expectations.intent(for: id) { return pushed }
         return gateway.frame(of: record.handle) ?? record.preTileFrame
     }
 

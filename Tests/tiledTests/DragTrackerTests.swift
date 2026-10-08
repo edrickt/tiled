@@ -11,8 +11,11 @@ final class DragTrackerTests: XCTestCase {
     private var slots: [WindowID: Slot]!
     private var handles: [WindowID: WindowHandle]!
     private var occupants: [Slot: WindowID]!
-    /// Injectable clock backing the tracker's echo timestamps.
+    /// Injectable clock backing the expectation owner's echo timestamps.
     private var now = Date()
+    /// The expectation owner paired with the tracker under test: armed
+    /// echoes and intent live here, not in the tracker.
+    private var expectations: WriteExpectations!
     /// Windows the tracker decided to untile via drag-out.
     private var untiled: [WindowID]!
     /// Drag-end fires captured from the injectable scheduler (latest wins).
@@ -32,7 +35,9 @@ final class DragTrackerTests: XCTestCase {
         untiled = []
         dragEndFires = []
         grids = [:]
+        expectations = WriteExpectations(now: { [weak self] in self?.now ?? Date() })
         tracker = DragTracker(
+            expectations: expectations,
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.slots[$0] },
                 frameOf: { [weak self] in
@@ -40,8 +45,7 @@ final class DragTrackerTests: XCTestCase {
                     return self?.gateway.frame(of: handle)
                 },
                 boundsOf: { $0 },
-                occupants: { [weak self] in self?.occupants ?? [:] },
-                now: { [weak self] in self?.now ?? Date() }),
+                occupants: { [weak self] in self?.occupants ?? [:] }),
             gridProvider: provider(),
             apply: { [weak self] rects, excluding in
                 self?.pushed.append((rects, excluding))
@@ -71,44 +75,10 @@ final class DragTrackerTests: XCTestCase {
     }
 
     private func tile(_ id: WindowID, _ slot: Slot, frame: CGRect) {
-        tile(id, slot, frame: frame, tracker: tracker)
-    }
-
-    private func tile(
-        _ id: WindowID, _ slot: Slot, frame: CGRect, tracker: DragTracker
-    ) {
         handles[id] = gateway.addWindow(frame: frame)
         slots[id] = slot
         occupants[slot] = id
-        tracker.markExpected(id, frame)
-    }
-
-    /// A tracker wired like the shared one but with an injectable
-    /// `liveFrameOf` (the seam the no-op-write skip and the silent-
-    /// convergence check read instead of intent.
-    private func makeTracker(
-        liveFrameOf: @escaping (WindowID) -> CGRect?
-    ) -> DragTracker {
-        DragTracker(
-            context: DragTracker.Context(
-                slotOf: { [weak self] in self?.slots[$0] },
-                frameOf: { [weak self] in
-                    guard let handle = self?.handles[$0] else { return nil }
-                    return self?.gateway.frame(of: handle)
-                },
-                boundsOf: { $0 },
-                occupants: { [weak self] in self?.occupants ?? [:] },
-                now: { [weak self] in self?.now ?? Date() },
-                liveFrameOf: liveFrameOf),
-            gridProvider: provider(),
-            apply: { [weak self] rects, excluding in
-                self?.pushed.append((rects, excluding))
-            },
-            onUntile: { [weak self] in self?.untiled.append($0) },
-            scheduleDragEnd: { [weak self] fire in
-                self?.dragEndFires.append(fire)
-                return {}
-            })
+        expectations.noteExpected(id, frame)
     }
 
     /// A tracker wired to a fixed screen rect, so absolute frames read as
@@ -116,6 +86,7 @@ final class DragTrackerTests: XCTestCase {
     /// bounds like the default frame-as-bounds test rig.
     private func makeTracker(bounds: CGRect) -> DragTracker {
         DragTracker(
+            expectations: expectations,
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.slots[$0] },
                 frameOf: { [weak self] in
@@ -123,8 +94,7 @@ final class DragTrackerTests: XCTestCase {
                     return self?.gateway.frame(of: handle)
                 },
                 boundsOf: { _ in bounds },
-                occupants: { [weak self] in self?.occupants ?? [:] },
-                now: { [weak self] in self?.now ?? Date() }),
+                occupants: { [weak self] in self?.occupants ?? [:] }),
             gridProvider: provider(),
             apply: { [weak self] rects, excluding in
                 self?.pushed.append((rects, excluding))
@@ -180,7 +150,7 @@ final class DragTrackerTests: XCTestCase {
         let screen = CGRect(x: 0, y: 0, width: 1680, height: 1019)
         let tracker = makeTracker(bounds: screen)
         let tiled = GridLayout().rect(for: .sixthsLeftTwoThirds, in: screen)
-        tile(1, .sixthsLeftTwoThirds, frame: tiled, tracker: tracker)
+        tile(1, .sixthsLeftTwoThirds, frame: tiled)
 
         var resized = tiled
         resized.size.width = 0.78 * screen.width
@@ -198,7 +168,7 @@ final class DragTrackerTests: XCTestCase {
         let screen = CGRect(x: 0, y: 0, width: 1680, height: 1019)
         let tracker = makeTracker(bounds: screen)
         let tiled = GridLayout().rect(for: .sixthsRightTwoThirds, in: screen)
-        tile(1, .sixthsRightTwoThirds, frame: tiled, tracker: tracker)
+        tile(1, .sixthsRightTwoThirds, frame: tiled)
 
         var resized = tiled
         resized.origin.x = 0.22 * screen.width
@@ -219,8 +189,8 @@ final class DragTrackerTests: XCTestCase {
         let tracker = makeTracker(bounds: screen)
         let leftTwo = GridLayout().rect(for: .sixthsLeftTwoThirds, in: screen)
         let rightThird = GridLayout().rect(for: .sixthRight, in: screen)
-        tile(1, .sixthsLeftTwoThirds, frame: leftTwo, tracker: tracker)
-        tile(2, .sixthRight, frame: rightThird, tracker: tracker)
+        tile(1, .sixthsLeftTwoThirds, frame: leftTwo)
+        tile(2, .sixthRight, frame: rightThird)
 
         var resized = rightThird
         resized.origin.x = 0.7 * screen.width
@@ -372,6 +342,7 @@ final class DragTrackerTests: XCTestCase {
         // nothing.
         let bounds = CGRect(x: 0, y: 0, width: 1680, height: 1019)
         let tracker = DragTracker(
+            expectations: expectations,
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.slots[$0] },
                 frameOf: { [weak self] in
@@ -379,8 +350,7 @@ final class DragTrackerTests: XCTestCase {
                     return self?.gateway.frame(of: handle)
                 },
                 boundsOf: { _ in bounds },
-                occupants: { [weak self] in self?.occupants ?? [:] },
-                now: { [weak self] in self?.now ?? Date() }),
+                occupants: { [weak self] in self?.occupants ?? [:] }),
             gridProvider: provider(),
             apply: { [weak self] rects, excluding in
                 self?.pushed.append((rects, excluding))
@@ -390,8 +360,8 @@ final class DragTrackerTests: XCTestCase {
                 self?.dragEndFires.append(fire)
                 return {}
             })
-        tile(1, .topLeft, frame: CGRect(x: 0, y: 519, width: 840, height: 500), tracker: tracker)
-        tile(2, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500), tracker: tracker)
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 519, width: 840, height: 500))
+        tile(2, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
 
         // Echo tick (swallowed), then a real edge drag: the top edge of
         // the bottom-left window drops to 450 in fixed screen bounds.
@@ -565,46 +535,6 @@ final class DragTrackerTests: XCTestCase {
 
     // MARK: Stale writes
 
-    func testConvergenceVerdictReadsTheEchoTrail() {
-        // No entry (consumed/takeover/superseded): inconclusive.
-        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
-        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
-        now += TimeInterval(5)
-        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
-        XCTAssertNil(tracker.convergence(for: 1), "consumed entry: inconclusive")
-
-        // Total silence with an answerable live frame far from target:
-        // ignored — the write never took effect.
-        let ignoring = makeTracker(liveFrameOf: { _ in
-            CGRect(x: 4000, y: 4000, width: 840, height: 500)
-        })
-        tile(2, .topRight, frame: CGRect(x: 840, y: 500, width: 840, height: 500),
-             tracker: ignoring)
-        XCTAssertEqual(ignoring.convergence(for: 2), .ignored)
-
-        // Total silence with an UNREADABLE live frame: inconclusive.
-        // During a lid close/open the frame read fails for live windows;
-        // judging that as ignored rolled fresh placements back
-        // (observed on live AX).
-        tile(4, .bottomRight, frame: CGRect(x: 840, y: 0, width: 840, height: 500))
-        XCTAssertNil(
-            tracker.convergence(for: 4),
-            "an unreadable live frame is can't-judge, not ignored")
-
-        // A converging tick settles the entry: converged.
-        tile(3, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
-        var echo = CGRect(x: 0, y: 0, width: 840, height: 500)
-        echo.origin.x += 10
-        tracker.handleChange(id: 3, frame: echo)
-        XCTAssertEqual(tracker.convergence(for: 3), .converged)
-
-        // Frames that never approach the target: inconclusive (alive,
-        // leave it alone); the controller compares live frames.
-        tile(4, .bottomRight, frame: CGRect(x: 840, y: 0, width: 840, height: 500))
-        tracker.handleChange(id: 4, frame: CGRect(x: 0, y: 0, width: 840, height: 300))
-        XCTAssertNil(tracker.convergence(for: 4))
-    }
-
     func testStaleWriteStopsWaitingAndProcessesLaterTicks() {
         tile(1, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
         tile(2, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
@@ -663,8 +593,8 @@ final class DragTrackerTests: XCTestCase {
         handles[1] = gateway.addWindow(frame: tl)
         handles[2] = gateway.addWindow(frame: r23)
         handles[3] = gateway.addWindow(frame: defaultGrid.rect(for: .sixthBottomLeft, in: bounds))
-        tracker.markExpected(1, tl)
-        tracker.markExpected(2, r23)
+        expectations.noteExpected(1, tl)
+        expectations.noteExpected(2, r23)
         tracker.handleChange(id: 1, frame: tl) // converges
         tracker.handleChange(id: 2, frame: r23) // converges
         // Tail stops 8pt narrow and the stream ends: swallowed, not a drag.
@@ -745,77 +675,5 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertEqual(
             grid().leftRowSplit, 0.8, accuracy: 0.001,
             "baseline seeded by reassert; 440/440 clamps to the row maximum")
-    }
-
-    // MARK: liveFrameOf seam
-
-    func testNoOpWriteIsSkippedInsteadOfMarkedExpected() {
-        // A write whose target sits within noOpWriteTolerance (1pt) of the
-        // window's live frame is a no-op: pushing it would echo nothing,
-        // and the late convergence check would read that silence as a
-        // silent ignore and evict an already-correct window. So the rect
-        // is dropped and no intent is recorded.
-        var liveFrames: [WindowID: CGRect] = [:]
-        let tracker = makeTracker(liveFrameOf: { liveFrames[$0] })
-        // Window 1's live frame (0,500,840,500) is its own bounds; the
-        // topLeft rect under the default grid is (0,750,420,250).
-        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500), tracker: tracker)
-        liveFrames[1] = CGRect(x: 0, y: 750.5, width: 420, height: 249.5)
-
-        tracker.reassertAll(occupants: occupants)
-        let expectation = XCTestExpectation(description: "no-op write skipped")
-        DispatchQueue.main.async {
-            XCTAssertNil(
-                self.pushed.first?.rects[1], "no rect for window 1 in any push")
-            XCTAssertEqual(
-                tracker.lastPushedTarget(for: 1), CGRect(x: 0, y: 500, width: 840, height: 500),
-                "the skipped write records no new intent: the tile-frame intent survives")
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 1.0)
-
-        // Control: the same reassert with the live frame far from the
-        // target pushes and marks intent; the skip is the live frame's
-        // doing, not the reassert's.
-        liveFrames[1] = CGRect(x: 600, y: 100, width: 50, height: 50)
-        tracker.reassertAll(occupants: occupants)
-        let pushedExpectation = XCTestExpectation(description: "real write pushed")
-        DispatchQueue.main.async {
-            XCTAssertEqual(
-                self.pushed.last?.rects[1], CGRect(x: 0, y: 750, width: 420, height: 250))
-            XCTAssertEqual(
-                tracker.lastPushedTarget(for: 1), CGRect(x: 0, y: 750, width: 420, height: 250),
-                "a real push records intent")
-            pushedExpectation.fulfill()
-        }
-        wait(for: [pushedExpectation], timeout: 1.0)
-    }
-
-    func testSilentConvergenceChecksTheLiveFrameBeforeCallingItIgnored() {
-        // Total echo silence is not automatically a silent ignore: apps
-        // that round frames to an internal grid can absorb a write whose
-        // target sits within their rounding distance, emitting no
-        // notification. The live frame is the tiebreaker: within the
-        // echo tolerance of the target means converged; far from it
-        // means genuinely ignored.
-        var liveFrames: [WindowID: CGRect] = [:]
-        let tracker = makeTracker(liveFrameOf: { liveFrames[$0] })
-
-        // Silent but at target: converged, and the entry is cleared.
-        let target = CGRect(x: 0, y: 500, width: 840, height: 500)
-        tile(1, .topLeft, frame: target, tracker: tracker)
-        liveFrames[1] = CGRect(x: 5, y: 505, width: 840, height: 500)
-        XCTAssertEqual(
-            tracker.convergence(for: 1), .converged,
-            "the live frame sits within tolerance of the target")
-        XCTAssertNil(
-            tracker.convergence(for: 1),
-            "the entry is consumed by the convergence win")
-
-        // Silent and far from target: the write never took effect.
-        let farTarget = CGRect(x: 840, y: 500, width: 840, height: 500)
-        tile(2, .topRight, frame: farTarget, tracker: tracker)
-        liveFrames[2] = CGRect(x: 0, y: 0, width: 100, height: 100)
-        XCTAssertEqual(tracker.convergence(for: 2), .ignored)
     }
 }

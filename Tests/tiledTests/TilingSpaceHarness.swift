@@ -22,9 +22,12 @@ final class TilingSpaceHarness {
     var bounds = CGRect(x: 0, y: 0, width: 1600, height: 1200)
     private(set) var tracker: DragTracker!
     private(set) var writer: FrameWriter!
+    private(set) var expectations: WriteExpectations!
 
     init() {
+        expectations = WriteExpectations()
         tracker = DragTracker(
+            expectations: expectations,
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.space.state.slot(of: $0) },
                 frameOf: { [weak self] in
@@ -43,7 +46,8 @@ final class TilingSpaceHarness {
             isVisible: { [weak self] _ in self?.canvasVisible ?? true },
             markStale: { _ in },
             markExpected: { [weak self] id, target in
-                self?.tracker.markExpected(id, target)
+                self?.expectations.noteExpected(id, target)
+                self?.tracker.notePushed(id, target)
             },
             scheduleCheck: { _, _ in },
             log: { _ in })
@@ -56,6 +60,7 @@ final class TilingSpaceHarness {
             gateway: gateway,
             frameWriter: writer,
             tracker: tracker,
+            expectations: expectations,
             boundsOf: { [weak self] in self?.bounds ?? $0 },
             space: .displayless,
             allocateID: { [weak self] _ in
