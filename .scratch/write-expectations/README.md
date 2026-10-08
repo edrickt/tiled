@@ -90,5 +90,11 @@ mutation-table target stays live and caught.
   table") is done at `91ee273`: the gateway takes one liveness pass, the adapter
   asks each app once and shares the answer, the death decision's gathering is a
   tested assembly (app answers, frames, baseline), and defect 4's per-record app
-  walk is gone. Candidates A4-A7 and defects 6-8 from the review report remain
+  walk is gone.
+- Candidate A4 ("One owner for restoring an undo chapter across canvases") is
+  done at `d5fb59a`: the canvas supplies only restoreChapter/restore primitives,
+  the controller owns chapter restoration once (step-aside admission, grouping,
+  notice/error precedence), the dead canvas requester branch and `UndoOutcome`
+  are gone, and defect 5's partial undo failure now surfaces ahead of the success
+  sentence. Candidates A5-A7 and defects 6-8 from the review report remain
   unclaimed.
