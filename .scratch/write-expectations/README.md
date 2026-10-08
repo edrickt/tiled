@@ -6,8 +6,11 @@ grilling on 2026-10-08; this file is the single source of truth for the design a
 
 ## Where this is
 
-Stages 1-2 are TODO. `master` at `fabb338` when the arc was written: 608 tests green, 50/50 mutants
-caught. `CONTEXT.md` carries the term **Expected write** (`_Code_: WriteExpectations`).
+Stage 1 is DONE at `e495f86` ("Home the write expectation store in WriteExpectations"): the store
+lives in `WriteExpectations`, the tracker consumes its verdicts, FrameWriter arms through the owner,
+621 tests green, 51/51 mutants caught. Stage 2 remains, unblocked. When the arc was written, `master`
+at `fabb338` held 608 tests green and 50/50 mutants. `CONTEXT.md` carries the term **Expected write**
+(`_Code_: WriteExpectations`).
 
 ## The design (settled)
 
@@ -44,7 +47,7 @@ caught. `CONTEXT.md` carries the term **Expected write** (`_Code_: WriteExpectat
 
 | # | Ticket | Delivers | Blocked by | Status |
 |---|---|---|---|---|
-| 1 | `issues/01-home-the-store.md` | `WriteExpectations` holds the store; tracker consumes; FrameWriter arms through it | - | TODO |
+| 1 | `issues/01-home-the-store.md` | `WriteExpectations` holds the store; tracker consumes; FrameWriter arms through it | - | DONE (`e495f86`) |
 | 2 | `issues/02-one-write-one-life.md` | FrameWriter dissolves; unconditional deduped checks; both consequence tokens; the widening; arc closes | 1 | TODO |
 
 ## Running one stage in a fresh session

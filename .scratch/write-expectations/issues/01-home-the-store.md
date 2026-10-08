@@ -1,8 +1,8 @@
 # Stage 1 - Home the store
 
-Status: TODO
+Status: DONE at `e495f86` ("Home the write expectation store in WriteExpectations"), master.
 Blocked by: -
-Blocks: stage 2.
+Blocks: stage 2 (unblocked).
 
 ## What ships
 
@@ -54,3 +54,24 @@ Blocks: stage 2.
 - `code-review` on both axes against `fabb338` (the last code commit before this arc).
 - Commit on `master` in the repo's style with gate evidence in the body; update this ticket and the
   README table.
+
+## Evidence
+
+- `swift build`: clean, zero warnings.
+- `swift test`: 621/621 (was 608: three cases moved out of `DragTrackerTests`, sixteen added in
+  `WriteExpectationsTests`).
+- `python3 tools/mutation/mutate.py`: 51/51 caught, none STALE. The stale-write target re-points at
+  `WriteExpectations.swift`; "intent cleared by forget" is new; the FrameWriter no-op entry re-points
+  at the moved constants; the `rehousingHome` entry, duplicated by the step-aside commit and stale
+  at `fabb338`, now names its occurrence.
+- `code-review` on both axes against `fabb338`:
+  - Spec: no wrong behaviour found. Its only missing item was this status update; two notes accepted
+    by design: intent now outlives the echo entry (the settled survival split), and a settled tick
+    leaving the radius logs only `settle-end` where the old shared distance block also logged
+    `ESCAPE` (state identical; the verdicts are now separate outcomes).
+  - Standards (smell baseline; no repo standards files): no hard violations. Judgement calls left as
+    designed: the arm-and-baseline pairing at its two write-path call sites (`FrameWriter`'s
+    `markExpected` closure and the tracker's own scheduled pushes), `WriteExpectations.close`'s thin
+    forward to `framesClose` (the split moved verbatim from `DragTracker`; stage 2 absorbs it), and
+    the drag tests' `tile` helper arming only the store (their echo seed seeds the baseline, as
+    before).
