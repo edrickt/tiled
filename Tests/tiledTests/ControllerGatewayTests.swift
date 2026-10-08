@@ -21,6 +21,8 @@ final class ControllerGatewayTests: XCTestCase {
     private var controller: TilingController!
     /// Drag-end fires captured from the injectable scheduler (latest wins).
     private var dragEndFires: [() -> Void] = []
+    /// Trailing-tick commit fires captured from the injectable scheduler.
+    private var commitFires: [() -> Void] = []
     /// Late silent-ignore checks captured from the injectable scheduler.
     private var checkFires: [() -> Void] = []
     /// How many scheduled checks were cancelled (superseded).
@@ -37,6 +39,7 @@ final class ControllerGatewayTests: XCTestCase {
         super.setUp()
         gateway = FakeWindowGateway()
         dragEndFires = []
+        commitFires = []
         checkFires = []
         checkCancels = 0
         feedbacks = []
@@ -55,6 +58,10 @@ final class ControllerGatewayTests: XCTestCase {
                 self?.checkFires.append(fire)
                 return { self?.checkCancels += 1 }
             },
+            scheduleCommit: { [weak self] fire in
+                self?.commitFires.append(fire)
+                return {}
+            },
             screens: { [Self.screen] },
             // Tests drive death directly: no confirmation window, so a
             // killed handle prunes on the first call (the transient-death
@@ -72,6 +79,12 @@ final class ControllerGatewayTests: XCTestCase {
     /// controller is not always the one acting).
     private func localCanvas(_ controller: TilingController) -> TilingSpace {
         controller.canvas(for: controller.focusedTilingSpace)
+    }
+
+    /// Fires the latest trailing-tick commit the controller armed (see
+    /// DragTracker.mouseLifted); a cancelled one is a no-op.
+    private func fireCommit() {
+        commitFires.last?()
     }
 
     // MARK: Hotkey entry point
@@ -177,9 +190,11 @@ final class ControllerGatewayTests: XCTestCase {
         gateway.focused = bottom
         gateway.simulateChange(bottom, to: moved)
 
-        // The splitter commits live; the neighbor re-push waits for the
-        // mouse-up the real loop gets from the global event monitor.
+        // The splitter commits live; the neighbor re-push schedules on
+        // the mouse-up the real loop gets from the global event monitor,
+        // and lands once its trailing-tick delay fires.
         controller.mouseLifted()
+        fireCommit()
 
         let expectation = XCTestExpectation(description: "coalesced apply")
         DispatchQueue.main.async {
@@ -269,6 +284,7 @@ final class ControllerGatewayTests: XCTestCase {
         let beforePush = gateway.frame(of: right)!
 
         controller.mouseLifted()
+        fireCommit()
         let pushed = XCTestExpectation(description: "coalesced neighbor push")
         DispatchQueue.main.async { pushed.fulfill() }
         wait(for: [pushed], timeout: 1.0)
@@ -395,6 +411,7 @@ final class ControllerGatewayTests: XCTestCase {
         let transient = TilingController(
             gateway: gateway, pruneInterval: nil,
             scheduleDragEnd: { _ in {} }, scheduleCheck: { _ in {} },
+            scheduleCommit: { _ in {} },
             now: { [self] in clock })
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
@@ -427,6 +444,7 @@ final class ControllerGatewayTests: XCTestCase {
         let timed = TilingController(
             gateway: gateway, pruneInterval: nil,
             scheduleDragEnd: { _ in {} }, scheduleCheck: { _ in {} },
+            scheduleCommit: { _ in {} },
             now: { [self] in clock })
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
@@ -562,6 +580,7 @@ final class ControllerGatewayTests: XCTestCase {
         dragged.size.height += 100 // top edge (maxY) rises; bottom stays
         gateway.simulateChange(b, to: dragged)
         controller.mouseLifted()
+        fireCommit()
 
         // The re-push is coalesced onto the next runloop tick.
         let pushed = XCTestExpectation(description: "coalesced push")

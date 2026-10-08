@@ -20,6 +20,9 @@ final class DragTrackerTests: XCTestCase {
     private var untiled: [WindowID]!
     /// Drag-end fires captured from the injectable scheduler (latest wins).
     private var dragEndFires: [() -> Void]!
+    /// Trailing-tick commit fires captured from the injectable scheduler
+    /// (latest wins; a cancelled one is a no-op when fired).
+    private var commitFires: [() -> Void]!
     /// The splitter fractions the tracker reads and writes, standing in
     /// for the canvas that owns them in production.
     private var grids: [TilingSpaceKey: GridLayout] = [:]
@@ -34,6 +37,7 @@ final class DragTrackerTests: XCTestCase {
         now = Date()
         untiled = []
         dragEndFires = []
+        commitFires = []
         grids = [:]
         expectations = WriteExpectations(
             gateway: gateway, now: { [weak self] in self?.now ?? Date() })
@@ -54,6 +58,10 @@ final class DragTrackerTests: XCTestCase {
             onUntile: { [weak self] in self?.untiled.append($0) },
             scheduleDragEnd: { [weak self] fire in
                 self?.dragEndFires.append(fire)
+                return {}
+            },
+            scheduleCommit: { [weak self] fire in
+                self?.commitFires.append(fire)
                 return {}
             })
     }
@@ -106,7 +114,18 @@ final class DragTrackerTests: XCTestCase {
             scheduleDragEnd: { [weak self] fire in
                 self?.dragEndFires.append(fire)
                 return {}
+            },
+            scheduleCommit: { [weak self] fire in
+                self?.commitFires.append(fire)
+                return {}
             })
+    }
+
+    /// Fires the latest trailing-tick commit the tracker armed. A
+    /// cancelled one is a no-op: its closure guards on its own pending
+    /// state, so this may be called freely after a press cancelled it.
+    private func fireCommit() {
+        commitFires.last?()
     }
 
     /// Streams a real edge drag: a close echo tick is swallowed, then the
@@ -297,6 +316,7 @@ final class DragTrackerTests: XCTestCase {
         moved.size.height -= 80
         tracker.handleChange(id: 2, frame: moved)
         tracker.mouseLifted()
+        fireCommit()
 
         let expectation = XCTestExpectation(description: "coalesced push")
         DispatchQueue.main.async {
@@ -337,12 +357,18 @@ final class DragTrackerTests: XCTestCase {
             XCTAssertTrue(
                 self.pushed.isEmpty,
                 "no tile resizes while the mouse button is down")
+            XCTAssertTrue(
+                self.commitFires.isEmpty,
+                "a mid-drag tick arms no trailing-tick commit")
             duringDrag.fulfill()
         }
         wait(for: [duringDrag], timeout: 1.0)
 
-        // Mouse-up: the whole grid commits at once.
+        // Mouse-up schedules the commit; it fires once the trailing
+        // ticks go quiet, so the grid commits as one move.
         tracker.mouseLifted()
+        XCTAssertFalse(commitFires.isEmpty, "mouse-up arms a trailing-tick commit")
+        fireCommit()
         let lifted = XCTestExpectation(description: "coalesced push on mouse-up")
         DispatchQueue.main.async {
             XCTAssertEqual(self.pushed.count, 1)
@@ -363,6 +389,7 @@ final class DragTrackerTests: XCTestCase {
         tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
         tracker.mouseLifted()
 
+        XCTAssertTrue(commitFires.isEmpty, "a click arms no commit without a pending resize")
         let expectation = XCTestExpectation(description: "no push")
         DispatchQueue.main.async {
             XCTAssertTrue(self.pushed.isEmpty, "a click commits nothing on its own")
@@ -371,15 +398,14 @@ final class DragTrackerTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
-    func testTrailingTickAfterMouseUpWaitsForTheNextOne() {
+    func testTrailingTickAfterMouseUpCommitsViaDebounce() {
         // AX can stream the drag's final frame after the mouse-up fired:
-        // that tick re-arms the pending apply (splitter already moved),
-        // and the next mouse-up anywhere commits it. Documented residual:
-        // one stale neighbor layout between the trailing tick and the
-        // next click. Needs a fixed boundsOf: with the frame-as-bounds
-        // rig every drag position clamps to the same splitter, and a
-        // trailing tick that produces no grid change correctly re-arms
-        // nothing.
+        // the trailing tick moves the splitter further and re-arms the
+        // trailing-tick commit, which lands the neighbor push on its own
+        // — no second click needed. Needs a fixed boundsOf: with the
+        // frame-as-bounds rig every drag position clamps to the same
+        // splitter, and a trailing tick that produces no grid change
+        // correctly re-arms nothing.
         let bounds = CGRect(x: 0, y: 0, width: 1680, height: 1019)
         let tracker = DragTracker(
             expectations: expectations,
@@ -399,6 +425,10 @@ final class DragTrackerTests: XCTestCase {
             scheduleDragEnd: { [weak self] fire in
                 self?.dragEndFires.append(fire)
                 return {}
+            },
+            scheduleCommit: { [weak self] fire in
+                self?.commitFires.append(fire)
+                return {}
             })
         tile(1, .topLeft, frame: CGRect(x: 0, y: 519, width: 840, height: 500))
         tile(2, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
@@ -414,41 +444,135 @@ final class DragTrackerTests: XCTestCase {
         let firstSplit = grid().leftRowSplit
         XCTAssertGreaterThan(firstSplit, 0.4)
         tracker.mouseLifted()
-
-        let first = XCTestExpectation(description: "mouse-up push")
-        DispatchQueue.main.async {
-            XCTAssertEqual(self.pushed.count, 1)
-            first.fulfill()
-        }
-        wait(for: [first], timeout: 1.0)
+        XCTAssertFalse(commitFires.isEmpty, "the release arms the commit")
 
         // The drag's final frame trails the mouse-up: a new splitter
-        // fraction, no push of its own.
+        // fraction. It re-arms the commit (the open one is superseded).
         var trailing = CGRect(x: 0, y: 0, width: 840, height: 500)
         trailing.size.height -= 80
         tracker.handleChange(id: 2, frame: trailing)
         XCTAssertNotEqual(
             grid().leftRowSplit, firstSplit,
             "the trailing tick moved the splitter further")
-        let afterTrailing = XCTestExpectation(description: "no push from the trailing tick alone")
+        let afterTrailing = XCTestExpectation(description: "the trailing tick waits out its delay")
         DispatchQueue.main.async {
             XCTAssertEqual(
-                self.pushed.count, 1,
-                "the trailing tick waits for the next mouse-up")
+                self.pushed.count, 0,
+                "nothing pushes before the trailing-tick commit fires")
             afterTrailing.fulfill()
         }
         wait(for: [afterTrailing], timeout: 1.0)
 
-        tracker.mouseLifted()
-        let second = XCTestExpectation(description: "next mouse-up commits the trailing tick")
+        fireCommit()
+        let committed = XCTestExpectation(description: "the armed commit lands the trailing grid")
         DispatchQueue.main.async {
-            XCTAssertEqual(self.pushed.count, 2, "the trailing tick's grid committed")
+            XCTAssertEqual(self.pushed.count, 1, "exactly one push for the whole gesture")
+            XCTAssertEqual(
+                self.pushed[0].rects[1]?.maxY,
+                self.grid().rect(for: .topLeft, in: bounds).maxY,
+                "the neighbor lands on the trailing grid, not the pre-trailing one")
+            committed.fulfill()
+        }
+        wait(for: [committed], timeout: 1.0)
+    }
+
+    func testLateTrailingTickAfterCommitArmsAnotherCommit() {
+        // The final AX tick can even land after the commit fired: the
+        // splitter moves again, and the tick arms a fresh commit instead
+        // of needing a click. Correctness never depends on how late the
+        // stream runs, only the delay does.
+        let bounds = CGRect(x: 0, y: 0, width: 1680, height: 1019)
+        let tracker = DragTracker(
+            expectations: expectations,
+            context: DragTracker.Context(
+                slotOf: { [weak self] in self?.slots[$0] },
+                frameOf: { [weak self] in
+                    guard let handle = self?.handles[$0] else { return nil }
+                    return self?.gateway.frame(of: handle)
+                },
+                boundsOf: { _ in bounds },
+                occupants: { [weak self] in self?.occupants ?? [:] }),
+            gridProvider: provider(),
+            apply: { [weak self] rects, excluding in
+                self?.pushed.append((rects, excluding))
+            },
+            onUntile: { [weak self] in self?.untiled.append($0) },
+            scheduleDragEnd: { [weak self] fire in
+                self?.dragEndFires.append(fire)
+                return {}
+            },
+            scheduleCommit: { [weak self] fire in
+                self?.commitFires.append(fire)
+                return {}
+            })
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 519, width: 840, height: 500))
+        tile(2, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
+
+        var echo = CGRect(x: 0, y: 0, width: 840, height: 490)
+        tracker.handleChange(id: 2, frame: echo)
+        var dragged = CGRect(x: 0, y: 0, width: 840, height: 450)
+        tracker.handleChange(id: 2, frame: dragged)
+        tracker.mouseLifted()
+        fireCommit()
+        let first = XCTestExpectation(description: "first commit")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.pushed.count, 1)
+            first.fulfill()
+        }
+        wait(for: [first], timeout: 1.0)
+
+        // A later tick lands after the commit: the splitter moves again
+        // and a fresh commit is armed.
+        var later = CGRect(x: 0, y: 0, width: 840, height: 400)
+        tracker.handleChange(id: 2, frame: later)
+        XCTAssertEqual(commitFires.count, 2, "the late tick armed a fresh commit")
+        fireCommit()
+        let second = XCTestExpectation(description: "late tick's commit")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.pushed.count, 2, "the late tick corrected the neighbor")
             XCTAssertNotEqual(
                 self.pushed[0].rects[1], self.pushed[1].rects[1],
-                "the second push carries the trailing grid, not the first")
+                "the second push carries the later grid")
             second.fulfill()
         }
         wait(for: [second], timeout: 1.0)
+    }
+
+    func testMousePressCancelsThePendingTrailingCommit() {
+        // A fast second grab cancels the previous release's pending
+        // commit: a stale trailing tick must never push neighbors under
+        // the new drag. The new drag's own release commits.
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 500, width: 840, height: 500))
+        tile(2, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 840, height: 500))
+
+        let echo = CGRect(x: 0, y: 0, width: 840, height: 490)
+        tracker.handleChange(id: 2, frame: echo)
+        let dragged = CGRect(x: 0, y: 0, width: 840, height: 420)
+        tracker.handleChange(id: 2, frame: dragged)
+        tracker.mouseLifted()
+        XCTAssertFalse(commitFires.isEmpty, "the release armed a commit")
+
+        // New grab before the delay elapsed: the armed commit is dropped.
+        tracker.mousePressed()
+        fireCommit()
+        let cancelled = XCTestExpectation(description: "cancelled commit is a no-op")
+        DispatchQueue.main.async {
+            XCTAssertTrue(self.pushed.isEmpty, "the cancelled commit pushed nothing")
+            cancelled.fulfill()
+        }
+        wait(for: [cancelled], timeout: 1.0)
+
+        // The new drag ends: its own release commits.
+        let moved = CGRect(x: 0, y: 0, width: 840, height: 380)
+        tracker.handleChange(id: 2, frame: moved)
+        tracker.mouseLifted()
+        fireCommit()
+        let committed = XCTestExpectation(description: "the new release commits")
+        DispatchQueue.main.async {
+            XCTAssertEqual(self.pushed.count, 1, "only the new release's grid committed")
+            committed.fulfill()
+        }
+        wait(for: [committed], timeout: 1.0)
     }
 
     // MARK: Drag-out untile
@@ -529,6 +653,7 @@ final class DragTrackerTests: XCTestCase {
         // The user switches to an edge drag: size changes mid-drag.
         tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 400, width: 840, height: 600))
         tracker.mouseLifted()
+        fireCommit()
         dragEndFires.last?()
 
         XCTAssertTrue(untiled.isEmpty, "the drag was abandoned for a resize")
@@ -598,6 +723,7 @@ final class DragTrackerTests: XCTestCase {
             grid().leftRowSplit, 0.8, accuracy: 0.001,
             "stale entry cleared; 330/330 clamps to the row-split maximum")
         tracker.mouseLifted()
+        fireCommit()
         let expectation = XCTestExpectation(description: "coalesced apply after stale")
         DispatchQueue.main.async {
             XCTAssertEqual(self.pushed.count, 1)

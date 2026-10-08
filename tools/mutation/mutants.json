@@ -502,5 +502,17 @@
   "cleared app action promises a bulk restore it does not have",
   "            return \"\\(action.title) disabled: re-record a combo to enable it.\"",
   "            return \"\\(action.title) disabled: its old combo (\\(parkedLabel)) is parked; Enable all restores it.\""
+ ],
+ [
+  "DragTracker.swift",
+  "trailing resize tick after mouse-up never re-arms the commit (straggler grid waits for a click)",
+  "            pendingResizeApplies[context.spaceOf(id)] = id\n            if !mouseIsDown {\n                armCommit()\n            }",
+  "            pendingResizeApplies[context.spaceOf(id)] = id"
+ ],
+ [
+  "DragTracker.swift",
+  "a new press leaves the previous release's commit pending (stale re-push under the new drag)",
+  "    func mousePressed() {\n        mouseIsDown = true\n        cancelCommit()\n    }",
+  "    func mousePressed() {\n        mouseIsDown = true\n    }"
  ]
 ]

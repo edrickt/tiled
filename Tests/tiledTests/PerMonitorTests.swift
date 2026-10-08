@@ -20,12 +20,19 @@ final class PerMonitorTests: XCTestCase {
 
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
+    /// Trailing-tick commit fires captured from the injectable scheduler.
+    private var commitFires: [() -> Void] = []
 
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
+        commitFires = []
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
+            scheduleCommit: { [weak self] fire in
+                self?.commitFires.append(fire)
+                return {}
+            },
             screens: { [Self.left, Self.right] }, deathConfirmation: 0)
     }
 
@@ -279,6 +286,7 @@ final class PerMonitorTests: XCTestCase {
         dragged.size.height -= 60
         gateway.simulateChange(leftNeighbor, to: dragged)
         controller.mouseLifted()
+        commitFires.last?()
 
         let expectation = XCTestExpectation(description: "neighbor re-push")
         DispatchQueue.main.async {

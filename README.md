@@ -182,6 +182,12 @@ monitors and Spaces, so dragging an edge on one canvas never moves tiles on
 another. The tile gap stays constant as you drag. A two-thirds window resizes
 as two equal one-thirds: the hidden splitter inside it follows its outer edge,
 staying at the midpoint.
+Neighbors move when the button lifts — after a split-second settle that
+absorbs the drag's final Accessibility notification. That last tick can
+arrive just after the release, and committing on the release alone would
+leave the neighbors on the splitter the drag had already passed, so the gap
+between the two tiles would read too small (or overlap) until some later
+click. The settle makes fast flicks and slow drags land the same.
 **Reset Splitters** in the menu (or ⌥⇧R) snaps the focused canvas's
 splitters back to even splits. After a drag the same row is titled
 **Restore Previous Splitters**, restoring the pre-drag splits instead.
@@ -220,7 +226,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (650 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (691 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~10s per mutant |

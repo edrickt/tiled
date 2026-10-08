@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var controller = TilingController(
         gateway: gateway,
         gap: { [weak self] in self?.settings.tileGap ?? AppSettings.defaultTileGap },
+        observeMouseDown: TilingController.observeLeftMouseDown,
         observeMouseUp: TilingController.observeLeftMouseUp)
     private let hotkeyStore = HotkeyStore()
     private var hotkeys: HotkeyService?

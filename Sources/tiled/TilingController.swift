@@ -22,6 +22,10 @@ final class TilingController {
     /// silent-ignore checks. Injectable so tests fire checks without
     /// waiting 3.5s.
     private let scheduleCheck: WriteExpectations.CheckScheduler
+    /// Trailing-tick commit scheduler for the drag loop's neighbor
+    /// re-pushes. Injectable so tests fire the commit without waiting on
+    /// the runloop.
+    private let scheduleCommit: DragTracker.CommitScheduler
     /// The one owner of every frame push: the shared write policy, the
     /// expectation armed before the gateway call, the echo trail watched
     /// tick by tick, the late convergence verdict, and the consequence a
@@ -75,6 +79,7 @@ final class TilingController {
         },
         onUntile: { [weak self] in self?.untileFromDrag($0) },
         scheduleDragEnd: scheduleDragEnd,
+        scheduleCommit: scheduleCommit,
         log: { [weak self] in self?.dbg($0) })
 
     /// Display set provider. Production returns one entry per NSScreen;
@@ -182,15 +187,18 @@ final class TilingController {
         pruneInterval: TimeInterval? = 5.0,
         scheduleDragEnd: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         scheduleCheck: @escaping WriteExpectations.CheckScheduler = WriteExpectations.scheduleCheckOnMain,
+        scheduleCommit: @escaping DragTracker.CommitScheduler = DragTracker.scheduleCommitOnMain,
         screens: ScreenProvider? = nil,
         gap: @escaping () -> CGFloat = { 0 },
         deathConfirmation: TimeInterval = 3.0,
         now: @escaping () -> Date = Date.init,
+        observeMouseDown: (@escaping () -> Void) -> Void = { _ in },
         observeMouseUp: (@escaping () -> Void) -> Void = { _ in }
     ) {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
         self.scheduleCheck = scheduleCheck
+        self.scheduleCommit = scheduleCommit
         self.gap = gap
         self.deathConfirmation = deathConfirmation
         self.now = now
@@ -232,10 +240,12 @@ final class TilingController {
             self.applyAll()
             self.onChange?()
         }
-        // Mouse-up commits the deferred neighbor re-pushes of an edge
-        // drag (see DragTracker.mouseLifted). AppDelegate wires the
-        // production monitor; the no-op default keeps tests from
+        // Mouse-down cancels a trailing-tick commit and mouse-up schedules
+        // the deferred neighbor re-pushes of an edge drag (see
+        // DragTracker.mousePressed / mouseLifted). AppDelegate wires the
+        // production monitors; the no-op defaults keep tests from
         // installing real event monitors.
+        observeMouseDown { [weak self] in self?.mousePressed() }
         observeMouseUp { [weak self] in self?.mouseLifted() }
         // Focus moving to another display or Space changes the status
         // glyph with no tiling action. Subscribe now when AX is already
@@ -989,12 +999,34 @@ final class TilingController {
 
     // MARK: Live resize (observe & compensate)
 
-    /// The user released the mouse button: commit every splitter move an
-    /// in-progress edge drag made, re-pushing the neighbor tiles the new
-    /// grid implies. Wired from the production mouse-up monitor; tests
-    /// call it directly.
+    /// The user pressed the mouse button: a trailing-tick commit left
+    /// over from the previous drag is cancelled (see
+    /// DragTracker.mousePressed). Wired from the production mouse-down
+    /// monitor; tests call it directly.
+    func mousePressed() {
+        tracker.mousePressed()
+    }
+
+    /// The user released the mouse button: schedule every splitter move
+    /// an in-progress edge drag made to commit once the drag's trailing
+    /// AX ticks go quiet, re-pushing the neighbor tiles the new grid
+    /// implies (see DragTracker.mouseLifted). Wired from the production
+    /// mouse-up monitor; tests call it directly.
     func mouseLifted() {
         tracker.mouseLifted()
+    }
+
+    /// Production mouse-down registrar: global monitors deliver presses
+    /// that go to other apps — where window-edge drags live — and the
+    /// local monitor covers presses this process receives. Both forward
+    /// the event untouched; the handler itself filters (no pending
+    /// resize is a no-op). Needs the same accessibility permission as AX.
+    static func observeLeftMouseDown(_ fire: @escaping () -> Void) {
+        NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { _ in fire() }
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { event in
+            fire()
+            return event
+        }
     }
 
     /// Production mouse-up registrar: global monitors deliver clicks that

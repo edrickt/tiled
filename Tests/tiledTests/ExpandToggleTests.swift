@@ -409,8 +409,11 @@ final class ExpandToggleTests: XCTestCase {
             visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 600),
             name: "Display 1")
         let gateway = FakeWindowGateway()
+        var commitFires: [() -> Void] = []
         let controller = TilingController(
-            gateway: gateway, pruneInterval: nil, screens: { [screen] })
+            gateway: gateway, pruneInterval: nil,
+            scheduleCommit: { commitFires.append($0); return {} },
+            screens: { [screen] })
 
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = a
@@ -433,6 +436,7 @@ final class ExpandToggleTests: XCTestCase {
         dragged.size.height -= 60
         gateway.simulateChange(b, to: dragged)
         controller.mouseLifted()
+        commitFires.last?()
 
         let pushed = XCTestExpectation(description: "drag re-push tick")
         DispatchQueue.main.async {

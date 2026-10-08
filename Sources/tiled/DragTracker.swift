@@ -23,10 +23,15 @@ import Foundation
 /// splitter fractions commit live, but the neighbor re-pushes wait for
 /// mouse-up (`mouseLifted`, wired by the controller's global event
 /// monitor). Resizing the tiles under a held button fights the drag and
-/// rewrites frames the user is still steering; on release the whole
-/// grid commits at once. A resize tick that trails the mouse-up (AX
-/// streams the drag's final frame) re-arms the pending apply, and the
-/// next mouse-up anywhere commits it.
+/// rewrites frames the user is still steering. On release the commit
+/// waits out a short trailing-tick delay: AX streams the drag's final
+/// frame, and it can arrive after the mouse-up, so an immediate commit
+/// would push the neighbors to a splitter the user already left behind
+/// (the visible gap then shrinks or overlaps until some later click
+/// commits the trailing tick). Each resize tick that lands while the
+/// button is up re-arms the delay; a new press (`mousePressed`, wired
+/// by the controller's global monitor) cancels it, so a fresh drag
+/// still defers everything to its own release.
 ///
 /// Title-bar drags (origin-only changes) are tracked separately from
 /// edge drags: moved ticks stream in, and when they go silent the drag
@@ -104,10 +109,19 @@ final class DragTracker {
     private var applyScheduled = false
     private var pendingRects: [WindowID: CGRect] = [:]
     private var pendingExclusion: WindowID?
-    /// Edge drags with splitter moves awaiting mouse-up, keyed by canvas.
-    /// The splitter fractions already committed; only the neighbor
-    /// re-push they imply waits for the click to lift (see `mouseLifted`).
+    /// Edge drags with splitter moves awaiting the release's trailing
+    /// ticks, keyed by canvas. The splitter fractions already committed;
+    /// only the neighbor re-push they imply waits for the click to lift
+    /// and the AX stream to go quiet (see `mouseLifted`).
     private var pendingResizeApplies: [TilingSpaceKey?: WindowID] = [:]
+    /// Whether the left mouse button is down. Initialised true: until the
+    /// controller's monitors report otherwise, deferring a neighbor
+    /// re-push is the safe side, and a release can always commit. The
+    /// monitors (`mousePressed` / `mouseLifted`) keep it current.
+    private var mouseIsDown = true
+    /// The scheduled trailing-tick commit, if any; cancelled by a new
+    /// press and re-armed by each post-release resize tick.
+    private var cancelPendingCommit: (() -> Void)?
 
     /// Minimum edge travel that counts as a drag (below this is jitter).
     private static let edgeMoveThreshold: CGFloat = 1
@@ -127,6 +141,25 @@ final class DragTracker {
         return { item.cancel() }
     }
 
+    /// Schedules the post-release trailing-tick commit; returns a
+    /// canceller. Injectable like the drag-end scheduler so tests fire
+    /// the commit without waiting on the runloop.
+    typealias CommitScheduler = (_ fire: @escaping () -> Void) -> () -> Void
+
+    /// Delay between the last resize tick (or the release that ended the
+    /// drag) and the neighbor re-push. Long enough for the drag's final
+    /// AX notification to land, short enough to still read as attached
+    /// to the release; a later tick re-arms it, so a miss only delays
+    /// the correction, never loses it.
+    static let trailingCommitDelay: TimeInterval = 0.1
+
+    static let scheduleCommitOnMain: CommitScheduler = { fire in
+        let item = DispatchWorkItem(block: fire)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + DragTracker.trailingCommitDelay, execute: item)
+        return { item.cancel() }
+    }
+
     init(
         expectations: WriteExpectations,
         context: Context,
@@ -134,6 +167,7 @@ final class DragTracker {
         apply: @escaping (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Void,
         onUntile: @escaping (WindowID) -> Void = { _ in },
         scheduleDragEnd: @escaping DragEndScheduler = DragTracker.scheduleDragEndOnMain,
+        scheduleCommit: @escaping CommitScheduler = DragTracker.scheduleCommitOnMain,
         log: @escaping (String) -> Void = { _ in }
     ) {
         self.expectations = expectations
@@ -142,10 +176,12 @@ final class DragTracker {
         self.apply = apply
         self.onUntile = onUntile
         self.scheduleDragEnd = scheduleDragEnd
+        self.scheduleCommit = scheduleCommit
         self.log = log
     }
 
     private let scheduleDragEnd: DragEndScheduler
+    private let scheduleCommit: CommitScheduler
 
     // MARK: Pushed targets
 
@@ -358,9 +394,15 @@ final class DragTracker {
         }
         if changed {
             // The splitter moved now, but the neighbors it will displace
-            // wait for mouse-up: pushing tiles while the button is down
-            // fights the drag the user is still steering.
+            // wait for the release and its trailing ticks: pushing tiles
+            // while the button is down fights the drag the user is still
+            // steering, and pushing on the release itself can beat the
+            // drag's final AX tick. A tick that lands while the button
+            // is up re-arms the commit, so the grid settles as one move.
             pendingResizeApplies[context.spaceOf(id)] = id
+            if !mouseIsDown {
+                armCommit()
+            }
         }
     }
 
@@ -396,11 +438,48 @@ final class DragTracker {
 
     // MARK: Mouse-up commit
 
-    /// The user released the mouse button: commit every deferred neighbor
-    /// re-push at once, so the tiles around a resized window resize on
-    /// the click lifting, never under it. A trailing resize tick re-arms
-    /// its canvas's entry; the next mouse-up anywhere commits it.
+    /// The user released the mouse button: schedule the pending neighbor
+    /// re-pushes to commit once the drag's trailing AX ticks go quiet.
+    /// Committing at once would race the drag's final tick — AX streams
+    /// it after the release — and push the neighbors to a splitter the
+    /// user already left behind, leaving a wrong (shrunk, grown, or
+    /// overlapping) gap until some later click committed the tick. Each
+    /// following resize tick re-arms the delay; a new press cancels it.
     func mouseLifted() {
+        mouseIsDown = false
+        armCommit()
+    }
+
+    /// The user pressed the mouse button: a pending trailing-tick commit
+    /// belongs to the gesture that just ended, so it is dropped. The new
+    /// drag's own release arms the next one.
+    func mousePressed() {
+        mouseIsDown = true
+        cancelCommit()
+    }
+
+    /// (Re)arms the trailing-tick commit when splitters await a neighbor
+    /// re-push; a no-op with nothing pending.
+    private func armCommit() {
+        cancelCommit()
+        guard !pendingResizeApplies.isEmpty else { return }
+        cancelPendingCommit = scheduleCommit { [weak self] in
+            guard let self, self.cancelPendingCommit != nil else { return }
+            self.cancelPendingCommit = nil
+            self.commitPendingResizes()
+        }
+    }
+
+    /// Drops the scheduled trailing-tick commit, if any.
+    private func cancelCommit() {
+        cancelPendingCommit?()
+        cancelPendingCommit = nil
+    }
+
+    /// Commits every deferred neighbor re-push at once: the grid has
+    /// settled (release plus trailing ticks), so the tiles around the
+    /// resized window move together, never under a held button.
+    private func commitPendingResizes() {
         guard !pendingResizeApplies.isEmpty else { return }
         let pending = pendingResizeApplies
         pendingResizeApplies = [:]
