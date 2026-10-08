@@ -85,5 +85,10 @@ mutation-table target stays live and caught.
 - Gateway-direct restores stay as they are; a silently ignored restore is its own future ticket.
 - Candidate A2 ("One outcome, announced once") is done at `d31a560`: the controller
   actions report whether they performed, the delegate announces a success sentence
-  only then, and the confirmation copy lives in `MenuText`. Candidates A3-A7 and
-  defects 6-8 from the review report remain unclaimed.
+  only then, and the confirmation copy lives in `MenuText`.
+- Candidate A3 ("Make the death standard's assembly as testable as its decision
+  table") is done at `91ee273`: the gateway takes one liveness pass, the adapter
+  asks each app once and shares the answer, the death decision's gathering is a
+  tested assembly (app answers, frames, baseline), and defect 4's per-record app
+  walk is gone. Candidates A4-A7 and defects 6-8 from the review report remain
+  unclaimed.
