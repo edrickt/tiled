@@ -1015,13 +1015,15 @@ struct TilingSpace {
             context.log("expand win\(id) -> \(target)")
             return Outcome()
         }
-        // Every non-accepted expanded write answers `.expandRefused`,
-        // deferred included (the old feedback shape); only a genuine
-        // refusal records a message on the canvas.
+        // A deferred (off-Space) write is not a refusal: the canvas is
+        // marked stale and the write is reconciled on the swipe back, so
+        // nothing is announced. Only a genuine refusal records a message
+        // and answers `.expandRefused`.
         if let message = result.refusal {
             error = message
+            return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
         }
-        return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
+        return Outcome()
     }
 
     /// Unexpands `id`, recording the refusal on this canvas and returning
@@ -1039,7 +1041,7 @@ struct TilingSpace {
         if state.slot(of: id) != nil {
             if let result = retileExpanded(id, saved: saved, context: context) {
                 refusal = result.refusal
-                answered = !result.accepted
+                answered = refusal != nil
             }
         } else if records[id] != nil {
             // A silent ignore must restore the expansion the collapse
@@ -1047,7 +1049,7 @@ struct TilingSpace {
             let result = writeExpandedFrame(
                 id, to: saved, revertTo: saved, context: context)
             refusal = result.refusal
-            answered = !result.accepted
+            answered = refusal != nil
             if result.accepted {
                 context.log("collapse win\(id) -> saved \(saved)")
             }
@@ -1055,8 +1057,9 @@ struct TilingSpace {
         if let refusal {
             error = refusal
         }
-        // A deferred or refused retile answers `.expandRefused`; a
-        // collapse with no record (nothing to write) stays silent.
+        // A deferred retile is silent (the write waits for the swipe
+        // back); only a genuine refusal answers `.expandRefused`. A
+        // collapse with no record (nothing to write) stays silent too.
         guard answered else { return Outcome() }
         return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
     }

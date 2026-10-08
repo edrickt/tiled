@@ -851,11 +851,48 @@ final class TilingSpaceTests: XCTestCase {
 
         let outcome = space.expandToggle(window: id, context: context())
 
-        XCTAssertEqual(outcome.result, .expandRefused(windowName: "TestApp"))
+        XCTAssertEqual(
+            outcome.result, .placed,
+            "a deferred off-Space write is not an app refusal")
+        XCTAssertNil(space.error, "a deferred write announces nothing")
         XCTAssertFalse(space.isExpanded(id))
         XCTAssertTrue(harness.gateway.writes.isEmpty)
         XCTAssertEqual(harness.staleMarks, [.displayless])
         XCTAssertTrue(harness.checks.isEmpty, "a deferred write arms no late check")
+    }
+
+    func testHiddenCanvasCollapseDefersAndStaysSilent() {
+        let id = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: id)
+        space.expandToggle(window: id, context: context())
+        XCTAssertTrue(space.isExpanded(id))
+
+        harness.canvasVisible = false
+        let outcome = space.expandToggle(window: id, context: context())
+
+        XCTAssertEqual(
+            outcome.result, .placed,
+            "a deferred collapse is not an app refusal")
+        XCTAssertNil(space.error, "a deferred write announces nothing")
+        XCTAssertFalse(space.isExpanded(id))
+    }
+
+    func testHiddenCanvasCollapseOfUntiledExpansionDefersAndStaysSilent() {
+        // An untiled window expands to its screen, then collapses: there
+        // is no slot to retile into, so the collapse restores the saved
+        // frame through the no-record branch.
+        let id = harness.addWindow()
+        space.expandToggle(window: id, context: context())
+        XCTAssertTrue(space.isExpanded(id))
+
+        harness.canvasVisible = false
+        let outcome = space.expandToggle(window: id, context: context())
+
+        XCTAssertEqual(
+            outcome.result, .placed,
+            "a deferred collapse is not an app refusal")
+        XCTAssertNil(space.error, "a deferred write announces nothing")
+        XCTAssertFalse(space.isExpanded(id))
     }
 
     func testExpandWithNoReadableFrameRefusesToGuess() {

@@ -512,8 +512,8 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertEqual(
             localGateway.frame(of: handle), original,
             "an off-Space window is never written")
-        guard case .expandRefused = localFeedbacks.first else {
-            return XCTFail("expected .expandRefused, got \(localFeedbacks)")
-        }
+        XCTAssertTrue(
+            localFeedbacks.isEmpty,
+            "a deferred write is not reported as an app refusal, got \(localFeedbacks)")
     }
 }

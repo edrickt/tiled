@@ -454,5 +454,23 @@
   "rebuild uses the build-time size instead of the window's live size",
   "        let size = window?.contentView?.bounds.size ?? Self.fallbackRebuildSize",
   "        let size = Self.fallbackRebuildSize"
+ ],
+ [
+  "TilingSpace.swift",
+  "deferred expand reported as an app refusal",
+  "        if let message = result.refusal {\n            error = message\n            return Outcome(result: .expandRefused(windowName: appName(id, context: context)))\n        }\n        return Outcome()",
+  "        if let message = result.refusal {\n            error = message\n        }\n        return Outcome(result: .expandRefused(windowName: appName(id, context: context)))"
+ ],
+ [
+  "TilingSpace.swift",
+  "deferred collapse retile reported as an app refusal",
+  "                refusal = result.refusal\n                answered = refusal != nil\n            }\n        } else if records[id] != nil {",
+  "                refusal = result.refusal\n                answered = !result.accepted\n            }\n        } else if records[id] != nil {"
+ ],
+ [
+  "TilingSpace.swift",
+  "deferred collapse write reported as an app refusal",
+  "            refusal = result.refusal\n            answered = refusal != nil\n            if result.accepted {",
+  "            refusal = result.refusal\n            answered = !result.accepted\n            if result.accepted {"
  ]
 ]
