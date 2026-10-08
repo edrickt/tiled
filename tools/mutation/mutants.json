@@ -424,5 +424,35 @@
   "chapter restoration ignores the other layout when admitting blockers",
   "            where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {",
   "            where slot.overlaps(evicted.slot) {"
+ ],
+ [
+  "SettingsWindowController.swift",
+  "first-run Welcome tab dropped from the starting order",
+  "            showWelcome ? [.welcome, .general, .shortcuts] : [.general, .shortcuts]",
+  "            [.general, .shortcuts]"
+ ],
+ [
+  "SettingsWindowController.swift",
+  "General tab's trust probe left unwired (permission row stale)",
+  "        generalTab.isTrustedProvider = dependencies.isTrusted",
+  "        generalTab.isTrustedProvider = { true }"
+ ],
+ [
+  "SettingsWindowController.swift",
+  "General tab's open-accessibility action left unwired (button dead)",
+  "        generalTab.onOpenAccessibilitySettings = dependencies.openAccessibilitySettings",
+  "        generalTab.onOpenAccessibilitySettings = {}"
+ ],
+ [
+  "SettingsWindowController.swift",
+  "Shortcuts tab's registration-failure probe left unwired",
+  "        shortcutsTab.failedActionsProvider = dependencies.failedActions",
+  "        shortcutsTab.failedActionsProvider = nil"
+ ],
+ [
+  "SettingsShortcutsTab.swift",
+  "rebuild uses the build-time size instead of the window's live size",
+  "        let size = window?.contentView?.bounds.size ?? Self.fallbackRebuildSize",
+  "        let size = Self.fallbackRebuildSize"
  ]
 ]

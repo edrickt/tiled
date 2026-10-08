@@ -673,34 +673,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ensureSettingsController() {
         if settingsController == nil {
             let controller = SettingsWindowController(
-                settings: settings, hotkeyStore: hotkeyStore)
-            controller.onHideIconChange = { [weak self] hidden in
-                self?.setIconHidden(hidden)
-            }
-            controller.isTrustedProvider = { [weak self] in self?.gateway.isTrusted ?? false }
-            controller.onOpenAccessibilitySettings = { [weak self] in
-                self?.openAccessibilitySettings(nil)
-            }
-            controller.onHotkeysChange = { [weak self] in
-                self?.hotkeys?.reload()
-                // Binding labels live in menu titles but not in the
-                // snapshot, so a label-only change would diff clean.
-                // Force past the diff on any binding edit.
-                self?.refreshMenu(force: true)
-            }
-            // The Shortcuts tab surfaces cross-app registration failures
-            // beside the recorder that accepted the combo, not only in
-            // the status menu.
-            controller.failedActionsProvider = { [weak self] in
-                self?.hotkeys?.failedActions ?? []
-            }
-            // General's hide-icon confirm names a recovery combo only when
-            // it is actually registered: never a dead promise while
-            // removing the last visible handle to the app.
-            controller.isSettingsHotkeyRegisteredProvider = { [weak self] in
-                guard let hotkeys = self?.hotkeys else { return false }
-                return !hotkeys.failedActions.contains(.settings)
-            }
+                settings: settings, hotkeyStore: hotkeyStore,
+                dependencies: SettingsDependencies(
+                    isTrusted: { [weak self] in self?.gateway.isTrusted ?? false },
+                    openAccessibilitySettings: { [weak self] in
+                        self?.openAccessibilitySettings(nil)
+                    },
+                    hideIconChange: { [weak self] hidden in
+                        self?.setIconHidden(hidden)
+                    },
+                    hotkeysChange: { [weak self] in
+                        self?.hotkeys?.reload()
+                        // Binding labels live in menu titles but not in the
+                        // snapshot, so a label-only change would diff clean.
+                        // Force past the diff on any binding edit.
+                        self?.refreshMenu(force: true)
+                    },
+                    failedActions: { [weak self] in
+                        self?.hotkeys?.failedActions ?? []
+                    },
+                    isSettingsHotkeyRegistered: { [weak self] in
+                        guard let hotkeys = self?.hotkeys else { return false }
+                        return !hotkeys.failedActions.contains(.settings)
+                    }))
             settingsController = controller
         }
     }

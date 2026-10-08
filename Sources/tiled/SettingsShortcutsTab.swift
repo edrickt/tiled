@@ -487,9 +487,10 @@ final class ShortcutsTab: NSObject {
         }
     }
 
-    /// Size for rebuilding the shortcuts view after collapse/bulk toggles.
-    /// Set by the shell on every build; falls back to the window default.
-    var buildSize = NSSize(width: 440, height: 480)
+    /// Size for a headless rebuild (no window): the window default. A tab
+    /// with a window reads the window's live content size instead, so a
+    /// resize between builds reaches the rebuilt view.
+    static let fallbackRebuildSize = NSSize(width: 440, height: 480)
     /// The shell swaps the tab item's view with the rebuilt content.
     var onContentRebuilt: ((NSView) -> Void)?
 
@@ -507,9 +508,15 @@ final class ShortcutsTab: NSObject {
     /// so headless callers (tests included) can drive the tab without
     /// a shell.
     @discardableResult
-    private func rebuildContent(restoringFocusTo identifier: String? = nil) -> NSView {
+    func rebuildContent(restoringFocusTo identifier: String? = nil) -> NSView {
         reset()
-        let view = build(size: buildSize, window: window)
+        // Read the window's current content size, not a size captured at
+        // the last build: a live resize between builds must reach the
+        // rebuilt view, or a collapse/bulk toggle snaps the tab back to
+        // its build-time width. The constant only serves headless callers
+        // (tests) that build without a window.
+        let size = window?.contentView?.bounds.size ?? Self.fallbackRebuildSize
+        let view = build(size: size, window: window)
         reload()
         onContentRebuilt?(view)
         if let identifier, let window,

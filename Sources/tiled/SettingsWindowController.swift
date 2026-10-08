@@ -9,6 +9,30 @@ final class SettingsWindowController: NSWindowController {
         case welcome
         case general
         case shortcuts
+
+        /// Selects by identifier: the Welcome tab shifts indices when
+        /// present, so raw values are never positions.
+        var identifier: String {
+            switch self {
+            case .welcome: "welcome"
+            case .general: "general"
+            case .shortcuts: "shortcuts"
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .welcome: "Welcome"
+            case .general: "General"
+            case .shortcuts: "Shortcuts"
+            }
+        }
+
+        /// The tabs present, in display order. Welcome leads when it is
+        /// showing; General is the default landing spot otherwise.
+        static func startingOrder(showWelcome: Bool) -> [Tab] {
+            showWelcome ? [.welcome, .general, .shortcuts] : [.general, .shortcuts]
+        }
     }
 
     private let settings: AppSettings
@@ -17,61 +41,36 @@ final class SettingsWindowController: NSWindowController {
     private let shortcutsTab: ShortcutsTab
     private var tabView: NSTabView!
 
-    /// Live Accessibility trust probe, forwarded to both teaching tabs
-    /// so the permission warning tracks reality on every build.
-    var isTrustedProvider: (() -> Bool)? {
-        didSet {
-            generalTab.isTrustedProvider = isTrustedProvider
-            welcomeTab.isTrustedProvider = isTrustedProvider
-            shortcutsTab.isTrustedProvider = isTrustedProvider
-        }
-    }
-    /// Opens the Accessibility permission pane.
-    var onOpenAccessibilitySettings: (() -> Void)? {
-        didSet {
-            generalTab.onOpenAccessibilitySettings = onOpenAccessibilitySettings
-            welcomeTab.onOpenAccessibilitySettings = onOpenAccessibilitySettings
-            shortcutsTab.onOpenAccessibilitySettings = onOpenAccessibilitySettings
-        }
-    }
-    /// Called when the user toggles "Hide menu bar icon" so the delegate
-    /// can remove/restore the status item immediately.
-    var onHideIconChange: ((Bool) -> Void)?
-    /// Called after any binding change so the delegate can re-register
-    /// hotkeys and refresh the menu.
-    var onHotkeysChange: (() -> Void)?
-    /// Actions whose global hotkey lost registration (owned by another
-    /// app), forwarded to the Shortcuts tab so a cross-app failure
-    /// surfaces beside the recorder that accepted the combo, not only in
-    /// the menu.
-    var failedActionsProvider: (() -> [HotkeyAction])? {
-        didSet { shortcutsTab.failedActionsProvider = failedActionsProvider }
-    }
-    /// Whether the Settings fallback hotkey (⌃⌥⇧⌘,) is currently
-    /// registered, forwarded to General so the hide-icon confirm never
-    /// promises a dead recovery combo.
-    var isSettingsHotkeyRegisteredProvider: (() -> Bool)? {
-        didSet {
-            generalTab.isSettingsHotkeyRegisteredProvider =
-                isSettingsHotkeyRegisteredProvider
-        }
-    }
-
-    init(settings: AppSettings, hotkeyStore: HotkeyStore = HotkeyStore()) {
+    init(
+        settings: AppSettings,
+        hotkeyStore: HotkeyStore = HotkeyStore(),
+        dependencies: SettingsDependencies = SettingsDependencies()
+    ) {
         self.settings = settings
         self.welcomeTab = WelcomeTab(hotkeyStore: hotkeyStore)
         self.generalTab = GeneralTab(settings: settings)
         self.shortcutsTab = ShortcutsTab(hotkeyStore: hotkeyStore)
         super.init(window: Self.makeWindow())
+        // One wiring point: each tab gets the slice of the dependency
+        // value it reads. The closures come from the delegate already
+        // weak-captured, so no indirection through the shell is needed.
+        generalTab.isTrustedProvider = dependencies.isTrusted
+        generalTab.isSettingsHotkeyRegisteredProvider = dependencies.isSettingsHotkeyRegistered
+        generalTab.onHideIconChange = dependencies.hideIconChange
+        welcomeTab.isTrustedProvider = dependencies.isTrusted
+        shortcutsTab.isTrustedProvider = dependencies.isTrusted
+        welcomeTab.onOpenAccessibilitySettings = dependencies.openAccessibilitySettings
+        generalTab.onOpenAccessibilitySettings = dependencies.openAccessibilitySettings
+        shortcutsTab.onOpenAccessibilitySettings = dependencies.openAccessibilitySettings
+        shortcutsTab.failedActionsProvider = dependencies.failedActions
         welcomeTab.onDismiss = { [weak self] in self?.dismissWelcome() }
-        generalTab.onHideIconChange = { [weak self] in self?.onHideIconChange?($0) }
         generalTab.onShowGuide = { [weak self] in self?.showWelcomeAgain() }
-        welcomeTab.onOpenAccessibilitySettings = { [weak self] in
-            self?.onOpenAccessibilitySettings?()
-        }
+        // A binding edit can change the Welcome tab's taught combo; refresh
+        // it before telling the delegate to re-register.
+        let hotkeysChange = dependencies.hotkeysChange
         shortcutsTab.onHotkeysChange = { [weak self] in
             self?.welcomeTab.refreshShortcutInstructions()
-            self?.onHotkeysChange?()
+            hotkeysChange()
         }
         shortcutsTab.onContentRebuilt = { [weak self] view in
             self?.replaceShortcutsView(view)
@@ -111,15 +110,28 @@ final class SettingsWindowController: NSWindowController {
     /// Selects by identifier: the Welcome tab shifts indices when present,
     /// so raw values are never positions.
     private func selectTab(_ tab: Tab) {
-        let id: String
-        switch tab {
-        case .welcome: id = "welcome"
-        case .general: id = "general"
-        case .shortcuts: id = "shortcuts"
-        }
-        if let item = tabView.tabViewItems.first(where: { ($0.identifier as? String) == id }) {
+        if let item = tabView.tabViewItems.first(where: {
+            ($0.identifier as? String) == tab.identifier
+        }) {
             tabView.selectTabViewItem(item)
         }
+    }
+
+    // MARK: Testable tab lifecycle
+
+    /// The tab identifiers present, in display order.
+    var tabIdentifiers: [String] {
+        tabView.tabViewItems.compactMap { $0.identifier as? String }
+    }
+
+    /// The identifier of the selected tab, or nil before a tab view exists.
+    var selectedTabIdentifier: String? {
+        tabView.selectedTabViewItem?.identifier as? String
+    }
+
+    /// The view currently hosting a tab, or nil when the tab is absent.
+    func tabContent(of tab: Tab) -> NSView? {
+        tabView.tabViewItems.first { ($0.identifier as? String) == tab.identifier }?.view
     }
 
     /// Keyboard/VoiceOver landing spot per tab: opening Settings must put
@@ -155,34 +167,24 @@ final class SettingsWindowController: NSWindowController {
         let tabs = NSTabView(frame: frame)
         tabs.autoresizingMask = [.width, .height]
         tabView = tabs
-
-        let general = NSTabViewItem(identifier: "general")
-        general.label = "General"
-        general.view = generalTab.build(size: frame.size)
-        tabs.addTabViewItem(general)
-
-        let shortcuts = NSTabViewItem(identifier: "shortcuts")
-        shortcuts.label = "Shortcuts"
-        shortcuts.view = shortcutsView(size: frame.size)
-        tabs.addTabViewItem(shortcuts)
-
-        // First-run tab: demonstrates one tiling instead of listing
-        // seventeen combos. Removed per launch once dismissed; re-openable
-        // from the menu bar menu → Tiled Guide (via a one-shot build override).
-        if !settings.didDismissWelcome || forceWelcomeOnce {
-            let welcome = NSTabViewItem(identifier: "welcome")
-            welcome.label = "Welcome"
-            welcome.view = welcomeTab.build(size: frame.size)
-            tabs.insertTabViewItem(welcome, at: 0)
+        let showWelcome = !settings.didDismissWelcome || forceWelcomeOnce
+        for tab in Tab.startingOrder(showWelcome: showWelcome) {
+            let item = NSTabViewItem(identifier: tab.identifier)
+            item.label = tab.label
+            item.view = makeTabContent(for: tab, size: frame.size)
+            tabs.addTabViewItem(item)
         }
         return tabs
     }
 
-    /// Builds the shortcuts content, remembering the size for later
-    /// collapse/bulk rebuilds (the tab rebuilds itself on toggle).
-    private func shortcutsView(size: NSSize) -> NSView {
-        shortcutsTab.buildSize = size
-        return shortcutsTab.build(size: size, window: window)
+    /// Builds one tab's content at the given size. Shortcuts needs the
+    /// window so it can restore focus and size its own rebuilds.
+    private func makeTabContent(for tab: Tab, size: NSSize) -> NSView {
+        switch tab {
+        case .welcome: welcomeTab.build(size: size)
+        case .general: generalTab.build(size: size)
+        case .shortcuts: shortcutsTab.build(size: size, window: window)
+        }
     }
 
     /// Swaps the Shortcuts tab item's view after a collapse/bulk rebuild.
@@ -268,14 +270,5 @@ final class SettingsWindowController: NSWindowController {
         welcomeTab.refreshPermissionState()
         generalTab.refreshPermissionState()
         shortcutsTab.refreshPermissionState()
-    }
-
-    /// Keeps the Shortcuts tab's rebuild size current during live
-    /// resize; without this, a collapse/bulk rebuild after resizing
-    /// would use the size captured at build time.
-    func windowDidResize(_ notification: Notification) {
-        if let size = window?.contentView?.bounds.size {
-            shortcutsTab.buildSize = size
-        }
     }
 }
