@@ -119,4 +119,8 @@ mutation-table target stays live and caught.
   `CarbonEventHandler` retains the routing context for as long as the handler is
   installed and removes the handler on deinit; the process-wide "install once"
   flag and the unretained `userData` are gone.
-  Defect 8 from the review report remains unclaimed.
+- Defect 8 ("Clear-recorder advice names the wrong recovery") is done at
+  `4e9391b`: the clear advice names the section's Enable-all button for a slot and
+  re-record for an app action (which has no bulk restore), and no longer names
+  Reset. The 2026-10-08 review queue is now clear: candidates A1-A7 and defects
+  1-8 are all addressed (defects 1-5 structurally by their candidates).
