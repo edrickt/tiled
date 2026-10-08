@@ -130,4 +130,143 @@ final class AXLivenessTests: XCTestCase {
         XCTAssertTrue(
             LiveWindowGateway.processExists(1), "launchd exists but is not signallable: EPERM is not death")
     }
+
+    // MARK: The death standard's assembly
+
+    func testAppWindowMatchScenarios() {
+        // Geometry membership, not element identity: the raw app answer
+        // (a frame per listed window, nil when a read failed) becomes
+        // alive-consistent, absent, or undeterminable.
+        let baseline = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let elsewhere = CGRect(x: 0, y: 0, width: 50, height: 50)
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(
+                baseline: baseline, listedFrames: [elsewhere, baseline]),
+            true, "a listed frame matching the baseline means alive")
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(
+                baseline: baseline,
+                listedFrames: [baseline.offsetBy(dx: 0.5, dy: -0.5)]),
+            true, "reads round: a sub-point difference still matches")
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(
+                baseline: baseline, listedFrames: [elsewhere]),
+            false, "the app answered, every frame read, none matched: gone")
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(baseline: baseline, listedFrames: []),
+            false, "the app lists nothing at all: gone")
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(
+                baseline: baseline, listedFrames: [nil]),
+            nil, "a listed frame that would not read is undeterminable")
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(
+                baseline: baseline, listedFrames: [elsewhere, nil]),
+            nil, "one unreadable listed frame keeps the check a maybe")
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(
+                baseline: nil, listedFrames: [elsewhere]),
+            nil, "no baseline frame was ever read: undeterminable")
+    }
+
+    func testOnePassScenarios() {
+        // The exact scenarios a prune pass meets, driven through the
+        // assembly that turns gathered answers into verdicts.
+        struct Scenario {
+            let name: String
+            let probe: AXError
+            let processAlive: Bool
+            let appError: AXError
+            let listedFrames: [CGRect?]
+            let baseline: CGRect?
+            let expected: Liveness
+        }
+        let baseline = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let elsewhere = CGRect(x: 0, y: 0, width: 50, height: 50)
+        let scenarios: [Scenario] = [
+            Scenario(
+                name: "a probe that answers is alive", probe: .success,
+                processAlive: true, appError: .cannotComplete, listedFrames: [],
+                baseline: baseline, expected: .alive),
+            Scenario(
+                name: "the app element itself is stale: dead", probe: .invalidUIElement,
+                processAlive: true, appError: .invalidUIElement, listedFrames: [],
+                baseline: baseline, expected: .dead),
+            Scenario(
+                name: "the owning process is gone: dead", probe: .cannotComplete,
+                processAlive: false, appError: .success, listedFrames: [baseline],
+                baseline: baseline, expected: .dead),
+            Scenario(
+                name: "app answers, no listed frame matches: dead",
+                probe: .invalidUIElement, processAlive: true, appError: .success,
+                listedFrames: [elsewhere], baseline: baseline, expected: .dead),
+            Scenario(
+                name: "app answers with an empty list: dead", probe: .attributeUnsupported,
+                processAlive: true, appError: .success, listedFrames: [],
+                baseline: baseline, expected: .dead),
+            Scenario(
+                name: "a matching listed frame is element churn: maybe",
+                probe: .invalidUIElement, processAlive: true, appError: .success,
+                listedFrames: [elsewhere, baseline], baseline: baseline,
+                expected: .unknown),
+            Scenario(
+                name: "an unreadable listed frame is a maybe", probe: .invalidUIElement,
+                processAlive: true, appError: .success, listedFrames: [elsewhere, nil],
+                baseline: baseline, expected: .unknown),
+            Scenario(
+                name: "no baseline frame is a maybe", probe: .invalidUIElement,
+                processAlive: true, appError: .success, listedFrames: [elsewhere],
+                baseline: nil, expected: .unknown),
+            Scenario(
+                name: "an unanswerable app is a maybe", probe: .cannotComplete,
+                processAlive: true, appError: .cannotComplete, listedFrames: [],
+                baseline: baseline, expected: .unknown),
+        ]
+        for scenario in scenarios {
+            let verdicts = LiveWindowGateway.livenessVerdicts(
+                failedProbes: [
+                    LiveWindowGateway.FailedProbe(
+                        handle: WindowHandle(id: 7), pid: 99, error: scenario.probe)
+                ],
+                baseline: { _ in scenario.baseline },
+                appAnswer: { _ in
+                    LiveWindowGateway.AppWindowAnswer(
+                        processAlive: scenario.processAlive,
+                        appWindowsError: scenario.appError,
+                        listedFrames: scenario.listedFrames)
+                })
+            XCTAssertEqual(verdicts[WindowHandle(id: 7)], scenario.expected, scenario.name)
+        }
+    }
+
+    func testOnePassAsksEachAppOnce() {
+        // The defect-4 fix: however many of an app's windows failed
+        // their probe, the pass walks that app's window list once. Two
+        // handles of pid 42 and one of pid 43 are three verdicts and
+        // two app asks.
+        var asked: [pid_t] = []
+        let verdicts = LiveWindowGateway.livenessVerdicts(
+            failedProbes: [
+                LiveWindowGateway.FailedProbe(
+                    handle: WindowHandle(id: 1), pid: 42, error: .cannotComplete),
+                LiveWindowGateway.FailedProbe(
+                    handle: WindowHandle(id: 2), pid: 42, error: .invalidUIElement),
+                LiveWindowGateway.FailedProbe(
+                    handle: WindowHandle(id: 3), pid: 43, error: .cannotComplete),
+            ],
+            baseline: { _ in CGRect(x: 0, y: 0, width: 10, height: 10) },
+            appAnswer: { pid in
+                asked.append(pid)
+                return LiveWindowGateway.AppWindowAnswer(
+                    processAlive: true, appWindowsError: .success, listedFrames: [])
+            })
+        XCTAssertEqual(asked, [42, 43], "each app is asked once for the whole pass")
+        XCTAssertEqual(
+            verdicts,
+            [
+                WindowHandle(id: 1): .dead,
+                WindowHandle(id: 2): .dead,
+                WindowHandle(id: 3): .dead,
+            ])
+    }
 }

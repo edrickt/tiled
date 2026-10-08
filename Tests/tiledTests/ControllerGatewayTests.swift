@@ -381,6 +381,26 @@ final class ControllerGatewayTests: XCTestCase {
             "death confirmed across the window releases the slot")
     }
 
+    func testPruneAsksTheGatewayOnceForAllRecords() {
+        // The defect-4 fix: one prune pass assembles one liveness request
+        // holding every managed record, so the gateway walks each app's
+        // window list once — never once per record on the main runloop.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .topLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
+        gateway.focused = b
+        controller.handle(slot: .topRight)
+
+        let passesBefore = gateway.livenessPasses.count
+        controller.pruneDeadWindows()
+
+        XCTAssertEqual(gateway.livenessPasses.count, passesBefore + 1)
+        XCTAssertEqual(
+            Set(gateway.livenessPasses.last ?? []), [a, b],
+            "one pass covers every record")
+    }
+
     // MARK: No-op re-push convergence
 
     /// Tiles the focused window into `slot` and returns its handle.

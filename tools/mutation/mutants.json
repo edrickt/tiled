@@ -270,6 +270,24 @@
   "        if false { return .dead }"
  ],
  [
+  "LiveWindowGateway.swift",
+  "unreadable listed frame treated as absence (lid-close transient prunes live windows)",
+  "        if listedFrames.isEmpty || readFrames.count == listedFrames.count {",
+  "        if listedFrames.isEmpty || readFrames.count <= listedFrames.count {"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "matching listed frame ignored (element churn reads as death)",
+  "        if readFrames.contains(where: { framesClose($0, baseline) }) {\n            return true\n        }",
+  "        if false {\n            return true\n        }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "each window asks its app again (window list walked per record, not per pass)",
+  "            if let cached = answers[probe.pid] {",
+  "            if false, let cached = answers[probe.pid] {"
+ ],
+ [
   "TilingController.swift",
   "destroyed notification ignored (slots linger until the prune tick)",
   "        guard let id = recordID(for: handle) else { return }\n        guard gateway.liveness(of: handle) == .dead else {",

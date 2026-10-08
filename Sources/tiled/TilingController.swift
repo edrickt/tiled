@@ -661,13 +661,18 @@ final class TilingController {
     /// confirmed deaths prune: a busy app's unanswerable probe is unknown,
     /// and pruning on a maybe would untile a live window.
     func pruneDeadWindows() {
-        var dead: [(key: TilingSpaceKey, id: WindowID, handle: WindowHandle)] = []
+        var managed: [(key: TilingSpaceKey, id: WindowID, handle: WindowHandle)] = []
         for (key, canvas) in spaces {
-            for (id, record) in canvas.records
-            where gateway.liveness(of: record.handle) == .dead {
-                dead.append((key, id, record.handle))
+            for (id, record) in canvas.records {
+                managed.append((key, id, record.handle))
             }
         }
+        // One pass for every managed record, every canvas: the gateway
+        // asks each owning app once and judges all its windows against
+        // that single answer, instead of walking the window list once
+        // per record on the main runloop.
+        let verdicts = gateway.liveness(of: managed.map(\.handle))
+        let dead = managed.filter { verdicts[$0.handle] == .dead }
         let timestamp = now()
         for entry in dead {
             let first = deadSince[entry.id] ?? timestamp

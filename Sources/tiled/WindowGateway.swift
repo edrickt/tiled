@@ -39,7 +39,11 @@ protocol WindowGateway: AnyObject {
     func setFrame(_ handle: WindowHandle, to frame: CGRect) -> Bool
     /// `.dead` once the window is closed or its app quit; `.unknown`
     /// when the app was too busy to answer (never treated as dead).
-    func liveness(of handle: WindowHandle) -> Liveness
+    /// One verdict per requested handle. Adapters that share an app
+    /// between handles must ask each app once for the whole pass — one
+    /// window list, its frames read once — never once per record: the
+    /// prune pass runs on the main runloop.
+    func liveness(of handles: [WindowHandle]) -> [WindowHandle: Liveness]
     /// Calls `onChange` on resize/move, and `onDestroyed` when the window
     /// element itself is destroyed: the OS's own report that the window
     /// is gone, which lets the slot release at once instead of waiting
@@ -89,4 +93,11 @@ protocol WindowGateway: AnyObject {
 
 extension WindowGateway {
     func release(_ handle: WindowHandle) {}
+
+    /// Single-window form of the pass, for the call sites that check one
+    /// handle: a destroy report, one undo entry. An omitted verdict is
+    /// unknown: a maybe never untiles.
+    func liveness(of handle: WindowHandle) -> Liveness {
+        liveness(of: [handle])[handle] ?? .unknown
+    }
 }

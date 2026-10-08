@@ -118,15 +118,30 @@ final class FakeWindowGateway: WindowGateway {
     /// cannot answer the probe): alive for every other purpose, never
     /// pruned.
     var busy: Set<WindowHandle> = []
-    /// Handles whose liveness probe reports dead while the window lives:
-    /// the lid-close transient, where AX answers `.invalidUIElement` for
-    /// live windows during the display teardown (observed on live AX).
+    /// Handles scripted to read dead while the window lives: the
+    /// controller's confirmation window turns one dead reading into a
+    /// maybe, so tests drive the transient-then-recovery shape without
+    /// waiting on a real lid cycle.
     var probeDead: Set<WindowHandle> = []
     /// Handles whose frame reads fail while the window lives: the same
     /// lid-close transient on the frame-read path.
     var hideFrames: Set<WindowHandle> = []
 
-    func liveness(of handle: WindowHandle) -> Liveness {
+    /// Every liveness pass requested through the seam, in order. Pins
+    /// the one-pass contract: a prune pass must ask once for all of its
+    /// records, not once per record.
+    private(set) var livenessPasses: [[WindowHandle]] = []
+
+    func liveness(of handles: [WindowHandle]) -> [WindowHandle: Liveness] {
+        livenessPasses.append(handles)
+        var verdicts: [WindowHandle: Liveness] = [:]
+        for handle in handles {
+            verdicts[handle] = verdict(of: handle)
+        }
+        return verdicts
+    }
+
+    private func verdict(of handle: WindowHandle) -> Liveness {
         guard let window = windows[handle] else { return .dead }
         if probeDead.contains(handle) { return .dead }
         if !window.alive { return .dead }
