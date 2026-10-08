@@ -83,4 +83,7 @@ mutation-table target stays live and caught.
 ## Out of scope
 
 - Gateway-direct restores stay as they are; a silently ignored restore is its own future ticket.
-- Candidates A2-A7 and defects 6-8 from the review report remain unclaimed.
+- Candidate A2 ("One outcome, announced once") is done at `d31a560`: the controller
+  actions report whether they performed, the delegate announces a success sentence
+  only then, and the confirmation copy lives in `MenuText`. Candidates A3-A7 and
+  defects 6-8 from the review report remain unclaimed.
