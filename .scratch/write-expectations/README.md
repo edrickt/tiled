@@ -115,4 +115,8 @@ mutation-table target stays live and caught.
 - Defect 6 ("Deferred off-Space write reported as an app refusal") is done at
   `449bc2a`: the expand/collapse path answers `.expandRefused` only for a genuine
   refusal; a deferred write stays silent, like every other off-Space write.
-  Defects 7-8 from the review report remain unclaimed.
+- Defect 7 ("Carbon hotkey handler outlives its instance") is done at `c278b18`:
+  `CarbonEventHandler` retains the routing context for as long as the handler is
+  installed and removes the handler on deinit; the process-wide "install once"
+  flag and the unretained `userData` are gone.
+  Defect 8 from the review report remains unclaimed.
