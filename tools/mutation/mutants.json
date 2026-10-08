@@ -490,5 +490,17 @@
   "context released while the handler is still installed",
   "        Unmanaged<Payload>.fromOpaque(userData).release()",
   "        _ = userData"
+ ],
+ [
+  "SettingsShortcutsTab.swift",
+  "cleared slot advises reset (which does not restore the park)",
+  "        return \"\\(action.title) disabled: its old combo (\\(parkedLabel)) is parked; \"\n            + \"Enable all \\(count) restores it.\"",
+  "        return \"\\(action.title) disabled: its old combo (\\(parkedLabel)) is parked; \"\n            + \"re-record or reset to restore it.\""
+ ],
+ [
+  "SettingsShortcutsTab.swift",
+  "cleared app action promises a bulk restore it does not have",
+  "            return \"\\(action.title) disabled: re-record a combo to enable it.\"",
+  "            return \"\\(action.title) disabled: its old combo (\\(parkedLabel)) is parked; Enable all restores it.\""
  ]
 ]

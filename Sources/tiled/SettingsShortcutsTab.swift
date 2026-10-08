@@ -270,6 +270,22 @@ final class ShortcutsTab: NSObject {
                "Disable every \(name) shortcut (keeps defaults for re-enable)")
     }
 
+    /// The recovery a cleared recorder's park actually has. A slot is
+    /// restored by its section's Enable-all button (the same one Disable
+    /// all parks against); app actions have no bulk button, so
+    /// re-recording is their only way back. The name is derived from the
+    /// same count the button renders, so the advice and the control
+    /// cannot drift. (Reset Shortcuts is not a recovery: it uses its own
+    /// backup keys and never reads the park.)
+    private func clearAdvice(for action: HotkeyAction, parkedLabel: String) -> String {
+        guard case .slot(let slot) = action else {
+            return "\(action.title) disabled: re-record a combo to enable it."
+        }
+        let count = Slot.allCases.filter { $0.layout == slot.layout }.count
+        return "\(action.title) disabled: its old combo (\(parkedLabel)) is parked; "
+            + "Enable all \(count) restores it."
+    }
+
     /// Surfaces cross-app registration failures beside the recorder rows.
     /// These are not in-app conflicts, but they are decided here: a combo
     /// the recorder accepted can still lose the global registration. The
@@ -630,9 +646,7 @@ final class ShortcutsTab: NSObject {
             hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: action)
             button.showBinding(hotkeyStore.binding(for: action))
             if let label = previous.label {
-                showConflict(
-                    "\(action.title) disabled: " +
-                    "its old combo (\(label)) is parked; re-record or reset to restore it.")
+                showConflict(clearAdvice(for: action, parkedLabel: label))
             } else {
                 clearConflict()
             }

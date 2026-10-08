@@ -182,6 +182,25 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         return nil
     }
 
+    private func conflictText(in view: NSView) -> String? {
+        if let field = view as? NSTextField,
+           field.stringValue.contains("disabled:") {
+            return field.stringValue
+        }
+        for subview in view.subviews {
+            if let hit = conflictText(in: subview) { return hit }
+        }
+        return nil
+    }
+
+    private func findRecorder(action: HotkeyAction, in view: NSView) -> RecorderButton? {
+        if let button = view as? RecorderButton, button.hotkeyAction == action { return button }
+        for subview in view.subviews {
+            if let hit = findRecorder(action: action, in: subview) { return hit }
+        }
+        return nil
+    }
+
     private func findRecorder(slot: Slot, in view: NSView) -> RecorderButton? {
         if let button = view as? RecorderButton, button.hotkeyAction == .slot(slot) { return button }
         for subview in view.subviews {
@@ -331,6 +350,46 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         XCTAssertNotNil(
             store.binding(for: .topLeft).keyCode,
             "the button labelled Enable all enabled the section")
+    }
+
+    func testClearingARecorderNamesTheEnableAllRecovery() throws {
+        let tab = makeTab()
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let recorder = findRecorder(slot: .topLeft, in: view)
+        else { return XCTFail("expected a Top Left recorder") }
+        XCTAssertNotNil(store.binding(for: .topLeft).label)
+
+        recorder.performClick(nil)
+        _ = recorder.routeRecordedEvent(keyDown(keyCode: UInt16(kVK_Delete)))
+
+        XCTAssertNil(store.binding(for: .topLeft).keyCode, "the clear landed")
+        let advice = try XCTUnwrap(conflictText(in: view))
+        XCTAssertTrue(
+            advice.contains("Enable all 6"),
+            "the clear advice must name the recovery that actually restores the park, got: \(advice)")
+        XCTAssertFalse(
+            advice.lowercased().contains("reset"),
+            "Reset Shortcuts is not the park's recovery; it resets everything, got: \(advice)")
+    }
+
+    func testClearingAnAppActionAdvisesReRecordingNotABulkRestore() throws {
+        // App Actions have no Enable-all button, so their cleared park has
+        // no bulk restore; the advice must not promise one (or name Reset,
+        // which resets everything).
+        let tab = makeTab()
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let recorder = findRecorder(action: .expand, in: view)
+        else { return XCTFail("expected an Expand recorder") }
+
+        recorder.performClick(nil)
+        _ = recorder.routeRecordedEvent(keyDown(keyCode: UInt16(kVK_Delete)))
+
+        XCTAssertNil(store.binding(for: .expand).keyCode, "the clear landed")
+        let advice = try XCTUnwrap(conflictText(in: view))
+        XCTAssertTrue(advice.contains("re-record"), advice)
+        XCTAssertFalse(
+            advice.contains("Enable all"),
+            "app actions have no bulk restore, got: \(advice)")
     }
 
     func testRecordingIntoTheLastDisabledSlotFlipsTheBulkButtonToDisable() {
