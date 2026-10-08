@@ -182,7 +182,10 @@ final class WriteExpectations {
     /// reads as a silent ignore); otherwise the expectation is armed
     /// before the write, and one late convergence check is scheduled
     /// after the gateway accepted it. The consequence decides what that
-    /// check pays if the app stayed silent.
+    /// check pays if the app stayed silent. An app that reports success
+    /// but applied a frame off the animation path to the target (a
+    /// minimum-size clamp is the real shape) had the request overridden:
+    /// the pre-write frame is restored and the write reads as refused.
     @discardableResult
     func write(
         _ id: WindowID, handle: WindowHandle, to target: CGRect,
@@ -199,10 +202,10 @@ final class WriteExpectations {
         // No-op writes are skipped, not pushed: the app changes
         // nothing and emits no echo, so a marked expectation here
         // would never converge and the late check would misread an
-        // already-correct window.
-        if let live = gateway.frame(of: handle),
-            Self.framesClose(live, target, tolerance: Self.noOpWriteTolerance)
-        {
+        // already-correct window. The pre-write frame is also the
+        // fallback the clamp guard restores to below.
+        let live = gateway.frame(of: handle)
+        if let live, Self.framesClose(live, target, tolerance: Self.noOpWriteTolerance) {
             log("write win\(id) no-op skip target=\(target)")
             return .skippedNoOp
         }
@@ -210,6 +213,29 @@ final class WriteExpectations {
         notePushed(id, target)
         guard gateway.setFrame(handle, to: target) else {
             log("write win\(id) refused target=\(target)")
+            return .refused
+        }
+        // The app may report success yet apply a different frame: a
+        // minimum-size clamp (Firefox refuses to shrink past its floor
+        // and lands the window half-off-screen on the right third) is
+        // the shape this guards. A frame animating toward the target
+        // moves along the line between the pre-write frame and the
+        // target, so an applied frame off that path within tolerance is
+        // not an in-flight animation: the app overrode the request. Put
+        // the window back where it was before this write (the README
+        // promises a refusing app's window is left alone, not
+        // half-moved) and report the refusal.
+        if let previous = live, let applied = gateway.frame(of: handle),
+            !Self.frameOnAnimationPath(applied, from: previous, toward: target)
+        {
+            _ = gateway.setFrame(handle, to: previous)
+            // The restore is our write too: re-point the echo trail and
+            // the diff baseline at the frame the window is actually in,
+            // so the restore's echo is swallowed against it instead of
+            // read as a user drag.
+            noteExpected(id, previous)
+            notePushed(id, previous)
+            log("write win\(id) clamped applied=\(applied) restored=\(previous)")
             return .refused
         }
         // Every performed write leaves exactly one outstanding check; a
@@ -441,5 +467,55 @@ final class WriteExpectations {
     private static func frameDistance(_ a: CGRect, _ b: CGRect) -> CGFloat {
         abs(a.minX - b.minX) + abs(a.maxX - b.maxX)
             + abs(a.minY - b.minY) + abs(a.maxY - b.maxY)
+    }
+
+    // MARK: Clamp detection
+
+    /// Whether `applied` could be a step of an animation from `previous`
+    /// toward `target`. A frame animation interpolates the two endpoint
+    /// frames, so each axis's (origin, size) pair moves along the straight
+    /// line joining its previous and target pairs; an applied pair off
+    /// that line (beyond `tolerance`) cannot be in flight. The write
+    /// policy reads this right after a successful write: off-path means
+    /// the app overrode the request (e.g. a minimum-width clamp), which
+    /// is a refusal wearing a success, not an echo to wait for.
+    static func frameOnAnimationPath(
+        _ applied: CGRect, from previous: CGRect, toward target: CGRect,
+        tolerance: CGFloat = WriteExpectations.echoTolerance
+    ) -> Bool {
+        axisOnAnimationPath(
+            origin: applied.minX, size: applied.width,
+            from: previous.minX, previousSize: previous.width,
+            to: target.minX, targetSize: target.width, tolerance: tolerance)
+            && axisOnAnimationPath(
+                origin: applied.minY, size: applied.height,
+                from: previous.minY, previousSize: previous.height,
+                to: target.minY, targetSize: target.height, tolerance: tolerance)
+    }
+
+    /// One axis's version of `frameOnAnimationPath`: distance from the
+    /// applied (origin, size) point to the segment joining the previous
+    /// and target pairs is within `tolerance`. A pair that barely moved
+    /// (the segment is shorter than the tolerance) demands the applied
+    /// pair to be within tolerance of it, not just of the line.
+    private static func axisOnAnimationPath(
+        origin: CGFloat, size: CGFloat,
+        from previousOrigin: CGFloat, previousSize: CGFloat,
+        to targetOrigin: CGFloat, targetSize: CGFloat,
+        tolerance: CGFloat
+    ) -> Bool {
+        let dx = targetOrigin - previousOrigin
+        let dy = targetSize - previousSize
+        let lengthSquared = dx * dx + dy * dy
+        let stepX = origin - previousOrigin
+        let stepY = size - previousSize
+        if lengthSquared <= tolerance * tolerance {
+            return stepX * stepX + stepY * stepY <= tolerance * tolerance
+        }
+        let projection = (stepX * dx + stepY * dy) / lengthSquared
+        let clampedT = min(max(projection, 0), 1)
+        let residualX = stepX - clampedT * dx
+        let residualY = stepY - clampedT * dy
+        return residualX * residualX + residualY * residualY <= tolerance * tolerance
     }
 }

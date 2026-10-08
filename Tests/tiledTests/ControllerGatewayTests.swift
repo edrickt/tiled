@@ -228,6 +228,68 @@ final class ControllerGatewayTests: XCTestCase {
             "the hidden divider stays at the midpoint of the resized two-thirds window")
     }
 
+    // MARK: Neighbor shrink at the app's minimum
+
+    func testNeighborThatCannotShrinkStaysOnScreen() {
+        // The reported bug: middle third + right third tiled; the user
+        // drags the middle third's right edge rightwards. Real apps clamp
+        // the width at their minimum while still reporting success, so
+        // the push moved the right third's left edge to the splitter
+        // while its width held at the minimum: the window ends up with
+        // its right edge past the screen's right edge instead of just
+        // not shrinking any further.
+        let middle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = middle
+        controller.handle(slot: .sixthMiddle)
+        let right = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = right
+        controller.handle(slot: .sixthRight)
+
+        // The right third's app enforces a 500pt minimum width: the size
+        // write lands with the top-left anchored and the width clamped
+        // (success, not a refusal).
+        gateway.writtenFrame = { handle, target in
+            guard handle == right, target.width < 500 else { return target }
+            var clamped = target
+            clamped.size.width = 500
+            return clamped
+        }
+
+        // The user drags the middle third's right edge far rightwards:
+        // the splitter clamps at its sixths maximum (0.9).
+        var echo = gateway.frame(of: middle)!
+        echo.size.width += 10
+        gateway.simulateChange(middle, to: echo)
+        var moved = echo
+        moved.size.width = 1000
+        gateway.simulateChange(middle, to: moved)
+        XCTAssertEqual(
+            canvas.grid.sixthsRightSplit, GridLayout.sixthsColumnClamp.upperBound,
+            accuracy: 0.001)
+        let beforePush = gateway.frame(of: right)!
+
+        controller.mouseLifted()
+        let pushed = XCTestExpectation(description: "coalesced neighbor push")
+        DispatchQueue.main.async { pushed.fulfill() }
+        wait(for: [pushed], timeout: 1.0)
+
+        let frame = gateway.frame(of: right)!
+        XCTAssertEqual(
+            frame, beforePush,
+            "a neighbor that cannot shrink is left exactly where it was")
+        XCTAssertTrue(
+            Self.screen.visibleFrame.contains(frame),
+            "the right third must stay on screen; got \(frame) "
+                + "in \(Self.screen.visibleFrame)")
+        XCTAssertEqual(
+            canvas.error, TilingSpace.refusalMessage(count: 1),
+            "the refused shrink is reported")
+        XCTAssertEqual(canvas.state.occupant(of: .sixthRight), 2, "still tiled")
+        XCTAssertEqual(
+            gateway.frame(of: middle), moved,
+            "the dragged window keeps its own frame")
+    }
+
     // MARK: Drag-out untile
 
     /// Tiles the window and streams a title-bar drag: an echo seed tick,

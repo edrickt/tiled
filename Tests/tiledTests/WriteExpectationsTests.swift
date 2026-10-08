@@ -468,4 +468,94 @@ final class WriteExpectationsTests: XCTestCase {
         }
         wait(for: [pushedExpectation], timeout: 1.0)
     }
+
+    // MARK: Clamp detection
+
+    func testClampedWriteRestoresThePreWriteFrameAndRefuses() {
+        // Firefox's minimum width: the write reports success, but the
+        // frame the app applied is off the line from the pre-write frame
+        // to the target (the position landed, the size held at its
+        // floor). The policy puts the window back where it was and
+        // reports the refusal instead of leaving it half off-screen.
+        let previous = CGRect(x: 1066.67, y: 0, width: 533.33, height: 1000)
+        let handle = gateway.addWindow(frame: previous)
+        let target = CGRect(x: 1440, y: 0, width: 160, height: 1000)
+        gateway.writtenFrame = { _, target in
+            guard target.width < 500 else { return target }
+            return CGRect(
+                x: target.minX, y: target.minY, width: 500, height: target.height)
+        }
+
+        let result = expectations.write(
+            7, handle: handle, to: target, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .refused)
+        XCTAssertEqual(
+            gateway.frame(of: handle), previous,
+            "the clamped write is undone: the window stays where it was")
+        XCTAssertEqual(
+            expectations.intent(for: 7), previous,
+            "the restore re-points intent at the frame the window is in")
+        XCTAssertTrue(checks.isEmpty, "a refusal schedules no late check")
+    }
+
+    func testMidAnimationWriteIsTrusted() {
+        // Terminal animates AX writes: the frame read right after a
+        // successful write is mid-flight, on the line from the previous
+        // frame to the target. That must read as written, never as a
+        // refusal to roll back.
+        let previous = CGRect(x: 0, y: 0, width: 500, height: 400)
+        let handle = gateway.addWindow(frame: previous)
+        let target = CGRect(x: 300, y: 0, width: 200, height: 400)
+        gateway.writtenFrame = { _, _ in
+            CGRect(x: 150, y: 0, width: 350, height: 400)  // half-way
+        }
+
+        let result = expectations.write(
+            7, handle: handle, to: target, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .written, "an in-flight animation is not a refusal")
+        XCTAssertEqual(gateway.frame(of: handle)?.width, 350)
+        XCTAssertEqual(checks.count, 1, "the write is watched like any other")
+    }
+
+    func testSmallRoundingWithinToleranceIsTrusted() {
+        // Grid-rounding apps (Terminal) settle a few points off target:
+        // inside the echo tolerance, still a successful write.
+        let previous = CGRect(x: 0, y: 0, width: 500, height: 400)
+        let handle = gateway.addWindow(frame: previous)
+        let target = CGRect(x: 0, y: 0, width: 400, height: 300)
+        gateway.writtenFrame = { _, _ in
+            CGRect(x: 0, y: 0, width: 405, height: 303)
+        }
+
+        let result = expectations.write(
+            7, handle: handle, to: target, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .written)
+        XCTAssertEqual(gateway.frame(of: handle)?.width, 405, "rounding is kept")
+        XCTAssertEqual(checks.count, 1)
+    }
+
+    func testFrameOnAnimationPathClassifiesClampsAndSteps() {
+        let previous = CGRect(x: 100, y: 100, width: 500, height: 500)
+        let target = CGRect(x: 300, y: 100, width: 200, height: 500)
+        // Endpoints and any interpolation step are on the path.
+        XCTAssertTrue(WriteExpectations.frameOnAnimationPath(previous, from: previous, toward: target))
+        XCTAssertTrue(WriteExpectations.frameOnAnimationPath(target, from: previous, toward: target))
+        let mid = CGRect(x: 200, y: 100, width: 350, height: 500)
+        XCTAssertTrue(WriteExpectations.frameOnAnimationPath(mid, from: previous, toward: target))
+        // A top-left-anchored minimum-size clamp is not: the position
+        // landed, the width held at the floor.
+        let clamp = CGRect(x: 300, y: 100, width: 400, height: 500)
+        XCTAssertFalse(WriteExpectations.frameOnAnimationPath(clamp, from: previous, toward: target))
+        // A little overshoot from a springy tail stays trusted...
+        let overshoot = target.offsetBy(dx: -5, dy: 0)
+        XCTAssertTrue(WriteExpectations.frameOnAnimationPath(overshoot, from: previous, toward: target))
+        // ...but an app that moves a stationary frame is off path.
+        let stationary = CGRect(x: 100, y: 100, width: 500, height: 500)
+        XCTAssertFalse(
+            WriteExpectations.frameOnAnimationPath(
+                stationary.offsetBy(dx: 0, dy: 80), from: stationary, toward: stationary))
+    }
 }

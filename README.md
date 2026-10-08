@@ -168,7 +168,9 @@ tell you which app took it.
   bounds.
 - Some apps refuse programmatic resizing. When that happens the window is
   left alone and the menu says which app refused, so state and screen never
-  silently disagree.
+  silently disagree. This covers apps that quietly clamp to a minimum size
+  (the position write lands, the size holds at their floor): the window is
+  put back exactly where it was instead of sliding half-off-screen.
 
 ## Live resizing
 
