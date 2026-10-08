@@ -190,6 +190,14 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         return nil
     }
 
+    private func findButton(titled title: String, in view: NSView) -> NSButton? {
+        if let button = view as? NSButton, button.title == title { return button }
+        for subview in view.subviews {
+            if let hit = findButton(titled: title, in: subview) { return hit }
+        }
+        return nil
+    }
+
     private func keyDown(
         keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []
     ) -> NSEvent {
@@ -349,5 +357,75 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         XCTAssertEqual(
             bulk.toolTip,
             "Disable every Quarters shortcut (keeps defaults for re-enable)")
+    }
+
+    // MARK: Corrupt parks (the codec's guard, exercised through the reader)
+
+    func testCorruptParkedEntriesDoNotTrapEnableAll() {
+        // Every corrupt entry in the shared table, parked under a slot:
+        // Enable all must read each as no park and fall back to the factory
+        // default, never trapping in UInt32.
+        for entry in CorruptHotkeyEntries.all {
+            store.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: .topLeft)
+            defaults.set(entry, forKey: "parkedHotkey.topLeft")
+
+            let tab = makeTab()
+            let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+            guard let enable = findButton(
+                identifier: "bulk-quarters", titledPrefix: "Enable all", in: view)
+            else { return XCTFail("expected an Enable-all bulk button for \(entry)") }
+            enable.performClick(nil)
+
+            XCTAssertEqual(
+                store.binding(for: .topLeft), HotkeyStore.defaultBinding(for: .topLeft),
+                "a corrupt park (\(entry)) is ignored, so the disabled slot returns to default")
+        }
+    }
+
+    func testDisabledSentinelParkIsNotRestored() {
+        // A park never holds a disabled sentinel (Disable all only parks
+        // live combos), so one is not a combo to restore: Enable all falls
+        // back to the default rather than leaving the slot disabled.
+        store.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: .topLeft)
+        defaults.set(["modifiers": 0, "keyCode": -1], forKey: "parkedHotkey.topLeft")
+
+        let tab = makeTab()
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let enable = findButton(
+            identifier: "bulk-quarters", titledPrefix: "Enable all", in: view)
+        else { return XCTFail("expected an Enable-all bulk button") }
+        enable.performClick(nil)
+
+        XCTAssertEqual(
+            store.binding(for: .topLeft), HotkeyStore.defaultBinding(for: .topLeft),
+            "the disabled sentinel is not a parked combo")
+    }
+
+    // MARK: Corrupt reset backups (the codec's guard, through the other reader)
+
+    func testCorruptResetBackupEntriesAreSkippedWithoutTrapping() {
+        // A valid backup makes the footer offer the restore; each corrupt
+        // entry in the shared table, under another action's reset key, must
+        // be skipped without trapping.
+        for entry in CorruptHotkeyEntries.all {
+            defaults.set(
+                ["modifiers": Int(controlKey), "keyCode": Int(kVK_ANSI_F)],
+                forKey: "resetBackupHotkey.action.expand")
+            defaults.set(entry, forKey: "resetBackupHotkey.action.undo")
+
+            let tab = makeTab()
+            let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+            guard let restore = findButton(titled: "Restore Previous Shortcuts", in: view)
+            else { return XCTFail("expected a Restore Previous Shortcuts button for \(entry)") }
+            restore.performClick(nil)
+
+            XCTAssertEqual(
+                store.binding(for: .expand),
+                HotkeyBinding(modifiers: UInt32(controlKey), keyCode: UInt32(kVK_ANSI_F)),
+                "the valid backup is restored (\(entry))")
+            XCTAssertEqual(
+                store.binding(for: .undo), HotkeyService.undoDefaultBinding,
+                "the corrupt backup (\(entry)) is skipped, leaving the action at its default")
+        }
     }
 }

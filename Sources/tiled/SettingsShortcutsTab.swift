@@ -477,10 +477,7 @@ final class ShortcutsTab: NSObject {
             if !messages.isEmpty { showConflict(messages.joined(separator: " ")) }
         } else {
             for slot in Slot.allCases where slot.layout == layout {
-                let current = hotkeyStore.binding(for: slot)
-                if current.keyCode != nil {
-                    parkBinding(current, for: .slot(slot))
-                }
+                parkBinding(hotkeyStore.binding(for: slot), for: .slot(slot))
                 hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: slot)
             }
             // Registration first: the rebuilt rows read the fresh
@@ -539,18 +536,19 @@ final class ShortcutsTab: NSObject {
     }
 
     private func parkedBinding(for action: HotkeyAction) -> HotkeyBinding? {
-        guard let dict = defaults.dictionary(forKey: parkedKey(for: action)),
-              let modifiers = dict["modifiers"] as? Int,
-              let code = dict["keyCode"] as? Int, code >= 0
+        // Only a live combo is worth parking: a disabled sentinel (or a
+        // corrupt entry) reads as no park, so Enable-all falls back to the
+        // default instead of restoring a disabled slot.
+        guard let binding = HotkeyBindingCodec.decode(
+            defaults.dictionary(forKey: parkedKey(for: action))), binding.isEnabled
         else { return nil }
-        return HotkeyBinding(modifiers: UInt32(modifiers), keyCode: UInt32(code))
+        return binding
     }
 
     private func parkBinding(_ binding: HotkeyBinding, for action: HotkeyAction) {
-        defaults.set(
-            ["modifiers": Int(binding.modifiers),
-             "keyCode": binding.keyCode.map(Int.init) ?? -1],
-            forKey: parkedKey(for: action))
+        // The write half of the same rule: only a live combo is parked.
+        guard binding.isEnabled else { return }
+        defaults.set(HotkeyBindingCodec.encode(binding), forKey: parkedKey(for: action))
     }
 
     private func clearParkedBinding(for action: HotkeyAction) {
@@ -621,9 +619,7 @@ final class ShortcutsTab: NSObject {
             // footer names the owner on clashes; the clear path owes the
             // same courtesy.
             let previous = hotkeyStore.binding(for: action)
-            if previous.keyCode != nil {
-                parkBinding(previous, for: action)
-            }
+            parkBinding(previous, for: action)
             hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: action)
             button.showBinding(hotkeyStore.binding(for: action))
             if let label = previous.label {
@@ -772,18 +768,11 @@ final class ShortcutsTab: NSObject {
     }
 
     private func resetBackupBinding(for action: HotkeyAction) -> HotkeyBinding? {
-        guard let dict = defaults.dictionary(forKey: resetBackupKey(for: action)),
-              let modifiers = dict["modifiers"] as? Int,
-              let code = dict["keyCode"] as? Int
-        else { return nil }
-        return HotkeyBinding(modifiers: UInt32(modifiers), keyCode: code >= 0 ? UInt32(code) : nil)
+        HotkeyBindingCodec.decode(defaults.dictionary(forKey: resetBackupKey(for: action)))
     }
 
     private func parkResetBackup(_ binding: HotkeyBinding, for action: HotkeyAction) {
-        defaults.set(
-            ["modifiers": Int(binding.modifiers),
-             "keyCode": binding.keyCode.map(Int.init) ?? -1],
-            forKey: resetBackupKey(for: action))
+        defaults.set(HotkeyBindingCodec.encode(binding), forKey: resetBackupKey(for: action))
     }
 
     private func clearResetBackup(for action: HotkeyAction) {

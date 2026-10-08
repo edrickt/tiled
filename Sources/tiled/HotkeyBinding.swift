@@ -104,6 +104,42 @@ struct HotkeyBinding: Equatable {
     }
 }
 
+/// The one codec for a hotkey binding at rest.
+///
+/// Bindings persist as a two-key dictionary — `["modifiers": Int,
+/// "keyCode": Int]` — under three different defaults keys: the store's
+/// per-action overrides, the Disable-all park, and the reset backup. This
+/// type owns that shape, the negative-keyCode convention (a code below
+/// zero means disabled, written as `-1`), and the guards that keep corrupt
+/// data away from `UInt32` (which traps on any value out of range), so the
+/// three readers cannot drift and no path can trap.
+enum HotkeyBindingCodec {
+    /// The persisted shape for `binding`. A disabled binding keeps its
+    /// modifiers and stores the sentinel key code.
+    static func encode(_ binding: HotkeyBinding) -> [String: Int] {
+        ["modifiers": Int(binding.modifiers),
+         "keyCode": binding.keyCode.map(Int.init) ?? disabledKeyCode]
+    }
+
+    /// The binding in `stored`, or nil when the entry is malformed or
+    /// corrupt. A key code below zero is the disabled sentinel; modifiers
+    /// (or a non-negative key code) that do not fit `UInt32` are corrupt
+    /// data, never written by `encode`, and reject the entry wholesale
+    /// rather than trap.
+    static func decode(_ stored: [String: Any]?) -> HotkeyBinding? {
+        guard let modifiers = stored?["modifiers"] as? Int,
+              let code = stored?["keyCode"] as? Int,
+              let modifierBits = UInt32(exactly: modifiers)
+        else { return nil }
+        if code < 0 { return HotkeyBinding(modifiers: modifierBits, keyCode: nil) }
+        guard let keyBits = UInt32(exactly: code) else { return nil }
+        return HotkeyBinding(modifiers: modifierBits, keyCode: keyBits)
+    }
+
+    /// The sentinel key code that encodes a disabled binding.
+    static let disabledKeyCode = -1
+}
+
 /// Display names and menu groupings for slots. Lives beside the hotkey
 /// model because nearly every consumer is hotkey UI (menu, Settings rows,
 /// announcements); the one exception is the controller's two status
@@ -192,19 +228,10 @@ final class HotkeyStore {
     }
 
     func binding(for action: HotkeyAction) -> HotkeyBinding {
-        guard let dict = defaults.dictionary(forKey: Self.key(for: action)),
-              let modifiers = dict["modifiers"] as? Int,
-              let code = dict["keyCode"] as? Int
-        else {
-            return Self.defaultBinding(for: action)
-        }
-        // A negative keyCode is the disabled encoding; a negative modifiers
-        // is corrupt data (never written by set) and must not reach
-        // UInt32 (a trap). Fall back to the factory default like any
-        // other unreadable entry.
-        guard modifiers >= 0 else { return Self.defaultBinding(for: action) }
-        return HotkeyBinding(
-            modifiers: UInt32(modifiers), keyCode: code >= 0 ? UInt32(code) : nil)
+        // Unreadable or corrupt storage (including negative modifiers, which
+        // must never reach UInt32) falls back to the factory default.
+        HotkeyBindingCodec.decode(defaults.dictionary(forKey: Self.key(for: action)))
+            ?? Self.defaultBinding(for: action)
     }
 
     func binding(for slot: Slot) -> HotkeyBinding {
@@ -212,9 +239,7 @@ final class HotkeyStore {
     }
 
     func set(_ binding: HotkeyBinding, for action: HotkeyAction) {
-        defaults.set(
-            ["modifiers": Int(binding.modifiers), "keyCode": binding.keyCode.map(Int.init) ?? -1],
-            forKey: Self.key(for: action))
+        defaults.set(HotkeyBindingCodec.encode(binding), forKey: Self.key(for: action))
     }
 
     func set(_ binding: HotkeyBinding, for slot: Slot) {

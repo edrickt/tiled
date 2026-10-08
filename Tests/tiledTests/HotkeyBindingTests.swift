@@ -283,4 +283,46 @@ final class HotkeyBindingTests: XCTestCase {
             store.binding(for: .topLeft), HotkeyStore.defaultBinding(for: .topLeft),
             "corrupt modifiers fall back to the factory default")
     }
+
+    // MARK: The one binding codec
+
+    func testCodecRoundTripsEveryBindingShape() {
+        // One table over the shapes the three readers share: a bare key
+        // (keyCode 0, modifiers 0), a normal combo, an unknown key code,
+        // and both spellings of disabled.
+        let cases: [HotkeyBinding] = [
+            HotkeyBinding(modifiers: 0, keyCode: 0),
+            HotkeyBinding(modifiers: UInt32(optionKey | shiftKey), keyCode: UInt32(kVK_ANSI_U)),
+            HotkeyBinding(modifiers: UInt32(cmdKey), keyCode: 0xCA),
+            HotkeyBinding(modifiers: UInt32(controlKey), keyCode: nil),
+            HotkeyBinding(modifiers: 0, keyCode: nil),
+        ]
+        for binding in cases {
+            XCTAssertEqual(
+                HotkeyBindingCodec.decode(HotkeyBindingCodec.encode(binding)), binding,
+                "\(binding) must survive a round trip")
+        }
+    }
+
+    func testCodecWritesTheDisabledSentinel() {
+        XCTAssertEqual(
+            HotkeyBindingCodec.encode(HotkeyBinding(modifiers: 0, keyCode: nil)),
+            ["modifiers": 0, "keyCode": HotkeyBindingCodec.disabledKeyCode])
+    }
+
+    func testCodecReadsNegativeKeyCodeAsDisabled() {
+        XCTAssertEqual(
+            HotkeyBindingCodec.decode(["modifiers": Int(optionKey), "keyCode": -1]),
+            HotkeyBinding(modifiers: UInt32(optionKey), keyCode: nil))
+    }
+
+    func testCodecRejectsCorruptEntries() {
+        // One corrupt-data table, shared with the reader-level tests: none
+        // of these may reach UInt32, which traps on any value out of range.
+        for entry in CorruptHotkeyEntries.all {
+            XCTAssertNil(
+                HotkeyBindingCodec.decode(entry), "\(entry) must decode to nil, never trap")
+        }
+        XCTAssertNil(HotkeyBindingCodec.decode(nil), "no entry at all is not a binding")
+    }
 }

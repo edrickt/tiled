@@ -186,6 +186,36 @@
   "    }"
  ],
  [
+  "HotkeyBinding.swift",
+  "codec truncates out-of-range modifiers instead of rejecting the entry",
+  "        guard let modifiers = stored?[\"modifiers\"] as? Int,\n              let code = stored?[\"keyCode\"] as? Int,\n              let modifierBits = UInt32(exactly: modifiers)\n        else { return nil }",
+  "        guard let modifiers = stored?[\"modifiers\"] as? Int,\n              let code = stored?[\"keyCode\"] as? Int\n        else { return nil }\n        let modifierBits = UInt32(truncatingIfNeeded: modifiers)"
+ ],
+ [
+  "HotkeyBinding.swift",
+  "codec truncates an out-of-range keyCode instead of rejecting the entry",
+  "        guard let keyBits = UInt32(exactly: code) else { return nil }",
+  "        let keyBits = UInt32(truncatingIfNeeded: code)"
+ ],
+ [
+  "HotkeyBinding.swift",
+  "codec reads keyCode 0 as disabled (a bare A key is lost)",
+  "        if code < 0 { return HotkeyBinding(modifiers: modifierBits, keyCode: nil) }",
+  "        if code <= 0 { return HotkeyBinding(modifiers: modifierBits, keyCode: nil) }"
+ ],
+ [
+  "HotkeyBinding.swift",
+  "codec writes a live key for a disabled binding (disabled decodes as A)",
+  "         \"keyCode\": binding.keyCode.map(Int.init) ?? disabledKeyCode]",
+  "         \"keyCode\": binding.keyCode.map(Int.init) ?? 0]"
+ ],
+ [
+  "SettingsShortcutsTab.swift",
+  "parked disabled sentinel restored (Enable all leaves the slot off)",
+  "        guard let binding = HotkeyBindingCodec.decode(\n            defaults.dictionary(forKey: parkedKey(for: action))), binding.isEnabled\n        else { return nil }\n        return binding",
+  "        guard let binding = HotkeyBindingCodec.decode(\n            defaults.dictionary(forKey: parkedKey(for: action)))\n        else { return nil }\n        return binding"
+ ],
+ [
   "AppDelegate.swift",
   "status icon gated by the menu diff again",
   "        return RefreshPlan(redrawIcon: iconChanged, rebuildMenu: menuChanged)",
