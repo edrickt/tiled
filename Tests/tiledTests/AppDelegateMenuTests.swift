@@ -124,35 +124,81 @@ final class AppDelegateMenuTests: XCTestCase {
 
     // MARK: Refresh ordering (refreshPlan)
 
+    private func rendered(
+        notice: String? = nil,
+        layout: LayoutKind = .quarters,
+        filled: [Slot] = [],
+        occupied: Int = 0
+    ) -> AppDelegate.RenderedMenuBar {
+        AppDelegate.RenderedMenuBar(
+            menu: MenuModel.Snapshot(
+                isTrusted: true, warnings: [], notice: notice, layoutTitle: "",
+                activeLayout: layout, tileError: nil, hasHotkeyWarnings: false,
+                hasSplitterBackup: false, hasFocusedWindow: false, expandedSlot: nil,
+                tiledWindows: [], canUndoDisplacement: false, evictedCount: 0, untileCount: 0),
+            icon: StatusIcon.Snapshot(layout: layout, filled: filled, occupiedSlots: occupied))
+    }
+
     func testIconChangeRedrawsWithoutRebuildingTheMenu() {
         // The status icon reads the focused display's occupancy, which the
         // menu snapshot deliberately aggregates across displays: a focus
         // move can change the glyph while the menu snapshot is identical.
         // The glyph must not ride the menu diff, or it freezes on the
         // display the user left until the next tiling action.
+        let last = rendered()
+        let next = rendered(filled: [.topLeft], occupied: 1)
         let plan = AppDelegate.refreshPlan(
-            menuChanged: false, iconChanged: true, menuOpen: false)
+            next: next, lastMenu: last.menu, lastIcon: last.icon,
+            hasMenu: true, hasImage: true, menuOpen: false)
 
         XCTAssertTrue(plan.redrawIcon, "an icon-only change still redraws the glyph")
         XCTAssertFalse(plan.rebuildMenu, "an icon-only change never rebuilds the menu")
     }
 
+    func testMenuChangeRebuildsWithoutRedrawingTheIcon() {
+        // The mirror: a changed menu with an equal glyph leaves the icon
+        // alone. Both diffs are read once, in this one pass.
+        let last = rendered()
+        let next = rendered(notice: "Evicted")
+        let plan = AppDelegate.refreshPlan(
+            next: next, lastMenu: last.menu, lastIcon: last.icon,
+            hasMenu: true, hasImage: true, menuOpen: false)
+
+        XCTAssertFalse(plan.redrawIcon, "an unchanged glyph is not redrawn")
+        XCTAssertTrue(plan.rebuildMenu, "a menu change rebuilds the rows")
+    }
+
     func testOpenMenuDefersBothHalvesOfTheRefresh() {
         // Rebuilding while the menu is open flickers or dismisses it; the
         // close handler runs a fresh pass.
+        let next = rendered(notice: "Evicted", filled: [.topLeft], occupied: 1)
         let plan = AppDelegate.refreshPlan(
-            menuChanged: true, iconChanged: true, menuOpen: true)
+            next: next, lastMenu: nil, lastIcon: nil,
+            hasMenu: true, hasImage: true, menuOpen: true)
 
         XCTAssertFalse(plan.redrawIcon)
         XCTAssertFalse(plan.rebuildMenu)
     }
 
-    func testMenuChangeRebuildsAndRedrawsTheIcon() {
+    func testForceRebuildsTheMenuPastTheDiff() {
+        // Binding labels live in menu titles but not the snapshot, so a
+        // binding edit forces the rebuild even when the snapshot is equal.
+        let same = rendered()
         let plan = AppDelegate.refreshPlan(
-            menuChanged: true, iconChanged: true, menuOpen: false)
+            next: same, lastMenu: same.menu, lastIcon: same.icon,
+            hasMenu: true, hasImage: true, menuOpen: false, force: true)
 
-        XCTAssertTrue(plan.redrawIcon)
         XCTAssertTrue(plan.rebuildMenu)
+    }
+
+    func testFirstPassRendersWhenNothingIsInstalledYet() {
+        let next = rendered(filled: [.topLeft], occupied: 1)
+        let plan = AppDelegate.refreshPlan(
+            next: next, lastMenu: next.menu, lastIcon: next.icon,
+            hasMenu: false, hasImage: false, menuOpen: false)
+
+        XCTAssertTrue(plan.redrawIcon, "no image yet: draw one")
+        XCTAssertTrue(plan.rebuildMenu, "no menu yet: install one")
     }
 
     // MARK: Action wiring (menuWiring)

@@ -816,7 +816,14 @@ final class TilingController {
     /// expanded; nil otherwise. Drives the expand row's stateful title:
     /// the toggle must show its state, not just its combo.
     var expandedFocusedSlot: Slot? {
-        guard let handle = gateway.focusedWindow(),
+        expandedSlot(of: gateway.focusedWindow())
+    }
+
+    /// The slot `handle` would return to if it is currently expanded; nil
+    /// otherwise. `expandedFocusedSlot` resolves the focused window; a pass
+    /// that already resolved focus passes its handle here instead.
+    func expandedSlot(of handle: WindowHandle?) -> Slot? {
+        guard let handle,
             let id = recordID(for: handle),
             let key = spaceOf(window: id),
             spaces[key]?.isExpanded(id) == true
@@ -1051,6 +1058,15 @@ final class TilingController {
     /// captured once so a UI pass can read the glyph's layout and
     /// occupancy consistently even if focus moves between the reads.
     var focusedTilingSpace: TilingSpaceKey { focusedSpaceKey() }
+
+    /// The focused window and the canvas a hotkey would act on, resolved
+    /// together. A UI pass that needs both — the menu reads the window, the
+    /// glyph reads the canvas — resolves once here, so the two can never
+    /// describe different focus states.
+    func focusedWindowAndCanvas() -> (handle: WindowHandle?, canvas: TilingSpaceKey) {
+        let handle = gateway.focusedWindow()
+        return (handle, actionSpaceKey(for: focusedScreenID(for: handle)))
+    }
 
     var tiledWindowsInfo: [TiledWindowInfo] {
         allTiledWindowsInfo()
@@ -1410,9 +1426,15 @@ final class TilingController {
     /// Focused display id: owning display of the focused window's live
     /// frame, else its pre-tile frame, else main.
     private func focusedScreenID() -> ScreenID? {
+        focusedScreenID(for: gateway.focusedWindow())
+    }
+
+    /// Focused display id for a window already resolved: owning display of
+    /// the window's live frame, else its pre-tile frame, else main.
+    private func focusedScreenID(for handle: WindowHandle?) -> ScreenID? {
         let infos = screens()
         guard !infos.isEmpty else { return nil }
-        if let handle = gateway.focusedWindow() {
+        if let handle {
             if let frame = gateway.frame(of: handle),
                let info = visibleScreen(for: frame)
             { return info.id }

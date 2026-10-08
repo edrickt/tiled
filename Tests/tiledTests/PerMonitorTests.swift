@@ -422,4 +422,37 @@ final class PerMonitorTests: XCTestCase {
             "the focused canvas is untouched")
         XCTAssertNil(controller.canvas(for: rightID).state.occupant(of: .topLeft))
     }
+
+    // MARK: Focus resolved once (the menu-bar pass seam)
+
+    func testFocusedWindowAndCanvasResolvesBothFromOneFocus() {
+        // One menu-bar pass needs the focused window (the menu reads it)
+        // and the canvas (the glyph reads it). Resolving them together
+        // keeps them on the same focus: the canvas is the focused window's
+        // display, and the handle is that window.
+        let right = tileOnRight()
+        controller.handle(slot: .sixthLeft)
+
+        let focus = controller.focusedWindowAndCanvas()
+
+        XCTAssertEqual(focus.handle, right)
+        XCTAssertEqual(focus.canvas, controller.focusedTilingSpace)
+        XCTAssertEqual(controller.canvas(for: focus.canvas).state.activeLayout, .sixths)
+    }
+
+    func testExpandedSlotAnswersForThePassedHandleNotTheCurrentFocus() {
+        // A pass that already resolved focus hands its handle to
+        // expandedSlot; the answer must describe that window, not re-resolve
+        // the now-current focus.
+        let left = tileOnLeft()
+        controller.handle(slot: .topLeft)
+        controller.handleExpandToggle()
+        XCTAssertEqual(controller.expandedSlot(of: left), .topLeft)
+
+        _ = tileOnRight() // focus moves to a window on the other display
+        XCTAssertNil(controller.expandedFocusedSlot, "the new focus is not expanded")
+        XCTAssertEqual(
+            controller.expandedSlot(of: left), .topLeft,
+            "the passed handle still answers for its own expansion")
+    }
 }

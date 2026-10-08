@@ -218,8 +218,38 @@
  [
   "AppDelegate.swift",
   "status icon gated by the menu diff again",
-  "        return RefreshPlan(redrawIcon: iconChanged, rebuildMenu: menuChanged)",
-  "        return RefreshPlan(redrawIcon: menuChanged && iconChanged, rebuildMenu: menuChanged)"
+  "            redrawIcon: next.icon != lastIcon || !hasImage,",
+  "            redrawIcon: next.menu != lastMenu && (next.icon != lastIcon || !hasImage),"
+ ],
+ [
+  "AppDelegate.swift",
+  "first pass forgets to draw the icon when nothing is installed",
+  "            redrawIcon: next.icon != lastIcon || !hasImage,",
+  "            redrawIcon: next.icon != lastIcon,"
+ ],
+ [
+  "AppDelegate.swift",
+  "open-menu deferral dropped (menu rebuilt mid-open)",
+  "        guard !menuOpen else { return RefreshPlan(redrawIcon: false, rebuildMenu: false) }",
+  "        guard true else { return RefreshPlan(redrawIcon: false, rebuildMenu: false) }"
+ ],
+ [
+  "AppDelegate.swift",
+  "binding-edit force no longer reaches the menu diff",
+  "            rebuildMenu: force || next.menu != lastMenu || !hasMenu)",
+  "            rebuildMenu: next.menu != lastMenu || !hasMenu)"
+ ],
+ [
+  "AppDelegate.swift",
+  "first pass forgets to install the menu when none exists",
+  "            rebuildMenu: force || next.menu != lastMenu || !hasMenu)",
+  "            rebuildMenu: force || next.menu != lastMenu)"
+ ],
+ [
+  "TilingController.swift",
+  "menu-bar pass drops the focused window it resolved",
+  "        return (handle, actionSpaceKey(for: focusedScreenID(for: handle)))",
+  "        return (nil, actionSpaceKey(for: focusedScreenID(for: handle)))"
  ],
  [
   "TilingController.swift",
