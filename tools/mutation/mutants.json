@@ -472,5 +472,23 @@
   "deferred collapse write reported as an app refusal",
   "            refusal = result.refusal\n            answered = refusal != nil\n            if result.accepted {",
   "            refusal = result.refusal\n            answered = !result.accepted\n            if result.accepted {"
+ ],
+ [
+  "CarbonEventHandler.swift",
+  "handler never removed on deinit (outlives its service)",
+  "        if let handlerRef { removeHandler(handlerRef) }",
+  "        _ = handlerRef"
+ ],
+ [
+  "CarbonEventHandler.swift",
+  "handler removal called even when the install failed",
+  "        if let handlerRef { removeHandler(handlerRef) }",
+  "        removeHandler(handlerRef ?? OpaquePointer(bitPattern: 0)!)"
+ ],
+ [
+  "CarbonEventHandler.swift",
+  "context released while the handler is still installed",
+  "        Unmanaged<Payload>.fromOpaque(userData).release()",
+  "        _ = userData"
  ]
 ]

@@ -126,7 +126,10 @@ final class HotkeyService {
 
     private var hotKeyRefs: [EventHotKeyRef?] = []
     private let context = Context()
-    private static var handlerInstalled = false
+    /// The installed Carbon handler: retained context, removed on deinit,
+    /// so a dead service never leaves a handler behind (and a replacement
+    /// service always installs its own).
+    private var eventHandler: CarbonEventHandler<Context>?
     private let store: HotkeyStore
 
     /// Actions whose global hotkey could not be registered (likely owned
@@ -145,8 +148,15 @@ final class HotkeyService {
 
     init(store: HotkeyStore = HotkeyStore()) {
         self.store = store
-        Self.installEventHandler(with: context)
+        installEventHandler()
         registerHotkeys()
+    }
+
+    deinit {
+        // A queued dispatch that already captured the context must find
+        // nothing to call once the service is gone; the handler removal
+        // in CarbonEventHandler.deinit is the other half (no new events).
+        context.handler = nil
     }
 
     /// Unregisters everything and registers from the store again.
@@ -186,18 +196,20 @@ final class HotkeyService {
         }
     }
 
-    private static func installEventHandler(with context: Context) {
-        guard !handlerInstalled else { return }
-        handlerInstalled = true
-        let userData = Unmanaged.passUnretained(context).toOpaque()
-        var eventType = Self.eventType
-        InstallEventHandler(
-            GetApplicationEventTarget(),
-            carbonCallback,
-            1,
-            &eventType,
-            userData,
-            nil)
+    private func installEventHandler() {
+        eventHandler = CarbonEventHandler(
+            payload: context,
+            install: { userData, ref in
+                var eventType = Self.eventType
+                InstallEventHandler(
+                    GetApplicationEventTarget(),
+                    Self.carbonCallback,
+                    1,
+                    &eventType,
+                    userData,
+                    &ref)
+            },
+            remove: { RemoveEventHandler($0) })
     }
 
     private static let carbonCallback: EventHandlerUPP = { _, event, userData in
