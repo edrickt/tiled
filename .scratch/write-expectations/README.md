@@ -107,4 +107,8 @@ mutation-table target stays live and caught.
   `21c771c`: `captureMenuBar()` resolves focus once and builds both snapshots,
   the pure `refreshPlan` owns both diffs and the open-menu deferral,
   `refreshFocusedDisplay` is gone, and the icon and menu each have one writer.
-  Candidate A7 and defects 6-8 from the review report remain unclaimed.
+- Candidate A7 ("One dependency value and a testable tab lifecycle") is done at
+  `cf2a884`: `SettingsDependencies` is one value injected once and handed to each
+  tab, the tab order/selection/focus are drivable headless, and the Shortcuts tab
+  reads its window's live content size at rebuild, so the dead `windowDidResize`
+  cache is gone. Defects 6-8 from the review report remain unclaimed.
