@@ -35,7 +35,8 @@ final class DragTrackerTests: XCTestCase {
         untiled = []
         dragEndFires = []
         grids = [:]
-        expectations = WriteExpectations(now: { [weak self] in self?.now ?? Date() })
+        expectations = WriteExpectations(
+            gateway: gateway, now: { [weak self] in self?.now ?? Date() })
         tracker = DragTracker(
             expectations: expectations,
             context: DragTracker.Context(

@@ -68,10 +68,10 @@ struct TilingSpace {
     /// undo chapters are this canvas's own; the context never carries them.
     struct Context {
         let gateway: WindowGateway
-        let frameWriter: FrameWriter
         let tracker: DragTracker
-        /// The write-expectation owner: untile-all primes the slot rects
-        /// its undo will write through it.
+        /// The write owner: every frame push goes through it (policy,
+        /// expectation, late check, consequence), and untile-all primes
+        /// the slot rects its undo will write through it.
         let expectations: WriteExpectations
         let boundsOf: (CGRect) -> CGRect
         /// The canvas every write without a better owner belongs to: the
@@ -108,12 +108,10 @@ struct TilingSpace {
         /// Windows the coordinator must now observe (their records landed).
         var observe: [WindowID] = []
         /// Windows the canvas released: the coordinator clears its handle
-        /// table, death clock, and pending verification for them.
+        /// table and death clock for them.
         var forget: [WindowID] = []
         /// Restored windows sit below the arrangement they left.
         var raise: Bool = false
-        /// Windows whose convergence must be verified one delay later.
-        var verify: [WindowID] = []
     }
 
     /// What one undo returns: narration plus observation requests. Kept
@@ -146,7 +144,7 @@ struct TilingSpace {
 
     /// Drops a window the convergence check judged silently ignored:
     /// occupancy and record go, nothing is written. The coordinator owns
-    /// the narration and the death/verification bookkeeping.
+    /// the narration and the death bookkeeping.
     mutating func discard(window id: WindowID, context: Context) {
         forget(id, context: context)
     }
@@ -177,8 +175,8 @@ struct TilingSpace {
 
     /// Commits a decided plan for `requester` into `slot`: dispatches to
     /// the per-kind branch, then settles (forget, reflow, narration,
-    /// verification, undo chapter). Internal so branch behaviour stays
-    /// testable with a directly chosen plan.
+    /// undo chapter). Internal so branch behaviour stays testable with a
+    /// directly chosen plan.
     mutating func execute(
         decision: TilePlan, requester id: WindowID, slot: Slot, context: Context
     ) -> Outcome {
@@ -205,8 +203,10 @@ struct TilingSpace {
     /// records (the coordinator clears its handle table), the cells the
     /// event freed reflow into one survivor, restored windows sit below
     /// the arrangement, a swap's displaced window takes focus, and the
-    /// event is narrated, verified, and made undoable. One chapter per
-    /// event, so a single ⌃⌥⇧⌘Z puts back everything this settled.
+    /// event is narrated and made undoable. One chapter per event, so a
+    /// single ⌃⌥⇧⌘Z puts back everything this settled. Every write judges
+    /// itself through the expectation owner's late check; settle only
+    /// records what happened.
     private mutating func settle(
         _ decision: TilePlan, commit: Commit, requester id: WindowID,
         context: Context
@@ -244,19 +244,6 @@ struct TilingSpace {
         }
         self.notice = commit.notice
         if let refusal = commit.refusal { self.error = refusal.message }
-        if commit.clean {
-            // Late convergence check: a silent ignore (gateway success,
-            // app never moved) is invisible at write time, so verify one
-            // verify-delay later via the echo trail; no extra AX traffic
-            // on the hot path. Windows that converged, produced any frames,
-            // or were re-written since are skipped; only total silence
-            // rolls back. Cancelled by the next placement's scheduling
-            // (a newer write supersedes) and by forget paths.
-            outcome.verify = verificationWindows(for: decision, requester: id)
-            if let rehoused = commit.rehoused {
-                outcome.verify.append(rehoused)
-            }
-        }
         outcome.observe = commit.observed
         // The reflow's survivors share the event's undo chapter: undo
         // restores the pre-event world in one ⌃⇧⌘Z (a move with no
@@ -284,16 +271,6 @@ struct TilingSpace {
         undoStack.append((snapshot: [], requester: nil))
         if undoStack.count > Self.undoDepth {
             undoStack.removeFirst(undoStack.count - Self.undoDepth)
-        }
-    }
-
-    /// The convergence checks one settled plan owns: the placed windows,
-    /// plus a re-housed evictee when there is one.
-    private func verificationWindows(for decision: TilePlan, requester id: WindowID) -> [WindowID] {
-        switch decision {
-        case .tile, .switchLayout: [id]
-        case .swap(let displaced): [id, displaced]
-        case .noop: []
         }
     }
 
@@ -582,8 +559,8 @@ struct TilingSpace {
 
     /// The pair a plan branch commits and hands back: the canvas folds
     /// `error`/`notice` into its own readable state, `snapshot`/
-    /// `requester`/`rehoused` into the undo chapter and verification, and
-    /// `observed` into the coordinator effects.
+    /// `requester`/`rehoused` into the undo chapter, and `observed` into
+    /// the coordinator effects.
     private struct Commit {
         var refusal: Refusal?
         var notice: String?
@@ -741,7 +718,8 @@ struct TilingSpace {
     /// Applies `id`'s slot rect on `space` (nil selects the display-less
     /// fallback for legacy/headless snapshots). Returns whether the
     /// gateway write succeeded (some windows refuse resizes). The tracker
-    /// bookkeeps the write for echo suppression.
+    /// bookkeeps the write for echo suppression, and the owner arms the
+    /// late silent-ignore check (a silent ignore releases the window).
     @discardableResult
     private func applyLayout(
         for id: WindowID, context: Context, on space: TilingSpaceKey?
@@ -752,14 +730,12 @@ struct TilingSpace {
         let target = grid.rect(for: slot, in: bounds)
         // The shared write policy: a no-op target counts as success
         // without a write, and a hidden canvas defers (false: the branch
-        // rolls back). The check is `.none`: settle schedules the plan's
-        // convergence check, so a per-write check would double-schedule.
-        // No canvas (legacy/headless snapshots) resolves to the
-        // display-less fallback, which the visibility policy treats as
-        // visible.
+        // rolls back). No canvas (legacy/headless snapshots) resolves to
+        // the display-less fallback, which the visibility policy treats
+        // as visible.
         let canvas = space ?? .displayless
-        let result = context.frameWriter.write(
-            id, handle: record.handle, to: target, on: canvas, check: .none)
+        let result = context.expectations.write(
+            id, handle: record.handle, to: target, on: canvas, consequence: .slotCommit)
         context.log(
             "applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) "
                 + "target=\(target) result=\(result)")
@@ -810,7 +786,7 @@ struct TilingSpace {
         // A hidden canvas's survivors grow in state now but are written
         // when the user swipes back: sizing an off-Space window can move
         // it onto the visible Space, which would break the independence
-        // the layout exists to provide. The FrameWriter defers those
+        // the layout exists to provide. The write owner defers those
         // writes and marks the canvas stale for the swipe back.
         var rects: [WindowID: CGRect] = [:]
         for move in moves {
@@ -839,18 +815,20 @@ struct TilingSpace {
         }
     }
 
-    /// Performs one coalesced push through the shared write policy,
-    /// counting refusals and recording the generic refusal message on
-    /// this canvas. Deferred (off-Space) writes are not failures: the
-    /// FrameWriter has already marked the canvas stale and the pushed
-    /// state stands. Shared by reflow and the tracker's publish path.
+    /// Performs one coalesced push through the shared write policy (the
+    /// expectation owner), counting refusals and recording the generic
+    /// refusal message on this canvas. Deferred (off-Space) writes are
+    /// not failures: the owner has already marked the canvas stale and
+    /// the pushed state stands. Each performed write arms its own late
+    /// silent-ignore check; a silent ignore releases the window.
+    /// Shared by reflow and the tracker's publish path.
     private mutating func writeRects(_ rects: [WindowID: CGRect], context: Context) -> Int {
         var failed = 0
         for (id, target) in rects {
             guard let record = records[id] else { continue }
-            if context.frameWriter.write(
-                id, handle: record.handle, to: target, on: context.space, check: .rollback)
-                == .refused
+            if context.expectations.write(
+                id, handle: record.handle, to: target, on: context.space,
+                consequence: .slotCommit) == .refused
             {
                 failed += 1
             }
@@ -1033,7 +1011,9 @@ struct TilingSpace {
         let target = context.boundsOf(current)
         error = nil
         notice = nil
-        let result = writeExpandedFrame(id, to: target, context: context)
+        // The cover-toggle token carries the pre-write value a silent
+        // ignore must restore: the window was not expanded, so clear.
+        let result = writeExpandedFrame(id, to: target, revertTo: nil, context: context)
         if result.accepted {
             expanded[id] = current
             context.log("expand win\(id) -> \(target)")
@@ -1061,12 +1041,15 @@ struct TilingSpace {
         var refusal: String?
         var answered = false
         if state.slot(of: id) != nil {
-            if let result = retileExpanded(id, context: context) {
+            if let result = retileExpanded(id, saved: saved, context: context) {
                 refusal = result.refusal
                 answered = !result.accepted
             }
         } else if records[id] != nil {
-            let result = writeExpandedFrame(id, to: saved, context: context)
+            // A silent ignore must restore the expansion the collapse
+            // just cleared: the token carries the saved frame back.
+            let result = writeExpandedFrame(
+                id, to: saved, revertTo: saved, context: context)
             refusal = result.refusal
             answered = !result.accepted
             if result.accepted {
@@ -1087,20 +1070,24 @@ struct TilingSpace {
     /// window's record or slot is already gone: nothing was written.
     /// Uses the canvas's own grid directly, not plan execution: the
     /// window never left its slot, so there is nothing to restore or
-    /// evict.
-    private func retileExpanded(_ id: WindowID, context: Context) -> ExpandedWrite? {
+    /// evict. `saved` is the expansion being collapsed: a silent ignore
+    /// of the retile restores it.
+    private func retileExpanded(
+        _ id: WindowID, saved: CGRect, context: Context
+    ) -> ExpandedWrite? {
         guard let record = records[id], let slot = state.slot(of: id) else { return nil }
         let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
         let target = grid.rect(for: slot, in: context.boundsOf(current))
-        let result = writeExpandedFrame(id, to: target, context: context)
+        let result = writeExpandedFrame(id, to: target, revertTo: saved, context: context)
         context.log("retile expanded win\(id) -> \(slot.rawValue) target=\(target)")
         return result
     }
 
-    /// One expected frame write via the gateway: the shared shape of the
-    /// expand, collapse, and retile writes. Expansion has no rollback
-    /// path of its own, so it declares no convergence check; a refusal
-    /// comes back as its message for the caller to record.
+    /// One expected frame write via the owner: the shared shape of the
+    /// expand, collapse, and retile writes. Every one arms the late
+    /// check, and a silent ignore reverts the expanded record to
+    /// `revertTo` (the record's pre-write value); a refusal comes back
+    /// as its message for the caller to record.
     private enum ExpandedWrite: Equatable {
         /// The frame is where intended (written, or already correct).
         case accepted
@@ -1120,14 +1107,16 @@ struct TilingSpace {
     }
 
     private func writeExpandedFrame(
-        _ id: WindowID, to target: CGRect, context: Context
+        _ id: WindowID, to target: CGRect, revertTo: CGRect?, context: Context
     ) -> ExpandedWrite {
         guard let record = records[id] else { return .deferred }
         // The shared write policy: the off-Space guard defers a hidden
         // canvas (the expansion stays out of state), and a no-op target
-        // counts as success without a write.
-        let result = context.frameWriter.write(
-            id, handle: record.handle, to: target, on: context.space, check: .none)
+        // counts as success without a write. The consequence reverts the
+        // expanded record when the app silently ignores the toggle.
+        let result = context.expectations.write(
+            id, handle: record.handle, to: target, on: context.space,
+            consequence: .coverToggle(revertTo: revertTo))
         switch result {
         case .written, .skippedNoOp: return .accepted
         case .deferredOffSpace: return .deferred
@@ -1191,9 +1180,9 @@ struct TilingSpace {
 
     /// Performs coalesced pushes through the shared write policy:
     /// no-op skip, off-Space deferral, echo marking, and the late
-    /// convergence check belong to `FrameWriter`. Refusals land on this
-    /// canvas, counted at once. `excluding` names the drag's source of
-    /// truth (informational; snapback rects name it with nil).
+    /// convergence check belong to the expectation owner. Refusals land
+    /// on this canvas, counted at once. `excluding` names the drag's
+    /// source of truth (informational; snapback rects name it with nil).
     @discardableResult
     mutating func publish(
         rects: [WindowID: CGRect], excluding: WindowID?, context: Context

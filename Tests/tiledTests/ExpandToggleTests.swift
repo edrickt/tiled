@@ -19,6 +19,10 @@ final class ExpandToggleTests: XCTestCase {
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
     private var feedbacks: [TilingController.Feedback] = []
+    /// Late checks captured from the injectable scheduler.
+    private var checkFires: [() -> Void] = []
+    /// How many times the controller signalled a state change.
+    private var changeCount = 0
 
     /// The canvas the test's single display tiles onto: reads go through
     /// the same accessor actions do.
@@ -28,12 +32,19 @@ final class ExpandToggleTests: XCTestCase {
         super.setUp()
         gateway = FakeWindowGateway()
         feedbacks = []
-        // No runloop timer: tests drive pruneDeadWindows directly.
+        checkFires = []
+        changeCount = 0
+        // No runloop timer: tests drive pruneDeadWindows directly, and
+        // late checks fire via the captured scheduler.
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
+            scheduleCheck: { [weak self] fire in
+                self?.checkFires.append(fire)
+                return {}
+            },
             screens: { [Self.screen] })
         controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
-        controller.onChange = {}
+        controller.onChange = { [weak self] in self?.changeCount += 1 }
     }
 
     // MARK: Expected geometry (the injected screen)
@@ -282,6 +293,107 @@ final class ExpandToggleTests: XCTestCase {
         // The window never expanded: the next press retries the expand.
         controller.handleExpandToggle()
         XCTAssertEqual(gateway.frame(of: handle), bounds(for: original))
+    }
+
+    // MARK: Late cover-toggle consequences (silent ignores)
+
+    func testSilentlyIgnoredExpandRevertsTheExpansion() {
+        // The app reported success but never moved: the expansion must
+        // not stay in state covering a frame the app never applied. The
+        // late check reverts the record and surfaces the immediate
+        // path's refusal, writing no frames of its own.
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let handle = gateway.addWindow(frame: original)
+        gateway.focused = handle
+        gateway.silentIgnore.insert(handle)
+
+        controller.handleExpandToggle()
+
+        XCTAssertTrue(canvas.isExpanded(1), "commits at write time")
+        XCTAssertEqual(gateway.frame(of: handle), original, "the app never moved")
+        let writesBefore = gateway.writes.count
+        let changesBefore = changeCount
+
+        checkFires.last?()
+
+        XCTAssertFalse(canvas.isExpanded(1), "the ignored expand rolled back")
+        XCTAssertEqual(
+            canvas.error, "Couldn't move that window: the app refused to resize it.")
+        XCTAssertEqual(feedbacks.count, 1)
+        guard case .expandRefused(let name) = feedbacks[0] else {
+            return XCTFail("expected .expandRefused, got \(feedbacks[0])")
+        }
+        XCTAssertEqual(name, "TestApp")
+        XCTAssertEqual(gateway.writes.count, writesBefore, "the revert writes no frames")
+        XCTAssertEqual(gateway.frame(of: handle), original)
+        XCTAssertEqual(changeCount, changesBefore + 1)
+
+        // The window never expanded: the next press expands for real.
+        gateway.silentIgnore.remove(handle)
+        controller.handleExpandToggle()
+        XCTAssertEqual(gateway.frame(of: handle), bounds(for: original))
+    }
+
+    func testSilentlyIgnoredCollapseRestoresTheExpansion() {
+        // The reverse direction: a collapse the app ignored leaves the
+        // window covering the screen, so the expanded record must come
+        // back - again with no frame write by the revert.
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let handle = gateway.addWindow(frame: original)
+        gateway.focused = handle
+        controller.handleExpandToggle() // expands for real
+        let expandedFrame = gateway.frame(of: handle)!
+        XCTAssertTrue(canvas.isExpanded(1))
+
+        gateway.silentIgnore.insert(handle)
+        controller.handleExpandToggle() // collapses, silently ignored
+
+        XCTAssertFalse(canvas.isExpanded(1), "the collapse cleared the record at write time")
+        XCTAssertEqual(gateway.frame(of: handle), expandedFrame, "the app never moved")
+        let writesBefore = gateway.writes.count
+        let changesBefore = changeCount
+
+        checkFires.last?()
+
+        XCTAssertTrue(canvas.isExpanded(1), "the ignored collapse restored the expansion")
+        XCTAssertEqual(canvas.expanded[1], original, "the saved frame is back")
+        XCTAssertEqual(
+            canvas.error, "Couldn't move that window: the app refused to resize it.")
+        XCTAssertEqual(feedbacks.count, 1)
+        guard case .expandRefused(let name) = feedbacks[0] else {
+            return XCTFail("expected .expandRefused, got \(feedbacks[0])")
+        }
+        XCTAssertEqual(name, "TestApp")
+        XCTAssertEqual(gateway.writes.count, writesBefore, "the revert writes no frames")
+        XCTAssertEqual(gateway.frame(of: handle), expandedFrame)
+        XCTAssertEqual(changeCount, changesBefore + 1)
+    }
+
+    func testSilentlyIgnoredRetileRestoresTheExpansion() {
+        // The tiled leg of collapse: an expanded window keeps its slot,
+        // so the collapse retiles it. A silent ignore must restore the
+        // expansion exactly like the untiled leg.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        controller.handleExpandToggle() // expands the tiled window
+        let expandedFrame = gateway.frame(of: handle)!
+        let saved = canvas.expanded[1]!
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft, "expansion keeps the slot")
+
+        gateway.silentIgnore.insert(handle)
+        controller.handleExpandToggle() // retiles, silently ignored
+
+        XCTAssertFalse(canvas.isExpanded(1), "the collapse cleared the record at write time")
+        XCTAssertEqual(gateway.frame(of: handle), expandedFrame, "the app never moved")
+        let writesBefore = gateway.writes.count
+
+        checkFires.last?()
+
+        XCTAssertTrue(canvas.isExpanded(1), "the ignored retile restored the expansion")
+        XCTAssertEqual(canvas.expanded[1], saved, "the saved frame is back")
+        XCTAssertEqual(gateway.writes.count, writesBefore, "the revert writes no frames")
+        XCTAssertEqual(gateway.frame(of: handle), expandedFrame)
     }
 
     /// A drag-resize coalesces a re-push of the dragged monitor's

@@ -276,33 +276,51 @@
   "        guard let id = recordID(for: handle) else { return }\n        guard false, gateway.liveness(of: handle) == .dead else {"
  ],
  [
-  "FrameWriter.swift",
+  "WriteExpectations.swift",
   "no-op write pushed anyway (expectation never converges)",
-  "        if let live = gateway.frame(of: handle),\n            WriteExpectations.close(live, target, tolerance: WriteExpectations.noOpWriteTolerance)\n        {\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
+  "        if let live = gateway.frame(of: handle),\n            Self.framesClose(live, target, tolerance: Self.noOpWriteTolerance)\n        {\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
   ""
  ],
  [
-  "FrameWriter.swift",
+  "WriteExpectations.swift",
   "off-Space defer never taken (hidden canvas written)",
   "        guard isVisible(space) else {\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }",
   "        guard true else {\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }"
  ],
  [
-  "FrameWriter.swift",
-  "rollback check inverted (silent ignores never verified)",
-  "        if case .rollback = check { scheduleCheck(id, space) }",
-  "        if case .none = check { scheduleCheck(id, space) }"
+  "WriteExpectations.swift",
+  "check never armed (silent ignores never roll back)",
+  "        armCheck(id, consequence)",
+  "        _ = consequence"
  ],
  [
-  "FrameWriter.swift",
+  "WriteExpectations.swift",
   "refusal reported as success (no write result reaches callers)",
   "        guard gateway.setFrame(handle, to: target) else {\n            log(\"write win\\(id) refused target=\\(target)\")\n            return .refused\n        }",
   "        _ = gateway.setFrame(handle, to: target)"
  ],
  [
-  "FrameWriter.swift",
+  "WriteExpectations.swift",
   "echo expectation not armed (own write reads as a user drag)",
-  "        markExpected(id, target)\n        guard gateway.setFrame",
-  "        guard gateway.setFrame"
+  "        noteExpected(id, target)\n        notePushed(id, target)",
+  "        notePushed(id, target)"
+ ],
+ [
+  "WriteExpectations.swift",
+  "supersede dropped (the older check survives the newer write)",
+  "        cancelCheck(id)\n        checkSerial += 1",
+  "        checkSerial += 1"
+ ],
+ [
+  "TilingSpace.swift",
+  "expand silent ignore skips the revert",
+  "        let result = writeExpandedFrame(id, to: target, revertTo: nil, context: context)",
+  "        let result = writeExpandedFrame(id, to: target, revertTo: current, context: context)"
+ ],
+ [
+  "TilingSpace.swift",
+  "collapse silent ignore skips the revert",
+  "            let result = writeExpandedFrame(\n                id, to: saved, revertTo: saved, context: context)",
+  "            let result = writeExpandedFrame(\n                id, to: saved, revertTo: nil, context: context)"
  ]
 ]

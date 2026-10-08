@@ -20,23 +20,23 @@ final class LidSleepWakeTests: XCTestCase {
     private var currentScreens: [ScreenInfo] = []
     /// Captured drag-end debounce fires (no runloop in tests).
     private var dragEndFires: [() -> Void] = []
-    /// Captured convergence-check fires.
-    private var verifyFires: [() -> Void] = []
+    /// Captured late silent-ignore checks.
+    private var checkFires: [() -> Void] = []
 
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
         currentScreens = [Self.builtIn]
         dragEndFires = []
-        verifyFires = []
+        checkFires = []
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             scheduleDragEnd: { [self] fire in
                 dragEndFires.append(fire)
                 return {}
             },
-            scheduleVerify: { [self] fire in
-                verifyFires.append(fire)
+            scheduleCheck: { [self] fire in
+                checkFires.append(fire)
                 return {}
             },
             screens: { [self] in currentScreens })

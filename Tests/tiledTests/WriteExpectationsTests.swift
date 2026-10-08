@@ -2,26 +2,215 @@ import XCTest
 @testable import tiled
 
 /// WriteExpectations through its interface: one frame push's whole life -
-/// arm, echo trail, per-tick verdicts, and the late convergence verdict -
-/// plus the intent that outlives the echo entry. No controller, no AX.
+/// the shared write policy, the arm/echo/late-verdict trail, the
+/// consequence a silent ignore fires, and the intent that outlives the
+/// echo entry. Fake gateway, recording ports; no controller, no AX.
 final class WriteExpectationsTests: XCTestCase {
     private var expectations: WriteExpectations!
+    private var gateway: FakeWindowGateway!
     /// Injectable clock backing the echo timestamps.
     private var now = Date()
-    /// Windows whose pending check was cancelled through the injected port.
-    private var cancelled: [WindowID] = []
+    /// Live frames the convergence check reads, by window.
+    private var liveFrames: [WindowID: CGRect] = [:]
+    /// Late checks captured from the injectable scheduler.
+    private var checks: [() -> Void] = []
+    /// How many scheduled checks were cancelled.
+    private var cancels = 0
+    /// Consequences the owner fired on silent ignores.
+    private var consequences: [(id: WindowID, consequence: WriteExpectations.Consequence)] = []
+
+    private let canvas = TilingSpaceKey(
+        screen: ScreenID(rawValue: 1), space: SpaceID(rawValue: 10))
 
     override func setUp() {
         super.setUp()
         now = Date()
-        cancelled = []
-        expectations = WriteExpectations(
-            now: { [weak self] in self?.now ?? Date() },
-            cancelCheck: { [weak self] in self?.cancelled.append($0) })
+        liveFrames = [:]
+        checks = []
+        cancels = 0
+        consequences = []
+        writeEvents = []
+        gateway = FakeWindowGateway()
+        expectations = makeExpectations()
+    }
+
+    /// The owner under test, with recording ports. The events array the
+    /// policy tests read lives in `writeEvents`.
+    private var writeEvents: [String] = []
+
+    private func makeExpectations(
+        visible: @escaping (TilingSpaceKey) -> Bool = { _ in true }
+    ) -> WriteExpectations {
+        WriteExpectations(
+            gateway: gateway,
+            isVisible: visible,
+            markStale: { [weak self] _ in self?.writeEvents.append("stale") },
+            scheduleCheck: { [weak self] fire in
+                guard let self else { return {} }
+                self.writeEvents.append("check")
+                self.checks.append(fire)
+                return { self.cancels += 1 }
+            },
+            liveFrameOf: { [weak self] in self?.liveFrames[$0] },
+            notePushed: { [weak self] _, _ in self?.writeEvents.append("armed") },
+            onConsequence: { [weak self] id, consequence in
+                self?.consequences.append((id, consequence))
+            },
+            now: { [weak self] in self?.now ?? Date() })
     }
 
     /// The standard pushed target every verdict test starts from.
     private let target = CGRect(x: 0, y: 500, width: 840, height: 500)
+
+    // MARK: Write policy
+
+    func testAcceptedWriteArmsThenWritesThenSchedulesTheCheck() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let written = CGRect(x: 40, y: 40, width: 300, height: 200)
+        // Order matters: the expectation must exist before the write can
+        // echo, and the check is scheduled only after the write landed.
+        gateway.writtenFrame = { [weak self] _, target in
+            self?.writeEvents.append("write")
+            return target
+        }
+
+        let result = expectations.write(
+            7, handle: handle, to: written, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .written)
+        XCTAssertEqual(gateway.writes.count, 1)
+        XCTAssertEqual(gateway.writes.first?.0, handle)
+        XCTAssertEqual(gateway.writes.first?.1, written)
+        XCTAssertEqual(
+            writeEvents, ["armed", "write", "check"],
+            "arm before the gateway call, schedule only after it landed")
+        XCTAssertEqual(
+            expectations.classify(7, frame: written), .consumed,
+            "the write armed its echo expectation")
+        XCTAssertEqual(checks.count, 1)
+    }
+
+    func testNoOpTargetIsSkippedWithoutWritingOrArmingAnEcho() {
+        let frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let handle = gateway.addWindow(frame: frame)
+
+        let result = expectations.write(
+            7, handle: handle, to: frame, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .skippedNoOp)
+        XCTAssertTrue(gateway.writes.isEmpty)
+        XCTAssertEqual(
+            expectations.classify(7, frame: frame), .live,
+            "no expectation was armed")
+        XCTAssertTrue(checks.isEmpty)
+        XCTAssertEqual(writeEvents, [])
+    }
+
+    func testHiddenCanvasDefersBeforeAnyWritePolicyRuns() {
+        let frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let handle = gateway.addWindow(frame: frame)
+
+        // A no-op target proves visibility is judged first: the write
+        // defers and the canvas is marked stale instead of skipped.
+        let result = makeExpectations(visible: { _ in false }).write(
+            7, handle: handle, to: frame, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .deferredOffSpace)
+        XCTAssertTrue(gateway.writes.isEmpty)
+        XCTAssertEqual(writeEvents, ["stale"])
+        XCTAssertTrue(checks.isEmpty)
+    }
+
+    func testRefusedWriteArmsTheEchoButSchedulesNoCheck() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        gateway.refuseNextWrites(handle)
+        let written = CGRect(x: 40, y: 40, width: 300, height: 200)
+
+        let result = expectations.write(
+            7, handle: handle, to: written, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .refused)
+        XCTAssertEqual(writeEvents, ["armed"])
+        XCTAssertEqual(
+            expectations.classify(7, frame: written), .consumed,
+            "the refused write had already armed its echo expectation")
+        XCTAssertTrue(checks.isEmpty)
+    }
+
+    // MARK: The late consequence
+
+    func testSilentIgnoreFiresTheSlotCommitConsequence() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        liveFrames[7] = CGRect(x: 5000, y: 5000, width: 10, height: 10)
+        expectations.write(
+            7, handle: handle, to: target, on: canvas, consequence: .slotCommit)
+
+        checks[0]()
+
+        XCTAssertEqual(consequences.count, 1)
+        XCTAssertEqual(consequences.first?.id, 7)
+        XCTAssertEqual(consequences.first?.consequence, .slotCommit)
+    }
+
+    func testCoverToggleConsequenceCarriesThePreWriteValue() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let saved = CGRect(x: 120, y: 90, width: 700, height: 500)
+        liveFrames[7] = CGRect(x: 5000, y: 5000, width: 10, height: 10)
+        expectations.write(
+            7, handle: handle, to: target, on: canvas,
+            consequence: .coverToggle(revertTo: saved))
+
+        checks[0]()
+
+        XCTAssertEqual(consequences.first?.consequence, .coverToggle(revertTo: saved))
+    }
+
+    func testConvergedWriteFiresNoConsequence() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        expectations.write(
+            7, handle: handle, to: target, on: canvas, consequence: .slotCommit)
+        var echo = target
+        echo.origin.x += 10
+        XCTAssertEqual(expectations.classify(7, frame: echo), .consumed)
+
+        checks[0]()
+
+        XCTAssertTrue(consequences.isEmpty, "an applied write pays nothing")
+    }
+
+    func testNewerWriteSupersedesTheOlderCheck() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let first = CGRect(x: 0, y: 500, width: 840, height: 500)
+        let second = CGRect(x: 840, y: 0, width: 760, height: 1000)
+        expectations.write(
+            7, handle: handle, to: first, on: canvas, consequence: .slotCommit)
+        expectations.write(
+            7, handle: handle, to: second, on: canvas,
+            consequence: .coverToggle(revertTo: nil))
+
+        XCTAssertEqual(cancels, 1, "the newer write cancelled the older check")
+        // The superseded closure must judge nothing: its silence is the
+        // new write's to answer.
+        checks[0]()
+        XCTAssertTrue(consequences.isEmpty, "a cancelled check pays nothing")
+        // The surviving check judges the surviving write, token included.
+        liveFrames[7] = CGRect(x: 5000, y: 5000, width: 10, height: 10)
+        checks[1]()
+        XCTAssertEqual(consequences.first?.consequence, .coverToggle(revertTo: nil))
+    }
+
+    func testForgetCancelsThePendingCheck() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        expectations.write(
+            7, handle: handle, to: target, on: canvas, consequence: .slotCommit)
+
+        expectations.forget(7)
+        checks[0]()
+
+        XCTAssertEqual(cancels, 1)
+        XCTAssertTrue(consequences.isEmpty, "a forgotten window is never judged")
+        XCTAssertEqual(expectations.classify(7, frame: target), .live)
+    }
 
     // MARK: Tick verdicts
 
@@ -125,11 +314,10 @@ final class WriteExpectationsTests: XCTestCase {
         XCTAssertNil(expectations.convergence(for: 1), "consumed entry: inconclusive")
 
         // Total silence with an answerable live frame far from target:
-        // ignored — the write never took effect.
-        let ignoring = WriteExpectations(
-            now: { [weak self] in self?.now ?? Date() },
-            liveFrameOf: { _ in CGRect(x: 4000, y: 4000, width: 840, height: 500) })
+        // ignored - the write never took effect.
+        let ignoring = makeExpectations()
         let topRight = CGRect(x: 840, y: 500, width: 840, height: 500)
+        liveFrames[2] = CGRect(x: 4000, y: 4000, width: 840, height: 500)
         ignoring.noteExpected(2, topRight)
         XCTAssertEqual(ignoring.convergence(for: 2), .ignored)
 
@@ -166,11 +354,6 @@ final class WriteExpectationsTests: XCTestCase {
         // notification. The live frame is the tiebreaker: within the
         // echo tolerance of the target means converged; far from it
         // means genuinely ignored.
-        var liveFrames: [WindowID: CGRect] = [:]
-        let expectations = WriteExpectations(
-            now: { [weak self] in self?.now ?? Date() },
-            liveFrameOf: { liveFrames[$0] })
-
         // Silent but at target: converged, and the entry is cleared.
         expectations.noteExpected(1, target)
         liveFrames[1] = CGRect(x: 5, y: 505, width: 840, height: 500)
@@ -220,12 +403,6 @@ final class WriteExpectationsTests: XCTestCase {
         expectations.forget(1)
         XCTAssertEqual(expectations.classify(1, frame: target), .live)
         XCTAssertNil(expectations.convergence(for: 1))
-    }
-
-    func testForgetCancelsThePendingCheck() {
-        expectations.noteExpected(1, target)
-        expectations.forget(1)
-        XCTAssertEqual(cancelled, [1])
     }
 
     // MARK: No-op skip (through the drag loop)

@@ -1,15 +1,17 @@
 import CoreGraphics
 import Foundation
 
-/// One owner for a frame push's expectation: armed before the gateway
-/// call, its echo trail watched tick by tick, and the convergence verdict
-/// rendered one verify-delay later. Owns where the window was meant to go
-/// (intent), whether our own write's echo is still in flight, and whether
-/// a write the app never applied should be judged ignored.
+/// One owner for a frame push's whole life: the shared write policy
+/// (off-Space deferral, no-op skip, refusal), the expectation armed before
+/// the gateway call, the echo trail watched tick by tick, the late
+/// convergence verdict, and the consequence a silent ignore pays. Also
+/// owns where the window was meant to go (intent).
 ///
 /// The drag loop consumes `classify` per gateway tick and keeps only drag
-/// semantics (snapback, untile, `processMove`); the controller keeps the
-/// write policy, the check scheduling, and the rollback consequence.
+/// semantics (snapback, untile, `processMove`). Every frame write goes
+/// through `write`, which states only where the window goes and what a
+/// silent ignore means; the check is armed internally and per performed
+/// write, so no write path can forget to verify itself.
 ///
 /// Two things live per window here, deliberately separate:
 /// - the armed expectation: the pushed frame plus its echo trail, cleared
@@ -35,10 +37,74 @@ final class WriteExpectations {
         var settled: Bool
     }
 
+    /// One performed gateway write's classification.
+    enum Result: Equatable {
+        /// The gateway accepted the write.
+        case written
+        /// The live frame already matches the target: no write issued.
+        case skippedNoOp
+        /// The canvas is not the visible Space: no write issued, and the
+        /// canvas is marked stale for the swipe back.
+        case deferredOffSpace
+        /// The gateway refused the write.
+        case refused
+
+        /// The write is on screen, or already correct: callers count
+        /// both as a successful placement.
+        var isAccepted: Bool { self == .written || self == .skippedNoOp }
+    }
+
+    /// What a silent ignore of this write means. Semantic tokens, not a
+    /// check flag: call sites never say *whether* to verify (every
+    /// performed write is), only what the app's silence has to undo.
+    enum Consequence: Equatable {
+        /// A layout write (placement, reflow, reassert, publish): a
+        /// silent ignore releases the window and announces the standard
+        /// refusal.
+        case slotCommit
+        /// A cover toggle (expand, collapse, retile): a silent ignore
+        /// reverts the expanded record to its pre-write value - nil
+        /// clears (expand), a frame restores (collapse and retile). The
+        /// revert writes no frames.
+        case coverToggle(revertTo: CGRect?)
+    }
+
+    /// Schedules the late convergence check and returns a canceller.
+    typealias CheckScheduler = (@escaping () -> Void) -> () -> Void
+
+    /// Delay before a performed write is judged converged or ignored.
+    /// Past the stale-write window (no tick even approached the target),
+    /// with margin for slow apps: animations settle in ~0.5s, so 3.5s of
+    /// total silence means the app ignored the write, not that it is
+    /// still animating.
+    static let checkDelay: TimeInterval = 3.5
+
+    /// Production check scheduler: one main-queue timer per performed write.
+    static let scheduleCheckOnMain: CheckScheduler = { fire in
+        let item = DispatchWorkItem(block: fire)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + WriteExpectations.checkDelay, execute: item)
+        return { item.cancel() }
+    }
+
     /// Armed expectations by window (echo suppression).
     private var expected: [WindowID: ExpectedWrite] = [:]
     /// Last frame we wanted each window in, written or not.
     private var intents: [WindowID: CGRect] = [:]
+    /// Pending late checks by window: one per performed write, the newer
+    /// superseding the older. The serial proves a firing closure belongs
+    /// to the check still registered: a cancelled work item whose fire
+    /// escapes judges nothing.
+    private var checks: [WindowID: PendingCheck] = [:]
+    private var checkSerial = 0
+
+    /// One scheduled late check: its canceller and the consequence its
+    /// write pays on a silent ignore.
+    private struct PendingCheck {
+        let serial: Int
+        let cancel: () -> Void
+        let consequence: Consequence
+    }
 
     private static let echoTolerance: CGFloat = 32
     /// Writes within this distance of the window's current frame are
@@ -57,32 +123,101 @@ final class WriteExpectations {
     /// distance, measured from the first escaped tick, can read short).
     private static let settleWindow: TimeInterval = 1
 
-    /// Clock for echo-bookkeeping timestamps. Injectable so tests can
-    /// fast-forward past the stale-write window without waiting on a
-    /// real 3-second timeout.
-    private let now: () -> Date
+    private let gateway: WindowGateway
+    /// Whether `space` is the canvas the user can see right now; a hidden
+    /// canvas's write defers instead of pulling the window through the
+    /// void.
+    private let isVisible: (TilingSpaceKey) -> Bool
+    /// Reports a canvas whose write deferred, for the re-assert on the
+    /// swipe back.
+    private let markStale: (TilingSpaceKey) -> Void
+    /// Schedules one late convergence check; returns a canceller.
+    /// Injectable so tests fire checks without waiting on real time.
+    private let scheduleCheck: CheckScheduler
     /// The window's live frame, as the app reports it; unlike intent,
     /// which says where we wanted the window, this says where it actually
     /// is. The silent-ignore check consults it before calling total echo
     /// silence an ignore: apps that round frames to an internal grid can
     /// absorb a write without emitting anything.
     private let liveFrameOf: (WindowID) -> CGRect?
-    /// Cancels the pending convergence check for a window. Injected so
-    /// `forget` can drop the check; scheduling itself still lives with
-    /// the controller until the write path moves in here.
-    private let cancelCheck: (WindowID) -> Void
+    /// Tells the drag loop a write is expected: the pushed target becomes
+    /// its diff baseline and any in-progress drag is dropped.
+    private let notePushed: (WindowID, CGRect) -> Void
+    /// Pays a silent ignore's consequence; the body lives with the
+    /// controller/canvas that owns the affected state.
+    private let onConsequence: (WindowID, Consequence) -> Void
+    /// Clock for echo-bookkeeping timestamps. Injectable so tests can
+    /// fast-forward past the stale-write window without waiting on a
+    /// real 3-second timeout.
+    private let now: () -> Date
     private let log: (String) -> Void
 
     init(
-        now: @escaping () -> Date = Date.init,
+        gateway: WindowGateway,
+        isVisible: @escaping (TilingSpaceKey) -> Bool = { _ in true },
+        markStale: @escaping (TilingSpaceKey) -> Void = { _ in },
+        scheduleCheck: @escaping CheckScheduler = WriteExpectations.scheduleCheckOnMain,
         liveFrameOf: @escaping (WindowID) -> CGRect? = { _ in nil },
-        cancelCheck: @escaping (WindowID) -> Void = { _ in },
+        notePushed: @escaping (WindowID, CGRect) -> Void = { _, _ in },
+        onConsequence: @escaping (WindowID, Consequence) -> Void = { _, _ in },
+        now: @escaping () -> Date = Date.init,
         log: @escaping (String) -> Void = { _ in }
     ) {
-        self.now = now
+        self.gateway = gateway
+        self.isVisible = isVisible
+        self.markStale = markStale
+        self.scheduleCheck = scheduleCheck
         self.liveFrameOf = liveFrameOf
-        self.cancelCheck = cancelCheck
+        self.notePushed = notePushed
+        self.onConsequence = onConsequence
+        self.now = now
         self.log = log
+    }
+
+    // MARK: The write
+
+    /// Writes one window's target frame under the shared policy: a
+    /// target the window already holds is skipped (writing it would
+    /// draw no echo, and a marked expectation that never converges
+    /// reads as a silent ignore); otherwise the expectation is armed
+    /// before the write, and one late convergence check is scheduled
+    /// after the gateway accepted it. The consequence decides what that
+    /// check pays if the app stayed silent.
+    @discardableResult
+    func write(
+        _ id: WindowID, handle: WindowHandle, to target: CGRect,
+        on space: TilingSpaceKey, consequence: Consequence
+    ) -> Result {
+        // A write to a canvas the user cannot see waits for the swipe
+        // back: sizing an off-Space window can pull it onto the visible
+        // Space. The mark re-asserts the canvas later.
+        guard isVisible(space) else {
+            markStale(space)
+            log("write win\(id) deferred off-Space")
+            return .deferredOffSpace
+        }
+        // No-op writes are skipped, not pushed: the app changes
+        // nothing and emits no echo, so a marked expectation here
+        // would never converge and the late check would misread an
+        // already-correct window.
+        if let live = gateway.frame(of: handle),
+            Self.framesClose(live, target, tolerance: Self.noOpWriteTolerance)
+        {
+            log("write win\(id) no-op skip target=\(target)")
+            return .skippedNoOp
+        }
+        noteExpected(id, target)
+        notePushed(id, target)
+        guard gateway.setFrame(handle, to: target) else {
+            log("write win\(id) refused target=\(target)")
+            return .refused
+        }
+        // Every performed write leaves exactly one outstanding check; a
+        // newer write supersedes (cancels) the older, so only the latest
+        // write for a window is ever judged.
+        armCheck(id, consequence)
+        log("write win\(id) target=\(target)")
+        return .written
     }
 
     // MARK: Arming
@@ -109,6 +244,40 @@ final class WriteExpectations {
     /// snapback prefer intent over echoes. Survives `forget`.
     func intent(for id: WindowID) -> CGRect? {
         intents[id]
+    }
+
+    // MARK: The late check
+
+    /// Schedules the one check a performed write owns, superseding any
+    /// older check for the same window.
+    private func armCheck(_ id: WindowID, _ consequence: Consequence) {
+        cancelCheck(id)
+        checkSerial += 1
+        let serial = checkSerial
+        let cancel = scheduleCheck { [weak self] in
+            self?.fireCheck(id, serial: serial)
+        }
+        checks[id] = PendingCheck(serial: serial, cancel: cancel, consequence: consequence)
+    }
+
+    /// Drops the pending check for a window, cancelling its scheduled
+    /// work item. A no-op when nothing is pending.
+    private func cancelCheck(_ id: WindowID) {
+        checks.removeValue(forKey: id)?.cancel()
+    }
+
+    /// One late check fired: judges the write it was armed for and pays
+    /// the consequence when the app stayed totally silent. A firing
+    /// closure whose check was cancelled or superseded judges nothing.
+    private func fireCheck(_ id: WindowID, serial: Int) {
+        guard let pending = checks[id], pending.serial == serial else { return }
+        checks[id] = nil
+        guard convergence(for: id) == .ignored else { return }
+        // The entry is spent: the app never moved the window, so the
+        // echo trail has nothing left to swallow.
+        expected[id] = nil
+        log("check win\(id): silent ignore")
+        onConsequence(id, pending.consequence)
     }
 
     // MARK: Tick classification
@@ -205,12 +374,12 @@ final class WriteExpectations {
 
     // MARK: Late convergence
 
-    /// Convergence verdict for one pending write, read by the controller's
-    /// late verification. Nil = inconclusive, leave the window alone:
-    /// the entry is gone (consumed by success, cleared by takeover, or
-    /// superseded by a newer write) or frames arrived but never settled.
-    /// `.ignored` = the write never took effect and nothing echoed.
-    /// `.converged` = a tick landed within tolerance of the target.
+    /// Convergence verdict for one pending write. Nil = inconclusive,
+    /// leave the window alone: the entry is gone (consumed by success,
+    /// cleared by takeover, or superseded by a newer write) or frames
+    /// arrived but never settled. `.ignored` = the write never took
+    /// effect and nothing echoed. `.converged` = a tick landed within
+    /// tolerance of the target.
     enum Convergence { case converged, ignored }
 
     func convergence(for id: WindowID) -> Convergence? {

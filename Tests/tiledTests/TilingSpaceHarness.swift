@@ -8,7 +8,9 @@ import CoreGraphics
 ///
 /// No controller, no AX, no live screen: every frame write lands in the
 /// fake gateway, every rect derives from `bounds`, and every action is
-/// observed through the canvas's own state, notices, and outcomes.
+/// observed through the canvas's own state, notices, and outcomes. The
+/// expectation owner is wired exactly like the controller's: late checks
+/// are captured for manual firing.
 final class TilingSpaceHarness {
     let gateway = FakeWindowGateway()
     var space = TilingSpace()
@@ -21,11 +23,29 @@ final class TilingSpaceHarness {
     /// target from this rect, never a live `NSScreen`.
     var bounds = CGRect(x: 0, y: 0, width: 1600, height: 1200)
     private(set) var tracker: DragTracker!
-    private(set) var writer: FrameWriter!
     private(set) var expectations: WriteExpectations!
+    /// Late silent-ignore checks captured from the injectable scheduler,
+    /// in scheduling order.
+    private(set) var checks: [() -> Void] = []
+    /// Canvases a deferred write marked stale.
+    private(set) var staleMarks: [TilingSpaceKey] = []
 
     init() {
-        expectations = WriteExpectations()
+        expectations = WriteExpectations(
+            gateway: gateway,
+            isVisible: { [weak self] _ in self?.canvasVisible ?? true },
+            markStale: { [weak self] in self?.staleMarks.append($0) },
+            scheduleCheck: { [weak self] fire in
+                self?.checks.append(fire)
+                return {}
+            },
+            liveFrameOf: { [weak self] id in
+                guard let self, let handle = self.handles[id] else { return nil }
+                return self.gateway.frame(of: handle)
+            },
+            notePushed: { [weak self] id, target in
+                self?.tracker.notePushed(id, target)
+            })
         tracker = DragTracker(
             expectations: expectations,
             context: DragTracker.Context(
@@ -41,16 +61,6 @@ final class TilingSpaceHarness {
                 grid: { [weak self] _ in self?.space.grid ?? GridLayout() },
                 setGrid: { [weak self] updated, _ in self?.space.grid = updated }),
             apply: { _, _ in })
-        writer = FrameWriter(
-            gateway: gateway,
-            isVisible: { [weak self] _ in self?.canvasVisible ?? true },
-            markStale: { _ in },
-            markExpected: { [weak self] id, target in
-                self?.expectations.noteExpected(id, target)
-                self?.tracker.notePushed(id, target)
-            },
-            scheduleCheck: { _, _ in },
-            log: { _ in })
     }
 
     /// The collaborators one canvas action needs. A fresh context is
@@ -58,7 +68,6 @@ final class TilingSpaceHarness {
     func context() -> TilingSpace.Context {
         TilingSpace.Context(
             gateway: gateway,
-            frameWriter: writer,
             tracker: tracker,
             expectations: expectations,
             boundsOf: { [weak self] in self?.bounds ?? $0 },

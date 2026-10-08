@@ -10,45 +10,39 @@ import AppKit
 /// chapters, notices) lives in `TilingSpace`; this module routes each
 /// action to the canvas that owns the window and applies the effects the
 /// returned `Outcome` names. The live drag-resize loop lives in
-/// `DragTracker` (echo suppression, edge detection, splitter moves, apply
-/// coalescing); this module feeds it gateway callbacks and performs the
-/// writes it schedules.
+/// `DragTracker` (edge detection, splitter moves, apply coalescing); this
+/// module feeds it gateway callbacks and routes the writes it schedules
+/// through `WriteExpectations`, the one owner of a frame push's life.
 final class TilingController {
     private let gateway: WindowGateway
     /// Drag-end debounce scheduler for the tracker's drag-out loop.
     /// Injectable so tests fire drag ends without waiting on the runloop.
     private let scheduleDragEnd: DragTracker.DragEndScheduler
-    /// Convergence-check scheduler for the late silent-ignore verification.
-    /// Injectable so tests fire verifications without waiting 3.5s.
-    private let scheduleVerify: DragTracker.DragEndScheduler
-    /// The one owner of every frame push's expectation: armed before the
-    /// gateway call, its echo trail watched tick by tick, its late
-    /// convergence judged one verify-delay later. Held here and injected
-    /// into the write policy, the drag loop, and the placement pipeline
-    /// (untile-all's intent priming). Lazy so its closures can capture
-    /// self.
+    /// Convergence-check scheduler for the expectation owner's late
+    /// silent-ignore checks. Injectable so tests fire checks without
+    /// waiting 3.5s.
+    private let scheduleCheck: WriteExpectations.CheckScheduler
+    /// The one owner of every frame push: the shared write policy, the
+    /// expectation armed before the gateway call, the echo trail watched
+    /// tick by tick, the late convergence verdict, and the consequence a
+    /// silent ignore pays. Held here and injected into the canvas write
+    /// paths and the drag loop. Lazy so its closures can capture self.
     private lazy var expectations = WriteExpectations(
-        now: now,
-        liveFrameOf: { [weak self] id in self?.liveFrameForTracker(id) },
-        cancelCheck: { [weak self] id in self?.cancelVerification(id) },
-        log: { [weak self] in self?.dbg($0) })
-    /// The one frame-write policy every push path shares: no-op skip,
-    /// off-Space deferral, echo marking, and the convergence check each
-    /// write declares. Lazy so its closures can capture self.
-    private lazy var frameWriter = FrameWriter(
         gateway: gateway,
         isVisible: { [weak self] in self?.isVisible($0) ?? false },
         markStale: { [weak self] space in
             guard let self else { return }
             self.staleSpaces.insert(space)
         },
-        markExpected: { [weak self] id, target in
-            self?.expectations.noteExpected(id, target)
+        scheduleCheck: scheduleCheck,
+        liveFrameOf: { [weak self] id in self?.liveFrameForTracker(id) },
+        notePushed: { [weak self] id, target in
             self?.tracker.notePushed(id, target)
         },
-        scheduleCheck: { [weak self] id, space in
-            self?.scheduleVerification(of: [id], on: space)
+        onConsequence: { [weak self] id, consequence in
+            self?.payConsequence(id, consequence)
         },
+        now: now,
         log: { [weak self] in self?.dbg($0) })
 
     /// The drag-resize loop. Lazy so its context closures can capture
@@ -182,7 +176,7 @@ final class TilingController {
         gateway: WindowGateway = LiveWindowGateway(),
         pruneInterval: TimeInterval? = 5.0,
         scheduleDragEnd: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleDragEndOnMain,
-        scheduleVerify: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleVerifyOnMain,
+        scheduleCheck: @escaping WriteExpectations.CheckScheduler = WriteExpectations.scheduleCheckOnMain,
         screens: ScreenProvider? = nil,
         deathConfirmation: TimeInterval = 3.0,
         now: @escaping () -> Date = Date.init,
@@ -190,7 +184,7 @@ final class TilingController {
     ) {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
-        self.scheduleVerify = scheduleVerify
+        self.scheduleCheck = scheduleCheck
         self.deathConfirmation = deathConfirmation
         self.now = now
         self.screens = screens ?? { NSScreen.screens.enumerated().map { ScreenInfo(appKit: $0.element, index: $0.offset) } }
@@ -379,8 +373,8 @@ final class TilingController {
     }
 
     /// Applies one canvas action's coordinator effects: the handle
-    /// registry, observation, raising, focus, and the convergence
-    /// schedule. `notice`/`error` are already on the canvas.
+    /// registry, observation, raising, and focus. `notice`/`error` are
+    /// already on the canvas.
     private func apply(_ outcome: TilingSpace.Outcome, on key: TilingSpaceKey) {
         // Restored-not-re-housed windows: untiled for good. A re-housed
         // window stayed tiled, so its record and observation survive.
@@ -401,9 +395,6 @@ final class TilingController {
         if let focusAfter = outcome.focusAfter, let handle = handle(of: focusAfter) {
             gateway.focus(handle)
         }
-        if !outcome.verify.isEmpty {
-            scheduleVerification(of: outcome.verify, on: key)
-        }
     }
 
     /// The collaborators one action needs. A fresh context is built per
@@ -412,7 +403,6 @@ final class TilingController {
     private func placementContext(for key: TilingSpaceKey) -> TilingSpace.Context {
         TilingSpace.Context(
             gateway: gateway,
-            frameWriter: frameWriter,
             tracker: tracker,
             expectations: expectations,
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
@@ -427,60 +417,76 @@ final class TilingController {
             log: { [weak self] message in self?.dbg(message) })
     }
 
-    /// Pending convergence checks by window: a newer placement for the
-    /// same window supersedes (cancels) the older check, and forget paths
-    /// cancel outright: a verification must never roll back a window
-    /// that already moved on.
-    private var pendingVerifications: [WindowID: () -> Void] = [:]
-
-    /// Schedules one convergence check per window, superseding any pending
-    /// check for the same window: only the latest write is ever judged.
-    private func scheduleVerification(of placed: [WindowID], on space: TilingSpaceKey) {
-        for window in placed {
-            pendingVerifications[window]?()
-            let checkSpace = space
-            pendingVerifications[window] = scheduleVerify { [weak self] in
-                self?.pendingVerifications[window] = nil
-                self?.verifyConvergence(window, on: checkSpace)
-            }
+    /// Pays the consequence of a write the app silently ignored one
+    /// check delay later. The expectation owner judges; the bodies live
+    /// here, where the affected state is.
+    private func payConsequence(_ id: WindowID, _ consequence: WriteExpectations.Consequence) {
+        switch consequence {
+        case .slotCommit:
+            discardIgnoredWindow(id)
+        case .coverToggle(let revertTo):
+            revertIgnoredCoverToggle(id, to: revertTo)
         }
     }
 
-    private func cancelVerification(_ id: WindowID) {
-        pendingVerifications[id]?()
-        pendingVerifications[id] = nil
-    }
-
-    /// Late silent-ignore check: `scheduleVerification` fires this one
-    /// verify-delay after the placement. Converged / inconclusive /
-    /// re-placed windows are left alone; a window whose write drew total
-    /// AX silence is rolled back exactly like a refused write (slot
-    /// released, tracker entry cleared, standard refusal surfaced), so
-    /// state and screen agree instead of disagreeing silently.
-    private func verifyConvergence(_ id: WindowID, on space: TilingSpaceKey) {
+    /// Late silent-ignore rollback for a layout write. Converged /
+    /// inconclusive / re-placed windows never reach here; a window whose
+    /// write drew total AX silence is rolled back exactly like a refused
+    /// write (slot released, tracker entry cleared, standard refusal
+    /// surfaced), so state and screen agree instead of disagreeing
+    /// silently.
+    private func discardIgnoredWindow(_ id: WindowID) {
         guard let errorSpace = spaceOf(window: id),
             spaces[errorSpace]?.state.slot(of: id) != nil
         else { return }
-        guard expectations.convergence(for: id) == .ignored else { return }
         // Name the window before its record goes; the rollback itself
         // writes nothing (the write never took effect).
         let name = appName(for: id) ?? "That window"
-        let hasError = mutateSpace(errorSpace) { canvas in
-            canvas.discard(window: id, context: placementContext(for: errorSpace))
+        surfaceIgnoredWrite(
+            on: errorSpace,
+            mutate: { $0.discard(window: id, context: placementContext(for: errorSpace)) },
+            message: TilingSpace.refusalMessage(windowName: name),
+            feedback: .refused(windowName: name))
+        forgetBookkeeping(id)
+        dbg("verify FAILED win\(id): silent ignore, rolled back")
+    }
+
+    /// Late silent-ignore rollback for a cover toggle: the app reported
+    /// success but never moved, so the expanded record goes back to its
+    /// pre-write value (nil = the toggle never happened, a frame = the
+    /// collapse never happened) and the standard expand refusal is
+    /// surfaced. The revert itself writes no frames.
+    private func revertIgnoredCoverToggle(_ id: WindowID, to saved: CGRect?) {
+        guard let key = spaceOf(window: id) else { return }
+        let name = appName(for: id) ?? "That window"
+        surfaceIgnoredWrite(
+            on: key,
+            mutate: { $0.expanded[id] = saved },
+            message: TilingSpace.refusalMessage(count: 1),
+            feedback: .expandRefused(windowName: name))
+        dbg("cover toggle FAILED win\(id): silent ignore, reverted")
+    }
+
+    /// Applies one silent-ignore rollback on the window's own canvas:
+    /// `mutate` performs the state revert, the standard refusal message
+    /// lands only when the canvas has no error of its own (a newer
+    /// refusal wins), and the window is announced on the feedback
+    /// channel. The rollback writes no frames.
+    private func surfaceIgnoredWrite(
+        on key: TilingSpaceKey,
+        mutate: (inout TilingSpace) -> Void,
+        message: String,
+        feedback: TilingController.Feedback
+    ) {
+        let hasError = mutateSpace(key) { canvas in
+            mutate(&canvas)
             return canvas.error != nil
         }
-        forgetBookkeeping(id)
-        // A later error (e.g. a newer refusal) wins over this late one.
-        // Scoped to the window's own canvas: the placement may tile onto
-        // a background display or Space while focus sits elsewhere.
         if !hasError {
-            mutateSpace(errorSpace) {
-                $0.error = TilingSpace.refusalMessage(windowName: name)
-            }
+            mutateSpace(key) { $0.error = message }
         }
-        onFeedback?(.refused(windowName: name))
+        onFeedback?(feedback)
         onChange?()
-        dbg("verify FAILED win\(id): silent ignore, rolled back")
     }
 
     // MARK: Placement (delegated)
@@ -687,10 +693,11 @@ final class TilingController {
     }
 
     /// Clears the coordinator-side bookkeeping of a window the canvas
-    /// released: the handle table, the death clock, and any pending
-    /// convergence check. The record itself is already gone.
+    /// released: the handle table and the death clock. The pending
+    /// convergence check is the expectation owner's: the canvas's
+    /// `tracker.forget` already cancelled it. The record itself is
+    /// already gone.
     private func forgetBookkeeping(_ id: WindowID) {
-        cancelVerification(id)
         deadSince[id] = nil
         windowIDs = windowIDs.filter { $0.value != id }
     }
@@ -1254,8 +1261,8 @@ final class TilingController {
 
     /// The canvas a window's frame write belongs to: its own canvas when
     /// known, else the caller's passed canvas, else the focused one. The
-    /// one spelling of that precedence, so visibility, verification, and
-    /// refusal attribution cannot drift apart.
+    /// one spelling of that precedence, so visibility and refusal
+    /// attribution cannot drift apart.
     private func writeCanvas(for id: WindowID, fallback: TilingSpaceKey? = nil) -> TilingSpaceKey {
         spaceOf(window: id) ?? fallback ?? focusedSpaceKey()
     }
