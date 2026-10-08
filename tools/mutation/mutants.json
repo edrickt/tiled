@@ -356,7 +356,7 @@
  [
   "WriteExpectations.swift",
   "no-op write pushed anyway (expectation never converges)",
-  "        if let live = gateway.frame(of: handle),\n            Self.framesClose(live, target, tolerance: Self.noOpWriteTolerance)\n        {\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
+  "        if let live, Self.framesClose(live, target, tolerance: Self.noOpWriteTolerance) {\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }",
   ""
  ],
  [
