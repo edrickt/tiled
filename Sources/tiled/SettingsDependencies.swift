@@ -19,6 +19,9 @@ struct SettingsDependencies {
     /// Fired when "Hide menu bar icon" commits, so the delegate can
     /// remove/restore the status item immediately.
     var hideIconChange: (Bool) -> Void = { _ in }
+    /// Fired when the tile gap changes, so the delegate can re-place
+    /// every tiled window under the new inset immediately.
+    var gapChange: (Double) -> Void = { _ in }
     /// Fired after any binding change so the delegate can re-register
     /// hotkeys and refresh the menu.
     var hotkeysChange: () -> Void = {}

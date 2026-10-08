@@ -49,6 +49,43 @@ final class TilingSpaceTests: XCTestCase {
             "the tile writes the slot rect in the injected bounds")
     }
 
+    func testTileInsetsTheWrittenFrameByTheGap() {
+        harness.gap = 10
+        let id = harness.addWindow()
+        let uninset = grid.rect(for: .topLeft, in: bounds)
+
+        harness.apply(slot: .topLeft, requester: id)
+
+        // .topLeft: full gap on the screen (left/top) edges, half a gap on
+        // the shared (right/bottom) edges.
+        XCTAssertEqual(
+            harness.frame(of: id),
+            CGRect(
+                x: uninset.minX + 10, y: uninset.minY + 5,
+                width: uninset.width - 15, height: uninset.height - 15),
+            "the placed frame carries the gap into the canvas's write")
+    }
+
+    func testReassertAppliesANewGapToTiledWindows() {
+        // Reassert is the live re-place path a settings change drives: no
+        // undo chapter, splitters untouched, every occupant re-pushed.
+        harness.gap = 0
+        let id = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: id)
+        let flush = harness.frame(of: id)!
+
+        harness.gap = 12
+        harness.space.reassert(context: context())
+
+        XCTAssertEqual(
+            harness.frame(of: id),
+            CGRect(
+                x: flush.minX + 12, y: flush.minY + 6,
+                width: flush.width - 18, height: flush.height - 18),
+            "the re-place picks up the new gap")
+        XCTAssertTrue(space.undoStack.isEmpty, "a gap change is not an undoable event")
+    }
+
     func testTileRefusalRollsBackAndReports() {
         let id = harness.addWindow()
         harness.gateway.refuseNextWrites(harness.handle(of: id)!)

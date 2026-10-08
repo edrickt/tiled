@@ -111,6 +111,10 @@ tell you which app took it.
 ## Tiling rules
 
 - One window per tile.
+- **Gap:** tiled windows leave a configurable gap (General settings; default
+  5pt, range 0–40). The gap is the same size everywhere: neighbouring tiles
+  split it at a shared edge, and a screen edge shows all of it. An expanded
+  window ignores it.
 - Tiling a window into a slot **evicts** any window occupying an overlapping
   slot. Evicted windows are restored to their pre-tile frames.
   - Two quads occupied on one side + the half key → both quads are evicted.
@@ -173,8 +177,9 @@ neighbors on the other side follow. Vertical and horizontal splitters are
 independent per column (quarters) or per third (sixths), so resizing one
 column never moves the other, and the same independence holds between
 monitors and Spaces, so dragging an edge on one canvas never moves tiles on
-another. A two-thirds window resizes as two equal one-thirds: the hidden
-splitter inside it follows its outer edge, staying at the midpoint.
+another. The tile gap stays constant as you drag. A two-thirds window resizes
+as two equal one-thirds: the hidden splitter inside it follows its outer edge,
+staying at the midpoint.
 **Reset Splitters** in the menu (or ⌥⇧R) snaps the focused canvas's
 splitters back to even splits. After a drag the same row is titled
 **Restore Previous Splitters**, restoring the pre-drag splits instead.
@@ -298,4 +303,4 @@ CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
 - [x] Drag-out (short drag snaps back, long drag untiles in place)
 - [ ] Owned overlay resize handles
 - [x] Remappable shortcuts
-- [ ] Gaps? (decided: no gaps for now)
+- [x] Configurable gap between tiles (General settings)

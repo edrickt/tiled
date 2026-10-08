@@ -10,6 +10,9 @@ import ServiceManagement
 final class GeneralTab: NSObject {
     private let settings: AppSettings
     var onHideIconChange: ((Bool) -> Void)?
+    /// Fires when the tile gap commits, so the delegate can re-place every
+    /// tiled window under the new inset immediately.
+    var onGapChange: ((Double) -> Void)?
     /// Reopens the Welcome tab (the General tab's "Show Tiled Guide"
     /// button). The shell owns tab switching.
     var onShowGuide: (() -> Void)?
@@ -26,6 +29,8 @@ final class GeneralTab: NSObject {
 
     private var launchAtLoginCheckbox: NSButton!
     private var hideIconCheckbox: NSButton!
+    private var gapStepper: NSStepper!
+    private var gapValueLabel: NSTextField!
     private var permissionRow: NSStackView!
     private var loginFailureLabel: NSTextField!
     /// Last probed trust state, so a visible permission-row flip can be
@@ -133,6 +138,48 @@ final class GeneralTab: NSObject {
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stack.addArrangedSubview(hint)
 
+        let gapHeading = NSTextField(labelWithString: "Tile gap")
+        gapHeading.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+        gapHeading.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(gapHeading)
+
+        let gapRow = NSStackView()
+        gapRow.orientation = .horizontal
+        gapRow.spacing = 8
+        gapRow.alignment = .firstBaseline
+        let gapText = NSTextField(wrappingLabelWithString:
+            "Space left around tiled windows, in points.")
+        gapText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        gapText.textColor = .secondaryLabelColor
+        gapText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        gapRow.addArrangedSubview(gapText)
+
+        gapValueLabel = NSTextField(labelWithString: "")
+        gapValueLabel.font = .monospacedDigitSystemFont(
+            ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        gapValueLabel.setContentHuggingPriority(.required, for: .horizontal)
+        gapValueLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        gapRow.addArrangedSubview(gapValueLabel)
+
+        gapStepper = NSStepper()
+        gapStepper.minValue = AppSettings.tileGapRange.lowerBound
+        gapStepper.maxValue = AppSettings.tileGapRange.upperBound
+        gapStepper.increment = 1
+        gapStepper.valueWraps = false
+        gapStepper.target = self
+        gapStepper.action = #selector(gapChanged(_:))
+        gapStepper.toolTip = "Points of space between tiled windows "
+            + "(\(Int(AppSettings.tileGapRange.lowerBound))–"
+            + "\(Int(AppSettings.tileGapRange.upperBound)))."
+        gapStepper.setAccessibilityLabel("Tile gap")
+        gapRow.addArrangedSubview(gapStepper)
+        stack.addArrangedSubview(gapRow)
+        // Same cap as the permission and guide rows: the trailing control
+        // holds the 24pt inset at any window width instead of riding on
+        // the label's intrinsic single-line width.
+        gapRow.trailingAnchor.constraint(
+            equalTo: stack.trailingAnchor, constant: -24).isActive = true
+
         let divider = NSBox()
         divider.boxType = .separator
         stack.addArrangedSubview(divider)
@@ -167,7 +214,25 @@ final class GeneralTab: NSObject {
     func loadValues() {
         launchAtLoginCheckbox?.state = currentLaunchAtLogin ? .on : .off
         hideIconCheckbox?.state = settings.hideMenuBarIcon ? .on : .off
+        gapStepper?.doubleValue = settings.tileGap
+        refreshGapValueLabel()
         refreshPermissionState()
+    }
+
+    /// The stepper's value is already clamped on write; read it back so the
+    /// label always matches what geometry will receive.
+    private func refreshGapValueLabel() {
+        // The stepper yields integers, but a hand-edited defaults value may
+        // not: round rather than truncate so the label never reads a value
+        // the geometry won't receive.
+        gapValueLabel?.stringValue = "\(Int(settings.tileGap.rounded())) pt"
+    }
+
+    @objc private func gapChanged(_ sender: NSStepper) {
+        settings.tileGap = sender.doubleValue
+        sender.doubleValue = settings.tileGap
+        refreshGapValueLabel()
+        onGapChange?(settings.tileGap)
     }
 
     /// Re-probes trust so the permission row tracks reality without

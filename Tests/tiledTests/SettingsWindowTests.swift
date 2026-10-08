@@ -51,6 +51,14 @@ final class SettingsWindowTests: XCTestCase {
         return own + view.subviews.flatMap { textFields(in: $0) }
     }
 
+    private func findStepper(in view: NSView) -> NSStepper? {
+        if let stepper = view as? NSStepper { return stepper }
+        for subview in view.subviews {
+            if let hit = findStepper(in: subview) { return hit }
+        }
+        return nil
+    }
+
     func testFirstRunLeadsWithWelcomeAndGeneralIsTheDefaultLanding() {
         let controller = makeController()
         XCTAssertEqual(
@@ -137,6 +145,32 @@ final class SettingsWindowTests: XCTestCase {
         let grantShortcuts = try XCTUnwrap(
             findButton(titled: "Open Accessibility Settings", in: shortcuts))
         XCTAssertFalse(grantShortcuts.isHiddenOrHasHiddenAncestor)
+    }
+
+    func testGapStepperShowsTheDefaultAndCommitsTheSetting() throws {
+        var reported: Double?
+        let dependencies = SettingsDependencies(gapChange: { reported = $0 })
+        let controller = makeController(dependencies: dependencies)
+        controller.show(selecting: .general)
+
+        let general = try XCTUnwrap(controller.tabContent(of: .general))
+        let stepper = try XCTUnwrap(findStepper(in: general))
+        XCTAssertEqual(stepper.doubleValue, 5, "the stepper shows the default gap")
+        XCTAssertEqual(stepper.minValue, AppSettings.tileGapRange.lowerBound)
+        XCTAssertEqual(stepper.maxValue, AppSettings.tileGapRange.upperBound)
+
+        stepper.doubleValue = 12
+        stepper.sendAction(stepper.action, to: stepper.target)
+
+        XCTAssertEqual(
+            AppSettings(defaults: defaults).tileGap, 12,
+            "the stepper persists the gap through AppSettings")
+        XCTAssertEqual(
+            reported, 12,
+            "the change reaches the delegate so it can re-place tiled windows")
+        XCTAssertTrue(
+            textFields(in: general).contains { $0.stringValue == "12 pt" },
+            "the value label mirrors the committed gap")
     }
 
     func testRegistrationFailuresSurfaceOnTheShortcutsTab() throws {

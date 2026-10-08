@@ -22,6 +22,9 @@ final class TilingSpaceHarness {
     /// Injected bounds: every placement, reflow, and expand derives its
     /// target from this rect, never a live `NSScreen`.
     var bounds = CGRect(x: 0, y: 0, width: 1600, height: 1200)
+    /// Injected tile gap, in points. Zero by default so existing frame
+    /// expectations stay gap-free; gap tests set it explicitly.
+    var gap: CGFloat = 0
     private(set) var tracker: DragTracker!
     private(set) var expectations: WriteExpectations!
     /// Late silent-ignore checks captured from the injectable scheduler,
@@ -56,6 +59,7 @@ final class TilingSpaceHarness {
                         ?? self.space.records[$0]?.preTileFrame
                 },
                 boundsOf: { [weak self] in self?.bounds ?? $0 },
+                gap: { [weak self] in self?.gap ?? 0 },
                 occupants: { [weak self] in self?.space.state.occupants ?? [:] }),
             gridProvider: DragTracker.GridProvider(
                 grid: { [weak self] _ in self?.space.grid ?? GridLayout() },
@@ -71,6 +75,7 @@ final class TilingSpaceHarness {
             tracker: tracker,
             expectations: expectations,
             boundsOf: { [weak self] in self?.bounds ?? $0 },
+            gap: gap,
             space: .displayless,
             allocateID: { [weak self] _ in
                 guard let self else { return 0 }
@@ -101,7 +106,7 @@ final class TilingSpaceHarness {
     /// The rect the canvas would write for `slot` under its own grid and
     /// the injected bounds.
     func rect(_ slot: Slot, in bounds: CGRect? = nil) -> CGRect {
-        space.grid.rect(for: slot, in: bounds ?? self.bounds)
+        space.grid.rect(for: slot, in: bounds ?? self.bounds, gap: gap)
     }
 
     /// The coordinator's handover: resolve the requester's record before

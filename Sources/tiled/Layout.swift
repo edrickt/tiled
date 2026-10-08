@@ -410,7 +410,15 @@ struct GridLayout: Equatable {
 
     /// Rect for `slot` within `bounds` (AppKit coordinates, y grows upward):
     /// the product of the slot's column and row span boundary lines.
-    func rect(for slot: Slot, in bounds: CGRect) -> CGRect {
+    ///
+    /// `gap` leaves the same blank space on every side of a tile: half the
+    /// gap on an edge shared with a neighbour (which leaves the other half,
+    /// so the two tiles show the full gap between them) and the whole gap
+    /// on a screen edge (no neighbour shares it). Refinement index 0 or the
+    /// maximum on an axis is a screen edge. Clamped so a tile never
+    /// collapses: each side is capped at `(extent - 1) / 2`, leaving at
+    /// least one point per axis.
+    func rect(for slot: Slot, in bounds: CGRect, gap: CGFloat = 0) -> CGRect {
         let g = slot.geometry
         let x0 = verticalLinePosition(g.columns.lowerBound, in: g.layout, bounds: bounds)
         let x1 = verticalLinePosition(g.columns.upperBound, in: g.layout, bounds: bounds)
@@ -418,7 +426,17 @@ struct GridLayout: Equatable {
             g.rows.lowerBound, columns: g.columns, in: g.layout, bounds: bounds)
         let yBottom = horizontalLinePosition(
             g.rows.upperBound, columns: g.columns, in: g.layout, bounds: bounds)
-        return CGRect(x: x0, y: yBottom, width: x1 - x0, height: yTop - yBottom)
+        let rect = CGRect(x: x0, y: yBottom, width: x1 - x0, height: yTop - yBottom)
+        guard gap > 0 else { return rect }
+        let maxHorizontal = max(0, (rect.width - 1) / 2)
+        let maxVertical = max(0, (rect.height - 1) / 2)
+        let left = min(g.columns.lowerBound == 0 ? gap : gap / 2, maxHorizontal)
+        let right = min(g.columns.upperBound == 4 ? gap : gap / 2, maxHorizontal)
+        let top = min(g.rows.lowerBound == 0 ? gap : gap / 2, maxVertical)
+        let bottom = min(g.rows.upperBound == 2 ? gap : gap / 2, maxVertical)
+        return CGRect(
+            x: rect.minX + left, y: rect.minY + bottom,
+            width: rect.width - left - right, height: rect.height - top - bottom)
     }
 }
 

@@ -30,6 +30,33 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(AppSettings(defaults: defaults).hideMenuBarIcon)
     }
 
+    func testTileGapDefaultsToFive() {
+        let (settings, _) = makeSettings()
+        XCTAssertEqual(settings.tileGap, 5)
+    }
+
+    func testTileGapPersists() {
+        let (_, defaults) = makeSettings()
+        AppSettings(defaults: defaults).tileGap = 12
+        XCTAssertEqual(AppSettings(defaults: defaults).tileGap, 12)
+    }
+
+    func testTileGapRoundTripsZero() {
+        let (_, defaults) = makeSettings()
+        AppSettings(defaults: defaults).tileGap = 0
+        XCTAssertEqual(AppSettings(defaults: defaults).tileGap, 0)
+    }
+
+    func testTileGapClampsToDocumentedRange() {
+        // The stepper won't go out of range, but a hand-edited defaults
+        // plist could. Clamp so the geometry never sees a negative inset.
+        let (_, defaults) = makeSettings()
+        AppSettings(defaults: defaults).tileGap = 999
+        XCTAssertEqual(AppSettings(defaults: defaults).tileGap, 40)
+        AppSettings(defaults: defaults).tileGap = -3
+        XCTAssertEqual(AppSettings(defaults: defaults).tileGap, 0)
+    }
+
     func testWelcomeShownByDefault() {
         let (settings, _) = makeSettings()
         XCTAssertFalse(settings.didDismissWelcome)

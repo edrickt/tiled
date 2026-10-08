@@ -49,6 +49,9 @@ final class DragTracker {
         var slotOf: (WindowID) -> Slot?
         var frameOf: (WindowID) -> CGRect?
         var boundsOf: (CGRect) -> CGRect
+        /// The tile gap in points, read live (the tracker's context is
+        /// built once, so a snapshot would freeze the setting).
+        var gap: () -> CGFloat = { 0 }
         var occupants: () -> [Slot: WindowID]
         /// Canvas owning a tiled window (its display plus Mission
         /// Control Space). Nil = legacy single-canvas mode: the shared
@@ -185,7 +188,8 @@ final class DragTracker {
     /// has no readable frame.
     func rect(for id: WindowID, slot: Slot) -> CGRect? {
         guard let frame = context.frameOf(id) else { return nil }
-        return grid(for: context.spaceOf(id)).rect(for: slot, in: context.boundsOf(frame))
+        return grid(for: context.spaceOf(id)).rect(
+            for: slot, in: context.boundsOf(frame), gap: context.gap())
     }
 
     // MARK: Change entry point
@@ -288,7 +292,8 @@ final class DragTracker {
             drag.lastFrame.origin.y - drag.startFrame.origin.y)
         log("dragend win\(id) ticks=\(drag.ticks) distance=\(distance)")
         guard distance > Self.untileDragDistance, drag.ticks >= 2 else {
-            let rect = grid(for: context.spaceOf(id)).rect(for: slot, in: context.boundsOf(drag.lastFrame))
+            let rect = grid(for: context.spaceOf(id)).rect(
+                for: slot, in: context.boundsOf(drag.lastFrame), gap: context.gap())
             log("dragend win\(id) snapback -> \(rect)")
             schedule(rects: [id: rect], excluding: nil)
             return
@@ -310,6 +315,13 @@ final class DragTracker {
         guard let slot = context.slotOf(id) else { return }
         let bounds = context.boundsOf(new)
         let threshold = Self.edgeMoveThreshold
+        // The frame we read is the *placed* one, inset by half the gap, so
+        // the visible edge sits half a gap inside the splitter line. Add it
+        // back before mapping to a boundary, or the splitter lands on the
+        // visible edge and the tile jumps half a gap on mouse-up. Min edges
+        // (left/bottom) sit inset away from their line; max edges (right/
+        // top) likewise, in the opposite direction.
+        let halfGap = context.gap() / 2
 
         func moved(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) > threshold }
 
@@ -319,13 +331,13 @@ final class DragTracker {
             let position: CGFloat
             switch edge {
             case .left:
-                edgeMoved = moved(new.minX, old.minX); position = new.minX
+                edgeMoved = moved(new.minX, old.minX); position = new.minX - halfGap
             case .right:
-                edgeMoved = moved(new.maxX, old.maxX); position = new.maxX
+                edgeMoved = moved(new.maxX, old.maxX); position = new.maxX + halfGap
             case .top:
-                edgeMoved = moved(new.maxY, old.maxY); position = new.maxY
+                edgeMoved = moved(new.maxY, old.maxY); position = new.maxY + halfGap
             case .bottom:
-                edgeMoved = moved(new.minY, old.minY); position = new.minY
+                edgeMoved = moved(new.minY, old.minY); position = new.minY - halfGap
             }
             guard edgeMoved else { continue }
             // The dragged window's own edge is the source of truth; skip it
@@ -412,7 +424,7 @@ final class DragTracker {
                 lastKnownFrames[occupant] = frame
             }
             rects[occupant] = grid(for: context.spaceOf(occupant)).rect(
-                for: slot, in: context.boundsOf(frame))
+                for: slot, in: context.boundsOf(frame), gap: context.gap())
         }
         schedule(rects: rects, excluding: excluding)
     }

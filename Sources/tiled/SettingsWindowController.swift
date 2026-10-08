@@ -57,6 +57,7 @@ final class SettingsWindowController: NSWindowController {
         generalTab.isTrustedProvider = dependencies.isTrusted
         generalTab.isSettingsHotkeyRegisteredProvider = dependencies.isSettingsHotkeyRegistered
         generalTab.onHideIconChange = dependencies.hideIconChange
+        generalTab.onGapChange = dependencies.gapChange
         welcomeTab.isTrustedProvider = dependencies.isTrusted
         shortcutsTab.isTrustedProvider = dependencies.isTrusted
         welcomeTab.onOpenAccessibilitySettings = dependencies.openAccessibilitySettings

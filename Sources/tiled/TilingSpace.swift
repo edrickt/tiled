@@ -79,6 +79,10 @@ struct TilingSpace {
         /// the slot rects its undo will write through it.
         let expectations: WriteExpectations
         let boundsOf: (CGRect) -> CGRect
+        /// The tile gap in points: a uniform inset of half this value on
+        /// every side of each placed frame. Snapshotted per action; the
+        /// context is rebuilt each time, so a settings change is seen.
+        let gap: CGFloat
         /// The canvas every write without a better owner belongs to: the
         /// canvas this action is running on.
         let space: TilingSpaceKey
@@ -321,7 +325,7 @@ struct TilingSpace {
             if let record = records[id],
                 let slot = state.slot(of: id),
                 let current = context.gateway.frame(of: record.handle),
-                current == grid.rect(for: slot, in: context.boundsOf(current))
+                current == grid.rect(for: slot, in: context.boundsOf(current), gap: context.gap)
             {
                 context.log("undo SKIP-WRITE win\(id) already placed")
                 result.restored.append(id)
@@ -723,7 +727,7 @@ struct TilingSpace {
         guard let record = records[id], let slot = state.slot(of: id) else { return false }
         let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
         let bounds = context.boundsOf(current)
-        let target = grid.rect(for: slot, in: bounds)
+        let target = grid.rect(for: slot, in: bounds, gap: context.gap)
         // The shared write policy: a no-op target counts as success
         // without a write, and a hidden canvas defers (false: the branch
         // rolls back). No canvas (legacy/headless snapshots) resolves to
@@ -788,7 +792,8 @@ struct TilingSpace {
         for move in moves {
             if let record = records[move.window] {
                 let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-                rects[move.window] = grid.rect(for: move.to, in: context.boundsOf(current))
+                rects[move.window] = grid.rect(
+                    for: move.to, in: context.boundsOf(current), gap: context.gap)
             }
         }
         if writeRects(rects, context: context) > 0 {
@@ -799,7 +804,8 @@ struct TilingSpace {
             for move in moves {
                 if let record = records[move.window] {
                     let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-                    oldRects[move.window] = grid.rect(for: move.from, in: context.boundsOf(current))
+                    oldRects[move.window] = grid.rect(
+                        for: move.from, in: context.boundsOf(current), gap: context.gap)
                 }
             }
             _ = writeRects(oldRects, context: context)
@@ -930,7 +936,8 @@ struct TilingSpace {
             // read as a user drag and the grid moves under them.
             for (slot, id) in chapter {
                 if let record = records[id] {
-                    let target = grid.rect(for: slot, in: context.boundsOf(record.preTileFrame))
+                    let target = grid.rect(
+                        for: slot, in: context.boundsOf(record.preTileFrame), gap: context.gap)
                     context.expectations.noteIntent(id, target)
                 }
             }
@@ -1076,7 +1083,7 @@ struct TilingSpace {
     ) -> ExpandedWrite? {
         guard let record = records[id], let slot = state.slot(of: id) else { return nil }
         let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-        let target = grid.rect(for: slot, in: context.boundsOf(current))
+        let target = grid.rect(for: slot, in: context.boundsOf(current), gap: context.gap)
         let result = writeExpandedFrame(id, to: target, revertTo: saved, context: context)
         context.log("retile expanded win\(id) -> \(slot.rawValue) target=\(target)")
         return result
@@ -1172,7 +1179,7 @@ struct TilingSpace {
                 let record = records[occupant]
             else { continue }
             let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-            rects[occupant] = grid.rect(for: slot, in: context.boundsOf(current))
+            rects[occupant] = grid.rect(for: slot, in: context.boundsOf(current), gap: context.gap)
         }
         return publish(rects: rects, excluding: nil, context: context)
     }

@@ -4,7 +4,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let gateway = LiveWindowGateway()
     private lazy var controller = TilingController(
-        gateway: gateway, observeMouseUp: TilingController.observeLeftMouseUp)
+        gateway: gateway,
+        gap: { [weak self] in self?.settings.tileGap ?? AppSettings.defaultTileGap },
+        observeMouseUp: TilingController.observeLeftMouseUp)
     private let hotkeyStore = HotkeyStore()
     private var hotkeys: HotkeyService?
     private var permissionTimer: Timer?
@@ -681,6 +683,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     },
                     hideIconChange: { [weak self] hidden in
                         self?.setIconHidden(hidden)
+                    },
+                    gapChange: { [weak self] _ in
+                        self?.controller.reapplyGap()
                     },
                     hotkeysChange: { [weak self] in
                         self?.hotkeys?.reload()

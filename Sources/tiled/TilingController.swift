@@ -56,6 +56,7 @@ final class TilingController {
             slotOf: { [weak self] in self?.trackedSlot(of: $0) },
             frameOf: { [weak self] in self?.frameForTracker($0) },
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
+            gap: { [weak self] in self?.gap() ?? 0 },
             occupants: { [weak self] in self?.trackedOccupants ?? [:] },
             spaceOf: { [weak self] in self?.spaceOf(window: $0) },
             occupantsOf: { [weak self] space in self?.trackedOccupants(on: space) ?? [:] },
@@ -81,6 +82,10 @@ final class TilingController {
     /// action (never cached between them), so replugs and rearranges take
     /// effect without an observer.
     private let screens: ScreenProvider
+    /// The tile gap in points, read per action (never cached) so a settings
+    /// change applies to the next placement without an observer. Defaults
+    /// to zero for tests; the app wires it to `AppSettings.tileGap`.
+    private let gap: () -> CGFloat
     /// Per-canvas tiling spaces: each display's each Mission Control
     /// Space runs its own occupancy, records, expansion, splitters, undo
     /// chapters, and transient notices. Reads go through `canvas(for:)`;
@@ -178,6 +183,7 @@ final class TilingController {
         scheduleDragEnd: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         scheduleCheck: @escaping WriteExpectations.CheckScheduler = WriteExpectations.scheduleCheckOnMain,
         screens: ScreenProvider? = nil,
+        gap: @escaping () -> CGFloat = { 0 },
         deathConfirmation: TimeInterval = 3.0,
         now: @escaping () -> Date = Date.init,
         observeMouseUp: (@escaping () -> Void) -> Void = { _ in }
@@ -185,6 +191,7 @@ final class TilingController {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
         self.scheduleCheck = scheduleCheck
+        self.gap = gap
         self.deathConfirmation = deathConfirmation
         self.now = now
         self.screens = screens ?? { NSScreen.screens.enumerated().map { ScreenInfo(appKit: $0.element, index: $0.offset) } }
@@ -406,6 +413,7 @@ final class TilingController {
             tracker: tracker,
             expectations: expectations,
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
+            gap: gap(),
             space: key,
             allocateID: { [weak self] handle in
                 guard let self else { return 0 }
@@ -490,6 +498,15 @@ final class TilingController {
     }
 
     // MARK: Placement (delegated)
+
+    /// Re-places every tiled window on the active canvases, picking up a
+    /// changed tile gap. A settings change, not a tiling action: no undo
+    /// chapter, splitters untouched, and expanded windows are skipped by
+    /// each canvas's `reassert`.
+    func reapplyGap() {
+        applyAll()
+        onChange?()
+    }
 
     /// Recomputes and pushes rects for all occupants (resize propagation).
     /// Each canvas reasserts its own occupants under its own grid and

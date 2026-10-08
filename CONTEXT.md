@@ -29,6 +29,11 @@ _Avoid_: sub-tile, block
 A movable divider between tiles whose fraction the drag-resize loop updates; screen edges are fixed, not splitters.
 _Avoid_: divider, separator, boundary (the code name is GridBoundary)
 
+**Gap**:
+The blank space a tile leaves around itself, the same size everywhere: on an edge shared with a neighbour each tile leaves half, so the two show the full gap between them, and a screen edge shows the full gap (no neighbour shares it). One value per app (default 5 pt), the same across layouts, displays, and Spaces; it holds steady through a drag-resize, and an expanded window ignores it.
+_Avoid_: margin, padding, spacing, inset
+_Code_: `AppSettings.tileGap`, `GridLayout.rect(for:in:gap:)`
+
 **Eviction**:
 Untiling a window to make room, restoring its pre-tile frame; what `plan` returns when another window overlaps the requested slot.
 _Avoid_: displacement, removal

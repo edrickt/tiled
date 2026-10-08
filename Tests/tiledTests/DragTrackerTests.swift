@@ -84,8 +84,9 @@ final class DragTrackerTests: XCTestCase {
 
     /// A tracker wired to a fixed screen rect, so absolute frames read as
     /// real splitter fractions instead of each frame becoming its own
-    /// bounds like the default frame-as-bounds test rig.
-    private func makeTracker(bounds: CGRect) -> DragTracker {
+    /// bounds like the default frame-as-bounds test rig. `gap` insets the
+    /// frames the tracker sees, matching a placed frame.
+    private func makeTracker(bounds: CGRect, gap: CGFloat = 0) -> DragTracker {
         DragTracker(
             expectations: expectations,
             context: DragTracker.Context(
@@ -95,6 +96,7 @@ final class DragTrackerTests: XCTestCase {
                     return self?.gateway.frame(of: handle)
                 },
                 boundsOf: { _ in bounds },
+                gap: { gap },
                 occupants: { [weak self] in self?.occupants ?? [:] }),
             gridProvider: provider(),
             apply: { [weak self] rects, excluding in
@@ -145,6 +147,43 @@ final class DragTrackerTests: XCTestCase {
         // (0,400,840,600): raw fraction 0, clamped to the row minimum.
         XCTAssertEqual(grid().leftRowSplit, 0.2, accuracy: 0.001,
             "bottom edge at 400/600 clamps to the row-split minimum")
+    }
+
+    func testGapOffsetsARightEdgeDragToTheSplitterLine() {
+        // The placed frame is inset half a gap, so the visible right edge
+        // sits half a gap inside the splitter. Dragging it to 595 must land
+        // the splitter at 600 (0.6), not on the visible edge (0.595).
+        let screen = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let tracker = makeTracker(bounds: screen, gap: 10)
+        let tiled = GridLayout().rect(for: .leftHalf, in: screen, gap: 10)
+        tile(1, .leftHalf, frame: tiled)
+
+        var resized = tiled
+        resized.size.width += 100 // visible right edge 495 -> 595
+        drag(1, from: tiled, to: resized, tracker: tracker)
+
+        XCTAssertEqual(
+            grid().columnSplit, 0.6, accuracy: 0.001,
+            "half a gap is added back so the splitter sits centred in the gap")
+    }
+
+    func testGapOffsetsALeftEdgeDragToTheSplitterLine() {
+        // Mirror of the right-edge case: the visible left edge sits half a
+        // gap right of the splitter, so dragging it to 405 lands the
+        // splitter at 400 (0.4).
+        let screen = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let tracker = makeTracker(bounds: screen, gap: 10)
+        let tiled = GridLayout().rect(for: .rightHalf, in: screen, gap: 10)
+        tile(1, .rightHalf, frame: tiled)
+
+        var resized = tiled
+        resized.origin.x -= 100 // visible left edge 505 -> 405
+        resized.size.width += 100
+        drag(1, from: tiled, to: resized, tracker: tracker)
+
+        XCTAssertEqual(
+            grid().columnSplit, 0.4, accuracy: 0.001,
+            "half a gap is subtracted so the splitter sits centred in the gap")
     }
 
     func testResizingLeftTwoThirdsCentersItsHiddenDivider() {

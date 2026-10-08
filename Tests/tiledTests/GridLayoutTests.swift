@@ -33,6 +33,60 @@ final class GridLayoutTests: XCTestCase {
             CGRect(x: 600, y: 50, width: 500, height: 800))
     }
 
+    // MARK: Tile gap
+
+    func testZeroGapMatchesUngappedRects() {
+        let grid = GridLayout()
+        for slot in Slot.allCases {
+            XCTAssertEqual(
+                grid.rect(for: slot, in: bounds, gap: 0),
+                grid.rect(for: slot, in: bounds))
+        }
+    }
+
+    func testGapInsetsScreenEdgesFullyAndInteriorEdgesByHalf() {
+        let grid = GridLayout()
+        // .topLeft touches the screen on its left and top edges (full gap)
+        // and a neighbour on its right and bottom edges (half gap each, so
+        // the pair leaves the full gap between them).
+        let uninset = grid.rect(for: .topLeft, in: bounds)
+        XCTAssertEqual(
+            grid.rect(for: .topLeft, in: bounds, gap: 10),
+            CGRect(
+                x: uninset.minX + 10, y: uninset.minY + 5,
+                width: uninset.width - 15, height: uninset.height - 15))
+    }
+
+    func testAdjacentTilesLeaveExactlyTheGapBetweenThem() {
+        let grid = GridLayout()
+        let left = grid.rect(for: .leftHalf, in: bounds, gap: 8)
+        let right = grid.rect(for: .rightHalf, in: bounds, gap: 8)
+        XCTAssertEqual(right.minX - left.maxX, 8)
+        let top = grid.rect(for: .topLeft, in: bounds, gap: 8)
+        let bottom = grid.rect(for: .bottomLeft, in: bounds, gap: 8)
+        XCTAssertEqual(top.minY - bottom.maxY, 8)
+    }
+
+    func testScreenEdgesShowTheFullGap() {
+        let grid = GridLayout()
+        let left = grid.rect(for: .leftHalf, in: bounds, gap: 8)
+        XCTAssertEqual(left.minX - bounds.minX, 8)
+        XCTAssertEqual(bounds.maxY - left.maxY, 8)
+        XCTAssertEqual(bounds.maxX - grid.rect(for: .rightHalf, in: bounds, gap: 8).maxX, 8)
+        XCTAssertEqual(grid.rect(for: .bottomLeft, in: bounds, gap: 8).minY - bounds.minY, 8)
+    }
+
+    func testGapClampsSoTilesNeverCollapse() {
+        let grid = GridLayout()
+        // A slot smaller than the gap: a top-left quad of a 10×10 screen is
+        // 5×5, so the inset caps at (min dimension − 1) / 2 = 2 rather than
+        // the requested 20.
+        let rect = grid.rect(for: .topLeft, in: CGRect(x: 0, y: 0, width: 10, height: 10), gap: 40)
+        XCTAssertEqual(rect, CGRect(x: 2, y: 7, width: 1, height: 1))
+        XCTAssertGreaterThanOrEqual(rect.width, 1)
+        XCTAssertGreaterThanOrEqual(rect.height, 1)
+    }
+
     // MARK: Custom splitters
 
     func testCustomColumnSplit() {
