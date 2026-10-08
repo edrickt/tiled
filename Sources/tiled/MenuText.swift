@@ -121,6 +121,23 @@ enum MenuText {
         "That window isn't tiled: nothing to evict."
     }
 
+    // MARK: Action confirmations
+
+    /// The success sentence one action may speak. Each is announced only
+    /// when the controller reports the action ran: speaking one otherwise
+    /// would contradict the no-op answered through `Feedback`, or the
+    /// failure recorded on the canvas.
+    static let focusedWindowEvicted = "Focused window evicted."
+    static let allTiledWindowsRestored = "All tiled windows restored."
+    static let evictedWindowsRestored = "Evicted windows restored."
+    static let splittersRestored = "Splitters restored to their pre-reset positions."
+    static let splittersReset = "Splitters reset to even splits."
+
+    /// One tiled window untiled: names the app when known.
+    static func windowUntiled(_ name: String?) -> String {
+        "\(name ?? "Window") untiled."
+    }
+
     // MARK: Restore failures
 
     /// A window's pre-tile frame could not be restored. Names the window

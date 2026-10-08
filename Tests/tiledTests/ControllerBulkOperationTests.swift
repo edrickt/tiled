@@ -71,7 +71,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .topLeft)
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
 
-        controller.untile(window: 1)
+        XCTAssertTrue(controller.untile(window: 1), "a tiled window reports the untile")
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(
@@ -80,7 +80,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testUntileUnknownWindowIsSafe() {
-        controller.untile(window: 99)
+        XCTAssertFalse(controller.untile(window: 99), "an unknown window reports nothing done")
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertTrue(feedbacks.isEmpty)
     }
@@ -95,11 +95,20 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .topRight)
         XCTAssertEqual(canvas.state.tiledWindows.count, 2)
 
-        controller.untileAll()
+        XCTAssertTrue(controller.untileAll(), "a populated canvas reports the dissolve")
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(gateway.frame(of: a), aOriginal)
         XCTAssertEqual(gateway.frame(of: b), bOriginal)
+    }
+
+    func testUntileAllOnAnEmptyCanvasIsANoOp() {
+        // The menu row counts the focused canvas; on a multi-display
+        // setup it can read "Untile 0 Windows" while another display is
+        // tiled. The action must report that it dissolved nothing, so a
+        // caller never announces "All tiled windows restored."
+        XCTAssertFalse(controller.untileAll(), "an empty canvas reports nothing done")
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
     }
 
     // MARK: Layout-switch undo lifecycle
@@ -125,7 +134,7 @@ final class ControllerBulkOperationTests: XCTestCase {
             gateway.frame(of: a), aOriginal,
             "eviction restores the pre-tile frame immediately")
 
-        controller.undoLastDisplacement()
+        XCTAssertTrue(controller.undoLastDisplacement(), "a restored chapter reports the undo")
 
         // The evicted window returns to its slot under a fresh id (its
         // record was pruned at switch); the requester is untiled with its
@@ -244,7 +253,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         addFocusedWindow()
         XCTAssertTrue(canvas.undoStack.isEmpty)
         feedbacks.removeAll()
-        controller.undoLastDisplacement()
+        XCTAssertFalse(controller.undoLastDisplacement(), "an empty stack reports nothing restored")
         XCTAssertEqual(feedbacks.count, 1, "an empty undo still answers")
         guard case .nothingToUndo = feedbacks[0] else {
             return XCTFail("expected .nothingToUndo, got \(feedbacks[0])")
@@ -296,7 +305,9 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .sixthLeft)
 
         gateway.kill(a)
-        controller.undoLastDisplacement()
+        XCTAssertFalse(
+            controller.undoLastDisplacement(),
+            "a chapter whose windows all died restores nothing, so it reports nothing restored")
 
         XCTAssertEqual(
             canvas.error, "Couldn't restore the evicted windows.")
@@ -409,7 +420,9 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.refuseNextWrites(gateway.issued[0])
         gateway.refuseNextWrites(gateway.issued[1])
 
-        controller.untileAll()
+        XCTAssertFalse(
+            controller.untileAll(),
+            "a refused restore means 'All tiled windows restored.' would be a lie")
 
         XCTAssertEqual(
             canvas.error,

@@ -718,31 +718,45 @@ final class TilingController {
 
     // MARK: Bulk operations
 
-    func untileAll() {
+    /// Dissolves the focused canvas and reports whether it dissolved at
+    /// least one window and restored them all (false for an empty canvas
+    /// or any refused restore).
+    @discardableResult
+    func untileAll() -> Bool {
         pruneDeadWindows()
         // Untile-all dissolves only the focused canvas: other displays
         // and Spaces keep their arrangements, so the legacy zero-arg
         // form resolves the focused canvas.
-        untileAll(in: focusedSpaceKey())
+        return untileAll(in: focusedSpaceKey())
     }
 
     /// Dissolves one display's currently shown canvas (the screen-based
-    /// form menus and tests use). Other canvases, including other Spaces
-    /// on the same display, are untouched.
-    func untileAll(on screen: ScreenID?) {
+    /// form menus and tests use) with the same report. Other canvases,
+    /// including other Spaces on the same display, are untouched.
+    @discardableResult
+    func untileAll(on screen: ScreenID?) -> Bool {
         untileAll(in: tilingKey(for: screen))
     }
 
     /// Dissolves one tiling canvas, leaving every other canvas alone.
     /// The undo chapter tags each window with its canvas so the recovery
     /// retiles per display and per Space.
-    private func untileAll(in space: TilingSpaceKey) {
+    ///
+    /// Returns whether it dissolved at least one window and restored them
+    /// all. False covers an empty canvas and any refused restore (the
+    /// canvas states the failure): callers announcing "All tiled windows
+    /// restored." must check this, or the sentence contradicts the
+    /// refusal.
+    private func untileAll(in space: TilingSpaceKey) -> Bool {
         pruneDeadWindows()
-        let outcome = mutateSpace(space) {
-            $0.untileAll(context: placementContext(for: space))
+        let (outcome, restoreFailed) = mutateSpace(space) {
+            canvas -> (TilingSpace.Outcome, Bool) in
+            let outcome = canvas.untileAll(context: placementContext(for: space))
+            return (outcome, canvas.error != nil)
         }
         apply(outcome, on: space)
         onChange?()
+        return !outcome.forget.isEmpty && !restoreFailed
     }
 
     /// Snaps all splitters back to defaults and re-tiles everyone. The
@@ -812,23 +826,31 @@ final class TilingController {
     /// vacated tile, swapping back). Consumes the entry it restores, so
     /// repeated ⌃⌥⇧⌘Z walks back through history up to `undoDepth`: the
     /// stack, not amnesia, bounds the past.
-    func undoLastDisplacement() {
+    ///
+    /// Returns whether any window was restored. False covers both the
+    /// empty stack (answered through `onFeedback`) and a chapter whose
+    /// windows all died (nothing was restored, and the canvas states the
+    /// failure): callers announcing "Evicted windows restored." must
+    /// check this, or the announcement contradicts the refusal.
+    @discardableResult
+    func undoLastDisplacement() -> Bool {
         undoLastDisplacement(in: focusedSpaceKey())
     }
 
     /// Undoes one display's currently shown canvas's freshest destructive
     /// action (the screen-based form menus and tests use). Other canvases,
     /// including other Spaces on the same display, keep their history.
-    func undoLastDisplacement(on screen: ScreenID?) {
+    @discardableResult
+    func undoLastDisplacement(on screen: ScreenID?) -> Bool {
         undoLastDisplacement(in: tilingKey(for: screen))
     }
 
-    private func undoLastDisplacement(in space: TilingSpaceKey) {
+    private func undoLastDisplacement(in space: TilingSpaceKey) -> Bool {
         guard let entry = mutateSpace(space, { $0.undoStack.popLast() }) else {
             // Expired or empty: the promise needs an answer, not silence
             // (see the undo-expiry feedback below).
             onFeedback?(.nothingToUndo)
-            return
+            return false
         }
         pruneDeadWindows()
         mutateSpace(space) { $0.error = nil; $0.notice = nil }
@@ -916,6 +938,7 @@ final class TilingController {
         // whose windows all died) still consumes the entry: nothing to
         // restore, standard error above.
         onChange?()
+        return restored > 0
     }
 
     // MARK: Live resize (observe & compensate)
@@ -1087,12 +1110,18 @@ final class TilingController {
     /// keeps no undo chapter (the restoration IS the frame) — unless the
     /// reflow moved a survivor into the freed cells, which is its own
     /// chapter.
-    func handleEvict() {
+    ///
+    /// Returns whether it performed the eviction. False means it answered
+    /// through `onFeedback` instead (no focused window, nothing to
+    /// evict): callers announcing success must check this, or an
+    /// ineffective press speaks both the refusal and a success.
+    @discardableResult
+    func handleEvict() -> Bool {
         pruneDeadWindows()
         guard let handle = gateway.focusedWindow() else {
             dbg("no focused window for evict")
             onFeedback?(.noFocusedWindow)
-            return
+            return false
         }
         let id = windowID(for: handle)
         let key = spaceOf(window: id) ?? focusedSpaceKey()
@@ -1102,31 +1131,41 @@ final class TilingController {
         }
         if case .nothingToEvict = outcome.result {
             onFeedback?(.nothingToEvict)
-            return
+            return false
         }
         apply(outcome, on: key)
         onChange?()
+        return true
     }
 
     /// Untiles one window, restoring its pre-tile frame. The freed cells
     /// reflow to the mergeable survivor; undo's preparatory untiles pass
     /// `reflowing: false` (they make room for a restoration that follows
     /// immediately, and must not churn the layout nor push a chapter).
-    func untile(window id: WindowID) {
+    ///
+    /// Returns whether the window held a slot. False means there was
+    /// nothing to release (an unknown or already-released window):
+    /// callers announcing success must check this, or a menu row clicked
+    /// after its window vanished claims an untile that never happened.
+    @discardableResult
+    func untile(window id: WindowID) -> Bool {
         untile(window: id, reflowing: true)
     }
 
-    func untile(window id: WindowID, reflowing: Bool) {
+    @discardableResult
+    func untile(window id: WindowID, reflowing: Bool) -> Bool {
         pruneDeadWindows()
         // The window's own canvas clears (not the focused one): menu
         // untile rows act on background displays and Spaces.
         let key = spaceOf(window: id) ?? focusedSpaceKey()
+        let wasTiled = spaceState(for: key).slot(of: id) != nil
         let outcome = mutateSpace(key) {
             $0.untile(
                 window: id, reflowing: reflowing, context: placementContext(for: key))
         }
         apply(outcome, on: key)
         onChange?()
+        return wasTiled
     }
 
     // MARK: Expand toggle (⌥⇧⏎)

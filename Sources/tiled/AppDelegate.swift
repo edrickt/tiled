@@ -741,8 +741,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func evictFocusedWindow(_ sender: Any?) {
-        controller.handleEvict()
-        announce("Focused window evicted.", fallback: "Focused window evicted.")
+        announce(MenuText.focusedWindowEvicted, ifPerformed: controller.handleEvict())
     }
 
     @objc private func untileAll(_ sender: NSMenuItem) {
@@ -751,18 +750,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // whole operation one ⌃⌥⇧⌘Z from reversal. The sticky notice +
         // undo row ARE the safety: a modal here would tax the daily
         // user for protection the design already provides structurally.
-        controller.untileAll()
-        announce("All tiled windows restored.", fallback: "All tiled windows restored.")
+        announce(MenuText.allTiledWindowsRestored, ifPerformed: controller.untileAll())
     }
 
     @objc private func resetDividers(_ sender: NSMenuItem) {
         // Two actions in sequence, like Reset Shortcuts: a reversible
         // reset first (fractions parked), then a restore of the backup.
-        if controller.canvas(for: controller.focusedTilingSpace).hasSplitterBackup {
-            controller.restoreSplitters()
-            announce(
-                "Splitters restored to their pre-reset positions.",
-                fallback: "Splitters restored to their pre-reset positions.")
+        // The action's own report picks the branch: no re-checking the
+        // canvas state before asking it to restore.
+        if controller.restoreSplitters() {
+            announce(MenuText.splittersRestored, fallback: MenuText.splittersRestored)
             return
         }
         guard confirmBulkAction(
@@ -772,7 +769,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button: "Reset Splitters")
         else { return }
         controller.resetDividers()
-        announce("Splitters reset to even splits.", fallback: "Splitters reset to even splits.")
+        announce(MenuText.splittersReset, fallback: MenuText.splittersReset)
     }
 
     /// Confirms a destructive bulk action with the consequence in the
@@ -805,6 +802,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if let noticeText {
             NSLog("Tiled: %@", noticeText)
         }
+    }
+
+    /// One announcement per action, driven by the controller's report:
+    /// the success sentence sounds only when the action really ran.
+    /// Otherwise the no-op was voiced through `onFeedback` (haptic +
+    /// announcement), the failure lives on the canvas, or nothing
+    /// happened at all — a success sentence here would misreport the
+    /// outcome.
+    private func announce(_ text: String, ifPerformed performed: Bool) {
+        guard performed else { return }
+        announce(text, fallback: text)
     }
 
     /// Subtle confirmation for ineffective hotkey presses: the safe no-op
@@ -856,15 +864,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// frontmost, so the undo works from anywhere, not only with the
     /// status menu open.
     private func performUndoSwitch() {
-        controller.undoLastDisplacement()
-        announce("Evicted windows restored.", fallback: "Evicted windows restored.")
+        announce(
+            MenuText.evictedWindowsRestored,
+            ifPerformed: controller.undoLastDisplacement())
     }
 
     @objc private func untileTiledWindow(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? WindowID else { return }
         let name = controller.tiledWindowsInfo.first { $0.id == id }?.appName
-        controller.untile(window: id)
-        announce("\(name ?? "Window") untiled.", fallback: "Window untiled.")
+        announce(
+            MenuText.windowUntiled(name),
+            ifPerformed: controller.untile(window: id))
     }
 
     @objc private func focusTiledWindow(_ sender: NSMenuItem) {

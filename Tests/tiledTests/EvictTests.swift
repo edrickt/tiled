@@ -122,7 +122,7 @@ final class EvictTests: XCTestCase {
         controller.handle(slot: .topLeft)
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
 
-        controller.handleEvict()
+        XCTAssertTrue(controller.handleEvict(), "releasing a slot reports the eviction")
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(gateway.frame(of: handle), original)
@@ -130,7 +130,7 @@ final class EvictTests: XCTestCase {
 
     func testEvictWithNoFocusedWindowAnswers() {
         gateway.focused = nil
-        controller.handleEvict()
+        XCTAssertFalse(controller.handleEvict(), "a no-op never reports the eviction")
         guard case .noFocusedWindow = feedbacks[0] else {
             return XCTFail("expected .noFocusedWindow, got \(feedbacks)")
         }
@@ -138,7 +138,7 @@ final class EvictTests: XCTestCase {
 
     func testEvictUntiledWindowAnswers() {
         addFocusedWindow()
-        controller.handleEvict()
+        XCTAssertFalse(controller.handleEvict(), "nothing to evict never reports the eviction")
         XCTAssertEqual(feedbacks.count, 1)
         guard case .nothingToEvict = feedbacks[0] else {
             return XCTFail("expected .nothingToEvict, got \(feedbacks[0])")

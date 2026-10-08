@@ -147,4 +147,20 @@ final class MenuTextTests: XCTestCase {
             MenuText.nothingToEvictAnnouncement(),
             "That window isn't tiled: nothing to evict.")
     }
+
+    // MARK: Action confirmations
+
+    func testActionConfirmations() {
+        XCTAssertEqual(MenuText.focusedWindowEvicted, "Focused window evicted.")
+        XCTAssertEqual(MenuText.allTiledWindowsRestored, "All tiled windows restored.")
+        XCTAssertEqual(MenuText.evictedWindowsRestored, "Evicted windows restored.")
+        XCTAssertEqual(
+            MenuText.splittersRestored, "Splitters restored to their pre-reset positions.")
+        XCTAssertEqual(MenuText.splittersReset, "Splitters reset to even splits.")
+    }
+
+    func testWindowUntiledNamesTheWindowOrFallsBack() {
+        XCTAssertEqual(MenuText.windowUntiled("Safari"), "Safari untiled.")
+        XCTAssertEqual(MenuText.windowUntiled(nil), "Window untiled.")
+    }
 }
