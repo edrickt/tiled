@@ -168,6 +168,72 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "undo re-tiles w")
     }
 
+    // MARK: Partial restoration
+
+    func testPartialUndoFailureReachesTheUser() {
+        // Two windows are evicted by a layout switch; one refuses its
+        // restore. The chapter partly restored, but the refusal must
+        // reach the user instead of hiding behind "1 window restored".
+        let a = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+        controller.handle(slot: .topRight)
+        focusNewWindow(CGRect(x: 1200, y: 80, width: 500, height: 400))
+        controller.handle(slot: .sixthLeft)
+
+        gateway.refuseNextWrites(a)
+        XCTAssertFalse(
+            controller.undoLastDisplacement(),
+            "a refused frame means the chapter did not fully restore")
+
+        XCTAssertNil(canvas.notice, "a partial failure must not be narrated as success")
+        XCTAssertEqual(
+            canvas.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+    }
+
+    func testRefusedRequesterRestoreReachesTheUser() {
+        // A swap's requester restores to its pre-tile frame before its
+        // chapter entry re-tiles it; when that first write is refused,
+        // the refusal is part of the chapter's story, not swallowed.
+        let a = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+        controller.handle(slot: .bottomLeft)
+        focusNewWindow(CGRect(x: 900, y: 0, width: 800, height: 600))
+        controller.handle(slot: .rightHalf)
+        gateway.focused = a
+        controller.handle(slot: .rightHalf)
+
+        gateway.refuseNextWrites(a)
+        XCTAssertFalse(
+            controller.undoLastDisplacement(),
+            "the refused requester frame means the chapter did not fully restore")
+
+        XCTAssertNil(canvas.notice)
+        XCTAssertEqual(
+            canvas.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+    }
+
+    func testUndoNoticeCountsOnlyRestoredWindows() {
+        // A chapter of two whose first evictee died before the undo: the
+        // notice reports the one window that actually returned, not the
+        // chapter's original size.
+        let a = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+        controller.handle(slot: .topRight)
+        focusNewWindow(CGRect(x: 1200, y: 80, width: 500, height: 400))
+        controller.handle(slot: .sixthLeft)
+        gateway.kill(a)
+
+        XCTAssertTrue(controller.undoLastDisplacement())
+
+        XCTAssertEqual(canvas.notice, "Undid displacement \u{00B7} 1 window restored.")
+        XCTAssertNil(canvas.error)
+    }
+
     // MARK: Re-house region and empty chapters
 
     func testReHouseUsesTheRegionTheRequestActuallyLeavesFree() {

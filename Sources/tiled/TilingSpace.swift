@@ -35,8 +35,13 @@ struct EvictedWindow {
 /// `notice`/`error` stay readable on the canvas: the placement writes
 /// them as it settles, so the menu surface reads the canvas that acted.
 struct TilingSpace {
+    /// One eviction's undo chapter: the evicted windows to re-place
+    /// (each tagged with the canvas it returns to) and the action's
+    /// requester, whose pre-tile frame the controller restores.
+    typealias UndoChapter = (snapshot: [EvictedWindow], requester: WindowID?)
+
     var state = TilingState()
-    var undoStack: [(snapshot: [EvictedWindow], requester: WindowID?)] = []
+    var undoStack: [UndoChapter] = []
     var splitterBackup: GridLayout?
     /// Splitter fractions for this canvas. The tracker moves them through
     /// its `GridProvider`, which reads and writes here.
@@ -114,14 +119,14 @@ struct TilingSpace {
         var raise: Bool = false
     }
 
-    /// What one undo returns: narration plus observation requests. Kept
-    /// out of `Outcome` because one undo chapter can span several
-    /// canvases and the notice lands on the canvas the chapter belonged
-    /// to, not on every destination it restores windows to.
-    struct UndoOutcome {
-        var notice: String?
-        var error: String?
-        var observe: [WindowID] = []
+    /// What restoring one chapter group onto a canvas did: the windows
+    /// now tiled here (the coordinator must observe them) and the display
+    /// names of windows whose pre-tile frame write was refused. No
+    /// narration: the controller owns the chapter's story, and the canvas
+    /// only supplies this primitive.
+    struct ChapterRestore {
+        var restored: [WindowID] = []
+        var failures: [String] = []
     }
 
     // MARK: Records
@@ -276,20 +281,19 @@ struct TilingSpace {
 
     // MARK: Undo
 
-    /// Undoes a chapter on this canvas: restores the requester to its
-    /// pre-tile frame and returns every surviving evicted window to its
-    /// slot. Returns the notice or error for the coordinator, which
-    /// aggregates multi-canvas chapters and narrates on the chapter's
-    /// own canvas.
-    mutating func undo(
-        snapshot: [EvictedWindow], requester: WindowID?, context: Context
-    ) -> UndoOutcome {
-        var result = UndoOutcome()
-        if let requester {
-            _ = restore(window: requester, context: context)
-        }
-        var restored = 0
-        for entry in snapshot {
+    /// One chapter group's evictees return to this canvas: each survivor
+    /// is committed into its slot and its frame written. The controller
+    /// owns chapter restoration (it is the only holder of the canvas
+    /// table), so this primitive narrates nothing and restores no
+    /// requester — the controller restores that separately. A window
+    /// whose frame write was refused is forgotten and named in
+    /// `failures`, so a partial failure can surface instead of hiding
+    /// behind a success sentence.
+    mutating func restoreChapter(
+        _ group: [EvictedWindow], context: Context
+    ) -> ChapterRestore {
+        var result = ChapterRestore()
+        for entry in group {
             // Skip confirmed deaths only: an unknown liveness (busy app)
             // still attempts the restore: the write re-probes, and a
             // failed attempt is reported, not silently skipped.
@@ -308,7 +312,6 @@ struct TilingSpace {
             record.preTileFrame = entry.preTileFrame
             records[id] = record
             state.commit(window: id, into: entry.slot)
-            result.observe.append(id)
             // The frame may already be correct (e.g. an untile-all chapter
             // whose windows still sit at their pre-tile frames, or a
             // settle frame the gateway applied late): skip the write and
@@ -321,20 +324,13 @@ struct TilingSpace {
                 current == grid.rect(for: slot, in: context.boundsOf(current))
             {
                 context.log("undo SKIP-WRITE win\(id) already placed")
-                restored += 1
+                result.restored.append(id)
             } else if applyLayout(for: id, context: context, on: entry.space) {
-                restored += 1
+                result.restored.append(id)
             } else {
+                result.failures.append(appName(id, context: context) ?? "A window")
                 forget(id, context: context)
             }
-        }
-        if restored > 0 {
-            let noun = restored == 1 ? "1 window" : "\(restored) windows"
-            // The undo itself must not push a new chapter: restoration is
-            // the consumption of history, not a new destruction.
-            result.notice = "Undid displacement \u{00B7} \(noun) restored."
-        } else {
-            result.error = MenuText.restoreEvictedWindowsFailure
         }
         return result
     }

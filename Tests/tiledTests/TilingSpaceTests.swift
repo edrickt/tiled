@@ -672,7 +672,7 @@ final class TilingSpaceTests: XCTestCase {
 
     // MARK: Undo
 
-    func testUndoRestoresRequesterAndEvicted() {
+    func testRestoreChapterReturnsEvictedToItsSlot() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
@@ -682,21 +682,22 @@ final class TilingSpaceTests: XCTestCase {
             return XCTFail("switch should snapshot")
         }
 
-        let result = harness.undo(snapshot: snapshot, requester: b)
+        let result = harness.restoreChapter(snapshot)
 
-        XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 1 window restored.")
-        XCTAssertNil(result.error)
+        XCTAssertEqual(result.restored.count, 1)
+        XCTAssertTrue(result.failures.isEmpty)
         XCTAssertEqual(
             space.state.occupant(of: .topLeft).flatMap { space.records[$0]?.handle },
             harness.handle(of: a),
             "evicted window returns to its slot (under a fresh id; its record was pruned at switch)")
     }
 
-    func testUndoAttemptsRestoreForBusyWindows() {
+    func testRestoreChapterAttemptsBusyWindows() {
         // A busy app answers the liveness probe with unknown, never dead:
-        // undo must still attempt the restore rather than silently skip a
-        // maybe-alive window. (With the pre-tri-state `isAlive`, a transient
-        // probe failure read as dead and the window was skipped entirely.)
+        // the primitive must still attempt the restore rather than
+        // silently skip a maybe-alive window. (With the pre-tri-state
+        // `isAlive`, a transient probe failure read as dead and the
+        // window was skipped entirely.)
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
@@ -707,17 +708,17 @@ final class TilingSpaceTests: XCTestCase {
         }
         harness.gateway.busy.insert(harness.handle(of: a)!)
 
-        let result = harness.undo(snapshot: snapshot, requester: b)
+        let result = harness.restoreChapter(snapshot)
 
-        XCTAssertNil(result.error)
-        XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 1 window restored.")
+        XCTAssertTrue(result.failures.isEmpty)
+        XCTAssertEqual(result.restored.count, 1)
         XCTAssertEqual(
             space.state.occupant(of: .topLeft).flatMap { space.records[$0]?.handle },
             harness.handle(of: a),
             "unknown liveness still restores the window to its slot")
     }
 
-    func testUndoSkipsDeadHandlesAndReports() {
+    func testRestoreChapterSkipsDeadHandles() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
@@ -729,15 +730,16 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(snapshot.count, 1, "requester moves, not evicted")
         harness.gateway.kill(harness.handle(of: a)!)
 
-        let result = harness.undo(snapshot: snapshot, requester: b)
+        let result = harness.restoreChapter(snapshot)
 
-        XCTAssertNil(result.notice)
-        XCTAssertEqual(result.error, "Couldn't restore the evicted windows.")
-        XCTAssertTrue(space.state.occupants.isEmpty,
-            "dead evictee skipped; requester restored (untiled)")
+        XCTAssertTrue(result.restored.isEmpty)
+        XCTAssertTrue(result.failures.isEmpty, "a dead window is skipped, not a failure")
+        XCTAssertFalse(
+            space.records.values.contains { $0.handle == harness.handle(of: a) },
+            "dead evictee skipped")
     }
 
-    func testUndoPluralNotice() {
+    func testRestoreChapterRestoresEverySurvivor() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         let c = harness.addWindow()
@@ -749,12 +751,13 @@ final class TilingSpaceTests: XCTestCase {
         }
         XCTAssertEqual(snapshot.count, 2)
 
-        let result = harness.undo(snapshot: snapshot, requester: c)
+        let result = harness.restoreChapter(snapshot)
 
-        XCTAssertEqual(result.notice, "Undid displacement \u{00B7} 2 windows restored.")
+        XCTAssertEqual(result.restored.count, 2)
+        XCTAssertTrue(result.failures.isEmpty)
     }
 
-    func testUndoRetileRefusalDropsTheWindow() {
+    func testRestoreChapterRefusalDropsTheWindow() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
@@ -765,17 +768,19 @@ final class TilingSpaceTests: XCTestCase {
         }
         harness.gateway.refuseNextWrites(harness.handle(of: a)!)
 
-        let result = harness.undo(snapshot: snapshot, requester: b)
+        let result = harness.restoreChapter(snapshot)
 
-        XCTAssertEqual(result.error, "Couldn't restore the evicted windows.")
-        XCTAssertTrue(space.state.occupants.isEmpty,
+        XCTAssertEqual(result.failures, ["TestApp"])
+        XCTAssertTrue(result.restored.isEmpty)
+        XCTAssertNil(
+            space.state.occupant(of: .topLeft),
             "a refused re-tile releases the slot so state and screen agree")
         XCTAssertFalse(
             space.records.values.contains { $0.handle == harness.handle(of: a) },
             "the refused window's fresh record is dropped, not left dangling")
     }
 
-    func testUndoRetilesEvictedUnderCurrentGrid() {
+    func testRestoreChapterRetilesEvictedUnderCurrentGrid() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
@@ -789,9 +794,8 @@ final class TilingSpaceTests: XCTestCase {
         // bounds.
         let expected = grid.rect(for: .topLeft, in: bounds)
 
-        let result = harness.undo(snapshot: snapshot, requester: b)
+        _ = harness.restoreChapter(snapshot)
 
-        XCTAssertNil(result.error)
         XCTAssertEqual(
             harness.frame(of: a), expected,
             "undo writes the slot rect computed from the restored frame")

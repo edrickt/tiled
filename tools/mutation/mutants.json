@@ -340,5 +340,29 @@
   "collapse silent ignore skips the revert",
   "            let result = writeExpandedFrame(\n                id, to: saved, revertTo: saved, context: context)",
   "            let result = writeExpandedFrame(\n                id, to: saved, revertTo: nil, context: context)"
+ ],
+ [
+  "TilingController.swift",
+  "partial undo failure swallowed (success narrated when one window refused)",
+  "        if !failures.isEmpty {",
+  "        if !failures.isEmpty && restored == 0 {"
+ ],
+ [
+  "TilingController.swift",
+  "undo notice counts the chapter, not the windows restored",
+  "            restored += result.restored.count",
+  "            restored += group.count"
+ ],
+ [
+  "TilingController.swift",
+  "refused requester restore swallowed (undo claims success)",
+  "            if refused { failures.append(name) }",
+  "            if refused { _ = name }"
+ ],
+ [
+  "TilingController.swift",
+  "chapter restoration ignores the other layout when admitting blockers",
+  "            where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {",
+  "            where slot.overlaps(evicted.slot) {"
  ]
 ]

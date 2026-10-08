@@ -832,11 +832,13 @@ final class TilingController {
     /// repeated ⌃⌥⇧⌘Z walks back through history up to `undoDepth`: the
     /// stack, not amnesia, bounds the past.
     ///
-    /// Returns whether any window was restored. False covers both the
-    /// empty stack (answered through `onFeedback`) and a chapter whose
-    /// windows all died (nothing was restored, and the canvas states the
-    /// failure): callers announcing "Evicted windows restored." must
-    /// check this, or the announcement contradicts the refusal.
+    /// Returns whether the chapter restored everything it owed: every
+    /// surviving evicted window and the requester. False covers the
+    /// empty stack (answered through `onFeedback`), a chapter whose
+    /// windows all died, and any refused frame — the canvas states the
+    /// failure, so callers announcing "Evicted windows restored." must
+    /// check this, or the sentence contradicts the refusal (a partial
+    /// restore included).
     @discardableResult
     func undoLastDisplacement() -> Bool {
         undoLastDisplacement(in: focusedSpaceKey())
@@ -851,30 +853,103 @@ final class TilingController {
     }
 
     private func undoLastDisplacement(in space: TilingSpaceKey) -> Bool {
-        guard let entry = mutateSpace(space, { $0.undoStack.popLast() }) else {
+        guard let chapter = mutateSpace(space, { $0.undoStack.popLast() }) else {
             // Expired or empty: the promise needs an answer, not silence
             // (see the undo-expiry feedback below).
             onFeedback?(.nothingToUndo)
             return false
         }
+        return restore(chapter, on: space)
+    }
+
+    /// Chapter restoration, owned here because the controller is the only
+    /// holder of the canvas table. The canvas supplies the primitives:
+    /// `TilingSpace.restoreChapter` re-places a group's evictees and
+    /// `TilingSpace.restore` returns the requester, while this one named
+    /// behaviour owns the cross-canvas rules — step-aside admission,
+    /// per-canvas grouping, and the notice/error precedence that lets a
+    /// partial failure surface ahead of the success sentence. Returns
+    /// whether the chapter restored everything it owed (see
+    /// `undoLastDisplacement`).
+    private func restore(_ chapter: TilingSpace.UndoChapter, on space: TilingSpaceKey) -> Bool {
         pruneDeadWindows()
         mutateSpace(space) { $0.error = nil; $0.notice = nil }
-        // A slot may have been re-tiled, and the canvas may have moved to
-        // the other layout, since the chapter was pushed (the undo stack
-        // survives new actions by design). Both are honored like any
-        // tile: every current occupant the restoration would land on
-        // (overlapping cells) or contradict (the other layout) is untiled
-        // to its pre-tile frame first. Undo can therefore never
-        // double-book a cell or leave two layouts on one canvas. Chapter
-        // members are exempt: each has an entry of its own that re-places
-        // it (a swap or step-aside chapter's destinations may overlap one
-        // another), so untiling one would only churn its identity — its
-        // entry restores it in place. A chapter's own requester without
-        // an entry still steps aside where it would block a restore,
-        // exactly as before.
-        let chapterHandles = Set(entry.snapshot.map(\.handle))
+        // Step-aside admission: every current occupant the restoration
+        // would land on (overlapping cells) or contradict (the other
+        // layout) is untiled to its pre-tile frame first, so undo can
+        // never double-book a cell or leave two layouts on one canvas.
+        for blocker in blockers(of: chapter, on: space).sorted() {
+            untile(window: blocker, reflowing: false)
+        }
+        var failures: [String] = []
+        var restored = 0
+        // Restore the requester once, in the canvas owning its record:
+        // its pre-tile frame wherever it sits — frames, not spaces,
+        // decide that. (Its record may already be gone; the restore is a
+        // no-op then.) A refused frame joins the chapter's failure story.
+        if let requester = chapter.requester {
+            let requesterSpace = spaceOf(window: requester) ?? space
+            let name = handle(of: requester).flatMap { gateway.appName(of: $0) }
+                ?? "A window"
+            let refused = mutateSpace(requesterSpace) { canvas -> Bool in
+                !canvas.restore(
+                    window: requester, context: placementContext(for: requesterSpace))
+            }
+            if refused { failures.append(name) }
+            forgetBookkeeping(requester)
+        }
+        // Group the chapter by destination canvas: each window returns to
+        // the canvas it left (legacy untagged entries restore into the
+        // undone canvas).
+        var bySpace: [TilingSpaceKey: [EvictedWindow]] = [:]
+        for evicted in chapter.snapshot {
+            bySpace[evicted.space ?? space, default: []].append(evicted)
+        }
+        for (destination, group) in bySpace {
+            let result = mutateSpace(destination) {
+                $0.restoreChapter(group, context: placementContext(for: destination))
+            }
+            for window in result.restored { observe(window: window) }
+            restored += result.restored.count
+            failures.append(contentsOf: result.failures)
+        }
+        // The chapter's story, told once here: any refused frame surfaces
+        // ahead of the success sentence, so a partial failure can never
+        // hide behind "N windows restored".
+        if !failures.isEmpty {
+            mutateSpace(space) {
+                $0.error = MenuText.restoreFailureMessage(failures)
+            }
+        } else if restored > 0 {
+            let noun = restored == 1 ? "1 window" : "\(restored) windows"
+            mutateSpace(space) {
+                $0.notice = "Undid displacement \u{00B7} \(noun) restored."
+            }
+        } else {
+            // Nothing restored and nothing refused (a chapter whose
+            // windows all died): report the standard failure. The entry
+            // is consumed either way.
+            mutateSpace(space) { $0.error = MenuText.restoreEvictedWindowsFailure }
+        }
+        onChange?()
+        // A refused frame means the chapter did not fully restore: report
+        // not-performed so the delegate speaks no success sentence over
+        // the canvas's refusal.
+        return restored > 0 && failures.isEmpty
+    }
+
+    /// The current occupants that must step aside before `chapter`
+    /// returns: those whose cells a restored window would land on, or
+    /// whose layout the chapter contradicts. Chapter members are exempt —
+    /// each has an entry of its own that re-places it (a swap or
+    /// step-aside chapter's destinations may overlap one another) — and
+    /// so is the window being restored.
+    private func blockers(
+        of chapter: TilingSpace.UndoChapter, on space: TilingSpaceKey
+    ) -> Set<WindowID> {
+        let chapterHandles = Set(chapter.snapshot.map(\.handle))
         var blockers: Set<WindowID> = []
-        for evicted in entry.snapshot {
+        for evicted in chapter.snapshot {
             let destination = evicted.space ?? space
             for (slot, current) in spaceState(for: destination).occupants
             where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {
@@ -885,65 +960,7 @@ final class TilingController {
                 blockers.insert(current)
             }
         }
-        for current in blockers.sorted() {
-            untile(window: current, reflowing: false)
-        }
-        // Group the chapter by destination canvas: each window returns
-        // to the canvas it left (legacy untagged entries restore into
-        // the undone canvas). The requester restores to its pre-tile
-        // frame wherever it sits: frames, not spaces, decide that.
-        var bySpace: [TilingSpaceKey: [EvictedWindow]] = [:]
-        for evicted in entry.snapshot {
-            bySpace[evicted.space ?? space, default: []].append(evicted)
-        }
-        var restored = 0
-        var errors: [String] = []
-        // Restore the requester once, in the canvas owning its record.
-        // (Its record may already be gone; the restore is a no-op then,
-        // but the per-canvas unwinding below still needs its id looked up
-        // in the same state.)
-        if let requester = entry.requester {
-            let requesterSpace = spaceOf(window: requester) ?? space
-            mutateSpace(requesterSpace) {
-                $0.restore(
-                    window: requester, context: placementContext(for: requesterSpace))
-            }
-            forgetBookkeeping(requester)
-        }
-        for (destination, group) in bySpace {
-            let result = mutateSpace(destination) {
-                $0.undo(
-                    snapshot: group, requester: nil,
-                    context: placementContext(for: destination))
-            }
-            for window in result.observe {
-                observe(window: window)
-            }
-            if result.notice != nil {
-                restored += group.count
-            }
-            if let error = result.error { errors.append(error) }
-        }
-        if restored > 0 {
-            let total = entry.snapshot.count
-            let noun = total == 1 ? "1 window" : "\(total) windows"
-            mutateSpace(space) {
-                $0.notice = "Undid displacement \u{00B7} \(noun) restored."
-            }
-        } else if let error = errors.first {
-            mutateSpace(space) { $0.error = error }
-        } else if entry.snapshot.isEmpty {
-            // Untile-all chapter with no surviving windows: the requester
-            // restore above already ran; report the standard empty result.
-            mutateSpace(space) { $0.error = MenuText.restoreEvictedWindowsFailure }
-        } else if errors.isEmpty {
-            mutateSpace(space) { $0.error = MenuText.restoreEvictedWindowsFailure }
-        }
-        // A nil requester with an empty snapshot (untile-all chapter
-        // whose windows all died) still consumes the entry: nothing to
-        // restore, standard error above.
-        onChange?()
-        return restored > 0
+        return blockers
     }
 
     // MARK: Live resize (observe & compensate)
