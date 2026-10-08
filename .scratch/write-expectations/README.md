@@ -111,4 +111,8 @@ mutation-table target stays live and caught.
   `cf2a884`: `SettingsDependencies` is one value injected once and handed to each
   tab, the tab order/selection/focus are drivable headless, and the Shortcuts tab
   reads its window's live content size at rebuild, so the dead `windowDidResize`
-  cache is gone. Defects 6-8 from the review report remain unclaimed.
+  cache is gone.
+- Defect 6 ("Deferred off-Space write reported as an app refusal") is done at
+  `449bc2a`: the expand/collapse path answers `.expandRefused` only for a genuine
+  refusal; a deferred write stays silent, like every other off-Space write.
+  Defects 7-8 from the review report remain unclaimed.
