@@ -514,5 +514,17 @@
   "a new press leaves the previous release's commit pending (stale re-push under the new drag)",
   "    func mousePressed() {\n        mouseIsDown = true\n        cancelCommit()\n    }",
   "    func mousePressed() {\n        mouseIsDown = true\n    }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "half-applied frame write left half-moved (screen disagrees with rolled-back state)",
+  "            if needsRestore(\n                positionLanded: positionLanded, sizeLanded: sizeLanded, failed: error != nil)\n            {",
+  "            if false, needsRestore(\n                positionLanded: positionLanded, sizeLanded: sizeLanded, failed: error != nil)\n            {"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "frame pair written size-first (bottom window clamps past the screen edge)",
+  "                let positionResult = writePosition(position)\n                if positionResult == .success { positionLanded = true }\n                let sizeResult = writeSize(size)\n                if sizeResult == .success { sizeLanded = true }",
+  "                let sizeResult = writeSize(size)\n                if sizeResult == .success { sizeLanded = true }\n                let positionResult = writePosition(position)\n                if positionResult == .success { positionLanded = true }"
  ]
 ]
