@@ -422,16 +422,40 @@ final class UndoIntegrityTests: XCTestCase {
     func testPartialSizeRefusalLeavesNoCommittedState() {
         focusNewWindow()
         controller.handle(slot: .topLeft)
-        let x = focusNewWindow(CGRect(x: 40, y: 40, width: 500, height: 400))
+        let preWrite = CGRect(x: 40, y: 40, width: 500, height: 400)
+        let x = focusNewWindow(preWrite)
         gateway.refuseSizeWrites.insert(x)
 
         controller.handle(slot: .leftHalf)
 
         XCTAssertNil(canvas.state.slot(of: 2), "state never commits a refused placement")
+        XCTAssertEqual(
+            gateway.frame(of: x), preWrite,
+            "the landed origin is put back with the untouched size: left whole")
         XCTAssertNotNil(canvas.error)
         XCTAssertTrue(
             gateway.writes.contains { $0.handle == x },
             "the partial write is observable instead of indistinguishable from a refusal")
+    }
+
+    func testPartialPositionRefusalRestoresThePreWriteFrame() {
+        // The mirror half-apply: the position write fails on every
+        // attempt while the size lands. The window must not stay resized
+        // at its old origin while the app is blamed for a refusal and
+        // state rolls back — the screen disagreeing with both.
+        focusNewWindow()
+        controller.handle(slot: .topLeft)
+        let preWrite = CGRect(x: 40, y: 40, width: 500, height: 400)
+        let x = focusNewWindow(preWrite)
+        gateway.refusePositionWrites.insert(x)
+
+        controller.handle(slot: .leftHalf)
+
+        XCTAssertEqual(
+            gateway.frame(of: x), preWrite,
+            "the landed size is put back with the untouched origin: left whole")
+        XCTAssertNil(canvas.state.slot(of: 2), "the write reads as refused")
+        XCTAssertNotNil(canvas.error, "the refusal surfaces on the canvas")
     }
 
     func testRetilingOwnSlotIssuesNoFrameWrite() {

@@ -487,4 +487,115 @@ final class ShortcutsBulkEnableTests: XCTestCase {
                 "the corrupt backup (\(entry)) is skipped, leaving the action at its default")
         }
     }
+
+    // MARK: Reset backup restore (the clash path)
+
+    /// The reset backup is the Disable-all park's twin and must keep the
+    /// same clash rule: a combo the restore cannot store past the
+    /// duplicate gate is never destroyed with it. The state is the
+    /// leftover steady state — one backup entry whose combo is claimed
+    /// by an action with no entry of its own (a first restore clashed,
+    /// then the user reassigned the combo again) — driven through the
+    /// real footer button, mirroring the bulk-enable park test above.
+    func testRestoreKeepsTheBackupEntryWhenTheComboWasClaimed() {
+        let claimed = HotkeyAction.slot(.topLeft)
+        let claimer = HotkeyAction.slot(.sixthTopLeft)
+        let combo = HotkeyBinding(
+            modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_J))
+        defaults.set(
+            HotkeyBindingCodec.encode(combo),
+            forKey: "resetBackupHotkey.\(claimed.storageKey)")
+        XCTAssertEqual(store.apply(combo, for: claimer), .applied)
+
+        let tab = makeTab()
+        // If the retry ever routes to the reset dialog again, fail fast
+        // instead of hanging on the modal session the dialog would run.
+        tab.confirmReset = { _ in
+            XCTFail("the retry must take the restore path, not the reset dialog")
+            return false
+        }
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let restore = findButton(titled: "Restore Previous Shortcuts", in: view)
+        else { return XCTFail("expected a Restore Previous Shortcuts button for the leftover entry") }
+        restore.performClick(nil)
+
+        XCTAssertEqual(
+            store.binding(for: claimed), HotkeyStore.defaultBinding(for: claimed),
+            "the claimed combo is not restored past the gate")
+        XCTAssertEqual(
+            store.binding(for: claimer), combo,
+            "the edit that claimed the combo keeps it")
+        XCTAssertNotNil(
+            defaults.dictionary(forKey: "resetBackupHotkey.\(claimed.storageKey)"),
+            "the backup entry survives for when the clash is resolved")
+        XCTAssertEqual(
+            restore.title, "Restore Previous Shortcuts",
+            "the button keeps offering the restore while a backup entry remains")
+
+        // Free the combo and press again: the kept entry is the retry's
+        // whole reason to exist.
+        store.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: claimer)
+        restore.performClick(nil)
+
+        XCTAssertEqual(
+            store.binding(for: claimed), combo,
+            "after the user frees the combo, pressing the button again restores it")
+        XCTAssertNil(
+            defaults.dictionary(forKey: "resetBackupHotkey.\(claimed.storageKey)"),
+            "an applied entry is cleared")
+        XCTAssertEqual(
+            restore.title, "Reset Shortcuts",
+            "no backup entry remains, so the button flips back to the reset")
+    }
+
+    /// The first-reset dialog's promise — "Your current combos are kept;
+    /// use Restore Previous Shortcuts to get them back" — pinned against
+    /// what the two presses really do: the reset keeps every combo in
+    /// the backup, and the restore gives every one of them back.
+    func testResetDialogsPromiseHoldsThroughTheRestore() {
+        store.set(
+            HotkeyBinding(modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_J)),
+            for: .topLeft)
+        store.set(
+            HotkeyBinding(modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_K)),
+            for: .expand)
+        let before = HotkeyAction.allCases.map { store.binding(for: $0) }
+
+        let tab = makeTab()
+        var promises: [String] = []
+        tab.confirmReset = { promises.append($0); return true }
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let reset = findButton(titled: "Reset Shortcuts", in: view)
+        else { return XCTFail("expected a Reset Shortcuts button") }
+        reset.performClick(nil)
+
+        XCTAssertEqual(promises, [
+            "Your current combos are kept; use Restore Previous Shortcuts to get them back.",
+        ], "with no backup the dialog promises the keep-and-restore recovery")
+        for (action, kept) in zip(HotkeyAction.allCases, before) {
+            XCTAssertEqual(
+                HotkeyBindingCodec.decode(
+                    defaults.dictionary(forKey: "resetBackupHotkey.\(action.storageKey)")),
+                kept,
+                "the reset keeps every current combo (\(action.title))")
+        }
+        XCTAssertEqual(
+            reset.title, "Restore Previous Shortcuts",
+            "a full backup, so the button offers its restore")
+
+        // The same button, second press: the restore side of the sequence.
+        reset.performClick(nil)
+
+        XCTAssertEqual(
+            HotkeyAction.allCases.map { store.binding(for: $0) }, before,
+            "Restore Previous Shortcuts gives every kept combo back")
+        XCTAssertTrue(
+            HotkeyAction.allCases.allSatisfy {
+                defaults.dictionary(forKey: "resetBackupHotkey.\($0.storageKey)") == nil
+            },
+            "every restored entry is cleared")
+        XCTAssertEqual(
+            reset.title, "Reset Shortcuts",
+            "no backup entry remains, so the button flips back to the reset")
+    }
 }

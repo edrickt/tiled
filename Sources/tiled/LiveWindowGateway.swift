@@ -896,61 +896,37 @@ final class LiveWindowGateway: WindowGateway {
     }
 
     /// Sets position and size. `nsFrame` uses AppKit global coordinates
-    /// (bottom-left origin); converted to AX top-left coordinates internally.
+    /// (bottom-left origin); converted to AX top-left coordinates
+    /// internally, the space the two write messages speak.
     ///
-    /// Position is written BEFORE size: AX size-sets anchor the window's
-    /// top-left at its *current* position, so sizing first can push a bottom
-    /// window past the screen bottom, where AppKit silently clamps the height
-    /// and the later position write can't undo it. Anchoring at the target
-    /// top-left (always inside the visible frame) never clamps.
+    /// The pair's life — the pre-write snapshot, the write order, the
+    /// retries, and the put-back when only one message lands — is
+    /// `AXWrite.pushFrame`, the same policy the test fake drives, so the
+    /// half-apply restore is pinned end-to-end and not just here.
     @discardableResult
     private static func setFrame(_ element: AXUIElement, to nsFrame: CGRect) -> Bool {
         // Same reasoning as the read path: with no screen there is no
         // coordinate space to convert into, so refuse the write rather
-        // than place the window at a guessed position.
+        // than place the window at a guessed position. Marshalling is
+        // verified up front too: a frame whose values cannot even be
+        // built must not half-push.
         guard let primaryTop = NSScreen.screens.first?.frame.maxY else { return false }
+        let targetSize = CGSize(width: nsFrame.width, height: nsFrame.height)
         guard
-            let sizeValue = sizeValue(CGSize(width: nsFrame.width, height: nsFrame.height)),
+            let sizeValue = sizeValue(targetSize),
             let positionValue = pointValue(axTopLeft(of: nsFrame, primaryTop: primaryTop))
         else { return false }
 
-        // The pair can part-apply: a position write that lands followed by
-        // a permanently refused size leaves the window moved at its old
-        // size. Remember the origin before writing, so the failure path
-        // can put the window back; the README promises a refusing app's
-        // window is left alone, not half-moved with state believing
-        // nothing happened.
-        let previousOrigin: AXValue? = readPoint(element, kAXPositionAttribute)
-            .flatMap(pointValue)
-        var positionLanded = false
-
-        // The write pair retries as a unit: position writes are idempotent,
-        // so a retry after a partial application (position landed, size hit
-        // a busy app) just rewrites both, never a half-moved window.
-        var lastError: AXError = .success
-        let error = AXWrite.retrying {
-            let positionResult = AXUIElementSetAttributeValue(
-                element, kAXPositionAttribute as CFString, positionValue)
-            if positionResult == .success { positionLanded = true }
-            let sizeResult = AXUIElementSetAttributeValue(
-                element, kAXSizeAttribute as CFString, sizeValue)
-            guard positionResult == .success, sizeResult == .success else {
-                // Report whichever write failed so the retry policy can
-                // judge it; when both failed, either is a valid cause.
-                lastError = positionResult == .success ? sizeResult : positionResult
-                return lastError
-            }
-            return .success
-        }
-        if AXWrite.needsPositionRestore(positionLanded: positionLanded, failed: error != nil),
-            let previousOrigin
-        {
-            // Best effort: if even the origin write is refused, the
-            // window is where the app left it and the refusal is still
-            // reported, so screen and state agree on the outcome.
-            AXUIElementSetAttributeValue(
-                element, kAXPositionAttribute as CFString, previousOrigin)
-        }
+        let error = AXWrite.pushFrame(
+            position: positionValue, size: sizeValue,
+            readPosition: { readAXValue(element, positionAttribute) },
+            readSize: { readAXValue(element, sizeAttribute) },
+            writePosition: {
+                AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, $0)
+            },
+            writeSize: {
+                AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, $0)
+            })
         if let error, ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: setFrame failed after retries (error %d)", error.rawValue)
         }
@@ -984,12 +960,19 @@ final class LiveWindowGateway: WindowGateway {
         /// added latency across a fully-retried write is 0.3s.
         static let baseDelay: TimeInterval = 0.1
 
-        /// Whether a failed write pair needs the already-landed position
-        /// rolled back. The size write is mandatory, so a landed position
-        /// plus any failure means the window is half-moved unless the
-        /// caller restores the previous origin.
-        static func needsPositionRestore(positionLanded: Bool, failed: Bool) -> Bool {
-            positionLanded && failed
+        /// Whether a failed write pair needs the pre-write frame put
+        /// back. The two messages are one logical push: whenever the
+        /// pair failed after landing anything, the caller reads a
+        /// refusal and rolls its state back, so the screen has to
+        /// follow. Exactly one message landed is the half-moved window
+        /// the README forbids; both landing on different attempts while
+        /// the pair still fails leaves the same disagreement in a
+        /// fuller frame. Nothing landed is already left alone, and a
+        /// pair that landed both on one attempt succeeded.
+        static func needsRestore(
+            positionLanded: Bool, sizeLanded: Bool, failed: Bool
+        ) -> Bool {
+            failed && (positionLanded || sizeLanded)
         }
 
         /// Wait before retrying after `attempt` (0-indexed) failed.
@@ -1016,6 +999,68 @@ final class LiveWindowGateway: WindowGateway {
                 sleep(delay(forAttempt: attempt))
             }
             return lastError
+        }
+
+        /// Pushes a frame as the write pair — position, then size — and
+        /// puts the window back whenever the pair half-applied.
+        ///
+        /// Position is written BEFORE size: AX size-sets anchor the
+        /// window's top-left at its *current* position, so sizing first
+        /// can push a bottom window past the screen bottom, where AppKit
+        /// silently clamps the height and the later position write can't
+        /// undo it. Anchoring at the target top-left (always inside the
+        /// visible frame) never clamps.
+        ///
+        /// The pair retries as a unit: position writes are idempotent, so
+        /// a retry after a partial application (position landed, size hit
+        /// a busy app) just rewrites both, never a half-moved window. But
+        /// an app can refuse one attribute on every attempt while the
+        /// other lands, and then the window is left half-applied — the
+        /// README promises a refusing app's window is left alone, not
+        /// half-moved with state believing nothing happened. Both values
+        /// are therefore snapshotted before the first message and a
+        /// failed pair is put back whole (see `needsRestore`).
+        ///
+        /// The values are the attributes' own representations (AX
+        /// top-left position and size for the live adapter; whatever the
+        /// caller reads back through `read*` is what `write*` receives).
+        static func pushFrame<PositionValue, SizeValue>(
+            position: PositionValue, size: SizeValue,
+            readPosition: () -> PositionValue?, readSize: () -> SizeValue?,
+            writePosition: (PositionValue) -> AXError,
+            writeSize: (SizeValue) -> AXError,
+            sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
+        ) -> AXError? {
+            let previousPosition = readPosition()
+            let previousSize = readSize()
+            var positionLanded = false
+            var sizeLanded = false
+            var lastError: AXError = .success
+            let error = retrying(operation: {
+                let positionResult = writePosition(position)
+                if positionResult == .success { positionLanded = true }
+                let sizeResult = writeSize(size)
+                if sizeResult == .success { sizeLanded = true }
+                guard positionResult == .success, sizeResult == .success else {
+                    // Report whichever write failed so the retry policy can
+                    // judge it; when both failed, either is a valid cause.
+                    lastError = positionResult == .success ? sizeResult : positionResult
+                    return lastError
+                }
+                return .success
+            }, sleep: sleep)
+            if needsRestore(
+                positionLanded: positionLanded, sizeLanded: sizeLanded, failed: error != nil)
+            {
+                // Best effort: if even a put-back write is refused, the
+                // window is where the app left it and the refusal is
+                // still reported, so screen and state agree on the
+                // outcome either way. Both values are written back —
+                // the untouched half is reasserted, never assumed.
+                if let previousPosition { _ = writePosition(previousPosition) }
+                if let previousSize { _ = writeSize(previousSize) }
+            }
+            return error
         }
     }
 

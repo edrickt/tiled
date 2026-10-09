@@ -538,5 +538,17 @@
   "a refused registration vanishes from failedActions (the menu never warns)",
   "                failedActions.append(action)",
   "                _ = action"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "half-applied frame write left half-moved (screen disagrees with rolled-back state)",
+  "            if needsRestore(\n                positionLanded: positionLanded, sizeLanded: sizeLanded, failed: error != nil)\n            {",
+  "            if false, needsRestore(\n                positionLanded: positionLanded, sizeLanded: sizeLanded, failed: error != nil)\n            {"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "frame pair written size-first (bottom window clamps past the screen edge)",
+  "                let positionResult = writePosition(position)\n                if positionResult == .success { positionLanded = true }\n                let sizeResult = writeSize(size)\n                if sizeResult == .success { sizeLanded = true }",
+  "                let sizeResult = writeSize(size)\n                if sizeResult == .success { sizeLanded = true }\n                let positionResult = writePosition(position)\n                if positionResult == .success { positionLanded = true }"
  ]
 ]
