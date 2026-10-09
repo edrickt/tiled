@@ -116,6 +116,51 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
     }
 
+    func testUndoOfSwitchReturnsTheTiledRequesterToItsVacatedSlot() {
+        // A=topLeft, B=topRight; B's sixths request switches the layout
+        // and untiles A. Undo must put the pre-event world back exactly:
+        // B returns to the slot it vacated — not to its pre-tile frame,
+        // untiled — while A lands in its pre-switch slot.
+        let a = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        let b = focusNewWindow(CGRect(x: 50, y: 50, width: 700, height: 500))
+        controller.handle(slot: .topRight)
+
+        controller.handle(slot: .sixthLeft) // B switches to sixths
+
+        controller.undoLastDisplacement()
+
+        XCTAssertEqual(
+            canvas.state.occupant(of: .topRight).map { canvas.handle(of: $0) }, b,
+            "the tiled requester lands back in the slot it vacated")
+        XCTAssertNotEqual(
+            gateway.frame(of: b), CGRect(x: 50, y: 50, width: 700, height: 500),
+            "the tiled requester does not float at its pre-tile frame")
+        XCTAssertEqual(
+            canvas.state.occupant(of: .topLeft).map { canvas.handle(of: $0) }, a,
+            "every other window lands in its pre-switch slot")
+    }
+
+    func testUndoOfSwitchRestoresAnUntiledRequesterToItsPreTileFrame() {
+        // The flip side: a fresh requester vacates no slot, so its undo
+        // stays the pre-tile restore.
+        let a = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        let b = focusNewWindow(CGRect(x: 50, y: 50, width: 700, height: 500))
+
+        controller.handle(slot: .sixthLeft) // untiled B switches to sixths
+
+        controller.undoLastDisplacement()
+
+        XCTAssertEqual(
+            canvas.state.occupant(of: .topLeft).map { canvas.handle(of: $0) }, a,
+            "every other window lands in its pre-switch slot")
+        XCTAssertNil(canvas.state.slot(of: 2), "the untiled requester holds no slot")
+        XCTAssertEqual(
+            gateway.frame(of: b), CGRect(x: 50, y: 50, width: 700, height: 500),
+            "the untiled requester returns to its pre-tile frame")
+    }
+
     // MARK: Refused requesters
 
     func testRefusedPlacementWithReHouseDoesNotMoveTheVictim() {

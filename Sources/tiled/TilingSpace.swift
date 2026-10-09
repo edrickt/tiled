@@ -353,8 +353,18 @@ struct TilingSpace {
         // would bail and the window would merely untile). Its old tile
         // is vacated by the commit inside `place`.
         let evicted = decision.windowsToRestore(requester: id)
-        let snapshot = evicted.compactMap { evictedID in
+        var snapshot = evicted.compactMap { evictedID in
             snapshotEntry(for: evictedID, fallback: slot, space: context.space)
+        }
+        // A tiled requester's vacated tile joins the chapter, exactly as
+        // in a swap chapter: undo returns the requester to the slot it
+        // vacated instead of releasing a window that was tiled before
+        // the request. A fresh requester adds no entry: its undo is the
+        // pre-tile restore.
+        if let previous = state.slot(of: id),
+            let entry = snapshotEntry(for: id, fallback: previous, space: context.space)
+        {
+            snapshot.append(entry)
         }
         // Names resolve BEFORE the restore deletes the records, exactly
         // as in the tile branch: naming after would degrade every

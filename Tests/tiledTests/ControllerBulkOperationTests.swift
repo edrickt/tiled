@@ -113,7 +113,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
     // MARK: Layout-switch undo lifecycle
 
-    func testUndoLayoutSwitchReturnsEvictedAndUntilesRequester() {
+    func testUndoLayoutSwitchReturnsEvictedAndRequesterToTheirSlots() {
         let a = addFocusedWindow()
         let aOriginal = gateway.frame(of: a)!
         controller.handle(slot: .topLeft)
@@ -127,7 +127,9 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
         XCTAssertFalse(canvas.undoStack.isEmpty)
-        XCTAssertEqual(canvas.evictedCount, 1)
+        XCTAssertEqual(
+            canvas.evictedCount, 2,
+            "the evicted window and the requester's vacated tile are both recoverable")
         XCTAssertNotNil(canvas.notice)
         XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft)
         XCTAssertEqual(
@@ -137,17 +139,22 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertTrue(controller.undoLastDisplacement(), "a restored chapter reports the undo")
 
         // The evicted window returns to its slot under a fresh id (its
-        // record was pruned at switch); the requester is untiled with its
-        // original frame back.
-        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
+        // record was pruned at switch); the tiled requester returns to
+        // the slot it vacated, not to its pre-tile frame.
+        XCTAssertEqual(canvas.state.tiledWindows.count, 2)
         XCTAssertNotNil(canvas.state.occupant(of: .topLeft))
-        XCTAssertEqual(canvas.state.slot(of: 2), nil)
+        XCTAssertNotNil(canvas.state.occupant(of: .topRight))
+        XCTAssertEqual(canvas.state.slot(of: 2), nil,
+            "the requester's id was reissued by the shared undo machinery")
         XCTAssertEqual(
             gateway.frame(of: a), expectedRect(.topLeft, for: a),
             "undo re-tiles the evicted window into its old slot")
-        XCTAssertEqual(
+        XCTAssertNotEqual(
             gateway.frame(of: b), bOriginal,
-            "undo restores the requester's pre-tile frame")
+            "the tiled requester does not float at its pre-tile frame")
+        XCTAssertEqual(
+            gateway.frame(of: b), expectedRect(.topRight, for: b),
+            "the tiled requester returns to the slot it vacated")
         XCTAssertTrue(canvas.undoStack.isEmpty)
         XCTAssertEqual(canvas.evictedCount, 0)
     }
@@ -168,7 +175,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertTrue(canvas.undoStack.isEmpty)
 
         controller.undoLastDisplacement()
-        XCTAssertEqual(canvas.state.tiledWindows.count, 1, "second undo is a no-op")
+        XCTAssertEqual(canvas.state.tiledWindows.count, 2, "second undo is a no-op")
     }
 
     func testNewSwitchPushesHistoryInsteadOfReplacingIt() {
@@ -178,11 +185,12 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.focused = b
         controller.handle(slot: .topRight)
 
-        // Cross-layout switch #1: a is evicted (undo names a).
+        // Cross-layout switch #1: a is evicted (undo names a and b's
+        // vacated tile).
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
         XCTAssertFalse(canvas.undoStack.isEmpty)
-        XCTAssertEqual(canvas.evictedCount, 1)
+        XCTAssertEqual(canvas.evictedCount, 2)
 
         // Switch #2 back to quarters: b is evicted. The old undo is NOT
         // gone; history stacks, newest last.
@@ -300,8 +308,6 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
-        controller.handle(slot: .topRight)
-        gateway.focused = b
         controller.handle(slot: .sixthLeft)
 
         gateway.kill(a)
@@ -312,7 +318,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(
             canvas.error, "Couldn't restore the evicted windows.")
         XCTAssertTrue(canvas.state.occupants.isEmpty,
-            "requester untiled by undo; dead evictee skipped")
+            "the dead evictee is skipped and the untiled requester has no slot")
         XCTAssertTrue(canvas.undoStack.isEmpty)
     }
 
