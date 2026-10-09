@@ -147,6 +147,25 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertFalse(grantShortcuts.isHiddenOrHasHiddenAncestor)
     }
 
+    func testHideIconSurfacesRenderTheInjectedHotkeyState() throws {
+        // The confirm's copy is pure decision logic (SettingsHotkeyStateTests);
+        // this pins the render: the standing hint must show the injected
+        // state's real label, not the factory combo the old hint hard-coded.
+        let dependencies = SettingsDependencies(
+            settingsHotkeyState: { .live(label: "⌘K") })
+        let controller = makeController(dependencies: dependencies)
+        controller.show(selecting: .general)
+
+        let general = try XCTUnwrap(controller.tabContent(of: .general))
+        let strings = textFields(in: general).map(\.stringValue)
+        XCTAssertTrue(
+            strings.contains { $0.contains("press ⌘K anywhere") },
+            "the hint must render the current binding's real label, got: \(strings)")
+        XCTAssertFalse(
+            strings.contains { $0.contains("⌃⌥⇧⌘,") },
+            "no General-tab surface may hard-code the factory combo, got: \(strings)")
+    }
+
     func testGapStepperShowsTheDefaultAndCommitsTheSetting() throws {
         var reported: Double?
         let dependencies = SettingsDependencies(gapChange: { reported = $0 })

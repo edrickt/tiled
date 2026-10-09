@@ -16,10 +16,11 @@ final class GeneralTab: NSObject {
     /// Reopens the Welcome tab (the General tab's "Show Tiled Guide"
     /// button). The shell owns tab switching.
     var onShowGuide: (() -> Void)?
-    /// Live probe of the Settings fallback hotkey, so the hide-icon
-    /// confirm can name a recovery that is actually registered, never a
-    /// dead combo while removing the last visible handle to the app.
-    var isSettingsHotkeyRegisteredProvider: (() -> Bool)?
+    /// The Open Settings shortcut's live state, so the hide-icon confirm
+    /// and this checkbox's standing hint name a recovery that actually
+    /// works — the current binding's real combo, or relaunch-only — never
+    /// a dead combo while removing the last visible handle to the app.
+    var settingsHotkeyStateProvider: (() -> SettingsHotkeyState)?
     /// Live Accessibility trust probe, injected by the shell: with the
     /// menu-bar icon hidden this tab is the app's only visible surface,
     /// so permission loss must be legible here.
@@ -33,6 +34,9 @@ final class GeneralTab: NSObject {
     private var gapValueLabel: NSTextField!
     private var permissionRow: NSStackView!
     private var loginFailureLabel: NSTextField!
+    /// The hide-icon recovery hint; stored so `loadValues` can re-render
+    /// it when the Open Settings binding changed while the window is open.
+    private var hideIconHintLabel: NSTextField!
     /// Last probed trust state, so a visible permission-row flip can be
     /// announced instead of being a silent layout jump.
     private var lastKnownTrusted: Bool?
@@ -124,19 +128,19 @@ final class GeneralTab: NSObject {
         hideIconCheckbox = NSButton(
             checkboxWithTitle: "Hide menu bar icon",
             target: self, action: #selector(hideIconToggled(_:)))
-        hideIconCheckbox.toolTip = "The icon disappears immediately; press \u{2303}\u{2325}\u{21E7}\u{2318}, to get back."
         stack.addArrangedSubview(hideIconCheckbox)
 
         // Recovery consequence sits with its checkbox, not below the
         // guide: proximity groups it with the control it explains,
-        // instead of orphaning it a divider and a section away.
-        let hint = NSTextField(wrappingLabelWithString:
-            "When the icon is hidden, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere " +
-            "or quit and reopen Tiled to get back here; Settings opens automatically. " +
-            "Hiding asks first, so this never happens by accident.")
-        hint.textColor = .secondaryLabelColor
-        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        stack.addArrangedSubview(hint)
+        // instead of orphaning it a divider and a section away. The copy
+        // is decided from the Open Settings shortcut's live state, so it
+        // names the recovery that actually works (see
+        // `SettingsHotkeyState`), never a hard-coded combo.
+        hideIconHintLabel = NSTextField(wrappingLabelWithString: "")
+        hideIconHintLabel.textColor = .secondaryLabelColor
+        hideIconHintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        stack.addArrangedSubview(hideIconHintLabel)
+        refreshHideIconRecoveryCopy()
 
         let gapHeading = NSTextField(labelWithString: "Tile gap")
         gapHeading.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
@@ -217,6 +221,18 @@ final class GeneralTab: NSObject {
         gapStepper?.doubleValue = settings.tileGap
         refreshGapValueLabel()
         refreshPermissionState()
+        // The binding may have changed in the Shortcuts tab since this
+        // copy was rendered; the hint must show the current binding.
+        refreshHideIconRecoveryCopy()
+    }
+
+    /// Re-renders the hide-icon recovery copy (hint and tooltip) from
+    /// the Open Settings shortcut's live state; the confirm reads the
+    /// same state at toggle time.
+    private func refreshHideIconRecoveryCopy() {
+        let state = settingsHotkeyStateProvider?() ?? .healthyDefault
+        hideIconCheckbox?.toolTip = state.toolTip
+        hideIconHintLabel?.stringValue = state.hint
     }
 
     /// The stepper's value is already clamped on write; read it back so the
@@ -295,21 +311,16 @@ final class GeneralTab: NSObject {
         let hidden = sender.state == .on
         if hidden {
             // Hiding removes the only visible handle to the app (including
-            // Quit), so confirm with a recovery path that is actually
-            // registered: if the Settings fallback hotkey lost to another
-            // app, the dialog must not promise ⌃⌥⇧⌘, combo; it names the
-            // relaunch path instead.
-            let settingsHotkeyAlive = isSettingsHotkeyRegisteredProvider?() ?? true
-            let recovery = settingsHotkeyAlive
-                ? "To get back, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere "
-                    + "or quit and reopen Tiled; Settings opens automatically."
-                : "To get back, quit and reopen Tiled; Settings opens automatically. "
-                    + "(The \u{2303}\u{2325}\u{21E7}\u{2318}, fallback is "
-                    + "already used by another app.)"
+            // Quit), so confirm with a recovery path that actually works:
+            // the state's copy names the Open Settings shortcut as
+            // currently bound — with its real label — or the relaunch-only
+            // recovery with the reason no combo exists, never a hard-coded
+            // or dead combo.
+            let state = settingsHotkeyStateProvider?() ?? .healthyDefault
             let alert = NSAlert()
             alert.messageText = "Hide the menu bar icon?"
             alert.informativeText =
-                "The icon disappears immediately. \(recovery)"
+                "The icon disappears immediately. \(state.confirmRecovery)"
             alert.addButton(withTitle: "Hide Icon")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else {

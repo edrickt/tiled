@@ -28,7 +28,9 @@ struct SettingsDependencies {
     /// Actions whose global hotkey lost registration, so the Shortcuts tab
     /// can surface the failure beside the recorder that accepted it.
     var failedActions: () -> [HotkeyAction] = { [] }
-    /// Whether the Settings fallback hotkey (⌃⌥⇧⌘,) is registered, so the
-    /// hide-icon confirm never promises a dead recovery combo.
-    var isSettingsHotkeyRegistered: () -> Bool = { true }
+    /// The Open Settings shortcut's live state, so the hide-icon confirm
+    /// and the checkbox's standing hint name the recovery that actually
+    /// works: the current binding's real combo when it is live,
+    /// relaunch-only otherwise (see `SettingsHotkeyState`).
+    var settingsHotkeyState: () -> SettingsHotkeyState = { .healthyDefault }
 }
