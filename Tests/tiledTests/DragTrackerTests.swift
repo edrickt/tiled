@@ -40,7 +40,9 @@ final class DragTrackerTests: XCTestCase {
         commitFires = []
         grids = [:]
         expectations = WriteExpectations(
-            gateway: gateway, now: { [weak self] in self?.now ?? Date() })
+            gateway: gateway,
+            notePushed: { [weak self] id, target in self?.tracker.notePushed(id, target) },
+            now: { [weak self] in self?.now ?? Date() })
         tracker = DragTracker(
             expectations: expectations,
             context: DragTracker.Context(
@@ -680,6 +682,74 @@ final class DragTrackerTests: XCTestCase {
 
         XCTAssertTrue(untiled.isEmpty)
         XCTAssertTrue(pushed.isEmpty)
+    }
+
+    // MARK: A late check judges its own write (D3/D11 at the drag seam)
+
+    /// A window occupying `frame` in `.topLeft`, with no echo entry or
+    /// diff baseline primed (the write under test arms its own).
+    private func tileFresh(_ id: WindowID, frame: CGRect) {
+        handles[id] = gateway.addWindow(frame: frame)
+        slots[id] = .topLeft
+        occupants[.topLeft] = id
+    }
+
+    func testLaterUserDragAfterARefusedWriteUntilesInsteadOfSnappingBack() {
+        // A refused placement leaves no echo entry and no phantom diff
+        // baseline behind. Long after, a >100pt title-bar drag is
+        // classified from its first tick and measured from where the
+        // window is: it untiles. Anchored at the refused target it never
+        // reached, the same gesture would measure ~42pt and snap back.
+        let size = CGSize(width: 840, height: 500)
+        let tileRect = CGRect(origin: CGPoint(x: 0, y: 500), size: size)
+        tileFresh(1, frame: tileRect)
+        gateway.refuseNextWrites(handles[1]!)
+        // A same-size re-placement whose target lies by the drag's end:
+        // the mis-anchor reads as "the gesture barely moved".
+        let refused = CGRect(origin: CGPoint(x: 100, y: 600), size: size)
+        XCTAssertEqual(
+            expectations.write(
+                1, handle: handles[1]!, to: refused, on: .displayless,
+                consequence: .slotCommit),
+            .refused)
+
+        now += 4
+        dragTicks(1, size: size, to: [(0, 500), (30, 530), (80, 580), (130, 630)])
+        dragEndFires.last?()
+
+        XCTAssertEqual(untiled, [1], "a >100pt drag untiles")
+        XCTAssertTrue(pushed.isEmpty, "a long drag untiles; it does not snap back")
+    }
+
+    func testLaterUserDragAfterAClampRestoreFailureUntilesInsteadOfSnappingBack() {
+        // A clamped write whose restore is refused leaves the expectation
+        // pointed at the frame the window is actually in (the clamped
+        // frame). Anchored at the restore target the window never
+        // reached, the drag would measure short and snap back (L16).
+        let size = CGSize(width: 500, height: 1000)
+        let previous = CGRect(origin: CGPoint(x: 560, y: 560), size: size)
+        tileFresh(1, frame: previous)
+        let handle = handles[1]!
+        let target = CGRect(x: 0, y: 0, width: 300, height: 1000)
+        let applied = CGRect(origin: CGPoint(x: 400, y: 400), size: size)
+        gateway.writtenFrame = { [weak self] _, requested in
+            guard requested.width < 400 else { return requested }
+            // The restore write back to `previous` is refused with it.
+            self?.gateway.refuseNextWrites(handle)
+            return applied
+        }
+        XCTAssertEqual(
+            expectations.write(
+                1, handle: handle, to: target, on: .displayless,
+                consequence: .slotCommit),
+            .refused)
+
+        now += 4
+        dragTicks(1, size: size, to: [(400, 400), (430, 430), (480, 480), (530, 530)])
+        dragEndFires.last?()
+
+        XCTAssertEqual(untiled, [1], "a >100pt drag untiles")
+        XCTAssertTrue(pushed.isEmpty, "a long drag untiles; it does not snap back")
     }
 
     // MARK: Lifecycle
