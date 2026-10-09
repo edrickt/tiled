@@ -55,7 +55,7 @@ final class SettingsWindowController: NSWindowController {
         // value it reads. The closures come from the delegate already
         // weak-captured, so no indirection through the shell is needed.
         generalTab.isTrustedProvider = dependencies.isTrusted
-        generalTab.isSettingsHotkeyRegisteredProvider = dependencies.isSettingsHotkeyRegistered
+        generalTab.settingsHotkeyStateProvider = dependencies.settingsHotkeyState
         generalTab.onHideIconChange = dependencies.hideIconChange
         generalTab.onGapChange = dependencies.gapChange
         welcomeTab.isTrustedProvider = dependencies.isTrusted

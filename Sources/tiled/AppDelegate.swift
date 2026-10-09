@@ -698,9 +698,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     failedActions: { [weak self] in
                         self?.hotkeys?.failedActions ?? []
                     },
-                    isSettingsHotkeyRegistered: { [weak self] in
-                        guard let hotkeys = self?.hotkeys else { return false }
-                        return !hotkeys.failedActions.contains(.settings)
+                    settingsHotkeyState: { [weak self] in
+                        guard let self else { return .pendingPermission }
+                        // The registration pass runs only after the
+                        // Accessibility trust arrives: before it, nothing
+                        // is registered yet — not "taken by another app".
+                        return SettingsHotkeyState.current(
+                            binding: self.hotkeyStore.binding(for: .settings),
+                            registration: self.hotkeys.map {
+                                $0.failedActions.contains(.settings)
+                                    ? .refused : .registered
+                            } ?? .notStarted)
                     }))
             settingsController = controller
         }

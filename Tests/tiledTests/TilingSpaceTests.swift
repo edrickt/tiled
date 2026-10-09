@@ -357,7 +357,6 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
 
         harness.apply(slot: .sixthLeft, requester: b)
 
@@ -367,6 +366,31 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(space.undoStack.last?.requester, b)
         XCTAssertEqual(space.state.slot(of: b), .sixthLeft)
         XCTAssertNil(space.state.slot(of: a), "evicted window restored (untiled)")
+    }
+
+    func testSwitchSnapshotsTheTiledRequestersVacatedSlot() {
+        // The switch's chapter mirrors the swap's: the tiled requester's
+        // undo entry names the slot it vacated, so undo returns it there
+        // instead of to its pre-tile frame. A fresh requester adds no
+        // entry (its undo is the pre-tile restore).
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topRight, requester: b)
+
+        harness.apply(slot: .sixthLeft, requester: b)
+
+        let snapshot = try! XCTUnwrap(space.undoStack.last?.snapshot)
+        XCTAssertEqual(
+            snapshot.count, 2,
+            "the evicted window and the tiled requester are both undoable")
+        XCTAssertTrue(
+            snapshot.contains { $0.slot == .topLeft },
+            "the evicted window's undo entry names its former slot")
+        XCTAssertTrue(
+            snapshot.contains { $0.slot == .topRight },
+            "the tiled requester's undo entry names the slot it vacated")
+        XCTAssertEqual(space.undoStack.last?.requester, b)
     }
 
     func testRestoreFailureLosesToNothingButWinsOverSilence() {
@@ -713,7 +737,6 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
         harness.apply(slot: .sixthLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")
@@ -738,7 +761,6 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
         harness.apply(slot: .sixthLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")
@@ -759,7 +781,6 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
         harness.apply(slot: .sixthLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")
@@ -798,7 +819,6 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
         harness.apply(slot: .sixthLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
             return XCTFail("switch should snapshot")

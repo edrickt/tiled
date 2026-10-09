@@ -516,6 +516,30 @@
   "    func mousePressed() {\n        mouseIsDown = true\n    }"
  ],
  [
+  "HotkeyService.swift",
+  "teardown clears the registration list without unregistering (phantom combos outlive the service)",
+  "        unregisterAll()\n    }",
+  "        hotKeyRefs = []\n    }"
+ ],
+ [
+  "HotkeyService.swift",
+  "reload registers again without giving the old registrations back (every binding edit double-registers)",
+  "        unregisterAll()\n        registerHotkeys()",
+  "        registerHotkeys()"
+ ],
+ [
+  "HotkeyService.swift",
+  "unregisterAll drops the unregister call (the ledger never gives back)",
+  "            if let ref { unregister(ref) }",
+  "            if let ref { _ = ref }"
+ ],
+ [
+  "HotkeyService.swift",
+  "a refused registration vanishes from failedActions (the menu never warns)",
+  "                failedActions.append(action)",
+  "                _ = action"
+ ],
+ [
   "LiveWindowGateway.swift",
   "half-applied frame write left half-moved (screen disagrees with rolled-back state)",
   "            if needsRestore(\n                positionLanded: positionLanded, sizeLanded: sizeLanded, failed: error != nil)\n            {",
