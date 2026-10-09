@@ -739,17 +739,16 @@ final class ShortcutsTab: NSObject {
 
     /// Resets everything to factory defaults, keeping the previous combos
     /// one step away: the reset button becomes Restore Previous Shortcuts
-    /// until the backup is restored (or overwritten by the next reset;
-    /// the dialog says so when a backup already exists, so the second
-    /// reset never silently destroys the first snapshot).
+    /// until every backup entry is back. Only reached with no backup — a
+    /// press with one present routes to the restore of that backup
+    /// instead — so the dialog makes exactly this one promise, and keeps
+    /// it (a clashing entry stays parked, so its restore keeps being
+    /// offered).
     private func confirmAndReset(_ sender: NSButton) {
-        // The promise is the outcome's contract: with no backup it names
-        // the recovery ("kept … Restore Previous Shortcuts"); with one it
-        // warns that the snapshot is replaced wholesale.
-        let promise = anyResetBackup()
-            ? "This replaces your previous backup; those combos will be gone. "
-                + "Your current combos become the new backup."
-            : "Your current combos are kept; use Restore Previous Shortcuts to get them back."
+        // The promise is the outcome's contract: the reset parks every
+        // combo and the button becomes the named recovery.
+        let promise =
+            "Your current combos are kept; use Restore Previous Shortcuts to get them back."
         let confirmed: Bool
         if let confirmReset {
             confirmed = confirmReset(promise)

@@ -112,7 +112,7 @@ enum MatrixOracle {
         }
         // "its freed cells merge with exactly one adjacent survivor into
         // a whole slot, and that survivor grows into it": the eviction
-        // remainders and the requester's vacated tile.
+        // remainders and the requester's vacated slot.
         var freed: Set<TileCell> = Set(
             evicting.compactMap { slot(of: $0, in: board) }.flatMap(\.cells))
         if let vacated { freed.formUnion(vacated.cells) }
@@ -135,7 +135,7 @@ enum MatrixOracle {
         // Free region: "when the cells left free after the request form
         // exactly one whole slot, the evicted window re-tiles into that
         // slot. The region may include cells that were free before the
-        // request" — and the requester's vacated tile is freed too.
+        // request" — and the requester's vacated slot is freed too.
         var claimed: Set<TileCell> = target.cells
         for (slot, window) in board where window != evictee && slot != vacated {
             claimed.formUnion(slot.cells)

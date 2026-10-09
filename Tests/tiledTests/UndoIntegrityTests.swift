@@ -431,6 +431,50 @@ final class UndoIntegrityTests: XCTestCase {
             "the notice must not offer a key with no chapter behind it")
     }
 
+    // MARK: The zero-evictee boundary (no chapter by design)
+
+    func testASwitchThatEvictsNobodyIsAMoveAndPushesNoChapterByDesign() {
+        // The boundary is deliberate: with the requester the only tiled
+        // window the switch untiles nobody, and a move with no eviction
+        // has no chapter of its own. Undo answers "nothing to undo" —
+        // the move is not a destruction, so there is nothing to put back
+        // and no recovery to invent.
+        let a = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        controller.handle(slot: .sixthLeft) // the only tiled window moves
+
+        XCTAssertEqual(
+            canvas.state.occupant(of: .sixthLeft).map { canvas.handle(of: $0) }, a,
+            "the switch itself landed")
+        XCTAssertTrue(
+            canvas.undoStack.isEmpty, "a move with no eviction keeps no chapter")
+
+        XCTAssertFalse(controller.undoLastDisplacement())
+        guard case .nothingToUndo = feedbacks.last else {
+            return XCTFail("expected .nothingToUndo, got \(feedbacks)")
+        }
+    }
+
+    func testAMoveThatEvictsNobodyPushesNoChapterByDesign() {
+        // The same boundary inside one layout: the move frees the old
+        // slot and lands in a free one, evicting nobody — still no
+        // chapter, still nothing to undo.
+        let a = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        controller.handle(slot: .bottomRight)
+
+        XCTAssertEqual(
+            canvas.state.occupant(of: .bottomRight).map { canvas.handle(of: $0) }, a,
+            "the move itself landed")
+        XCTAssertTrue(
+            canvas.undoStack.isEmpty, "a move with no eviction keeps no chapter")
+
+        XCTAssertFalse(controller.undoLastDisplacement())
+        guard case .nothingToUndo = feedbacks.last else {
+            return XCTFail("expected .nothingToUndo, got \(feedbacks)")
+        }
+    }
+
     // MARK: Refusal attribution and off-Space writes
 
     func testRefusalLandsOnTheActingCanvasNotTheFocusedOne() {

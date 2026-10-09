@@ -390,13 +390,6 @@ final class LiveWindowGateway: WindowGateway {
         }
     }
 
-    /// Frames within a point of each other: the cached last-read frame
-    /// and a fresh read of the same window differ only by rounding.
-    private static func framesClose(_ a: CGRect, _ b: CGRect) -> Bool {
-        abs(a.minX - b.minX) < 1 && abs(a.minY - b.minY) < 1
-            && abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
-    }
-
     /// How far the app's listed frame may sit from the window's baseline
     /// and still be that window: apps that round frames to an internal
     /// grid (Terminal rounds to character cells) settle a few points off
@@ -404,20 +397,12 @@ final class LiveWindowGateway: WindowGateway {
     /// probe can sit that far from the frame the app lists a moment
     /// later. A rounding-level difference must never read as absence —
     /// that is how a live window gets confirmed dead. Deliberately wider
-    /// than the element-adoption fallback's within-a-point bound above:
-    /// there a sibling's near frame would steal a live handle, while here
-    /// a wider bound only delays a ghost's release (a maybe never
-    /// untiles).
+    /// than the element-adoption fallback's within-a-point bound: there
+    /// a sibling's near frame would steal a live handle, while here a
+    /// wider bound only delays a ghost's release (a maybe never
+    /// untiles). Measured with `FrameGeometry.close`, the one near-frame
+    /// comparison: the death match's "same frame".
     static let roundingTolerance: CGFloat = 5
-
-    /// Frames within `roundingTolerance` of each other per edge (origin
-    /// and size): the death match's "same frame".
-    private static func framesClose(
-        _ a: CGRect, _ b: CGRect, tolerance: CGFloat
-    ) -> Bool {
-        abs(a.minX - b.minX) <= tolerance && abs(a.minY - b.minY) <= tolerance
-            && abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
-    }
 
     func observe(
         _ handle: WindowHandle, onChange: @escaping () -> Void,
@@ -750,7 +735,7 @@ final class LiveWindowGateway: WindowGateway {
         if let frame = Self.frame(of: element) {
             for (handle, registeredPID) in pids where registeredPID == pid {
                 guard let cached = lastFrames[handle],
-                      Self.framesClose(cached, frame)
+                      FrameGeometry.close(cached, frame, tolerance: 1)
                 else { continue }
                 elements[handle] = element
                 lastFrames[handle] = frame
@@ -905,7 +890,7 @@ final class LiveWindowGateway: WindowGateway {
         guard let baseline else { return nil }
         let readFrames = listedFrames.compactMap { $0 }
         if readFrames.contains(where: {
-            framesClose($0, baseline, tolerance: roundingTolerance)
+            FrameGeometry.close($0, baseline, tolerance: roundingTolerance)
         }) {
             return true
         }

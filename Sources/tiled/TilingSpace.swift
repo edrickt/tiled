@@ -228,7 +228,7 @@ struct TilingSpace {
         outcome.forget = decision.windowsToRestore(requester: id)
             .filter { $0 != commit.rehoused }
         // Reflow: the cells the event freed (eviction remainders, the
-        // requester's vacated tile) flow into the one survivor that
+        // requester's vacated slot) flow into the one survivor that
         // merges with them into a whole slot. Skipped when the placement
         // or a restore failed: the screen must agree with state before
         // anyone grows into it. The requester, the evicted, and expanded
@@ -356,7 +356,7 @@ struct TilingSpace {
         var snapshot = evicted.compactMap { evictedID in
             snapshotEntry(for: evictedID, fallback: slot, space: context.space)
         }
-        // A tiled requester's vacated tile joins the chapter, exactly as
+        // A tiled requester's vacated slot joins the chapter, exactly as
         // in a swap chapter: undo returns the requester to the slot it
         // vacated instead of releasing a window that was tiled before
         // the request. A fresh requester adds no entry: its undo is the
@@ -390,34 +390,20 @@ struct TilingSpace {
                 commit.refusal = placeResult
                 Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
             }
-            // The chapter is pushed even when the requester's own write
-            // was refused — and even when an evictee's restore write
-            // was: the untiled windows really are gone (a refused
-            // restore forgets all the same), and without it that
-            // destruction would be silent and unrecoverable — a switch
-            // untiles everyone, the app's most destructive action. The
-            // requester joins the chapter only when it actually landed.
             // A refused switch narrates the untile with the tile
             // branch's own sentence, so the refusal and the recovery
-            // coexist exactly as they do after a refused eviction — but
-            // a failed restore keeps that success sentence quiet (the
-            // restore-failure message surfaces ahead of it) so it never
-            // covers a window that refused to go home.
-            if !evicted.isEmpty {
-                commit.snapshot = snapshot
-                commit.requester = commit.clean ? id : nil
-                if commit.notice == nil, restoreFailures.isEmpty {
-                    commit.notice = Self.evictionNotice(
-                        names: evictedNames, count: evicted.count)
-                }
-            }
+            // coexist exactly as they do after a refused eviction.
+            Self.finishEvictionChapter(
+                evicted, names: evictedNames, snapshot: snapshot,
+                landed: placeResult == nil, restoreFailures: restoreFailures,
+                requester: id, commit: &commit)
         }
         context.log("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
         return commit
     }
 
     /// The swap branch: both windows stay tiled, the displaced one taking
-    /// the tile the requester vacates. The displaced window moves first, so
+    /// the slot the requester vacates. The displaced window moves first, so
     /// a refusal anywhere leaves every window where it started.
     private mutating func applySwap(
         _ displaced: WindowID, decision: TilePlan, requester id: WindowID, slot: Slot,
@@ -501,7 +487,7 @@ struct TilingSpace {
         // naming after would degrade every eviction to a count.
         let evictedNames = evicted.compactMap { appName($0, context: context) }
         // Slots leave the state before reflow sees them: the evicted
-        // slots and the requester's vacated tile together form the
+        // slots and the requester's vacated slot together form the
         // freed region the survivors may absorb.
         let evictedSlots = evicted.compactMap { state.slot(of: $0) }
         let previous = state.slot(of: id)
@@ -521,7 +507,7 @@ struct TilingSpace {
         var snapshot = evicted.compactMap { evictedID in
             snapshotEntry(for: evictedID, fallback: slot, space: context.space)
         }
-        // A tiled requester's vacated tile joins the chapter, exactly as
+        // A tiled requester's vacated slot joins the chapter, exactly as
         // in a swap chapter: undo returns the requester to the slot it
         // vacated instead of releasing a window that was tiled before
         // the request. A fresh requester adds no entry: its undo is the
@@ -572,29 +558,15 @@ struct TilingSpace {
             }
             commit.reflowFreed = freed
         }
-        if !evicted.isEmpty {
-            // Ordinary eviction gets the same narrative as a layout
-            // switch: a notice naming the displaced app plus the shared
-            // one-step undo. The switch was never special; it was
-            // just the first destruction anyone bothered to narrate.
-            // A re-house already narrated itself (the victim moved,
-            // nobody went back). The chapter is pushed even when the
-            // requester's own write was refused — and even when an
-            // evictee's restore write was: every eviction forgets its
-            // window all the same, and without the chapter that
-            // destruction would be silent and unrecoverable. The
-            // requester joins the chapter only when it actually landed.
-            commit.snapshot = snapshot
-            commit.requester = clean ? id : nil
-            // The success sentence stays quiet behind a failed restore:
-            // the restore-failure message surfaces ahead of it (the
-            // partial-failure precedence the undo story uses), so
-            // "went back to where they were" never covers a window that
-            // refused to.
-            if commit.notice == nil, restoreFailures.isEmpty {
-                commit.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
-            }
-        }
+        // Ordinary eviction gets the same narrative as a layout switch:
+        // a notice naming the displaced app plus the shared one-step
+        // undo. The switch was never special; it was just the first
+        // destruction anyone bothered to narrate. A re-house already
+        // narrated itself (the victim moved, nobody went back).
+        Self.finishEvictionChapter(
+            evicted, names: evictedNames, snapshot: snapshot,
+            landed: placeResult == nil, restoreFailures: restoreFailures,
+            requester: id, commit: &commit)
         return commit
     }
 
@@ -626,6 +598,31 @@ struct TilingSpace {
     }
 
     // MARK: Eviction narrative
+
+    /// The chapter finish both eviction paths share. The chapter is
+    /// pushed even when the requester's own write was refused — and even
+    /// when an evictee's restore write was: every eviction forgets its
+    /// window all the same, and without the chapter that destruction
+    /// would be silent and unrecoverable — a switch untiles everyone,
+    /// the app's most destructive action. The requester joins the
+    /// chapter only when its placement actually landed (`landed`), never
+    /// on the event being failure-free: a refused restore is not the
+    /// requester's. The success sentence stays quiet behind a failed
+    /// restore (the restore-failure message surfaces ahead of it), so
+    /// "went back to where they were" never covers a window that
+    /// refused to.
+    private static func finishEvictionChapter(
+        _ evicted: [WindowID], names: [String], snapshot: [EvictedWindow],
+        landed: Bool, restoreFailures: [String],
+        requester id: WindowID, commit: inout Commit
+    ) {
+        guard !evicted.isEmpty else { return }
+        commit.snapshot = snapshot
+        commit.requester = landed ? id : nil
+        if commit.notice == nil, restoreFailures.isEmpty {
+            commit.notice = evictionNotice(names: names, count: evicted.count)
+        }
+    }
 
     /// One snapshot entry per displaced window, captured before the
     /// restore deletes its record: the handle to find it again, the slot

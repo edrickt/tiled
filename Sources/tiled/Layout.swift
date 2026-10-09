@@ -531,12 +531,12 @@ struct TilingState: Equatable {
             .sorted()
         // Tile swap: the requester offers its own tile, so a single
         // window in the way can take it instead of losing its tiling.
-        // The vacated tile must not overlap the target (the displaced
+        // The vacated slot must not overlap the target (the displaced
         // window would land inside the requester's new tile), and more
         // than one blocker (or an untiled requester with no tile to
         // offer) falls back to eviction. A blocker whose leftover (its
         // slot minus the target) is a clean whole slot steps aside
-        // instead — nearer, and the requester's vacated tile frees up
+        // instead — nearer, and the requester's vacated slot frees up
         // for reflow — so the swap only stands when no such home exists.
         if blockers.count == 1, let previous = self.slot(of: window),
             !previous.overlaps(slot),

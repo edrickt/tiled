@@ -338,7 +338,7 @@
  [
   "LiveWindowGateway.swift",
   "matching listed frame ignored (element churn reads as death)",
-  "        if readFrames.contains(where: {\n            framesClose($0, baseline, tolerance: roundingTolerance)\n        }) {\n            return true\n        }",
+  "        if readFrames.contains(where: {\n            FrameGeometry.close($0, baseline, tolerance: roundingTolerance)\n        }) {\n            return true\n        }",
   "        if false {\n            return true\n        }"
  ],
  [
@@ -368,14 +368,14 @@
  [
   "WriteExpectations.swift",
   "no-op write pushed anyway (expectation never converges)",
-  "        if let live, Self.framesClose(live, target, tolerance: Self.noOpWriteTolerance) {\n            voidPending(id)\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }",
+  "        if let live, FrameGeometry.close(live, target, tolerance: Self.noOpWriteTolerance) {\n            voidExpected(id)\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }",
   ""
  ],
  [
   "WriteExpectations.swift",
   "off-Space defer never taken (hidden canvas written)",
-  "        guard isVisible(space) else {\n            voidPending(id)\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }",
-  "        guard true else {\n            voidPending(id)\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }"
+  "        guard isVisible(space) else {\n            voidExpected(id)\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }",
+  "        guard true else {\n            voidExpected(id)\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }"
  ],
  [
   "WriteExpectations.swift",

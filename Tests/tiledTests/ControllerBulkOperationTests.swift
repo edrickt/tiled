@@ -129,7 +129,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertFalse(canvas.undoStack.isEmpty)
         XCTAssertEqual(
             canvas.evictedCount, 2,
-            "the evicted window and the requester's vacated tile are both recoverable")
+            "the evicted window and the requester's vacated slot are both recoverable")
         XCTAssertNotNil(canvas.notice)
         XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft)
         XCTAssertEqual(
@@ -186,7 +186,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .topRight)
 
         // Cross-layout switch #1: a is evicted (undo names a and b's
-        // vacated tile).
+        // vacated slot).
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
         XCTAssertFalse(canvas.undoStack.isEmpty)

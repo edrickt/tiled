@@ -64,7 +64,7 @@ final class MatrixCrossCheckTests: XCTestCase {
             expected[previous] = displaced
             XCTAssertEqual(
                 canvas.state.occupants, expected,
-                "\(context): the displaced window takes the vacated tile")
+                "\(context): the displaced window takes the vacated slot")
         case .tile(let evicting):
             XCTAssertEqual(
                 canvas.state.occupant(of: target), replay.requester,
@@ -267,7 +267,7 @@ final class MatrixCrossCheckTests: XCTestCase {
                 target: .sixthsRightTwoThirds,
                 homes: [2: .sixthLeft],
                 expected: [.sixthsRightTwoThirds: 1, .sixthLeft: 2],
-                rule: "the cells left free after the request include the requester's vacated tile"),
+                rule: "the cells left free after the request include the requester's vacated slot"),
             Pin(
                 config: [.sixthsLeftTwoThirds], requester: nil, target: .sixthTopLeft,
                 homes: [:],

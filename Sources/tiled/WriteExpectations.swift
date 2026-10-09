@@ -95,7 +95,7 @@ final class WriteExpectations {
     private var expected: [WindowID: ExpectedWrite] = [:]
     /// Last frame we wanted each window in, written or not.
     private var intents: [WindowID: CGRect] = [:]
-    /// Pending late checks by window: one per performed write, the newer
+    /// Scheduled late checks by window: one per performed write, the newer
     /// superseding the older. The serial proves a firing closure belongs
     /// to the check still registered: a cancelled work item whose fire
     /// escapes judges nothing.
@@ -199,7 +199,7 @@ final class WriteExpectations {
         // back: sizing an off-Space window can pull it onto the visible
         // Space. The mark re-asserts the canvas later.
         guard isVisible(space) else {
-            voidPending(id)
+            voidExpected(id)
             markStale(space)
             log("write win\(id) deferred off-Space")
             return .deferredOffSpace
@@ -210,8 +210,8 @@ final class WriteExpectations {
         // already-correct window. The pre-write frame is also the
         // fallback the clamp guard restores to below.
         let live = gateway.frame(of: handle)
-        if let live, Self.framesClose(live, target, tolerance: Self.noOpWriteTolerance) {
-            voidPending(id)
+        if let live, FrameGeometry.close(live, target, tolerance: Self.noOpWriteTolerance) {
+            voidExpected(id)
             log("write win\(id) no-op skip target=\(target)")
             return .skippedNoOp
         }
@@ -275,10 +275,11 @@ final class WriteExpectations {
         intents[id] = frame
     }
 
-    /// Records where a window is going without arming an expectation: no
-    /// write is in flight. Untile-all primes the slot rects its undo will
-    /// write, and the drag loop primes the pushes it schedules; the
-    /// actual write arms the expectation via `noteExpected`.
+    /// Records where a window is going without arming an expectation:
+    /// no echo entry and no late check here. Untile-all primes the slot
+    /// rects its undo will write, and the drag loop primes the pushes it
+    /// schedules; the actual write arms the expectation via
+    /// `noteExpected`.
     func noteIntent(_ id: WindowID, _ frame: CGRect) {
         intents[id] = frame
     }
@@ -307,20 +308,20 @@ final class WriteExpectations {
         checks[id] = PendingCheck(serial: serial, cancel: cancel, consequence: consequence)
     }
 
-    /// Drops the pending check for a window, cancelling its scheduled
-    /// work item. A no-op when nothing is pending.
+    /// Drops a window's scheduled check, cancelling its work item. A
+    /// no-op when no check is scheduled.
     private func cancelCheck(_ id: WindowID) {
         checks.removeValue(forKey: id)?.cancel()
     }
 
-    /// Voids a window's whole outstanding write life: the pending check
-    /// and its echo entry. A no-op skip or off-Space deferral supersedes
+    /// Voids a window's whole expected write: its armed echo entry and
+    /// scheduled check. A no-op skip or off-Space deferral supersedes
     /// the previous write's claim without writing anything, so that
     /// write's late check must never be paid against the state the newer
     /// outcome leaves: the window keeps the slot it visibly occupies.
     /// Intent survives (it is where we were going, not an echo), and a
     /// newer performed write arms its own life.
-    private func voidPending(_ id: WindowID) {
+    private func voidExpected(_ id: WindowID) {
         cancelCheck(id)
         expected[id] = nil
     }
@@ -344,7 +345,7 @@ final class WriteExpectations {
 
     // MARK: Tick classification
 
-    /// What one gateway tick means for the pending expectation.
+    /// What one gateway tick means for the armed expectation.
     enum TickVerdict: Equatable {
         /// No expectation: the caller processes the tick fully.
         case live
@@ -368,7 +369,7 @@ final class WriteExpectations {
         case converging
     }
 
-    /// Classifies one gateway tick against the pending expectation and
+    /// Classifies one gateway tick against the armed expectation and
     /// advances its echo trail (settle, distance, staleness). `.live` when
     /// no expectation exists. The caller owns what each verdict means for
     /// the drag loop; the entry's own transitions happen here.
@@ -380,7 +381,7 @@ final class WriteExpectations {
         // close ticks; a tick that moves AWAY from the target means a real
         // user drag took over, so the entry clears and the tick processes
         // live.
-        if Self.framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
+        if FrameGeometry.close(entry.frame, frame, tolerance: Self.echoTolerance) {
             if entry.settled,
                 now().timeIntervalSince(entry.date) > Self.settleWindow
             {
@@ -436,7 +437,7 @@ final class WriteExpectations {
 
     // MARK: Late convergence
 
-    /// Convergence verdict for one pending write. Nil = inconclusive,
+    /// Convergence verdict for one expected write. Nil = inconclusive,
     /// leave the window alone: the entry is gone (consumed by success,
     /// cleared by takeover, or superseded by a newer write) or frames
     /// arrived but never settled. `.ignored` = the write never took
@@ -465,7 +466,7 @@ final class WriteExpectations {
             log("convergence win\(id): live frame unreadable, skipping")
             return nil
         }
-        if Self.framesClose(entry.frame, live, tolerance: Self.echoTolerance) {
+        if FrameGeometry.close(entry.frame, live, tolerance: Self.echoTolerance) {
             expected[id] = nil
             log("convergence win\(id): silent but at target (live=\(live))")
             return .converged
@@ -475,7 +476,7 @@ final class WriteExpectations {
 
     // MARK: Forgetting
 
-    /// Forgets a window: clears the echo entry and cancels the pending
+    /// Forgets a window: clears the echo entry and cancels the scheduled
     /// convergence check, so a stale expectation never swallows a future
     /// drag and a check never rolls back a window that moved on. Intent
     /// survives: undo chapters replay writes for ids whose frames were
@@ -488,16 +489,6 @@ final class WriteExpectations {
     }
 
     // MARK: Geometry helpers
-
-    private static func framesClose(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
-        abs(a.minX - b.minX) <= tolerance && abs(a.maxX - b.maxX) <= tolerance
-            && abs(a.minY - b.minY) <= tolerance && abs(a.maxY - b.maxY) <= tolerance
-    }
-
-    /// True when `a` and `b` differ by at most `tolerance` per edge.
-    static func close(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
-        framesClose(a, b, tolerance: tolerance)
-    }
 
     /// Sum of per-edge deltas between two frames.
     private static func frameDistance(_ a: CGRect, _ b: CGRect) -> CGFloat {

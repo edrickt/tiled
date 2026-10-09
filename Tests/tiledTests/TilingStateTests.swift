@@ -76,7 +76,7 @@ final class TilingStateTests: XCTestCase {
         // The report's example, inverted: the middle third sits inside
         // the right two-thirds a tiled requester is asking for. The
         // blocker has no leftover of its own, so the step-aside cannot
-        // fire and the vacated tile still offers a landing: swap stands.
+        // fire and the vacated slot still offers a landing: swap stands.
         var state = TilingState()
         state.commit(window: a, into: .sixthTopLeft)
         state.commit(window: b, into: .sixthMiddle)

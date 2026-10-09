@@ -47,7 +47,7 @@ final class HarnessObservabilityTests: XCTestCase {
             XCTAssertNil(push.rects[bottom])
             XCTAssertEqual(
                 push.rects, [top: harness.rect(.topLeft)],
-                "the neighbour is pushed exactly its rect under the dragged grid")
+                "the neighbour is pushed exactly its rect after the splitter drag")
             XCTAssertEqual(
                 harness.frame(of: top), harness.rect(.topLeft),
                 "the push performs its write through the canvas, like the controller's")
@@ -93,6 +93,6 @@ final class HarnessObservabilityTests: XCTestCase {
         XCTAssertNotEqual(
             harness.frame(of: id),
             harness.space.grid.rect(for: .topLeft, in: harness.bounds),
-            "the placed frame is gap-inset out of the box")
+            "the placed frame leaves the gap inside the box")
     }
 }

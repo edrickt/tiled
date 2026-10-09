@@ -22,7 +22,7 @@ final class GapRulesTests: XCTestCase {
         let id = harness.addWindow(frame: original)
         harness.apply(slot: .topLeft, requester: id)
         let tiled = harness.rect(.topLeft)
-        XCTAssertNotEqual(tiled, harness.bounds, "the tile carries the gap")
+        XCTAssertNotEqual(tiled, harness.bounds, "the slot carries the gap")
 
         harness.space.expandToggle(window: id, context: harness.context())
 

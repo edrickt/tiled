@@ -291,7 +291,7 @@ final class PerMonitorTests: XCTestCase {
         let expectation = XCTestExpectation(description: "neighbor re-push")
         DispatchQueue.main.async {
             // Positive side: the dragged monitor's splitter actually
-            // moved and its neighbor re-pushed onto the dragged grid,
+            // moved and its neighbor re-pushed after the splitter drag,
             // the isolation claim must be two-sided, or a mutant that
             // deletes the re-push entirely would pass.
             let grid = self.controller.canvas(for: self.leftID).grid
@@ -301,7 +301,7 @@ final class PerMonitorTests: XCTestCase {
             XCTAssertEqual(
                 self.gateway.frame(of: leftNeighbor),
                 grid.rect(for: .bottomLeft, in: Self.left.visibleFrame),
-                "the dragged monitor's neighbor re-pushed onto the dragged grid")
+                "the dragged monitor's neighbor re-pushed after the splitter drag")
             // Negative side: the other monitor's window never moves.
             XCTAssertEqual(self.gateway.frame(of: rightHandle), rightBefore)
             expectation.fulfill()

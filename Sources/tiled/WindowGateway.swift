@@ -11,6 +11,18 @@ struct WindowHandle: Hashable {
     let id: Int
 }
 
+/// The one near-frame comparison: true when `a` and `b` sit within
+/// `tolerance` of each other per component (origin and size). Shared by
+/// the echo matcher and the death match, so "the same frame" means one
+/// thing everywhere: a few points of rounding drift (which moves origin
+/// and size together) must never read as two different frames.
+enum FrameGeometry {
+    static func close(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
+        abs(a.minX - b.minX) <= tolerance && abs(a.minY - b.minY) <= tolerance
+            && abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
+    }
+}
+
 /// Liveness of a window, as far as the gateway can tell.
 enum Liveness {
     case alive

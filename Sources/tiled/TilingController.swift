@@ -862,7 +862,7 @@ final class TilingController {
     /// ordinary eviction, or a swap. All share one recovery path: the
     /// displaced windows return to their slots, the requester to its
     /// pre-tile frame (a swap's requester entry re-tiles it into its
-    /// vacated tile, swapping back). Consumes the entry it restores, so
+    /// vacated slot, swapping back). Consumes the entry it restores, so
     /// repeated ⌃⌥⇧⌘Z walks back through history up to `undoDepth`: the
     /// stack, not amnesia, bounds the past.
     ///

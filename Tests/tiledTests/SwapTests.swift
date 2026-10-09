@@ -67,7 +67,7 @@ final class SwapTests: XCTestCase {
         XCTAssertEqual(
             canvas.state.slot(of: 3), .sixthRight,
             "the containing blocker steps into its own leftover")
-        XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft, "the bystander absorbs the vacated tile")
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft, "the bystander absorbs the vacated slot")
         XCTAssertEqual(canvas.state.tiledWindows.count, 3, "nobody was untiled")
         XCTAssertEqual(
             gateway.frame(of: a), expectedRect(.sixthMiddle, for: a))
@@ -167,7 +167,7 @@ final class SwapTests: XCTestCase {
             "undo re-tiles the stepped-aside window into its own tile")
         XCTAssertEqual(
             gateway.frame(of: b), expectedRect(.sixthBottomLeft, for: b),
-            "undo undoes the reflow that absorbed the vacated tile")
+            "undo undoes the reflow that absorbed the vacated slot")
         XCTAssertTrue(canvas.undoStack.isEmpty)
     }
 

@@ -376,7 +376,7 @@ final class DragTrackerTests: XCTestCase {
             XCTAssertEqual(self.pushed.count, 1)
             XCTAssertNil(self.pushed.first?.rects[2], "dragged window never re-pushed")
             // Window 1's live frame (0,500,840,500) is its own bounds
-            // (identity boundsOf). TopLeft under the dragged grid:
+            // (identity boundsOf). TopLeft after the splitter drag:
             // mid line at 500 + 0.8·500 = 900, left column 420 wide,
             // top strip 500·(1−0.8) = 100 tall.
             XCTAssertEqual(

@@ -193,6 +193,19 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         return nil
     }
 
+    /// The first visible label containing `needle`, for the reports that
+    /// are not the park's "disabled:" advice (e.g. a restore's clash
+    /// report).
+    private func label(containing needle: String, in view: NSView) -> String? {
+        if let field = view as? NSTextField, field.stringValue.contains(needle) {
+            return field.stringValue
+        }
+        for subview in view.subviews {
+            if let hit = label(containing: needle, in: subview) { return hit }
+        }
+        return nil
+    }
+
     private func findRecorder(action: HotkeyAction, in view: NSView) -> RecorderButton? {
         if let button = view as? RecorderButton, button.hotkeyAction == action { return button }
         for subview in view.subviews {
@@ -525,6 +538,11 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         XCTAssertEqual(
             store.binding(for: claimer), combo,
             "the edit that claimed the combo keeps it")
+        XCTAssertEqual(
+            label(containing: "Not restored", in: view),
+            "Not restored: \(claimed.title) (taken by \(claimer.title)).",
+            "the partial restore reports the clash by name, so the promise "
+                + "stays checkable instead of quietly half-kept")
         XCTAssertNotNil(
             defaults.dictionary(forKey: "resetBackupHotkey.\(claimed.storageKey)"),
             "the backup entry survives for when the clash is resolved")

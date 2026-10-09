@@ -528,7 +528,7 @@ final class DragTracker {
             // evict an already-correct window. Live frame, not intent;
             // intent equals the target by definition.
             if let live = context.liveFrameOf(id),
-                WriteExpectations.close(
+                FrameGeometry.close(
                     live, rect, tolerance: WriteExpectations.noOpWriteTolerance)
             {
                 log("skip win\(id) no-op write rect=\(rect)")

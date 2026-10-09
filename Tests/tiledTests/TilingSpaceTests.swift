@@ -214,7 +214,7 @@ final class TilingSpaceTests: XCTestCase {
     func testSwapMovesBothWindowsAndKeepsThemTiled() {
         // The exact-slot swap: the top-left quad requests the top-right
         // quad its occupant holds. The blocker has no leftover of its
-        // own, so it takes the requester's vacated tile; nobody is
+        // own, so it takes the requester's vacated slot; nobody is
         // untiled.
         let a = harness.addWindow()
         let b = harness.addWindow()
@@ -228,7 +228,7 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(space.state.slot(of: a), .topRight)
         XCTAssertEqual(
             space.state.slot(of: b), .topLeft,
-            "the displaced window takes the tile the requester vacated")
+            "the displaced window takes the slot the requester vacated")
         XCTAssertEqual(harness.frame(of: a), harness.rect(.topRight))
         XCTAssertEqual(harness.frame(of: b), harness.rect(.topLeft))
     }
@@ -302,7 +302,7 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(space.state.slot(of: a), .topLeft)
         XCTAssertEqual(space.state.slot(of: b), .topRight, "rolled back to its own tile")
         // The displaced window's first write succeeded, so it visibly sits
-        // in the requester's vacated tile unless the rollback writes it
+        // in the requester's vacated slot unless the rollback writes it
         // home. State alone cannot see that: an unwritten rollback leaves
         // screen and state disagreeing while this test stays green.
         XCTAssertEqual(
@@ -330,7 +330,7 @@ final class TilingSpaceTests: XCTestCase {
             "the stepped-aside window's undo entry names its own former tile")
         XCTAssertTrue(
             snapshot.contains { $0.slot == .sixthTopLeft },
-            "the requester's undo entry names its vacated tile")
+            "the requester's undo entry names its vacated slot")
     }
 
     /// A swap plan whose requester is not tiled degrades to a plain
