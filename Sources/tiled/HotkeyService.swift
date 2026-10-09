@@ -90,33 +90,27 @@ final class HotkeyService {
     static let undoDefaultBinding = HotkeyBinding(
         modifiers: undoModifiers, keyCode: undoKeyCode)
 
-    /// Pure id → action mapping over the slot table the callback holds.
-    /// Extracted from carbonCallback so a table test pins it: a routing
-    /// typo here turns a global hotkey into a dead key while the menu
-    /// still advertises it. Unknown ids return nil (the callback answers
-    /// eventNotHandledErr, letting the event fall through to other apps).
-    static func route(
-        forHotKeyID id: UInt32, slotByID: [UInt32: Slot]
-    ) -> HotkeyAction? {
-        if let slot = slotByID[id] { return .slot(slot) }
-        switch id {
-        case expandHotkeyID: return .expand
-        case evictHotkeyID: return .evict
-        case settingsHotkeyID: return .settings
-        case undoHotkeyID: return .undo
-        case resetSplittersHotkeyID: return .resetSplitters
-        default: return nil
-        }
+    /// The one routing rule — id → action, the inverse of
+    /// `HotkeyAction.hotkeyID`, the same mapping the combos are
+    /// registered under — so the id a combo is registered under and the
+    /// id its press routes by cannot drift apart. Carbon dispatch runs
+    /// through here, and the table test pins it: a routing typo here turns
+    /// a global hotkey into a dead key — or another action's — while the
+    /// menu still advertises it. Unknown ids return nil (the callback
+    /// answers eventNotHandledErr, letting the event fall through to
+    /// other apps).
+    static func route(forHotKeyID id: UInt32) -> HotkeyAction? {
+        actionByID[id]
     }
 
+    /// The routing table, built once from the action → id rule the
+    /// registrations use.
+    private static let actionByID: [UInt32: HotkeyAction] = Dictionary(
+        uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID, $0) })
+
+    /// The handler the dispatch fires, carried to the Carbon callback.
     private final class Context {
         var handler: ((HotkeyAction) -> Void)?
-        let actionByID: [UInt32: HotkeyAction]
-
-        init() {
-            actionByID = Dictionary(
-                uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID, $0) })
-        }
     }
 
     private static let signature = OSType(0x54_49_4C_44) // 'TILD'
@@ -283,7 +277,11 @@ final class HotkeyService {
         RemoveEventHandler(ref)
     }
 
-    private static let carbonCallback: EventHandlerUPP = { _, event, userData in
+    /// The Carbon handler installed for hotkey presses: reads the event's
+    /// hotkey id and routes it through the pinned rule to the handler.
+    /// Internal, not private, so the dispatch tests can press it with the
+    /// very event objects the system delivers.
+    static let carbonCallback: EventHandlerUPP = { _, event, userData in
         guard let event else { return OSStatus(eventNotHandledErr) }
         var hotKeyID = EventHotKeyID()
         let status = GetEventParameter(
@@ -296,7 +294,7 @@ final class HotkeyService {
             &hotKeyID)
         guard status == noErr else { return status }
         let context = Unmanaged<Context>.fromOpaque(userData!).takeUnretainedValue()
-        guard let action = context.actionByID[hotKeyID.id] else {
+        guard let action = HotkeyService.route(forHotKeyID: hotKeyID.id) else {
             return OSStatus(eventNotHandledErr)
         }
         DispatchQueue.main.async { context.handler?(action) }

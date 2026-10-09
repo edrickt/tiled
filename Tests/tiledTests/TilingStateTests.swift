@@ -305,7 +305,7 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testHotkeyIDRoundTripsEverySlot() {
-        // Mirrors HotkeyService.Context: hotkeyID must be a unique dense
+        // Mirrors HotkeyService.route's table: hotkeyID must be a unique dense
         // 1-based index into allCases, and every id must resolve back to
         // its slot. A duplicate or gap means a hotkey fires the wrong slot
         // or nothing at all.
