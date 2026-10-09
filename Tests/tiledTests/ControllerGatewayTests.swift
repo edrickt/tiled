@@ -461,6 +461,45 @@ final class ControllerGatewayTests: XCTestCase {
             "death confirmed across the window releases the slot")
     }
 
+    func testFailedRegistrationDragAndOneTransientProbeFailureKeepTheSlot() {
+        // D13's failure scenario end to end. The window's move
+        // notifications failed to register, so the user's drag is
+        // invisible to Tiled and no read refreshes the frame baseline
+        // the geometric death confirmation matches against. One
+        // transient probe failure is then corroborated by the app's
+        // window list — which answers and lists the dragged window right
+        // where it is. A stale baseline must not turn that into a
+        // confirmed death: the window is alive on screen and keeps its
+        // slot. Death confirmation is collapsed to a single verdict here
+        // so the pin holds the geometric confirmation itself to account,
+        // not the confirmation window behind it.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        gateway.registrationFailures.insert(handle)
+        controller.handle(slot: .topLeft)
+
+        // The user drags the window elsewhere. With the registration
+        // failed the OS never delivers the move, so nothing re-reads the
+        // frame and the baseline stays behind.
+        gateway.simulateChange(handle, to: CGRect(x: 250, y: 150, width: 800, height: 600))
+
+        // The routine probe tick between the drag and the transient
+        // answers — the pass that keeps the baseline honest.
+        controller.pruneDeadWindows()
+
+        // One transient probe failure; the app's window list answers and
+        // lists the dragged window at its new frame.
+        gateway.probeFailures.insert(handle)
+        controller.pruneDeadWindows()
+
+        XCTAssertEqual(
+            canvas.state.slot(of: 1), .topLeft,
+            "a dragged window the app still lists is alive: the stale baseline must not condemn it")
+        XCTAssertTrue(
+            gateway.releaseCalls.isEmpty,
+            "death confirmation cannot prune a live window")
+    }
+
     func testPruneAsksTheGatewayOnceForAllRecords() {
         // The defect-4 fix: one prune pass assembles one liveness request
         // holding every managed record, so the gateway walks each app's
