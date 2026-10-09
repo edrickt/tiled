@@ -305,6 +305,75 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertNil(canvas.error)
     }
 
+    func testRefusedRestoreAfterEvictionsKeepsTheDestructionUndoable() {
+        // The restore-write mirror of the refused placement above: two
+        // evictees, one app refuses the write home. The eviction that
+        // really landed must stay undoable — one refused restore no
+        // longer disarms the chapter (every eviction forgets its window
+        // all the same) — and undo still returns the window that went
+        // home. The refusal surfaces its restore-failure message ahead
+        // of any success sentence.
+        let m = focusNewWindow()
+        controller.handle(slot: .sixthMiddle)
+        let r = focusNewWindow(CGRect(x: 50, y: 50, width: 700, height: 500))
+        controller.handle(slot: .sixthRight)
+        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+
+        gateway.refuseNextWrites(m)
+        controller.handle(slot: .sixthsRightTwoThirds) // evicts m and r; m refuses its restore
+
+        XCTAssertEqual(
+            gateway.frame(of: r), CGRect(x: 50, y: 50, width: 700, height: 500),
+            "r really did go home")
+        XCTAssertEqual(
+            canvas.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+        XCTAssertNil(canvas.notice, "the refusal must not be narrated as success")
+        XCTAssertFalse(canvas.undoStack.isEmpty, "the eviction that landed is undoable")
+
+        controller.undoLastDisplacement()
+
+        XCTAssertEqual(
+            canvas.state.occupant(of: .sixthRight).map { canvas.handle(of: $0) }, r,
+            "undo returns the window that went home")
+        XCTAssertEqual(
+            canvas.state.occupant(of: .sixthMiddle).map { canvas.handle(of: $0) }, m,
+            "the refused restore is undoable all the same")
+    }
+
+    func testRefusedRestoreAfterSwitchKeepsTheDestructionUndoable() {
+        // The switch mirror: a quarters pair untiles behind a sixths
+        // request whose restore writes split — one lands, one refuses.
+        // The untile stays undoable and undo returns the window that
+        // went home; the refusal keeps the success sentence quiet.
+        let a = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        let b = focusNewWindow(CGRect(x: 50, y: 50, width: 700, height: 500))
+        controller.handle(slot: .topRight)
+        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+
+        gateway.refuseNextWrites(a)
+        controller.handle(slot: .sixthLeft) // switch untiles a and b; a refuses its restore
+
+        XCTAssertEqual(
+            gateway.frame(of: b), CGRect(x: 50, y: 50, width: 700, height: 500),
+            "b really did go home")
+        XCTAssertEqual(
+            canvas.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+        XCTAssertNil(canvas.notice, "the refusal must not be narrated as success")
+        XCTAssertFalse(canvas.undoStack.isEmpty, "the switch's untile is undoable")
+
+        controller.undoLastDisplacement()
+
+        XCTAssertEqual(
+            canvas.state.occupant(of: .topRight).map { canvas.handle(of: $0) }, b,
+            "undo returns the window that went home")
+        XCTAssertEqual(
+            canvas.state.occupant(of: .topLeft).map { canvas.handle(of: $0) }, a,
+            "the refused restore is undoable all the same")
+    }
+
     // MARK: Re-house region and empty chapters
 
     func testReHouseUsesTheRegionTheRequestActuallyLeavesFree() {

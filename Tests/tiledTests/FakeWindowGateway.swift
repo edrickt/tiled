@@ -4,8 +4,10 @@ import CoreGraphics
 /// In-memory `WindowGateway`: the second adapter behind the seam.
 ///
 /// Windows are plain frames in a dictionary; observation handlers fire
-/// synchronously via `simulateChange`. Refusals are scripted per handle
-/// (`refuseFrames`), deaths via `kill`. No AX, no AppKit, no runloop.
+/// synchronously via `simulateChange`. Refusals, probe failures, and
+/// registration failures are scripted per handle; deaths via `kill` or
+/// via the real death standard judging those scripts. No AX, no AppKit,
+/// no runloop.
 final class FakeWindowGateway: WindowGateway {
     private var nextID = 1
     struct Window {
@@ -89,6 +91,7 @@ final class FakeWindowGateway: WindowGateway {
     func frame(of handle: WindowHandle) -> CGRect? {
         guard let window = windows[handle], window.alive else { return nil }
         if hideFrames.contains(handle) { return nil }
+        lastFrames[handle] = window.frame
         return window.frame
     }
 
@@ -140,6 +143,11 @@ final class FakeWindowGateway: WindowGateway {
         releaseCalls.append(handle)
         changeHandlers[handle] = nil
         destroyedHandlers[handle] = nil
+        // Like live's release, the element drops: later frame reads go
+        // dark and liveness reads dead, so an undo-on-a-released-handle
+        // shape cannot pass against a window the fake kept around.
+        windows[handle] = nil
+        lastFrames[handle] = nil
     }
 
     /// Handles whose liveness probe reports unknown (a busy app that
@@ -154,6 +162,31 @@ final class FakeWindowGateway: WindowGateway {
     /// Handles whose frame reads fail while the window lives: the same
     /// lid-close transient on the frame-read path.
     var hideFrames: Set<WindowHandle> = []
+    /// Handles whose liveness probe fails while the window lives: the
+    /// lid-close transient on the held element. The verdict is the real
+    /// death standard's — the failed probe is corroborated against the
+    /// owning app's window list and the frame baseline, the same
+    /// assembly the live gateway judges with — so tests can drive the
+    /// non-happy shapes (element churn, geometric absence, undeterminable
+    /// membership) without scripting the verdict.
+    var probeFailures: Set<WindowHandle> = []
+    /// Handles whose change notifications could not be registered: the
+    /// OS delivers neither moves nor destroys for them. `observe` keeps
+    /// the handlers (the controller held up its end) but nothing
+    /// simulates through — the failed registration's observable shape.
+    var registrationFailures: Set<WindowHandle> = []
+    /// Last read frame per handle: the frame baseline the geometric
+    /// death confirmation matches against, with the live gateway's
+    /// staleness rules — seeded when observing starts, refreshed by
+    /// frame reads (and successful probes), never by a move nobody
+    /// notified. A stale one condemns a moved window; that hazard is
+    /// deliberately modelled, not smoothed over.
+    private var lastFrames: [WindowHandle: CGRect] = [:]
+    /// Synthetic pid per owning app name: the death standard asks each
+    /// app once per pass and judges its windows against that answer.
+    private var pidsByApp: [String: pid_t] = [:]
+    private var appsByPID: [pid_t: String] = [:]
+    private var nextPID: pid_t = 100
 
     /// Every liveness pass requested through the seam, in order. Pins
     /// the one-pass contract: a prune pass must ask once for all of its
@@ -163,17 +196,57 @@ final class FakeWindowGateway: WindowGateway {
     func liveness(of handles: [WindowHandle]) -> [WindowHandle: Liveness] {
         livenessPasses.append(handles)
         var verdicts: [WindowHandle: Liveness] = [:]
+        var probes: [LiveWindowGateway.ProbedWindow] = []
         for handle in handles {
-            verdicts[handle] = verdict(of: handle)
+            guard let window = windows[handle] else {
+                verdicts[handle] = .dead
+                continue
+            }
+            if probeDead.contains(handle) { verdicts[handle] = .dead; continue }
+            if !window.alive { verdicts[handle] = .dead; continue }
+            if busy.contains(handle) { verdicts[handle] = .unknown; continue }
+            let failed = probeFailures.contains(handle)
+            probes.append(
+                LiveWindowGateway.ProbedWindow(
+                    handle: handle, pid: pid(of: handle),
+                    error: failed ? .invalidUIElement : .success,
+                    frame: failed || hideFrames.contains(handle) ? nil : window.frame))
         }
+        // The same pass assembly the live adapter judges with — the
+        // fake scripts the raw inputs (probe outcomes, window lists,
+        // baselines) but never a verdict, so the death standard cannot
+        // drift behind the seam. Successful probes refresh the baseline
+        // here exactly as they do in production.
+        let pass = LiveWindowGateway.livenessPass(
+            probes: probes,
+            baselines: lastFrames,
+            appAnswer: { self.appWindowAnswer(for: $0) })
+        lastFrames = pass.baselines
+        verdicts.merge(pass.verdicts) { _, new in new }
         return verdicts
     }
 
-    private func verdict(of handle: WindowHandle) -> Liveness {
-        guard let window = windows[handle] else { return .dead }
-        if probeDead.contains(handle) { return .dead }
-        if !window.alive { return .dead }
-        return busy.contains(handle) ? .unknown : .alive
+    private func pid(of handle: WindowHandle) -> pid_t {
+        let name = windows[handle]?.appName ?? ""
+        if let pid = pidsByApp[name] { return pid }
+        let pid = nextPID
+        nextPID += 1
+        pidsByApp[name] = pid
+        appsByPID[pid] = name
+        return pid
+    }
+
+    /// One owning app's answer for a liveness pass: the windows it still
+    /// has, each listed with its current frame — nil for a listed frame
+    /// that will not read (the lid-close shape). Closed and released
+    /// windows are gone from the list, like live's.
+    private func appWindowAnswer(for pid: pid_t) -> LiveWindowGateway.AppWindowAnswer {
+        let name = appsByPID[pid] ?? ""
+        let members = windows.filter { $0.value.alive && ($0.value.appName ?? "") == name }
+        return LiveWindowGateway.AppWindowAnswer(
+            processAlive: true,
+            appWindowsError: .success,
+            listedFrames: members.map { hideFrames.contains($0.key) ? nil : $0.value.frame })
     }
 
     func observe(
@@ -182,6 +255,11 @@ final class FakeWindowGateway: WindowGateway {
     ) {
         changeHandlers[handle] = onChange
         destroyedHandlers[handle] = onDestroyed
+        // The geometric death check needs a baseline even for a window
+        // whose frame was never read (live's `observe` seeds one).
+        if lastFrames[handle] == nil, let frame = windows[handle]?.frame {
+            lastFrames[handle] = frame
+        }
     }
 
     private var focusChangeHandler: (() -> Void)?
@@ -234,9 +312,12 @@ final class FakeWindowGateway: WindowGateway {
 
     // MARK: Test controls
 
-    /// Moves the window as a user drag would, firing the change handler.
+    /// Moves the window as a user drag would, firing the change handler
+    /// unless the registration failed — then the OS has nothing to
+    /// deliver and only the frame moves.
     func simulateChange(_ handle: WindowHandle, to frame: CGRect) {
         windows[handle]?.frame = frame
+        guard !registrationFailures.contains(handle) else { return }
         changeHandlers[handle]?()
     }
 
@@ -247,8 +328,10 @@ final class FakeWindowGateway: WindowGateway {
 
     /// Test control: simulates the OS's `AXUIElementDestroyed`
     /// notification. `kill` first to model a window that is really gone;
-    /// leave it alive to model element churn.
+    /// leave it alive to model element churn. A failed registration
+    /// delivers nothing, destroys included.
     func simulateDestroyed(_ handle: WindowHandle) {
+        guard !registrationFailures.contains(handle) else { return }
         destroyedHandlers[handle]?()
     }
 

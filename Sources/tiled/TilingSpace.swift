@@ -391,18 +391,22 @@ struct TilingSpace {
                 Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
             }
             // The chapter is pushed even when the requester's own write
-            // was refused: the untiled windows really did go home, and
-            // without it that destruction would be silent and
-            // unrecoverable — a switch untiles everyone, the app's most
-            // destructive action. The requester joins the chapter only
-            // when it actually landed. A refused switch narrates the
-            // untile with the tile branch's own sentence, so the
-            // refusal and the recovery coexist exactly as they do
-            // after a refused eviction.
-            if restoreFailures.isEmpty, !evicted.isEmpty {
+            // was refused — and even when an evictee's restore write
+            // was: the untiled windows really are gone (a refused
+            // restore forgets all the same), and without it that
+            // destruction would be silent and unrecoverable — a switch
+            // untiles everyone, the app's most destructive action. The
+            // requester joins the chapter only when it actually landed.
+            // A refused switch narrates the untile with the tile
+            // branch's own sentence, so the refusal and the recovery
+            // coexist exactly as they do after a refused eviction — but
+            // a failed restore keeps that success sentence quiet (the
+            // restore-failure message surfaces ahead of it) so it never
+            // covers a window that refused to go home.
+            if !evicted.isEmpty {
                 commit.snapshot = snapshot
                 commit.requester = commit.clean ? id : nil
-                if commit.notice == nil {
+                if commit.notice == nil, restoreFailures.isEmpty {
                     commit.notice = Self.evictionNotice(
                         names: evictedNames, count: evicted.count)
                 }
@@ -568,20 +572,26 @@ struct TilingSpace {
             }
             commit.reflowFreed = freed
         }
-        if restoreFailures.isEmpty, !evicted.isEmpty {
+        if !evicted.isEmpty {
             // Ordinary eviction gets the same narrative as a layout
             // switch: a notice naming the displaced app plus the shared
             // one-step undo. The switch was never special; it was
             // just the first destruction anyone bothered to narrate.
             // A re-house already narrated itself (the victim moved,
             // nobody went back). The chapter is pushed even when the
-            // requester's own write was refused: the evictees really did
-            // go home, and without it that destruction would be silent
-            // and unrecoverable. The requester joins the chapter only
-            // when it actually landed.
+            // requester's own write was refused — and even when an
+            // evictee's restore write was: every eviction forgets its
+            // window all the same, and without the chapter that
+            // destruction would be silent and unrecoverable. The
+            // requester joins the chapter only when it actually landed.
             commit.snapshot = snapshot
             commit.requester = clean ? id : nil
-            if commit.notice == nil {
+            // The success sentence stays quiet behind a failed restore:
+            // the restore-failure message surfaces ahead of it (the
+            // partial-failure precedence the undo story uses), so
+            // "went back to where they were" never covers a window that
+            // refused to.
+            if commit.notice == nil, restoreFailures.isEmpty {
                 commit.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
             }
         }

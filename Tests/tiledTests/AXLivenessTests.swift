@@ -150,6 +150,12 @@ final class AXLivenessTests: XCTestCase {
             true, "reads round: a sub-point difference still matches")
         XCTAssertEqual(
             LiveWindowGateway.appWindowMatch(
+                baseline: baseline,
+                listedFrames: [CGRect(x: 103, y: 97, width: 405, height: 303)]),
+            true,
+            "grid rounding settles a frame a few points off the baseline: still the same window")
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(
                 baseline: baseline, listedFrames: [elsewhere]),
             false, "the app answered, every frame read, none matched: gone")
         XCTAssertEqual(
@@ -223,20 +229,64 @@ final class AXLivenessTests: XCTestCase {
                 baseline: baseline, expected: .unknown),
         ]
         for scenario in scenarios {
-            let verdicts = LiveWindowGateway.livenessVerdicts(
-                failedProbes: [
-                    LiveWindowGateway.FailedProbe(
-                        handle: WindowHandle(id: 7), pid: 99, error: scenario.probe)
+            let pass = LiveWindowGateway.livenessPass(
+                probes: [
+                    LiveWindowGateway.ProbedWindow(
+                        handle: WindowHandle(id: 7), pid: 99, error: scenario.probe,
+                        frame: nil)
                 ],
-                baseline: { _ in scenario.baseline },
+                baselines: scenario.baseline.map { [WindowHandle(id: 7): $0] } ?? [:],
                 appAnswer: { _ in
                     LiveWindowGateway.AppWindowAnswer(
                         processAlive: scenario.processAlive,
                         appWindowsError: scenario.appError,
                         listedFrames: scenario.listedFrames)
                 })
-            XCTAssertEqual(verdicts[WindowHandle(id: 7)], scenario.expected, scenario.name)
+            XCTAssertEqual(pass.verdicts[WindowHandle(id: 7)], scenario.expected, scenario.name)
         }
+    }
+
+    func testSuccessfulProbeRefreshesTheFrameBaseline() {
+        // The baseline must track reality even where nothing reads the
+        // frame: a window whose move notifications failed to register is
+        // probed every prune tick but never re-read, and a drag then
+        // leaves the death match looking for a frame the window already
+        // left (D13). A successful probe is that refresh.
+        let stale = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let dragged = CGRect(x: 300, y: 200, width: 400, height: 300)
+        let handle = WindowHandle(id: 7)
+        let pass = LiveWindowGateway.livenessPass(
+            probes: [
+                LiveWindowGateway.ProbedWindow(
+                    handle: handle, pid: 99, error: .success, frame: dragged)
+            ],
+            baselines: [handle: stale],
+            appAnswer: { _ in
+                LiveWindowGateway.AppWindowAnswer(
+                    processAlive: true, appWindowsError: .cannotComplete,
+                    listedFrames: [])
+            })
+        XCTAssertEqual(pass.verdicts[handle], .alive)
+        XCTAssertEqual(
+            pass.baselines[handle], dragged,
+            "a successful probe refreshes the baseline to where the window is now")
+
+        // A frame that will not read (the lid-close coordinate refusal)
+        // keeps the old baseline: a maybe, never a reset to nothing.
+        let unreadable = LiveWindowGateway.livenessPass(
+            probes: [
+                LiveWindowGateway.ProbedWindow(
+                    handle: handle, pid: 99, error: .success, frame: nil)
+            ],
+            baselines: [handle: stale],
+            appAnswer: { _ in
+                LiveWindowGateway.AppWindowAnswer(
+                    processAlive: true, appWindowsError: .cannotComplete,
+                    listedFrames: [])
+            })
+        XCTAssertEqual(
+            unreadable.baselines[handle], stale,
+            "an unreadable probe frame leaves the baseline alone")
     }
 
     func testOnePassAsksEachAppOnce() {
@@ -245,16 +295,23 @@ final class AXLivenessTests: XCTestCase {
         // handles of pid 42 and one of pid 43 are three verdicts and
         // two app asks.
         var asked: [pid_t] = []
-        let verdicts = LiveWindowGateway.livenessVerdicts(
-            failedProbes: [
-                LiveWindowGateway.FailedProbe(
-                    handle: WindowHandle(id: 1), pid: 42, error: .cannotComplete),
-                LiveWindowGateway.FailedProbe(
-                    handle: WindowHandle(id: 2), pid: 42, error: .invalidUIElement),
-                LiveWindowGateway.FailedProbe(
-                    handle: WindowHandle(id: 3), pid: 43, error: .cannotComplete),
+        let pass = LiveWindowGateway.livenessPass(
+            probes: [
+                LiveWindowGateway.ProbedWindow(
+                    handle: WindowHandle(id: 1), pid: 42, error: .cannotComplete,
+                    frame: nil),
+                LiveWindowGateway.ProbedWindow(
+                    handle: WindowHandle(id: 2), pid: 42, error: .invalidUIElement,
+                    frame: nil),
+                LiveWindowGateway.ProbedWindow(
+                    handle: WindowHandle(id: 3), pid: 43, error: .cannotComplete,
+                    frame: nil),
             ],
-            baseline: { _ in CGRect(x: 0, y: 0, width: 10, height: 10) },
+            baselines: [
+                WindowHandle(id: 1): CGRect(x: 0, y: 0, width: 10, height: 10),
+                WindowHandle(id: 2): CGRect(x: 0, y: 0, width: 10, height: 10),
+                WindowHandle(id: 3): CGRect(x: 0, y: 0, width: 10, height: 10),
+            ],
             appAnswer: { pid in
                 asked.append(pid)
                 return LiveWindowGateway.AppWindowAnswer(
@@ -262,7 +319,7 @@ final class AXLivenessTests: XCTestCase {
             })
         XCTAssertEqual(asked, [42, 43], "each app is asked once for the whole pass")
         XCTAssertEqual(
-            verdicts,
+            pass.verdicts,
             [
                 WindowHandle(id: 1): .dead,
                 WindowHandle(id: 2): .dead,
