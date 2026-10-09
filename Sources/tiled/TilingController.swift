@@ -27,6 +27,7 @@ final class TilingController {
     private lazy var frameWriter = FrameWriter(
         gateway: gateway,
         isVisible: { [weak self] in self?.isVisible($0) ?? false },
+        boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
         markStale: { [weak self] space in
             guard let self else { return }
             self.staleSpaces.insert(space)

@@ -36,6 +36,9 @@ struct FrameWriter {
 
     private let gateway: WindowGateway
     private let isVisible: (TilingSpaceKey) -> Bool
+    /// The visible frame a target sits in: the boundary a clamped write
+    /// must be pulled back inside (see `repinnedInsideBounds`).
+    private let boundsOf: (CGRect) -> CGRect
     private let markStale: (TilingSpaceKey) -> Void
     private let markExpected: (WindowID, CGRect) -> Void
     private let scheduleCheck: (WindowID, TilingSpaceKey) -> Void
@@ -44,6 +47,7 @@ struct FrameWriter {
     init(
         gateway: WindowGateway,
         isVisible: @escaping (TilingSpaceKey) -> Bool,
+        boundsOf: @escaping (CGRect) -> CGRect,
         markStale: @escaping (TilingSpaceKey) -> Void,
         markExpected: @escaping (WindowID, CGRect) -> Void,
         scheduleCheck: @escaping (WindowID, TilingSpaceKey) -> Void,
@@ -51,6 +55,7 @@ struct FrameWriter {
     ) {
         self.gateway = gateway
         self.isVisible = isVisible
+        self.boundsOf = boundsOf
         self.markStale = markStale
         self.markExpected = markExpected
         self.scheduleCheck = scheduleCheck
@@ -91,8 +96,57 @@ struct FrameWriter {
             log("write win\(id) refused target=\(target)")
             return .refused
         }
+        // Minimum-size clamp: an app that cannot go below its floor lands
+        // the position exactly and snaps only the size (probed on live
+        // AX: target (1300, 300, 150, 350) applied (1300, 300, 400, 350)),
+        // so the window keeps its origin and grows away from it - past
+        // the screen edge when the target hugged one. Repin the clamped
+        // frame inside its bounds: it keeps its floor size and simply
+        // stops shrinking at the screen edge, never off it.
+        if let applied = gateway.frame(of: handle),
+            let repinned = Self.repinnedInsideBounds(
+                applied: applied, target: target, bounds: boundsOf(target))
+        {
+            gateway.setFrame(handle, to: repinned)
+            markExpected(id, repinned)
+            log("write win\(id) clamped at \(applied); repinned \(repinned)")
+        }
         if case .rollback = check { scheduleCheck(id, space) }
         log("write win\(id) target=\(target)")
         return .written
+    }
+
+    /// The frame to rewrite after an app clamped a write, or nil when
+    /// the write needs no repair.
+    ///
+    /// The clamp signature is a size the app refused: a frame it applied
+    /// as requested is left alone, so a target that legitimately runs
+    /// past the bounds (a pre-tile restore straddling displays) keeps
+    /// the placement the user gave it. A clamped frame is pulled back by
+    /// the edge that escaped, so the bounds edge its target hugged stays
+    /// held and the window stops at its floor size in place.
+    static func repinnedInsideBounds(
+        applied: CGRect, target: CGRect, bounds: CGRect
+    ) -> CGRect? {
+        let tolerance = DragTracker.noOpWriteTolerance
+        guard abs(applied.width - target.width) > tolerance
+            || abs(applied.height - target.height) > tolerance
+        else { return nil }
+        func shift(
+            appliedMin: CGFloat, appliedMax: CGFloat,
+            boundsMin: CGFloat, boundsMax: CGFloat
+        ) -> CGFloat {
+            if appliedMax > boundsMax + tolerance { return boundsMax - appliedMax }
+            if appliedMin < boundsMin - tolerance { return boundsMin - appliedMin }
+            return 0
+        }
+        let dx = shift(
+            appliedMin: applied.minX, appliedMax: applied.maxX,
+            boundsMin: bounds.minX, boundsMax: bounds.maxX)
+        let dy = shift(
+            appliedMin: applied.minY, appliedMax: applied.maxY,
+            boundsMin: bounds.minY, boundsMax: bounds.maxY)
+        guard dx != 0 || dy != 0 else { return nil }
+        return applied.offsetBy(dx: dx, dy: dy)
     }
 }

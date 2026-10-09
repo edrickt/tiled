@@ -174,7 +174,11 @@ independent per column (quarters) or per third (sixths), so resizing one
 column never moves the other, and the same independence holds between
 monitors and Spaces, so dragging an edge on one canvas never moves tiles on
 another. A two-thirds window resizes as two equal one-thirds: the hidden
-splitter inside it follows its outer edge, staying at the midpoint.
+splitter inside it follows its outer edge, staying at the midpoint. A
+neighbor pushed narrower (or shorter) than its app's minimum size simply
+stops shrinking at that size, pinned to the screen edge it already held:
+the window always stays inside the boundaries of the screen, never
+sliding off it.
 **Reset Splitters** in the menu (or ⌥⇧R) snaps the focused canvas's
 splitters back to even splits. After a drag the same row is titled
 **Restore Previous Splitters**, restoring the pre-drag splits instead.

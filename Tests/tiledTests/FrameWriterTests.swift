@@ -28,11 +28,13 @@ final class FrameWriterTests: XCTestCase {
     }
 
     private func makeWriter(
-        visible: @escaping (TilingSpaceKey) -> Bool = { _ in true }
+        visible: @escaping (TilingSpaceKey) -> Bool = { _ in true },
+        bounds: CGRect = CGRect(x: 0, y: 0, width: 1600, height: 1000)
     ) -> FrameWriter {
         FrameWriter(
             gateway: gateway,
             isVisible: visible,
+            boundsOf: { _ in bounds },
             markStale: { [weak self] space in
                 self?.events.append("stale")
                 self?.staleMarks.append(space)
@@ -121,5 +123,88 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(result, .refused)
         XCTAssertEqual(echoed, [7])
         XCTAssertTrue(checked.isEmpty)
+    }
+
+    // MARK: Minimum-size clamp
+
+    /// The probed app behavior, modeled on the fake: the position write
+    /// lands exactly and only the size snaps to the window's floor, so
+    /// the window keeps its origin and grows away from it. A target
+    /// hugging the right screen edge then sails the clamped window off
+    /// it; the write policy owes the user a window inside the bounds.
+    private func clampWidthToFloor(_ floor: CGFloat) -> (WindowHandle, CGRect) -> CGRect {
+        { _, target in
+            CGRect(
+                origin: target.origin,
+                size: CGSize(width: max(target.width, floor), height: target.height))
+        }
+    }
+
+    func testClampedWriteIsRepinnedAtTheScreenEdgeItHolds() {
+        let handle = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 533, height: 1000))
+        gateway.writtenFrame = clampWidthToFloor(500)
+        let target = CGRect(x: 1300, y: 0, width: 300, height: 1000)
+
+        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+
+        XCTAssertEqual(result, .written)
+        XCTAssertEqual(gateway.writes.count, 2, "the repin is its own write")
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 1100, y: 0, width: 500, height: 1000),
+            "the floor-width window holds the screen edge and simply stops shrinking")
+        XCTAssertEqual(
+            echoed, [7, 7],
+            "the echo re-arms at the frame the window really has, not the one it was refused")
+    }
+
+    func testClampedWriteAnchoredOnTheScreenEdgeIsLeftAlone() {
+        // Shrinking from the right: the floor keeps the window's origin,
+        // which IS the screen edge, so it stopped shrinking in bounds
+        // already and a second write would only fight the app.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 533, height: 1000))
+        gateway.writtenFrame = clampWidthToFloor(500)
+        let target = CGRect(x: 0, y: 0, width: 300, height: 1000)
+
+        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+
+        XCTAssertEqual(result, .written)
+        XCTAssertEqual(gateway.writes.count, 1)
+        XCTAssertEqual(gateway.frame(of: handle), CGRect(x: 0, y: 0, width: 500, height: 1000))
+    }
+
+    func testClampedHeightIsRepinnedAtTheBottomScreenEdge() {
+        // Size writes anchor at the window's top-left (AppKit: its top
+        // edge), so a clamped height grows downward past the bottom
+        // screen edge for a target hugging it.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 533))
+        gateway.writtenFrame = { _, target in
+            let height = max(target.height, 500)
+            return CGRect(
+                x: target.minX, y: target.maxY - height,
+                width: target.width, height: height)
+        }
+        let target = CGRect(x: 0, y: 0, width: 800, height: 300)
+
+        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+
+        XCTAssertEqual(result, .written)
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 0, y: 0, width: 800, height: 500),
+            "the floor-height window holds the bottom screen edge")
+    }
+
+    func testStraddlingTargetTheAppAppliedIsNeverYankedBack() {
+        // Only a clamp - a size the app refused - triggers the repair.
+        // A frame that legitimately runs past the bounds (a pre-tile
+        // restore straddling displays) is the app's own placement and
+        // must be left exactly where it lands.
+        let handle = gateway.addWindow(frame: CGRect(x: 100, y: 0, width: 300, height: 300))
+        let target = CGRect(x: 1500, y: 0, width: 300, height: 300)
+
+        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+
+        XCTAssertEqual(result, .written)
+        XCTAssertEqual(gateway.writes.count, 1)
+        XCTAssertEqual(gateway.frame(of: handle), target)
     }
 }

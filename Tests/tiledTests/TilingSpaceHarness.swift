@@ -41,6 +41,7 @@ final class TilingSpaceHarness {
         writer = FrameWriter(
             gateway: gateway,
             isVisible: { [weak self] _ in self?.canvasVisible ?? true },
+            boundsOf: { [weak self] in self?.bounds ?? $0 },
             markStale: { _ in },
             markExpected: { [weak self] id, target in
                 self?.tracker.markExpected(id, target)
