@@ -3,8 +3,10 @@ import XCTest
 @testable import tiled
 
 /// HotkeyService's pure constants and the slot identifier scheme. The
-/// Carbon registration calls themselves need a live process and are not
-/// unit-testable; the invariants they depend on are pinned here.
+/// Carbon registration calls run through the injected register/unregister
+/// seam; their register / reload / teardown lifecycle is pinned in
+/// HotkeyServiceLifecycleTests, and the invariants they depend on are
+/// pinned here.
 final class HotkeyServiceTests: XCTestCase {
     func testSettingsFallbackComboIsAllFourModifiersPlusComma() {
         // Deliberately over-modified so it collides with nothing.

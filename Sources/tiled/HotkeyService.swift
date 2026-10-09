@@ -124,6 +124,17 @@ final class HotkeyService {
         eventClass: OSType(kEventClassKeyboard),
         eventKind: UInt32(kEventHotKeyPressed))
 
+    /// The registration seam's shape: register one combo under a hotkey
+    /// id (filling the live registration ref), unregister one live
+    /// registration. Injected at init, like `CarbonEventHandler`'s
+    /// install/remove, so the register / reload / teardown lifecycle is
+    /// pinnable without a live Carbon event loop.
+    typealias Register = (
+        _ keyCode: UInt32, _ modifiers: UInt32, _ hotKeyID: UInt32,
+        _ ref: inout EventHotKeyRef?
+    ) -> OSStatus
+    typealias Unregister = (EventHotKeyRef) -> Void
+
     private var hotKeyRefs: [EventHotKeyRef?] = []
     private let context = Context()
     /// The installed Carbon handler: retained context, removed on deinit,
@@ -131,6 +142,8 @@ final class HotkeyService {
     /// service always installs its own).
     private var eventHandler: CarbonEventHandler<Context>?
     private let store: HotkeyStore
+    private let register: Register
+    private let unregister: Unregister
 
     /// Actions whose global hotkey could not be registered (likely owned
     /// by another app). Surfaced in the status menu and the Shortcuts tab;
@@ -146,9 +159,23 @@ final class HotkeyService {
         set { context.handler = newValue }
     }
 
-    init(store: HotkeyStore = HotkeyStore()) {
+    /// Creates a service and registers every enabled action's combo.
+    ///
+    /// The Carbon calls are injected — the same shape
+    /// `CarbonEventHandler` takes for its handler's install/remove — so
+    /// the register / reload / teardown lifecycle is pinnable without a
+    /// live Carbon event loop. Production uses the live calls.
+    init(
+        store: HotkeyStore = HotkeyStore(),
+        register: @escaping Register = HotkeyService.carbonRegister,
+        unregister: @escaping Unregister = HotkeyService.carbonUnregister,
+        install: (UnsafeMutableRawPointer, inout EventHandlerRef?) -> Void = HotkeyService.carbonInstall,
+        remove: @escaping (EventHandlerRef) -> Void = HotkeyService.carbonRemove
+    ) {
         self.store = store
-        installEventHandler()
+        self.register = register
+        self.unregister = unregister
+        installEventHandler(install: install, remove: remove)
         registerHotkeys()
     }
 
@@ -157,6 +184,10 @@ final class HotkeyService {
         // nothing to call once the service is gone; the handler removal
         // in CarbonEventHandler.deinit is the other half (no new events).
         context.handler = nil
+        // And every registration goes back to the system: a dead service
+        // must leave no phantom combo swallowing keys system-wide, and a
+        // replacement service must find the combos free to register once.
+        unregisterAll()
     }
 
     /// Unregisters everything and registers from the store again.
@@ -164,11 +195,18 @@ final class HotkeyService {
     /// recomputed, so newly freed (or newly conflicted) actions surface
     /// in the menu without a relaunch.
     func reload() {
+        unregisterAll()
+        registerHotkeys()
+    }
+
+    /// Gives back every registration the service holds, through the
+    /// injected unregister call. Teardown and reload both pass through
+    /// here, so "nothing stays registered" is one rule, not two.
+    private func unregisterAll() {
         for ref in hotKeyRefs {
-            if let ref { UnregisterEventHotKey(ref) }
+            if let ref { unregister(ref) }
         }
         hotKeyRefs = []
-        registerHotkeys()
     }
 
     private func registerHotkeys() {
@@ -178,12 +216,10 @@ final class HotkeyService {
             // A disabled action registers nothing and warns about nothing.
             guard let keyCode = binding.keyCode else { continue }
             var ref: EventHotKeyRef?
-            let status = RegisterEventHotKey(
+            let status = register(
                 keyCode,
                 binding.modifiers,
-                EventHotKeyID(signature: Self.signature, id: action.hotkeyID),
-                GetApplicationEventTarget(),
-                0,
+                action.hotkeyID,
                 &ref)
             if status == noErr {
                 hotKeyRefs.append(ref)
@@ -196,20 +232,55 @@ final class HotkeyService {
         }
     }
 
-    private func installEventHandler() {
+    private func installEventHandler(
+        install: (UnsafeMutableRawPointer, inout EventHandlerRef?) -> Void,
+        remove: @escaping (EventHandlerRef) -> Void
+    ) {
         eventHandler = CarbonEventHandler(
             payload: context,
-            install: { userData, ref in
-                var eventType = Self.eventType
-                InstallEventHandler(
-                    GetApplicationEventTarget(),
-                    Self.carbonCallback,
-                    1,
-                    &eventType,
-                    userData,
-                    &ref)
-            },
-            remove: { RemoveEventHandler($0) })
+            install: install,
+            remove: remove)
+    }
+
+    // MARK: Live Carbon calls
+    //
+    // The defaults for the injected seams: the register/unregister pair
+    // that owns the system-wide combos, and the install/remove pair
+    // `CarbonEventHandler` takes. Every Carbon call the service makes
+    // lives here.
+
+    static func carbonRegister(
+        keyCode: UInt32, modifiers: UInt32, hotKeyID: UInt32,
+        ref: inout EventHotKeyRef?
+    ) -> OSStatus {
+        RegisterEventHotKey(
+            keyCode,
+            modifiers,
+            EventHotKeyID(signature: signature, id: hotKeyID),
+            GetApplicationEventTarget(),
+            0,
+            &ref)
+    }
+
+    static func carbonUnregister(_ ref: EventHotKeyRef) {
+        UnregisterEventHotKey(ref)
+    }
+
+    static func carbonInstall(
+        userData: UnsafeMutableRawPointer, ref: inout EventHandlerRef?
+    ) {
+        var eventType = Self.eventType
+        InstallEventHandler(
+            GetApplicationEventTarget(),
+            carbonCallback,
+            1,
+            &eventType,
+            userData,
+            &ref)
+    }
+
+    static func carbonRemove(_ ref: EventHandlerRef) {
+        RemoveEventHandler(ref)
     }
 
     private static let carbonCallback: EventHandlerUPP = { _, event, userData in
