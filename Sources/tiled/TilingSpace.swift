@@ -356,26 +356,47 @@ struct TilingSpace {
         let snapshot = evicted.compactMap { evictedID in
             snapshotEntry(for: evictedID, fallback: slot, space: context.space)
         }
+        // Names resolve BEFORE the restore deletes the records, exactly
+        // as in the tile branch: naming after would degrade every
+        // refusal narrative to a count.
+        let evictedNames = evicted.compactMap { appName($0, context: context) }
         let restoreFailures = restore(evicted, context: context)
         let placeResult = place(
             window: id, into: slot, context: context, observed: &commit.observed)
         if records[id] == nil {
             // `place` bailed (no record): nothing to snapshot.
             Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
-        } else if placeResult == nil, restoreFailures.isEmpty, !evicted.isEmpty {
-            let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
-            // Narrate the event AND the recovery: the notice is the
-            // hotkey user's only record of a mass-untile, and the
-            // undo row may sit below the fold. One sentence, one
-            // cue: no menu-title splicing, just the combo.
-            commit.notice =
-                "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. "
-                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
-            commit.snapshot = snapshot
-            commit.requester = id
         } else {
-            commit.refusal = placeResult
-            Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
+            if placeResult == nil, restoreFailures.isEmpty, !evicted.isEmpty {
+                let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
+                // Narrate the event AND the recovery: the notice is the
+                // hotkey user's only record of a mass-untile, and the
+                // undo row may sit below the fold. One sentence, one
+                // cue: no menu-title splicing, just the combo.
+                commit.notice =
+                    "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. "
+                    + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+            } else {
+                commit.refusal = placeResult
+                Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
+            }
+            // The chapter is pushed even when the requester's own write
+            // was refused: the untiled windows really did go home, and
+            // without it that destruction would be silent and
+            // unrecoverable — a switch untiles everyone, the app's most
+            // destructive action. The requester joins the chapter only
+            // when it actually landed. A refused switch narrates the
+            // untile with the tile branch's own sentence, so the
+            // refusal and the recovery coexist exactly as they do
+            // after a refused eviction.
+            if restoreFailures.isEmpty, !evicted.isEmpty {
+                commit.snapshot = snapshot
+                commit.requester = commit.clean ? id : nil
+                if commit.notice == nil {
+                    commit.notice = Self.evictionNotice(
+                        names: evictedNames, count: evicted.count)
+                }
+            }
         }
         context.log("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
         return commit
