@@ -38,13 +38,20 @@ final class FakeWindowGateway: WindowGateway {
     /// so the live frame can differ from the target. Identity by default.
     var writtenFrame: (WindowHandle, CGRect) -> CGRect = { _, target in target }
     /// Handles whose size write is refused while the position write still
-    /// lands: the partial application the live adapter must roll back.
-    /// The fake models the app (the origin moves, the call reports
-    /// false); the adapter's restore policy lives in `AXWrite`.
+    /// lands: one half-apply shape (the origin moves, the call reports
+    /// false). The fake models the app's per-message refusals; the
+    /// put-back runs in the shared `AXWrite.pushFrame` policy below.
     var refuseSizeWrites: Set<WindowHandle> = []
-    /// Every frame write the adapter applied, in order (a partial write
-    /// records the origin move). Lets tests pin "a no-op request issues
-    /// zero writes" instead of only the resulting frame.
+    /// Handles whose position write is refused while the size write still
+    /// lands: the mirror half-apply shape — the app resizes the window at
+    /// its old origin and reports false. Same split as above: refusals
+    /// modelled here, the put-back in the shared policy.
+    var refusePositionWrites: Set<WindowHandle> = []
+    /// Every frame write the adapter applied, in order — one entry per
+    /// write that touched the frame (a half-applied pair records the
+    /// frame the put-back policy left the window in). Lets tests pin
+    /// "a no-op request issues zero writes" instead of only the
+    /// resulting frame.
     private(set) var writes: [(handle: WindowHandle, frame: CGRect)] = []
     /// Handles the controller has released. Only confirmed death may
     /// release: an untiled or evicted window must keep its element so
@@ -94,21 +101,39 @@ final class FakeWindowGateway: WindowGateway {
             windows[handle] = window
             return false
         }
-        if refuseSizeWrites.contains(handle) {
-            // Position lands, size is refused: the window is half-moved
-            // until the adapter puts the origin back.
-            window.frame.origin = frame.origin
-            windows[handle] = window
-            writes.append((handle, frame))
-            return false
+        // The pair runs through the production write policy
+        // (`AXWrite.pushFrame`) — the same glue the live adapter drives
+        // its two AX messages with — so the half-apply put-back is
+        // pinned end-to-end here, not reimplemented in the fake. The
+        // scripted refusals answer `.failure` (a permanent refusal), so
+        // the policy's retry takes one attempt per write.
+        let applied = writtenFrame(handle, frame)
+        var touched = false
+        let error = LiveWindowGateway.AXWrite.pushFrame(
+            position: applied.origin, size: applied.size,
+            readPosition: { self.windows[handle]?.frame.origin },
+            readSize: { self.windows[handle]?.frame.size },
+            writePosition: { origin in
+                guard !self.refusePositionWrites.contains(handle) else { return .failure }
+                self.windows[handle]?.frame.origin = origin
+                touched = true
+                return .success
+            },
+            writeSize: { size in
+                guard !self.refuseSizeWrites.contains(handle) else { return .failure }
+                self.windows[handle]?.frame.size = size
+                touched = true
+                return .success
+            },
+            sleep: { _ in })
+        // One entry per write that touched the frame: a half-applied
+        // pair's entry shows the frame the policy left the window in,
+        // while a write the app refused outright touches nothing and a
+        // silently ignored one applies nothing.
+        if touched, let end = windows[handle]?.frame {
+            writes.append((handle, end))
         }
-        window.frame = writtenFrame(handle, frame)
-        // Assign through the dictionary, not the copy: `writtenFrame`
-        // scripts follow-ups (e.g. a refused restore) and must not be
-        // clobbered by this write's stale snapshot.
-        windows[handle]?.frame = window.frame
-        writes.append((handle, window.frame))
-        return true
+        return error == nil
     }
 
     func release(_ handle: WindowHandle) {

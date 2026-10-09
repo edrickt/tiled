@@ -63,6 +63,12 @@ final class ShortcutsTab: NSObject {
     var failedActionsProvider: (() -> [HotkeyAction])?
     /// Opens the Accessibility permission pane.
     var onOpenAccessibilitySettings: (() -> Void)?
+    /// The reset confirmation decision, receiving the dialog's promise
+    /// (its informative text) and answering whether to reset. Injectable
+    /// so tests can run the whole reset/restore lifecycle — including
+    /// what the dialog promises — without a modal session; nil presents
+    /// the real alert.
+    var confirmReset: ((String) -> Bool)?
 
     private var recorderButtons: [HotkeyAction: RecorderButton] = [:]
     /// The per-section bulk buttons, so a binding change that does not
@@ -737,15 +743,25 @@ final class ShortcutsTab: NSObject {
     /// the dialog says so when a backup already exists, so the second
     /// reset never silently destroys the first snapshot).
     private func confirmAndReset(_ sender: NSButton) {
-        let alert = NSAlert()
-        alert.messageText = "Reset all \(HotkeyAction.allCases.count) shortcuts to defaults?"
-        alert.informativeText = anyResetBackup()
+        // The promise is the outcome's contract: with no backup it names
+        // the recovery ("kept … Restore Previous Shortcuts"); with one it
+        // warns that the snapshot is replaced wholesale.
+        let promise = anyResetBackup()
             ? "This replaces your previous backup; those combos will be gone. "
                 + "Your current combos become the new backup."
             : "Your current combos are kept; use Restore Previous Shortcuts to get them back."
-        alert.addButton(withTitle: "Reset Shortcuts")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let confirmed: Bool
+        if let confirmReset {
+            confirmed = confirmReset(promise)
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "Reset all \(HotkeyAction.allCases.count) shortcuts to defaults?"
+            alert.informativeText = promise
+            alert.addButton(withTitle: "Reset Shortcuts")
+            alert.addButton(withTitle: "Cancel")
+            confirmed = alert.runModal() == .alertFirstButtonReturn
+        }
+        guard confirmed else { return }
         for action in HotkeyAction.allCases {
             parkResetBackup(hotkeyStore.binding(for: action), for: action)
         }
@@ -760,15 +776,17 @@ final class ShortcutsTab: NSObject {
     /// duplicate gate as a recording: a snapshot combo the user has
     /// since (re)assigned elsewhere is reported, never stored past the
     /// gate (which would leave an action that renders enabled but never
-    /// registers).
+    /// registers). A clash-reported entry stays in the backup — the
+    /// Disable-all park's rule — so the button keeps offering the
+    /// restore and a later press, once the combo is free, brings the
+    /// entry back; only applied entries are cleared.
     private func restoreResetBackup(_ sender: NSButton) {
         var skipped: [String] = []
         for action in HotkeyAction.allCases {
             guard let backup = resetBackupBinding(for: action) else { continue }
-            clearResetBackup(for: action)
             switch hotkeyStore.apply(backup, for: action) {
             case .applied:
-                break
+                clearResetBackup(for: action)
             case .duplicate(let owners):
                 let names = owners.map(\.title).joined(separator: ", ")
                 skipped.append("\(action.title) (taken by \(names))")
@@ -776,7 +794,8 @@ final class ShortcutsTab: NSObject {
         }
         onHotkeysChange?()
         reload()
-        sender.title = "Reset Shortcuts"
+        sender.title = anyResetBackup()
+            ? "Restore Previous Shortcuts" : "Reset Shortcuts"
         if !skipped.isEmpty {
             showConflict("Not restored: \(skipped.joined(separator: ", ")).")
         }
