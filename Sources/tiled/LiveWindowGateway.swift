@@ -67,11 +67,15 @@ final class LiveWindowGateway: WindowGateway {
     private var focusedCache: (handle: WindowHandle?, stamp: Date)?
     private static let focusedCacheLifetime: TimeInterval = 0.05
     /// Last successfully-read frame per handle: the geometry a death
-    /// confirmation matches against. Window element identity is useless
-    /// for that check — after a display teardown a held element stops
-    /// comparing equal (CFEqual) to the app's fresh reference for the
-    /// same window (observed on live AX: `listed=no` while the app
-    /// listed every window) — but the window's frame is stable.
+    /// confirmation matches against, refreshed by frame reads and by
+    /// successful liveness probes — a window whose move notifications
+    /// failed to register is probed but never re-read otherwise, and a
+    /// stale baseline would condemn it after a drag. Window element
+    /// identity is useless for that check — after a display teardown a
+    /// held element stops comparing equal (CFEqual) to the app's fresh
+    /// reference for the same window (observed on live AX: `listed=no`
+    /// while the app listed every window) — but the window's frame is
+    /// stable.
     private var lastFrames: [WindowHandle: CGRect] = [:]
     /// Observer per pid; registrations outlive untiled records and can
     /// never be unregistered, so they are created once and shared.
@@ -216,6 +220,12 @@ final class LiveWindowGateway: WindowGateway {
     /// windows failed. The prune pass runs on the main runloop, so the
     /// pass costs one app walk per app, never one per record.
     ///
+    /// A successful probe also refreshes the frame baseline the death
+    /// match reads: move notifications can fail to register, and a user
+    /// drag then leaves the baseline stale — the geometric match would
+    /// confirm the live window's absence against a frame it left behind
+    /// (D13).
+    ///
     /// A dead verdict is not a retirement. The controller confirms it
     /// across `deathConfirmation`, precisely so a transient (a lid
     /// close where window probes fail for live windows) can recover on
@@ -225,52 +235,53 @@ final class LiveWindowGateway: WindowGateway {
     /// the controller confirms and forgets the window, which is when
     /// `release` runs and the slot actually frees.
     func liveness(of handles: [WindowHandle]) -> [WindowHandle: Liveness] {
-        var verdicts: [WindowHandle: Liveness] = [:]
-        var failedProbes: [FailedProbe] = []
+        var probes: [ProbedWindow] = []
+        var missing: [WindowHandle: Liveness] = [:]
         for handle in handles {
             guard let element = elements[handle], let pid = pids[handle] else {
-                verdicts[handle] = .dead
+                missing[handle] = .dead
                 continue
             }
             var value: CFTypeRef?
             let probeError = AXUIElementCopyAttributeValue(
                 element, kAXPositionAttribute as CFString, &value)
-            if probeError == .success {
-                verdicts[handle] = .alive
-            } else {
-                failedProbes.append(
-                    FailedProbe(handle: handle, pid: pid, error: probeError))
-            }
+            probes.append(ProbedWindow(
+                handle: handle, pid: pid, error: probeError,
+                frame: probeError == .success ? Self.frame(of: element) : nil))
         }
-        verdicts.merge(
-            Self.livenessVerdicts(
-                failedProbes: failedProbes,
-                baseline: { self.lastFrames[$0] },
-                appAnswer: { pid in
-                    // Frames only matter where a failed handle has a
-                    // baseline to compare them against; an app with
-                    // none gets its window list read but no frames.
-                    self.appWindowAnswer(
-                        for: pid,
-                        needsFrames: failedProbes.contains {
-                            $0.pid == pid && self.lastFrames[$0.handle] != nil
-                        })
-                },
-                log: { message in
-                    guard ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1"
-                    else { return }
-                    NSLog("Tiled: [DEBUG-lv] %@", message)
-                })
-        ) { _, new in new }
-        return verdicts
+        let pass = Self.livenessPass(
+            probes: probes,
+            baselines: lastFrames,
+            appAnswer: { pid in
+                // Frames only matter where a failed handle has a
+                // baseline to compare them against; an app with
+                // none gets its window list read but no frames.
+                self.appWindowAnswer(
+                    for: pid,
+                    needsFrames: probes.contains {
+                        $0.pid == pid && $0.error != .success
+                            && self.lastFrames[$0.handle] != nil
+                    })
+            },
+            log: { message in
+                guard ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1"
+                else { return }
+                NSLog("Tiled: [DEBUG-lv] %@", message)
+            })
+        lastFrames = pass.baselines
+        return missing.merging(pass.verdicts) { _, new in new }
     }
 
-    /// One managed window whose held-element probe failed, waiting for
-    /// its owning app's corroboration.
-    struct FailedProbe {
+    /// One managed window as a liveness pass found it: the probe's error
+    /// and — when the probe answered — the frame read alongside it. A
+    /// successful probe is the pass's chance to refresh the death-match
+    /// baseline; a failed one carries no frame, only its error and its
+    /// owning app.
+    struct ProbedWindow {
         var handle: WindowHandle
         var pid: pid_t
         var error: AXError
+        var frame: CGRect?
     }
 
     /// What one owning app answered when asked about its windows: whether
@@ -283,21 +294,34 @@ final class LiveWindowGateway: WindowGateway {
         var listedFrames: [CGRect?]
     }
 
-    /// One liveness pass assembled from raw answers: every failed probe
-    /// is judged against its app's single answer for the pass — the app
-    /// is asked at most once, however many of its windows failed their
-    /// probe. Pure so the assembly (and its one-walk-per-app rule) is
-    /// testable with exact scenarios, no AX. `log` receives one line per
-    /// judged probe; the adapter routes it through TILED_DEBUG.
-    static func livenessVerdicts(
-        failedProbes: [FailedProbe],
-        baseline: (WindowHandle) -> CGRect?,
+    /// One liveness pass assembled from raw probe and app answers:
+    /// successful probes are alive and refresh the frame baseline the
+    /// geometric match reads; every failed probe is judged against its
+    /// app's single answer for the pass — the app is asked at most once,
+    /// however many of its windows failed their probe. Pure so the
+    /// assembly (and its one-walk-per-app rule) is testable with exact
+    /// scenarios, no AX. `log` receives one line per judged probe; the
+    /// adapter routes it through TILED_DEBUG.
+    static func livenessPass(
+        probes: [ProbedWindow],
+        baselines: [WindowHandle: CGRect],
         appAnswer: (pid_t) -> AppWindowAnswer,
         log: (String) -> Void = { _ in }
-    ) -> [WindowHandle: Liveness] {
+    ) -> (verdicts: [WindowHandle: Liveness], baselines: [WindowHandle: CGRect]) {
         var verdicts: [WindowHandle: Liveness] = [:]
+        var refreshed = baselines
+        for probe in probes where probe.error == .success {
+            verdicts[probe.handle] = .alive
+            // A successful probe is the baseline's only chance to track
+            // a window nothing reads: move notifications can fail to
+            // register and a drag then leaves the stale frame the death
+            // match would confirm absence against (D13). A frame that
+            // will not read keeps the old baseline — a maybe, never a
+            // reset to nothing.
+            if let frame = probe.frame { refreshed[probe.handle] = frame }
+        }
         var answers: [pid_t: AppWindowAnswer] = [:]
-        for probe in failedProbes {
+        for probe in probes where probe.error != .success {
             let answer: AppWindowAnswer
             if let cached = answers[probe.pid] {
                 answer = cached
@@ -306,7 +330,7 @@ final class LiveWindowGateway: WindowGateway {
                 answers[probe.pid] = answer
             }
             let match = appWindowMatch(
-                baseline: baseline(probe.handle), listedFrames: answer.listedFrames)
+                baseline: baselines[probe.handle], listedFrames: answer.listedFrames)
             let verdict = liveness(
                 probeError: probe.error,
                 appWindowsError: answer.appWindowsError,
@@ -321,7 +345,7 @@ final class LiveWindowGateway: WindowGateway {
                     + "processAlive=\(answer.processAlive ? 1 : 0) -> "
                     + "\(verdict == .alive ? "alive" : verdict == .dead ? "dead" : "unknown")")
         }
-        return verdicts
+        return (verdicts, refreshed)
     }
 
     /// Gathers one app's answer for a liveness pass: process probe, app
@@ -371,6 +395,28 @@ final class LiveWindowGateway: WindowGateway {
     private static func framesClose(_ a: CGRect, _ b: CGRect) -> Bool {
         abs(a.minX - b.minX) < 1 && abs(a.minY - b.minY) < 1
             && abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
+    }
+
+    /// How far the app's listed frame may sit from the window's baseline
+    /// and still be that window: apps that round frames to an internal
+    /// grid (Terminal rounds to character cells) settle a few points off
+    /// between reads, and the baseline refreshed at the last successful
+    /// probe can sit that far from the frame the app lists a moment
+    /// later. A rounding-level difference must never read as absence —
+    /// that is how a live window gets confirmed dead. Deliberately wider
+    /// than the element-adoption fallback's within-a-point bound above:
+    /// there a sibling's near frame would steal a live handle, while here
+    /// a wider bound only delays a ghost's release (a maybe never
+    /// untiles).
+    static let roundingTolerance: CGFloat = 5
+
+    /// Frames within `roundingTolerance` of each other per edge (origin
+    /// and size): the death match's "same frame".
+    private static func framesClose(
+        _ a: CGRect, _ b: CGRect, tolerance: CGFloat
+    ) -> Bool {
+        abs(a.minX - b.minX) <= tolerance && abs(a.minY - b.minY) <= tolerance
+            && abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
     }
 
     func observe(
@@ -844,7 +890,10 @@ final class LiveWindowGateway: WindowGateway {
     /// Geometry membership of a window's last read frame among the app's
     /// listed windows — never element identity: after a display teardown
     /// a held element stops comparing equal to the app's fresh reference
-    /// for the same window, but the frame is stable. True: a listed
+    /// for the same window, but the frame is stable. Tolerates the
+    /// rounding-level drift between reads (`roundingTolerance`); exact
+    /// frame identity would condemn a window its app rounded or settled
+    /// after the baseline was refreshed. True: a listed
     /// frame matches. False: the app answered and no listed frame
     /// matches — every listed frame read (or the app listed nothing).
     /// Nil: undeterminable — no baseline was ever read, or some listed
@@ -855,7 +904,9 @@ final class LiveWindowGateway: WindowGateway {
     ) -> Bool? {
         guard let baseline else { return nil }
         let readFrames = listedFrames.compactMap { $0 }
-        if readFrames.contains(where: { framesClose($0, baseline) }) {
+        if readFrames.contains(where: {
+            framesClose($0, baseline, tolerance: roundingTolerance)
+        }) {
             return true
         }
         if listedFrames.isEmpty || readFrames.count == listedFrames.count {

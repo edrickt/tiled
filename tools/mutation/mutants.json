@@ -338,8 +338,20 @@
  [
   "LiveWindowGateway.swift",
   "matching listed frame ignored (element churn reads as death)",
-  "        if readFrames.contains(where: { framesClose($0, baseline) }) {\n            return true\n        }",
+  "        if readFrames.contains(where: {\n            framesClose($0, baseline, tolerance: roundingTolerance)\n        }) {\n            return true\n        }",
   "        if false {\n            return true\n        }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "successful probe leaves a stale baseline in place (a dragged window is confirmed dead)",
+  "            if let frame = probe.frame { refreshed[probe.handle] = frame }",
+  "            if let frame = probe.frame, refreshed[probe.handle] == nil { refreshed[probe.handle] = frame }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "death match demands frame identity (grid-rounded frames read as dead)",
+  "    static let roundingTolerance: CGFloat = 5",
+  "    static let roundingTolerance: CGFloat = 0"
  ],
  [
   "LiveWindowGateway.swift",
