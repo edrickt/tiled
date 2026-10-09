@@ -550,5 +550,23 @@
   "frame pair written size-first (bottom window clamps past the screen edge)",
   "                let positionResult = writePosition(position)\n                if positionResult == .success { positionLanded = true }\n                let sizeResult = writeSize(size)\n                if sizeResult == .success { sizeLanded = true }",
   "                let sizeResult = writeSize(size)\n                if sizeResult == .success { sizeLanded = true }\n                let positionResult = writePosition(position)\n                if positionResult == .success { positionLanded = true }"
+ ],
+ [
+  "HotkeyService.swift",
+  "dispatch routes a press by a drifted id (every hotkey fires the wrong action or nothing)",
+  "guard let action = HotkeyService.route(forHotKeyID: hotKeyID.id) else {",
+  "guard let action = HotkeyService.route(forHotKeyID: hotKeyID.id + 1) else {"
+ ],
+ [
+  "HotkeyService.swift",
+  "the routing table is keyed off from the registrations (a press misroutes or dies)",
+  "uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID, $0) })",
+  "uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID + 1, $0) })"
+ ],
+ [
+  "HotkeyService.swift",
+  "an unknown id is swallowed instead of falling through (Tiled eats the press)",
+  "HotkeyService.route(forHotKeyID: hotKeyID.id) else {\n            return OSStatus(eventNotHandledErr)\n        }",
+  "HotkeyService.route(forHotKeyID: hotKeyID.id) else {\n            return noErr\n        }"
  ]
 ]
