@@ -174,6 +174,41 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertTrue(space.undoStack.isEmpty)
     }
 
+    func testPartialRestoreFailureLeavesAChapterCoveringTheEvictions() {
+        // Two evictees, one app refuses its restore write: the eviction
+        // that really landed must stay undoable. A single refused restore
+        // no longer disarms the chapter — every eviction forgets its
+        // window all the same — and the refusal keeps the success
+        // sentence quiet while its own message surfaces (the partial-
+        // failure precedence the undo story uses).
+        let m = harness.addWindow()
+        harness.apply(slot: .sixthMiddle, requester: m)
+        let r = harness.addWindow(frame: CGRect(x: 50, y: 50, width: 700, height: 500))
+        harness.apply(slot: .sixthRight, requester: r)
+        harness.gateway.refuseNextWrites(harness.handle(of: m)!)
+        let x = harness.addWindow()
+
+        harness.apply(slot: .sixthsRightTwoThirds, requester: x)
+
+        XCTAssertEqual(
+            space.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+        XCTAssertNil(space.notice, "a refused restore is never narrated as success")
+        let chapter = space.undoStack.last
+        XCTAssertNotNil(chapter, "the eviction that landed is undoable")
+        XCTAssertEqual(chapter?.snapshot.count, 2, "the chapter covers both evictions")
+        XCTAssertTrue(
+            chapter?.snapshot.contains { $0.slot == .sixthMiddle } ?? false,
+            "the refused eviction is covered all the same")
+        XCTAssertTrue(
+            chapter?.snapshot.contains { $0.slot == .sixthRight } ?? false,
+            "the eviction that went home is covered")
+        XCTAssertEqual(
+            harness.frame(of: r), CGRect(x: 50, y: 50, width: 700, height: 500),
+            "r really did go home")
+        XCTAssertEqual(space.state.slot(of: x), .sixthsRightTwoThirds, "the requester still lands")
+    }
+
     // MARK: Swap
 
     func testSwapMovesBothWindowsAndKeepsThemTiled() {
@@ -404,9 +439,43 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .sixthLeft, requester: b)
 
         XCTAssertNotNil(space.error, "failed restore surfaces instead of silence")
-        XCTAssertTrue(space.undoStack.isEmpty, "no undo when the switch didn't cleanly land")
+        XCTAssertFalse(
+            space.undoStack.isEmpty,
+            "a refused restore forgets its window all the same: the untile stays undoable")
         XCTAssertNil(space.notice)
         XCTAssertEqual(space.state.slot(of: b), .sixthLeft, "requester still lands in its slot")
+    }
+
+    func testSwitchPartialRestoreFailureLeavesAChapterCoveringTheEvictions() {
+        // The switch mirror of the eviction case: two quarters windows
+        // untile behind a sixths request and one restore write refuses.
+        // The chapter covers both evictions; the refusal surfaces its
+        // own message and keeps the success sentence quiet.
+        let a = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        let b = harness.addWindow(frame: CGRect(x: 50, y: 50, width: 700, height: 500))
+        harness.apply(slot: .topRight, requester: b)
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!)
+        let x = harness.addWindow()
+
+        harness.apply(slot: .sixthLeft, requester: x)
+
+        XCTAssertEqual(
+            space.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+        XCTAssertNil(space.notice, "a refused restore is never narrated as success")
+        let chapter = space.undoStack.last
+        XCTAssertNotNil(chapter, "the switch's untile is undoable")
+        XCTAssertEqual(chapter?.snapshot.count, 2, "the chapter covers both evictions")
+        XCTAssertTrue(
+            chapter?.snapshot.contains { $0.slot == .topLeft } ?? false,
+            "the refused eviction is covered all the same")
+        XCTAssertTrue(
+            chapter?.snapshot.contains { $0.slot == .topRight } ?? false,
+            "the eviction that went home is covered")
+        XCTAssertEqual(
+            harness.frame(of: b), CGRect(x: 50, y: 50, width: 700, height: 500),
+            "b really did go home")
     }
 
     // MARK: Re-house
