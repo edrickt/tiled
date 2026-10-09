@@ -4,10 +4,14 @@ import XCTest
 /// Closes the "commit dance" gap without copying it: every (occupancy,
 /// request) pair from the pure plan matrices is replayed through the
 /// canvas (`TilingSpace` with a fake gateway and injected bounds) and
-/// checked against the model's plan-defined contract. The model is
-/// `plan` itself plus the pure rules (`rehousingHome`, `reflow`); the
-/// test never re-implements the placement pipeline's commit order.
-/// Both requester kinds run: a fresh untiled window (tile/evict/switch
+/// checked against an independent oracle. `MatrixOracle` states the
+/// expected outcome per matrix case in its own terms — the plan rules
+/// written from `CONTEXT.md` over Slots and Cells, never a call into
+/// the code under test — so a wrong re-housing home is caught, not
+/// agreed with. The model (`plan`) runs alongside: where the canvas and
+/// the model diverge, the cross-check names the divergence; where the
+/// model and the oracle disagree, it names the drifted rule. Both
+/// requester kinds run: a fresh untiled window (tile/evict/switch
 /// paths) and an already-tiled window (move and no-op paths, which only
 /// tiled requesters can produce).
 final class MatrixCrossCheckTests: XCTestCase {
@@ -19,72 +23,95 @@ final class MatrixCrossCheckTests: XCTestCase {
         runMatrix(requester: .tiled)
     }
 
-    // MARK: Canvas vs. model
+    // MARK: Canvas vs. oracle vs. model
 
-    /// The contract of one plan, asserted on the canvas that executed it:
-    /// - `.noop`: nothing changed.
-    /// - `.switchLayout`: exactly the requester remains.
-    /// - `.swap`: the two windows trade tiles, nobody else moves.
-    /// - `.tile`: the requester lands, every evictee either re-houses
-    ///   into the one whole slot the request freed (`rehousingHome`) or
-    ///   is gone, and every survivor stays tiled.
+    /// The contract of one plan, asserted on the canvas that executed
+    /// it, in three layers:
+    /// - the model's plan must match the oracle's reading of the rules
+    ///   (`CONTEXT.md`), or a rule has drifted from its spec;
+    /// - the canvas must have executed the model's plan (divergence
+    ///   detection between canvas and model);
+    /// - the canvas must land where the oracle says — explicit expected
+    ///   homes per evictee and a stated slot per survivor — because rule
+    ///   correctness cannot rest on the rule under test.
     /// Structural health (one layout, no ghosts, no double-booked cells)
     /// is checked after every case.
     private func assertCanvasFollows(
-        _ plan: TilePlan, harness: TilingSpaceHarness, model: TilingState,
-        requester: WindowID, target: Slot, context: String
+        _ oracle: MatrixOracle.Expectation, plan: TilePlan, replay: Replay,
+        target: Slot, context: String
     ) {
-        let canvas = harness.space
+        let canvas = replay.harness.space
+        XCTAssertEqual(
+            shape(of: plan), oracle.plan,
+            "\(context): the model's plan disagrees with the oracle's rules")
         switch plan {
         case .noop:
-            XCTAssertEqual(canvas.state, model, "\(context): noop changed the state")
+            XCTAssertEqual(canvas.state, replay.model, "\(context): noop changed the state")
         case .switchLayout:
             XCTAssertEqual(
-                canvas.state.occupants, [target: requester],
+                canvas.state.occupants, [target: replay.requester],
                 "\(context): a switch leaves exactly the requester")
         case .swap(let displaced):
-            guard let previous = model.slot(of: requester),
-                let displacedSlot = model.slot(of: displaced)
+            guard let previous = replay.model.slot(of: replay.requester),
+                let displacedSlot = replay.model.slot(of: displaced)
             else {
                 return XCTFail("\(context): swap plan without both tiles")
             }
-            var expected = model.occupants
+            var expected = replay.model.occupants
             expected[previous] = nil
             expected[displacedSlot] = nil
-            expected[target] = requester
+            expected[target] = replay.requester
             expected[previous] = displaced
             XCTAssertEqual(
                 canvas.state.occupants, expected,
                 "\(context): the displaced window takes the vacated tile")
         case .tile(let evicting):
             XCTAssertEqual(
-                canvas.state.occupant(of: target), requester,
+                canvas.state.occupant(of: target), replay.requester,
                 "\(context): the requester lands in its slot")
-            for evicted in evicting {
-                if evicted == requester { continue }
-                // Only a lone evictee is ever re-housed (the canvas's
-                // rule); with more than one, everyone goes home.
-                if evicting.count == 1,
-                    let home = model.rehousingHome(
-                        evicting: evicted, for: target, vacating: model.slot(of: requester))
-                {
+            // The re-housing expectation per victim: an explicit
+            // expected home from the oracle. A home computed by
+            // `rehousingHome` here would be the rule judging itself —
+            // a wrong home would be agreed with, not caught.
+            for evictee in evicting where evictee != replay.requester {
+                if let home = oracle.homes[evictee] {
                     XCTAssertEqual(
-                        canvas.state.slot(of: evicted), home,
-                        "\(context): the lone evictee re-houses into the one free slot")
+                        canvas.state.slot(of: evictee), home,
+                        "\(context): win\(evictee) re-houses into \(home.rawValue)")
+                    XCTAssertEqual(
+                        replay.harness.frame(of: evictee), replay.harness.rect(home),
+                        "\(context): win\(evictee)'s frame is its home's rect")
                 } else {
                     XCTAssertNil(
-                        canvas.state.slot(of: evicted),
-                        "\(context): a window with no re-house slot is released")
+                        canvas.state.slot(of: evictee),
+                        "\(context): a window with no whole-slot home is untiled")
                 }
             }
-            // Survivors: reflow may grow them, never drop them.
-            let survivors = Set(model.tiledWindows).subtracting(evicting)
+            // Survivors: which slot each one holds — its cells and its
+            // written rect — not mere presence. Reflow may grow a
+            // survivor; the oracle states into what.
+            let survivors = Set(replay.model.tiledWindows)
+                .subtracting(evicting)
+                .subtracting([replay.requester])
             for survivor in survivors {
-                XCTAssertNotNil(
-                    canvas.state.slot(of: survivor),
-                    "\(context): a survivor must keep a tile")
+                let expectedSlot = oracle.occupants.first { $0.value == survivor }?.key
+                XCTAssertEqual(
+                    canvas.state.slot(of: survivor), expectedSlot,
+                    "\(context): survivor win\(survivor) holds the slot the rules give it")
+                if let expectedSlot {
+                    XCTAssertEqual(
+                        canvas.state.slot(of: survivor)?.cells, expectedSlot.cells,
+                        "\(context): survivor win\(survivor) holds exactly these cells")
+                    XCTAssertEqual(
+                        replay.harness.frame(of: survivor), replay.harness.rect(expectedSlot),
+                        "\(context): survivor win\(survivor)'s frame is its slot's rect")
+                }
             }
         }
+        // The oracle states the whole expected outcome per matrix case.
+        XCTAssertEqual(
+            canvas.state.occupants, oracle.occupants,
+            "\(context): the final occupancy diverges from the oracle")
         assertHealthy(canvas.state.occupants, context: context)
     }
 
@@ -103,11 +130,48 @@ final class MatrixCrossCheckTests: XCTestCase {
             "\(context): a window appears in two slots")
     }
 
+    /// The model's decision read into the oracle's vocabulary, for the
+    /// rule-agreement check only.
+    private func shape(of plan: TilePlan) -> MatrixOracle.Plan {
+        switch plan {
+        case .noop: .noop
+        case .switchLayout: .switchLayout
+        case .swap(let displaced): .swap(displaced: displaced)
+        case .tile(let evicting): .tile(evicting: evicting)
+        }
+    }
+
     // MARK: Engine
 
     private enum RequesterKind {
         case fresh
         case tiled
+    }
+
+    /// One replay's parts: the canvas run over the config's occupancy,
+    /// the model over the same occupancy, and the requester's id.
+    private struct Replay {
+        var harness: TilingSpaceHarness
+        var model: TilingState
+        var requester: WindowID
+    }
+
+    /// Builds one replay without requesting anything: the config tiles
+    /// in order (ids 1...count — configs are pairwise disjoint, so every
+    /// setup tile is a plain placement), and the requester is either a
+    /// fresh untiled window (`nil`) or the config's window with that id.
+    private func replay(config: [Slot], requester: WindowID?) -> Replay {
+        let harness = TilingSpaceHarness()
+        for slot in config {
+            let id = harness.addWindow()
+            harness.apply(slot: slot, requester: id)
+        }
+        var model = TilingState()
+        for (index, slot) in config.enumerated() {
+            model.commit(window: index + 1, into: slot)
+        }
+        return Replay(
+            harness: harness, model: model, requester: requester ?? harness.addWindow())
     }
 
     private func runMatrix(requester kind: RequesterKind) {
@@ -118,43 +182,142 @@ final class MatrixCrossCheckTests: XCTestCase {
         for (layout, configs) in matrices {
             for config in configs {
                 for target in Slot.allCases {
-                    let harness = TilingSpaceHarness()
-                    // Tile the occupancy shape: ids 1...count, in order.
-                    // Configs are pairwise disjoint, so every setup tile
-                    // is a plain placement.
-                    for slot in config {
-                        let id = harness.addWindow()
-                        harness.apply(slot: slot, requester: id)
-                    }
-
-                    let requesterID: WindowID
-                    switch kind {
-                    case .fresh:
-                        requesterID = harness.addWindow()
-                    case .tiled:
-                        requesterID = 1
-                    }
-
-                    // The model over the same occupancy.
-                    var model = TilingState()
-                    for (index, slot) in config.enumerated() {
-                        model.commit(window: index + 1, into: slot)
-                    }
-                    let plan = model.plan(window: requesterID, into: target)
-
+                    let replay = replay(config: config, requester: kind == .fresh ? nil : 1)
+                    let plan = replay.model.plan(window: replay.requester, into: target)
+                    // The oracle states the expected outcome before the
+                    // canvas runs: the canvas is compared against a
+                    // prediction, not against its own echo.
+                    let oracle = MatrixOracle.expectation(
+                        occupants: replay.model.occupants,
+                        requester: replay.requester, target: target)
                     let context =
                         "\(kind) \(layout.rawValue) \(config) -> \(target.rawValue) [\(plan)]"
                     XCTAssertEqual(
-                        harness.space.state.occupants, model.occupants,
+                        replay.harness.space.state.occupants, replay.model.occupants,
                         "\(context): canvas and model start from the same occupancy")
-
-                    harness.apply(slot: target, requester: requesterID)
-
+                    replay.harness.apply(slot: target, requester: replay.requester)
                     assertCanvasFollows(
-                        plan, harness: harness, model: model,
-                        requester: requesterID, target: target, context: context)
+                        oracle, plan: plan, replay: replay, target: target, context: context)
                 }
             }
+        }
+    }
+
+    // MARK: Explicit expected homes
+
+    /// The re-housing scenarios `CONTEXT.md` names, written down by hand
+    /// in the rule's own terms: an occupancy shape, a request, and the
+    /// exact homes and final occupancy that must result. These literals
+    /// — not any computation — are the trust anchor the oracle is held
+    /// to; the matrix then sweeps every other case against the anchored
+    /// oracle. Each pin is replayed through the canvas too, so a
+    /// written-down home is checked against the screen, not just the
+    /// model of it.
+    func testExplicitExpectedHomesPinTheReHousingRule() {
+        struct Pin {
+            /// The occupancy shape, tiled by consecutive ids (1...).
+            let config: [Slot]
+            /// The requester: a fresh untiled window (`nil`) or the
+            /// config's window with this id.
+            let requester: WindowID?
+            let target: Slot
+            /// Every re-housed victim's expected home, explicitly.
+            let homes: [WindowID: Slot]
+            /// The whole expected outcome.
+            let expected: [Slot: WindowID]
+            /// The rule text this pin was written from.
+            let rule: String
+        }
+        let pins: [Pin] = [
+            Pin(
+                config: [.sixthLeft], requester: nil, target: .sixthTopLeft,
+                homes: [1: .sixthBottomLeft],
+                expected: [.sixthTopLeft: 2, .sixthBottomLeft: 1],
+                rule: "the left third requested at its top sixth steps down into the bottom-left sixth"),
+            Pin(
+                config: [.leftHalf], requester: nil, target: .topLeft,
+                homes: [1: .bottomLeft],
+                expected: [.topLeft: 2, .bottomLeft: 1],
+                rule: "the left half into the bottom-left quad"),
+            Pin(
+                config: [.sixthsLeftTwoThirds], requester: nil, target: .sixthLeft,
+                homes: [1: .sixthMiddle],
+                expected: [.sixthLeft: 2, .sixthMiddle: 1],
+                rule: "a two-thirds into the third its request leaves clean"),
+            Pin(
+                config: [.sixthsLeftTwoThirds], requester: nil, target: .sixthsRightTwoThirds,
+                homes: [1: .sixthLeft],
+                expected: [.sixthsRightTwoThirds: 2, .sixthLeft: 1],
+                rule: "the one overlap that is not a containment — a left two-thirds blocking a right two-thirds request — steps aside into the left third"),
+            Pin(
+                config: [.sixthsRightTwoThirds], requester: nil, target: .sixthsLeftTwoThirds,
+                homes: [1: .sixthRight],
+                expected: [.sixthsLeftTwoThirds: 2, .sixthRight: 1],
+                rule: "the same crossing in the other direction steps into the right third"),
+            Pin(
+                config: [.sixthBottomLeft, .sixthMiddle], requester: nil,
+                target: .sixthsRightTwoThirds,
+                homes: [2: .sixthTopLeft],
+                expected: [
+                    .sixthsRightTwoThirds: 3, .sixthTopLeft: 2, .sixthBottomLeft: 1,
+                ],
+                rule: "with the bottom-left sixth occupied, the middle third making room for the right two-thirds moves into the free top-left sixth"),
+            Pin(
+                config: [.sixthsLeftTwoThirds, .sixthRight], requester: 1,
+                target: .sixthsRightTwoThirds,
+                homes: [2: .sixthLeft],
+                expected: [.sixthsRightTwoThirds: 1, .sixthLeft: 2],
+                rule: "the cells left free after the request include the requester's vacated tile"),
+            Pin(
+                config: [.sixthsLeftTwoThirds], requester: nil, target: .sixthTopLeft,
+                homes: [:],
+                expected: [.sixthTopLeft: 2],
+                rule: "a leftover that is not exactly one slot falls back to untile-and-restore"),
+            Pin(
+                config: [.topLeft, .bottomRight], requester: nil, target: .bottomRight,
+                homes: [:],
+                expected: [.topLeft: 1, .bottomRight: 3],
+                rule: "a free region that is not exactly one slot falls back to untile-and-restore"),
+            Pin(
+                config: [.sixthBottomLeft, .sixthMiddle, .sixthRight], requester: nil,
+                target: .sixthsRightTwoThirds,
+                homes: [:],
+                expected: [.sixthsRightTwoThirds: 4, .sixthBottomLeft: 1],
+                rule: "only a lone evictee re-houses; with more than one, everyone goes home"),
+            Pin(
+                config: [.leftHalf, .rightHalf], requester: 1, target: .topRight,
+                homes: [2: .bottomRight],
+                expected: [.topRight: 1, .bottomRight: 2],
+                rule: "the step-aside covers tiled requesters too: it wins over a swap"),
+            Pin(
+                config: [.topLeft, .bottomLeft], requester: 1, target: .topRight,
+                homes: [:],
+                expected: [.topRight: 1, .leftHalf: 2],
+                rule: "the requester's vacated cells merge with exactly one adjacent survivor into a whole slot"),
+            Pin(
+                config: [.sixthTopLeft, .sixthBottomLeft], requester: 2, target: .sixthTopRight,
+                homes: [:],
+                expected: [.sixthLeft: 1, .sixthTopRight: 2],
+                rule: "the top-left sixth whose bottom mate left becomes the left third"),
+        ]
+        for pin in pins {
+            let replay = replay(config: pin.config, requester: pin.requester)
+            let oracle = MatrixOracle.expectation(
+                occupants: replay.model.occupants,
+                requester: replay.requester, target: pin.target)
+            let context = "[\(pin.rule)] \(pin.config) -> \(pin.target.rawValue)"
+            // The oracle must state the written-down outcome ...
+            XCTAssertEqual(
+                oracle.homes, pin.homes,
+                "\(context): the oracle's homes disagree with the written-down homes")
+            XCTAssertEqual(
+                oracle.occupants, pin.expected,
+                "\(context): the oracle's outcome disagrees with the written-down outcome")
+            // ... and the canvas must land there.
+            replay.harness.apply(slot: pin.target, requester: replay.requester)
+            XCTAssertEqual(
+                replay.harness.space.state.occupants, pin.expected,
+                "\(context): the canvas disagrees with the written-down outcome")
         }
     }
 
