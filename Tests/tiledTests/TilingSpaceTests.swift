@@ -848,8 +848,8 @@ final class TilingSpaceTests: XCTestCase {
         }
         // At undo time a's live frame is its restored pre-tile frame; the
         // re-tile target derives from the grid evaluated in the injected
-        // bounds.
-        let expected = grid.rect(for: .topLeft, in: bounds)
+        // bounds under the injected gap.
+        let expected = harness.rect(.topLeft)
 
         _ = harness.restoreChapter(snapshot)
 
@@ -991,7 +991,7 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(
             space.notice, "Splitters restored to their pre-reset positions.")
         XCTAssertFalse(space.hasSplitterBackup, "restoring consumes the backup")
-        let target = space.grid.rect(for: .topLeft, in: bounds)
+        let target = harness.rect(.topLeft)
         XCTAssertEqual(harness.frame(of: a), target, "occupants re-tile at the restored grid")
 
         // Nil backup (already restored once) is a no-op.

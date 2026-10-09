@@ -10,7 +10,9 @@ import CoreGraphics
 /// fake gateway, every rect derives from `bounds`, and every action is
 /// observed through the canvas's own state, notices, and outcomes. The
 /// expectation owner is wired exactly like the controller's: late checks
-/// are captured for manual firing.
+/// are captured for manual firing, silent-ignore consequences are
+/// recorded, and the drag loop's publish path performs its pushes
+/// through the canvas and records them.
 final class TilingSpaceHarness {
     let gateway = FakeWindowGateway()
     var space = TilingSpace()
@@ -22,14 +24,28 @@ final class TilingSpaceHarness {
     /// Injected bounds: every placement, reflow, and expand derives its
     /// target from this rect, never a live `NSScreen`.
     var bounds = CGRect(x: 0, y: 0, width: 1600, height: 1200)
-    /// Injected tile gap, in points. Zero by default so existing frame
-    /// expectations stay gap-free; gap tests set it explicitly.
-    var gap: CGFloat = 0
+    /// Injected tile gap, in points. The app's default (5 pt,
+    /// `AppSettings.defaultTileGap`) so canvas coverage exercises the
+    /// gap code instead of running gap-free; tests after gap-free
+    /// geometry set it to 0 explicitly.
+    var gap: CGFloat = 5
     private(set) var tracker: DragTracker!
     private(set) var expectations: WriteExpectations!
     /// Late silent-ignore checks captured from the injectable scheduler,
     /// in scheduling order.
     private(set) var checks: [() -> Void] = []
+    /// Trailing-tick commits captured from the injectable scheduler: the
+    /// drag loop's neighbour re-push gate, fired manually so a publish
+    /// never waits on real time.
+    private(set) var commitFires: [() -> Void] = []
+    /// Publish pushes the drag loop coalesced, in order: the tracker's
+    /// `apply` seam. Each entry names the pushed rects and the drag's
+    /// source of truth the push excludes, so wrong neighbour pushes are
+    /// observable from the canvas suite.
+    private(set) var published: [(rects: [WindowID: CGRect], excluding: WindowID?)] = []
+    /// Silent-ignore consequences the expectation owner paid, in order.
+    private(set) var consequences:
+        [(id: WindowID, consequence: WriteExpectations.Consequence)] = []
     /// Canvases a deferred write marked stale.
     private(set) var staleMarks: [TilingSpaceKey] = []
 
@@ -48,6 +64,9 @@ final class TilingSpaceHarness {
             },
             notePushed: { [weak self] id, target in
                 self?.tracker.notePushed(id, target)
+            },
+            onConsequence: { [weak self] id, consequence in
+                self?.consequences.append((id, consequence))
             })
         tracker = DragTracker(
             expectations: expectations,
@@ -64,7 +83,20 @@ final class TilingSpaceHarness {
             gridProvider: DragTracker.GridProvider(
                 grid: { [weak self] _ in self?.space.grid ?? GridLayout() },
                 setGrid: { [weak self] updated, _ in self?.space.grid = updated }),
-            apply: { _, _ in })
+            apply: { [weak self] rects, excluding in
+                guard let self else { return }
+                self.published.append((rects: rects, excluding: excluding))
+                // Wired exactly like the coordinator's publish path:
+                // the coalesced push performs its writes through the
+                // canvas, so the fake screen agrees with what the drag
+                // loop pushed.
+                self.space.publish(
+                    rects: rects, excluding: excluding, context: self.context())
+            },
+            scheduleCommit: { [weak self] fire in
+                self?.commitFires.append(fire)
+                return {}
+            })
     }
 
     /// The collaborators one canvas action needs. A fresh context is
