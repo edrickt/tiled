@@ -168,6 +168,32 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "undo re-tiles w")
     }
 
+    func testRefusedPlacementAfterSwitchKeepsTheDestructionUndoable() {
+        // The switch mirror of the eviction case above: a quarters
+        // arrangement is untiled by a sixths request whose placement the
+        // requester's app refuses. The refusal and the mass untile's
+        // chapter coexist exactly as the tile branch's pinned behaviour
+        // prescribes — the destruction is narrated, not silent, and one
+        // undo brings every untiled window home.
+        let w = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        let x = focusNewWindow(CGRect(x: 40, y: 40, width: 500, height: 400))
+
+        gateway.refuseNextWrites(x)
+        controller.handle(slot: .sixthLeft) // switch untiles w, then refuses x
+
+        XCTAssertNil(canvas.state.slot(of: 1), "w was untiled by the failed switch")
+        XCTAssertEqual(
+            gateway.frame(of: w), CGRect(x: 0, y: 0, width: 800, height: 600),
+            "w went back to its pre-tile frame")
+        XCTAssertNotNil(canvas.notice, "the untile is narrated, not silent")
+        XCTAssertNotNil(canvas.error, "the refused placement is surfaced")
+        XCTAssertFalse(canvas.undoStack.isEmpty, "the destruction is undoable")
+
+        controller.undoLastDisplacement()
+        XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "undo re-tiles w")
+    }
+
     // MARK: Partial restoration
 
     func testPartialUndoFailureReachesTheUser() {
