@@ -121,7 +121,7 @@ final class WriteExpectationsTests: XCTestCase {
         XCTAssertTrue(checks.isEmpty)
     }
 
-    func testRefusedWriteArmsTheEchoButSchedulesNoCheck() {
+    func testRefusedWriteLeavesNoArmedEchoEntry() {
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         gateway.refuseNextWrites(handle)
         let written = CGRect(x: 40, y: 40, width: 300, height: 200)
@@ -130,11 +130,15 @@ final class WriteExpectationsTests: XCTestCase {
             7, handle: handle, to: written, on: canvas, consequence: .slotCommit)
 
         XCTAssertEqual(result, .refused)
-        XCTAssertEqual(writeEvents, ["armed"])
+        XCTAssertTrue(checks.isEmpty, "a refusal schedules no late check")
+        // No echo entry is left behind: a later user drag is classified
+        // from its first tick, wherever the drag starts.
         XCTAssertEqual(
-            expectations.classify(7, frame: written), .consumed,
-            "the refused write had already armed its echo expectation")
-        XCTAssertTrue(checks.isEmpty)
+            expectations.classify(7, frame: CGRect(x: 20, y: 20, width: 100, height: 100)), .live,
+            "the drag's first tick is live")
+        XCTAssertEqual(
+            expectations.classify(7, frame: written), .live,
+            "not even the refused target is an echo entry")
     }
 
     // MARK: The late consequence
@@ -469,6 +473,175 @@ final class WriteExpectationsTests: XCTestCase {
         wait(for: [pushedExpectation], timeout: 1.0)
     }
 
+    // MARK: One write, one life (interleavings)
+
+    /// A silently-ignoring app: the first write is accepted but the
+    /// window never moves, so its late check must fire its consequence -
+    /// unless a later outcome voided it. The write's target is far from
+    /// the live frame the check reads (the ignored write's shape).
+    private func performIgnoredWrite(
+        on owner: WriteExpectations? = nil,
+        to ignoredTarget: CGRect = CGRect(x: 0, y: 500, width: 840, height: 500)
+    ) -> WindowHandle {
+        let owner: WriteExpectations = owner ?? expectations
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        liveFrames[7] = CGRect(x: 3000, y: 3000, width: 400, height: 300)
+        let result = owner.write(
+            7, handle: handle, to: ignoredTarget, on: canvas, consequence: .slotCommit)
+        XCTAssertEqual(result, .written)
+        return handle
+    }
+
+    func testPerformedThenNoOpSkipVoidsThePendingCheck() {
+        let handle = performIgnoredWrite()
+        // The user re-tiles to the frame the window visibly occupies: the
+        // write policy skips it - no write issued, no new expectation.
+        let occupied = CGRect(x: 900, y: 0, width: 400, height: 300)
+        gateway.simulateSilentChange(handle, to: occupied)
+
+        let result = expectations.write(
+            7, handle: handle, to: occupied, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .skippedNoOp)
+        XCTAssertEqual(cancels, 1, "the skip voids the pending check")
+        // The captured closure is cancelled work: firing it must judge
+        // nothing. The window keeps the slot it visibly occupies.
+        checks[0]()
+        XCTAssertTrue(
+            consequences.isEmpty,
+            "the skip voids the performed write's check: no consequence fires")
+    }
+
+    func testPerformedThenDeferredOffSpaceVoidsThePendingCheck() {
+        let hidden = TilingSpaceKey(
+            screen: ScreenID(rawValue: 2), space: SpaceID(rawValue: 20))
+        let owner = makeExpectations(visible: { $0 == self.canvas })
+        let handle = performIgnoredWrite(on: owner)
+        let result = owner.write(
+            7, handle: handle, to: CGRect(x: 900, y: 0, width: 400, height: 300),
+            on: hidden, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .deferredOffSpace)
+        // The deferral voids the earlier performed write's life too: its
+        // verdict would be paid against the deferred state.
+        XCTAssertEqual(cancels, 1, "the deferral voids the pending check")
+        checks[0]()
+        XCTAssertTrue(
+            consequences.isEmpty,
+            "the deferral voids the performed write's check: no consequence fires")
+    }
+
+    func testPerformedThenRefusedJudgesThePerformedWritesOwnEntry() {
+        let handle = performIgnoredWrite()
+        // The next write is refused at the frame the window visibly sits
+        // in: judging THAT entry would read "converged" and stay silent.
+        let occupied = liveFrames[7]!
+        gateway.refuseNextWrites(handle)
+        let result = expectations.write(
+            7, handle: handle, to: occupied, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .refused)
+        checks[0]()
+        XCTAssertEqual(
+            consequences.count, 1,
+            "the check judges its own write's entry: the ignored write pays its consequence")
+    }
+
+    func testPerformedThenRefusedNeverPaysAgainstTheRefusedTarget() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let first = CGRect(x: 0, y: 500, width: 840, height: 500)
+        XCTAssertEqual(
+            expectations.write(
+                7, handle: handle, to: first, on: canvas, consequence: .slotCommit),
+            .written)
+        // The write landed (silently at its target); a later refused
+        // write at a far frame must not be judged in its place.
+        liveFrames[7] = first
+        gateway.refuseNextWrites(handle)
+        XCTAssertEqual(
+            expectations.write(
+                7, handle: handle, to: CGRect(x: 40, y: 40, width: 300, height: 200),
+                on: canvas, consequence: .slotCommit),
+            .refused)
+
+        checks[0]()
+        XCTAssertTrue(
+            consequences.isEmpty,
+            "the check judges its own entry: the converged write pays nothing")
+    }
+
+    func testRefusedThenPerformedJudgesThePerformedWriteAtTheVerifyDelay() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let refusedTarget = CGRect(x: 40, y: 40, width: 300, height: 200)
+        gateway.refuseNextWrites(handle)
+        XCTAssertEqual(
+            expectations.write(
+                7, handle: handle, to: refusedTarget, on: canvas, consequence: .slotCommit),
+            .refused)
+        XCTAssertEqual(
+            expectations.classify(7, frame: CGRect(x: 0, y: 0, width: 100, height: 100)), .live,
+            "the refusal leaves no echo entry: the drag's first tick is live")
+
+        liveFrames[7] = CGRect(x: 3000, y: 3000, width: 400, height: 300)
+        let first = CGRect(x: 0, y: 500, width: 840, height: 500)
+        XCTAssertEqual(
+            expectations.write(
+                7, handle: handle, to: first, on: canvas, consequence: .slotCommit),
+            .written)
+
+        checks[0]()
+        XCTAssertEqual(
+            consequences.count, 1,
+            "the performed write is judged at the verify delay")
+    }
+
+    func testPerformedThenClampedVoidsThePendingCheck() {
+        let handle = performIgnoredWrite()
+        // The next write lands clamped (the Firefox floor shape from the
+        // clamp tests): its restore re-points the echo trail at the frame
+        // the window is back in. The earlier write's check must never be
+        // paid against that trail either.
+        gateway.writtenFrame = { _, requested in
+            guard requested.width < 500 else { return requested }
+            return CGRect(
+                x: requested.minX, y: requested.minY, width: 500, height: 1000)
+        }
+        let result = expectations.write(
+            7, handle: handle, to: CGRect(x: 1440, y: 0, width: 160, height: 1000),
+            on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .refused)
+        XCTAssertEqual(cancels, 1, "the clamp-restore supersedes the pending check")
+        checks[0]()
+        XCTAssertTrue(
+            consequences.isEmpty,
+            "the re-pointed trail is never judged as the earlier write's silence")
+    }
+
+    func testCheckJudgesOnlyTheEntryItsOwnWriteArmed() {
+        // The contract in one line: a late check judges exactly the
+        // write that armed it. A re-pointed echo trail (another owner
+        // path noting an expectation over it) must never be read as that
+        // write's convergence or silence.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let first = CGRect(x: 0, y: 500, width: 840, height: 500)
+        XCTAssertEqual(
+            expectations.write(
+                7, handle: handle, to: first, on: canvas, consequence: .slotCommit),
+            .written)
+        // Judging ITS entry would say "converged"...
+        liveFrames[7] = first
+        // ...while judging this later entry would say "ignored" and
+        // discard a window whose own write landed.
+        expectations.noteExpected(7, CGRect(x: 5000, y: 5000, width: 10, height: 10))
+
+        checks[0]()
+
+        XCTAssertTrue(
+            consequences.isEmpty,
+            "a check judges its own entry, or nothing at all")
+    }
+
     // MARK: Clamp detection
 
     func testClampedWriteRestoresThePreWriteFrameAndRefuses() {
@@ -496,6 +669,41 @@ final class WriteExpectationsTests: XCTestCase {
         XCTAssertEqual(
             expectations.intent(for: 7), previous,
             "the restore re-points intent at the frame the window is in")
+        XCTAssertEqual(
+            expectations.classify(7, frame: previous), .consumed,
+            "the restore's echo is swallowed against the frame the window is in")
+        XCTAssertTrue(checks.isEmpty, "a refusal schedules no late check")
+    }
+
+    func testClampRestoreFailureRePointsTheExpectationAtTheFrameTheWindowIsActuallyIn() {
+        // Firefox's floor again, but the restore write back is refused
+        // too: the window stays at the clamped frame. The expectation
+        // must point at the frame the window is actually in, never at
+        // the restore target it never reached (L16).
+        let previous = CGRect(x: 1066.67, y: 0, width: 533.33, height: 1000)
+        let handle = gateway.addWindow(frame: previous)
+        let target = CGRect(x: 1440, y: 0, width: 160, height: 1000)
+        let applied = CGRect(x: 1440, y: 0, width: 500, height: 1000)
+        gateway.writtenFrame = { [weak self] _, requested in
+            guard requested.width < 500 else { return requested }
+            // The restore (back to `previous`) is refused with it.
+            self?.gateway.refuseNextWrites(handle)
+            return applied
+        }
+
+        let result = expectations.write(
+            7, handle: handle, to: target, on: canvas, consequence: .slotCommit)
+
+        XCTAssertEqual(result, .refused)
+        XCTAssertEqual(
+            gateway.frame(of: handle), applied,
+            "the refused restore leaves the window at the clamped frame")
+        XCTAssertEqual(
+            expectations.intent(for: 7), applied,
+            "the expectation re-points at the frame the window is actually in")
+        XCTAssertEqual(
+            expectations.classify(7, frame: applied), .consumed,
+            "the clamped frame's echo is swallowed against the frame the window is in")
         XCTAssertTrue(checks.isEmpty, "a refusal schedules no late check")
     }
 

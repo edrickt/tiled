@@ -103,7 +103,10 @@ final class FakeWindowGateway: WindowGateway {
             return false
         }
         window.frame = writtenFrame(handle, frame)
-        windows[handle] = window
+        // Assign through the dictionary, not the copy: `writtenFrame`
+        // scripts follow-ups (e.g. a refused restore) and must not be
+        // clobbered by this write's stale snapshot.
+        windows[handle]?.frame = window.frame
         writes.append((handle, window.frame))
         return true
     }

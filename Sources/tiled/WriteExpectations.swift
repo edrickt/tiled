@@ -24,6 +24,10 @@ final class WriteExpectations {
     /// One armed expectation: the pushed frame plus its echo trail.
     private struct ExpectedWrite {
         let frame: CGRect
+        /// Serial of the write this entry belongs to, stamped when its
+        /// check is armed: a late check judges only the entry its own
+        /// write armed, never a later write's re-pointed trail.
+        var serial: Int = 0
         /// Last observed sum-of-edge-deltas from `frame`. Starts at infinity;
         /// only a strictly increasing distance means a user took over.
         var lastDistance: CGFloat
@@ -195,6 +199,7 @@ final class WriteExpectations {
         // back: sizing an off-Space window can pull it onto the visible
         // Space. The mark re-asserts the canvas later.
         guard isVisible(space) else {
+            voidPending(id)
             markStale(space)
             log("write win\(id) deferred off-Space")
             return .deferredOffSpace
@@ -206,12 +211,21 @@ final class WriteExpectations {
         // fallback the clamp guard restores to below.
         let live = gateway.frame(of: handle)
         if let live, Self.framesClose(live, target, tolerance: Self.noOpWriteTolerance) {
+            voidPending(id)
             log("write win\(id) no-op skip target=\(target)")
             return .skippedNoOp
         }
+        let outstanding = expected[id]
         noteExpected(id, target)
         notePushed(id, target)
         guard gateway.setFrame(handle, to: target) else {
+            // The write never landed, so its echo never comes: undo the
+            // arming, leaving the previous write's life (its check
+            // judging its own entry) exactly as it was. The diff
+            // baseline re-points at the frame the window is actually in,
+            // never the refused target it never reached.
+            expected[id] = outstanding
+            if let live { notePushed(id, live) }
             log("write win\(id) refused target=\(target)")
             return .refused
         }
@@ -228,14 +242,18 @@ final class WriteExpectations {
         if let previous = live, let applied = gateway.frame(of: handle),
             !Self.frameOnAnimationPath(applied, from: previous, toward: target)
         {
-            _ = gateway.setFrame(handle, to: previous)
+            let restored = gateway.setFrame(handle, to: previous)
             // The restore is our write too: re-point the echo trail and
             // the diff baseline at the frame the window is actually in,
             // so the restore's echo is swallowed against it instead of
-            // read as a user drag.
-            noteExpected(id, previous)
-            notePushed(id, previous)
-            log("write win\(id) clamped applied=\(applied) restored=\(previous)")
+            // read as a user drag. When the restore write fails that is
+            // the clamped frame the window is still in - never the
+            // restore target it never reached (L16).
+            let settledIn = restored ? previous : applied
+            cancelCheck(id)
+            noteExpected(id, settledIn)
+            notePushed(id, settledIn)
+            log("write win\(id) clamped applied=\(applied) settled=\(settledIn)")
             return .refused
         }
         // Every performed write leaves exactly one outstanding check; a
@@ -280,6 +298,9 @@ final class WriteExpectations {
         cancelCheck(id)
         checkSerial += 1
         let serial = checkSerial
+        // Tie the check to the entry its write armed: one write, one
+        // life, and each check judges its own entry.
+        expected[id]?.serial = serial
         let cancel = scheduleCheck { [weak self] in
             self?.fireCheck(id, serial: serial)
         }
@@ -292,12 +313,27 @@ final class WriteExpectations {
         checks.removeValue(forKey: id)?.cancel()
     }
 
+    /// Voids a window's whole outstanding write life: the pending check
+    /// and its echo entry. A no-op skip or off-Space deferral supersedes
+    /// the previous write's claim without writing anything, so that
+    /// write's late check must never be paid against the state the newer
+    /// outcome leaves: the window keeps the slot it visibly occupies.
+    /// Intent survives (it is where we were going, not an echo), and a
+    /// newer performed write arms its own life.
+    private func voidPending(_ id: WindowID) {
+        cancelCheck(id)
+        expected[id] = nil
+    }
+
     /// One late check fired: judges the write it was armed for and pays
     /// the consequence when the app stayed totally silent. A firing
-    /// closure whose check was cancelled or superseded judges nothing.
+    /// closure whose check was cancelled or superseded judges nothing;
+    /// neither does one whose entry is no longer the write's own - a
+    /// late check judges its own write, and nothing else.
     private func fireCheck(_ id: WindowID, serial: Int) {
         guard let pending = checks[id], pending.serial == serial else { return }
         checks[id] = nil
+        guard expected[id]?.serial == pending.serial else { return }
         guard convergence(for: id) == .ignored else { return }
         // The entry is spent: the app never moved the window, so the
         // echo trail has nothing left to swallow.
