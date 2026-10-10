@@ -591,8 +591,9 @@ final class DragTracker {
         framesClose(a, b, tolerance: tolerance)
     }
 
-    /// Sum of per-edge deltas between two frames.
-    private static func frameDistance(_ a: CGRect, _ b: CGRect) -> CGFloat {
+    /// Sum of per-edge deltas between two frames: the divergence metric
+    /// the tracker's escape rule and the animator's hand detection share.
+    static func frameDistance(_ a: CGRect, _ b: CGRect) -> CGFloat {
         abs(a.minX - b.minX) + abs(a.maxX - b.maxX)
             + abs(a.minY - b.minY) + abs(a.maxY - b.maxY)
     }

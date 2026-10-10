@@ -620,7 +620,9 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .topLeft, requester: a)
         harness.gateway.clearWrites()
 
-        space.discard(window: a, context: context())
+        space.discard(
+            window: a, refusing: TilingSpace.refusalMessage(windowName: "TestApp"),
+            context: context())
 
         XCTAssertNil(space.state.slot(of: a))
         XCTAssertNil(space.records[a])
@@ -922,7 +924,7 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .bottomRight, requester: b)
         harness.gateway.clearWrites()
 
-        let outcome = space.reassert(context: context())
+        let outcome = space.reassert(context: context(), animated: true)
 
         XCTAssertEqual(outcome.result, .placed)
         XCTAssertEqual(harness.frame(of: a), harness.rect(.topLeft))
@@ -937,7 +939,7 @@ final class TilingSpaceTests: XCTestCase {
         space.expanded[a] = .zero
         let bBefore = harness.frame(of: b)!
 
-        space.reassert(excluding: [b], context: context())
+        space.reassert(excluding: [b], context: context(), animated: true)
 
         XCTAssertEqual(harness.frame(of: b), bBefore, "an excluded occupant is not written")
     }
@@ -955,7 +957,7 @@ final class TilingSpaceTests: XCTestCase {
 
         space.publish(
             rects: [a: harness.rect(.topLeft), b: harness.rect(.bottomRight)],
-            excluding: nil, context: context())
+            excluding: nil, context: context(), animated: true)
 
         XCTAssertEqual(
             space.error, "Couldn't move 2 windows: an app refused to resize.")

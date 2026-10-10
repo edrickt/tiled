@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 @testable import tiled
 
 /// One `TilingSpace` under test: fake gateway, injected bounds, and a
@@ -20,10 +21,55 @@ final class TilingSpaceHarness {
     /// Injected bounds: every placement, reflow, and expand derives its
     /// target from this rect, never a live `NSScreen`.
     var bounds = CGRect(x: 0, y: 0, width: 1600, height: 1200)
+    /// Injected clock backing the animator's progress. Tests advance it
+    /// one step at a time and fire the captured steps by hand, so glides
+    /// are deterministic and never touch the runloop.
+    var now = Date()
+    /// Whether moves glide. Off by default: the placement suite asserts
+    /// instant landings; animation tests opt in and drive the steps.
+    var animationEnabled = false
+    /// Whether the injected Reduce Motion provider says snap. Read live
+    /// per move, like the real OS setting.
+    var reduceMotion = false
     private(set) var tracker: DragTracker!
     private(set) var writer: FrameWriter!
+    private(set) var animator: Animator!
+    /// A scheduled fire awaiting a manual trigger: an animator step or a
+    /// tracker drag end. The scheduler's canceller nils a superseded
+    /// fire, so a retargeted glide's stale step never fires against the
+    /// newer glide, and a continued drag's stale drag end never ends it.
+    private final class StepBox { var fire: (() -> Void)? }
+    private var pendingSteps: [StepBox] = []
+    /// Drag ends the tracker's debounce scheduled (latest wins per drag;
+    /// superseded fires are cancelled).
+    private var pendingDragEnds: [StepBox] = []
+
+    /// Whether any glide has a step waiting to fire.
+    var hasPendingSteps: Bool { pendingSteps.contains { $0.fire != nil } }
+
+    /// Fires every drag end the tracker scheduled. Superseded ends are
+    /// already cancelled; the live one fires.
+    func fireDragEnd() {
+        let boxes = pendingDragEnds
+        pendingDragEnds = []
+        for box in boxes { box.fire?() }
+    }
 
     init() {
+        animator = Animator(
+            now: { [weak self] in self?.now ?? Date() },
+            scheduleStep: { [weak self] fire in
+                let box = StepBox()
+                box.fire = fire
+                self?.pendingSteps.append(box)
+                return { box.fire = nil }
+            },
+            isEnabled: { [weak self] in self?.animationEnabled ?? false },
+            reduceMotion: { [weak self] in self?.reduceMotion ?? false },
+            frameOf: { [weak self] handle in self?.gateway.frame(of: handle) },
+            setFrame: { [weak self] handle, frame in
+                self?.gateway.setFrame(handle, to: frame) ?? false
+            })
         tracker = DragTracker(
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.space.state.slot(of: $0) },
@@ -37,9 +83,18 @@ final class TilingSpaceHarness {
             gridProvider: DragTracker.GridProvider(
                 grid: { [weak self] _ in self?.space.grid ?? GridLayout() },
                 setGrid: { [weak self] updated, _ in self?.space.grid = updated }),
-            apply: { _, _ in })
+            apply: { [weak self] rects, excluding in
+                self?.publishFromTracker(rects: rects, excluding: excluding)
+            },
+            scheduleDragEnd: { [weak self] fire in
+                let box = StepBox()
+                box.fire = fire
+                self?.pendingDragEnds.append(box)
+                return { box.fire = nil }
+            })
         writer = FrameWriter(
             gateway: gateway,
+            animator: animator,
             isVisible: { [weak self] _ in self?.canvasVisible ?? true },
             boundsOf: { [weak self] in self?.bounds ?? $0 },
             markStale: { _ in },
@@ -47,7 +102,34 @@ final class TilingSpaceHarness {
                 self?.tracker.markExpected(id, target)
             },
             scheduleCheck: { _, _ in },
+            onLandingFailed: { [weak self] id, _ in
+                guard let self else { return }
+                let name = self.handles[id].flatMap { self.gateway.appName(of: $0) }
+                    ?? "That window"
+                self.space.discard(
+                    window: id, refusing: TilingSpace.refusalMessage(windowName: name),
+                    context: self.context())
+            },
             log: { _ in })
+    }
+
+    /// Advances the injected clock one animation step and fires every
+    /// step the animator scheduled for this generation.
+    func step() {
+        now = now.addingTimeInterval(Animator.stepInterval)
+        let boxes = pendingSteps
+        pendingSteps = []
+        for box in boxes { box.fire?() }
+    }
+
+    /// Fires scheduled steps until every glide has landed. Bounded so a
+    /// stuck glide fails the test's later assertions instead of hanging.
+    func settleAnimations(maxSteps: Int = 64) {
+        var fired = 0
+        while hasPendingSteps, fired < maxSteps {
+            step()
+            fired += 1
+        }
     }
 
     /// The collaborators one canvas action needs. A fresh context is
@@ -57,6 +139,7 @@ final class TilingSpaceHarness {
             gateway: gateway,
             frameWriter: writer,
             tracker: tracker,
+            animator: animator,
             boundsOf: { [weak self] in self?.bounds ?? $0 },
             space: .displayless,
             allocateID: { [weak self] _ in
@@ -100,6 +183,19 @@ final class TilingSpaceHarness {
         }
     }
 
+    /// The coordinator's re-resolution after a release: the same live
+    /// handle comes back under a fresh id with a fresh record, exactly as
+    /// `windowID(for:)` allocates one once the old record is gone.
+    @discardableResult
+    func reattach(_ id: WindowID) -> WindowID {
+        guard let handle = handles[id] else { return id }
+        let fresh: WindowID = nextID
+        nextID += 1
+        handles[fresh] = handle
+        space.attach(fresh, handle: handle)
+        return fresh
+    }
+
     /// Runs one already-decided plan through the canvas's execute seam.
     @discardableResult
     func run(_ decision: TilePlan, requester: WindowID, slot: Slot) -> TilingSpace.Outcome {
@@ -118,5 +214,13 @@ final class TilingSpaceHarness {
     /// One undo chapter through the canvas.
     func undo(snapshot: [EvictedWindow], requester: WindowID?) -> TilingSpace.UndoOutcome {
         space.undo(snapshot: snapshot, requester: requester, context: context())
+    }
+
+    /// Routes the tracker's coalesced pushes into the canvas's publish
+    /// path, exactly as the controller's `publishRects` does. The tracker's
+    /// releases glide when animation is enabled. The tracker dispatches
+    /// onto the main queue; tests wait for the runloop tick.
+    private func publishFromTracker(rects: [WindowID: CGRect], excluding: WindowID?) {
+        space.publish(rects: rects, excluding: excluding, context: context(), animated: true)
     }
 }

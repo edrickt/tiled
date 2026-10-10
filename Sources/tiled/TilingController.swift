@@ -21,11 +21,22 @@ final class TilingController {
     /// Convergence-check scheduler for the late silent-ignore verification.
     /// Injectable so tests fire verifications without waiting 3.5s.
     private let scheduleVerify: DragTracker.DragEndScheduler
+    /// Animation-step scheduler for the glide stepper. Injectable so tests
+    /// fire steps without waiting on the runloop.
+    private let scheduleStep: Animator.StepScheduler
+    /// Whether Tiled-driven animation may run, read live per move. Off by
+    /// default so tests and headless rigs are deterministic; the app
+    /// enables it through this provider (the Settings toggle plugs in
+    /// here). Reduce Motion overrides it, always.
+    private let animationEnabled: () -> Bool
+    /// Whether macOS Reduce Motion is on, read live per move.
+    private let reduceMotion: () -> Bool
     /// The one frame-write policy every push path shares: no-op skip,
     /// off-Space deferral, echo marking, and the convergence check each
     /// write declares. Lazy so its closures can capture self.
     private lazy var frameWriter = FrameWriter(
         gateway: gateway,
+        animator: animator,
         isVisible: { [weak self] in self?.isVisible($0) ?? false },
         boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
         markStale: { [weak self] space in
@@ -37,6 +48,22 @@ final class TilingController {
         },
         scheduleCheck: { [weak self] id, space in
             self?.scheduleVerification(of: [id], on: space)
+        },
+        onLandingFailed: { [weak self] id, space in
+            self?.landingFailed(id, on: space)
+        },
+        log: { [weak self] in self?.dbg($0) })
+
+    /// The glide stepper: every accepted write-policy move animates when
+    /// enabled. Lazy so its closures can capture self.
+    private lazy var animator = Animator(
+        now: now,
+        scheduleStep: scheduleStep,
+        isEnabled: animationEnabled,
+        reduceMotion: reduceMotion,
+        frameOf: { [weak self] handle in self?.gateway.frame(of: handle) },
+        setFrame: { [weak self] handle, frame in
+            self?.gateway.setFrame(handle, to: frame) ?? false
         },
         log: { [weak self] in self?.dbg($0) })
 
@@ -170,6 +197,11 @@ final class TilingController {
         pruneInterval: TimeInterval? = 5.0,
         scheduleDragEnd: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         scheduleVerify: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleVerifyOnMain,
+        scheduleStep: @escaping Animator.StepScheduler = Animator.scheduleStepOnMain,
+        animationEnabled: @escaping () -> Bool = { false },
+        reduceMotion: @escaping () -> Bool = {
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        },
         screens: ScreenProvider? = nil,
         deathConfirmation: TimeInterval = 3.0,
         now: @escaping () -> Date = Date.init,
@@ -178,6 +210,9 @@ final class TilingController {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
         self.scheduleVerify = scheduleVerify
+        self.scheduleStep = scheduleStep
+        self.animationEnabled = animationEnabled
+        self.reduceMotion = reduceMotion
         self.deathConfirmation = deathConfirmation
         self.now = now
         self.screens = screens ?? { NSScreen.screens.enumerated().map { ScreenInfo(appKit: $0.element, index: $0.offset) } }
@@ -401,6 +436,7 @@ final class TilingController {
             gateway: gateway,
             frameWriter: frameWriter,
             tracker: tracker,
+            animator: animator,
             boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
             space: key,
             allocateID: { [weak self] handle in
@@ -444,29 +480,49 @@ final class TilingController {
     /// released, tracker entry cleared, standard refusal surfaced), so
     /// state and screen agree instead of disagreeing silently.
     private func verifyConvergence(_ id: WindowID, on space: TilingSpaceKey) {
-        guard let errorSpace = spaceOf(window: id),
-            spaces[errorSpace]?.state.slot(of: id) != nil
-        else { return }
+        guard let errorSpace = tiledCanvas(of: id) else { return }
         guard tracker.convergence(for: id) == .ignored else { return }
-        // Name the window before its record goes; the rollback itself
-        // writes nothing (the write never took effect).
+        refusePlacement(id, on: errorSpace, reason: "silent ignore")
+    }
+
+    /// A glide whose final write was refused, reported by the write
+    /// policy. A glide ends within a pixel of its target, so the late
+    /// convergence check would read the refused landing as converged;
+    /// the landing result itself is the evidence. Rolls back exactly like
+    /// a refused placement, so state and screen never silently disagree.
+    private func landingFailed(_ id: WindowID, on space: TilingSpaceKey) {
+        guard let errorSpace = tiledCanvas(of: id) else { return }
+        refusePlacement(id, on: errorSpace, reason: "refused landing")
+    }
+
+    /// The canvas still holding `id`'s slot, or nil when the window moved
+    /// on (released, re-placed, gone): a late rollback must never touch a
+    /// window that already left.
+    private func tiledCanvas(of id: WindowID) -> TilingSpaceKey? {
+        guard let key = spaceOf(window: id),
+            spaces[key]?.state.slot(of: id) != nil
+        else { return nil }
+        return key
+    }
+
+    /// Rolls a window out of the layout exactly like a refused placement:
+    /// slot released, tracker entry cleared, the standard refusal message
+    /// surfaced, and the usual feedback fired. Names the window before
+    /// its record goes. A newer error already on the canvas wins over
+    /// this one.
+    private func refusePlacement(
+        _ id: WindowID, on errorSpace: TilingSpaceKey, reason: String
+    ) {
         let name = appName(for: id) ?? "That window"
-        let hasError = mutateSpace(errorSpace) { canvas in
-            canvas.discard(window: id, context: placementContext(for: errorSpace))
-            return canvas.error != nil
+        mutateSpace(errorSpace) {
+            $0.discard(
+                window: id, refusing: TilingSpace.refusalMessage(windowName: name),
+                context: placementContext(for: errorSpace))
         }
         forgetBookkeeping(id)
-        // A later error (e.g. a newer refusal) wins over this late one.
-        // Scoped to the window's own canvas: the placement may tile onto
-        // a background display or Space while focus sits elsewhere.
-        if !hasError {
-            mutateSpace(errorSpace) {
-                $0.error = TilingSpace.refusalMessage(windowName: name)
-            }
-        }
         onFeedback?(.refused(windowName: name))
         onChange?()
-        dbg("verify FAILED win\(id): silent ignore, rolled back")
+        dbg("refusal rollback win\(id): \(reason)")
     }
 
     // MARK: Placement (delegated)
@@ -476,14 +532,17 @@ final class TilingController {
     /// reports refusals: the push half of the tracker's decide/push
     /// split. Nil reasserts every currently visible canvas (display
     /// changes); a key scopes to one canvas (reset, restore, stale
-    /// reassert).
+    /// reassert). Display reasserts declare themselves non-animated:
+    /// correctness after an unplug or rearrange never waits on a glide.
     private func applyAll(excluding excluded: Set<WindowID> = [], on space: TilingSpaceKey? = nil) {
         let keys: [TilingSpaceKey] =
             if let space { [space] } else { activeSpaceKeys() }
         staleSpaces.subtract(keys)
         for key in keys {
             mutateSpace(key) {
-                $0.reassert(excluding: excluded, context: placementContext(for: key))
+                $0.reassert(
+                    excluding: excluded, context: placementContext(for: key),
+                    animated: false)
             }
         }
     }
@@ -503,7 +562,7 @@ final class TilingController {
             mutateSpace(key) {
                 $0.publish(
                     rects: group, excluding: excluding,
-                    context: placementContext(for: key))
+                    context: placementContext(for: key), animated: true)
             }
         }
         onChange?()
@@ -858,7 +917,8 @@ final class TilingController {
             let requesterSpace = spaceOf(window: requester) ?? space
             mutateSpace(requesterSpace) {
                 $0.restore(
-                    window: requester, context: placementContext(for: requesterSpace))
+                    window: requester, context: placementContext(for: requesterSpace),
+                    animated: true)
             }
             forgetBookkeeping(requester)
         }

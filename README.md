@@ -245,6 +245,7 @@ swift tools/repro/probe-spaces.swift     # what the live suites can cover here
 ./scripts/run-repro.sh tools/repro/multi-display-suite.swift  # two displays
 ./scripts/run-repro.sh tools/repro/driver.swift   # smaller focused driver
 python3 tools/mutation/mutate.py        # verify the suite still catches bugs
+python3 tools/mutation/mutate.py --since HEAD~3  # only mutants whose file changed since a ref
 python3 tools/mutation/mutate.py --list # show the injected-bug table
 ```
 
@@ -283,7 +284,8 @@ would these tests notice if the code stopped working? Each entry in
 `tools/mutation/mutants.json` is a plausible bug injected into `Sources/tiled`;
 a mutant that survives is a test gap. It exits non-zero on any survivor or
 unresolved mutant, so it can gate a release branch. Sources are restored from memory after each
-run, so uncommitted work is safe.
+run, so uncommitted work is safe. While a stage is in flight, `--since <its base commit>` keeps
+the run to the mutants the stage can affect; run the full table before committing.
 
 CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
 

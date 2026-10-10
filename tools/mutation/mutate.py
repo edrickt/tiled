@@ -13,7 +13,12 @@ regressions that would ship green.
 Usage:
     python3 tools/mutation/mutate.py              # all mutants
     python3 tools/mutation/mutate.py reflow       # only labels/paths matching
+    python3 tools/mutation/mutate.py --since HEAD~2  # only files changed since a ref
     python3 tools/mutation/mutate.py --list       # show the mutant table
+
+While a stage is in flight, `--since <its base commit>` (optionally with a
+positional filter) keeps the run to the mutants the stage can affect; run
+the full table once before committing.
 
 Sources are patched in place and restored from memory after each run,
 so uncommitted edits in the worktree are safe. Exits non-zero if any
@@ -40,14 +45,44 @@ def run_suite(timeout=900):
     )
 
 
+def changed_since(ref):
+    """Mutation-table paths (relative to Sources/tiled) changed since ref.
+
+    Covers tracked edits (staged or not) plus untracked files, because the
+    tool runs mid-work, before the stage's commit exists.
+    """
+    def git(*argv):
+        return subprocess.run(
+            ["git", *argv], cwd=ROOT, capture_output=True, text=True, check=True,
+        ).stdout
+
+    paths = git("diff", "--name-only", ref)
+    paths += git("ls-files", "--others", "--exclude-standard")
+    prefix = os.path.join("Sources", "tiled") + "/"
+    return {path[len(prefix):] for path in paths.splitlines()
+            if path.startswith(prefix)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("filter", nargs="?", default="",
                         help="only run mutants whose path or label contains this")
+    parser.add_argument("--since", metavar="REF", default="",
+                        help="only run mutants whose source file changed since this git ref")
     parser.add_argument("--list", action="store_true", help="list mutants and exit")
     args = parser.parse_args()
 
     mutants = [tuple(m) for m in json.load(open(MUTANTS_FILE))]
+    if args.since:
+        try:
+            changed = changed_since(args.since)
+        except subprocess.CalledProcessError as error:
+            print(error.stderr.strip() or f"git could not diff {args.since}", file=sys.stderr)
+            return 1
+        mutants = [m for m in mutants if m[0] in changed]
+        if not mutants and not args.filter:
+            print(f"no mutants to run: no mutation-table source changed since {args.since}")
+            return 0
     if args.filter:
         mutants = [m for m in mutants
                    if args.filter in m[0] or args.filter in m[1]]

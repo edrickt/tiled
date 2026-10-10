@@ -4,7 +4,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let gateway = LiveWindowGateway()
     private lazy var controller = TilingController(
-        gateway: gateway, observeMouseUp: TilingController.observeLeftMouseUp)
+        gateway: gateway,
+        // Tiled-driven animation follows the Settings toggle ("Animate
+        // layout changes"), read live per move so a flip applies to the
+        // next move with no relaunch; Reduce Motion still wins inside
+        // the animator, and AppSettings defaults it on for existing
+        // installs.
+        animationEnabled: { [weak self] in self?.settings.animateLayoutChanges ?? true },
+        observeMouseUp: TilingController.observeLeftMouseUp)
     private let hotkeyStore = HotkeyStore()
     private var hotkeys: HotkeyService?
     private var permissionTimer: Timer?
