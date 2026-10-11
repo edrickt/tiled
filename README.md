@@ -183,15 +183,35 @@ sliding off it.
 splitters back to even splits. After a drag the same row is titled
 **Restore Previous Splitters**, restoring the pre-drag splits instead.
 
+## Installing a release build
+
+Download `Tiled-<version>.zip` from the
+[releases page](https://github.com/edrickt/tiled/releases), move `Tiled.app`
+to `/Applications`, then right-click it and choose **Open** on first launch
+(the bundle is ad-hoc signed, so Gatekeeper needs that one-time override).
+Grant Accessibility permission when Tiled asks and relaunch. Bundles are
+universal (Apple Silicon and Intel) and target macOS 13 or later, and each
+release ships a `.sha256` to verify the download:
+
+```bash
+shasum -a 256 -c Tiled-<version>.zip.sha256
+```
+
 ## Building & running
 
 Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
-swift build          # debug build
-swift test           # layout-engine unit tests
-./scripts/make-app.sh # release build bundled as build/Tiled.app
+swift build            # debug build
+swift test             # hermetic unit suite (613 tests)
+make app               # release build bundled as build/Tiled.app
+make app-universal     # same, fat binary for Apple Silicon + Intel
+make install           # build, install to /Applications, launch
 ```
+
+`make help` lists every task. The Makefile only wraps the scripts in
+`scripts/`, which remain the source of truth and are what CI runs; the bundle
+version comes from `VERSION`.
 
 ### Running during development
 
