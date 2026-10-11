@@ -19,7 +19,7 @@
  ],
  [
   "TilingController.swift",
-  "expanded windows re-pushed as tile occupants",
+  "expanded windows counted as occupants (drive the two-thirds divider)",
   "        return canvas.state.occupants.filter { !canvas.isExpanded($0.value) }",
   "        return canvas.state.occupants"
  ],
@@ -352,5 +352,29 @@
   "clamped write repinned against the window's own frame, not the canvas",
   "                id, handle: record.handle, to: target, bounds: visibleFrame,\n                on: context.space, check: .rollback)",
   "                id, handle: record.handle, to: target,\n                bounds: context.gateway.frame(of: record.handle) ?? visibleFrame,\n                on: context.space, check: .rollback)"
+ ],
+ [
+  "DragTracker.swift",
+  "live splitter commit resolves the frame per window, not the canvas",
+  "        let bounds = gridProvider.visibleFrame(space)",
+  "        let bounds = new"
+ ],
+ [
+  "DragTracker.swift",
+  "mouse-up emits a snapback instead of a resize",
+  "            onDragEnd(.resize(id))",
+  "            onDragEnd(.snapback(id))"
+ ],
+ [
+  "DragTracker.swift",
+  "short title-bar drag untiles instead of snapping back",
+  "            onDragEnd(.snapback(id))",
+  "            onDragEnd(.untile(id))"
+ ],
+ [
+  "TilingController.swift",
+  "resize reassert downgraded to a grid reassert (clamp not reconciled)",
+  "            reassert(id, source: .resize(dragged: id, achieved: achieved))",
+  "            reassert(id, source: .grid)"
  ]
 ]

@@ -56,8 +56,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     /// The rect the controller would write for `slot` right now: the live
-    /// grid evaluated in the injected screen's visible frame (mirrors the
-    /// controller's `visibleBounds` + tracker `rect(for:)`).
+    /// grid evaluated in the injected screen's visible frame.
     private func expectedRect(_ slot: Slot, for handle: WindowHandle) -> CGRect {
         controller.canvas(for: Self.screen.id).grid.rect(
             for: slot, in: Self.screen.visibleFrame)

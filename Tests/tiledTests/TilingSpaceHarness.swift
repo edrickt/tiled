@@ -29,17 +29,12 @@ final class TilingSpaceHarness {
         tracker = DragTracker(
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.space.state.slot(of: $0) },
-                frameOf: { [weak self] in
-                    guard let self, let handle = self.handles[$0] else { return nil }
-                    return self.gateway.frame(of: handle)
-                        ?? self.space.records[$0]?.preTileFrame
-                },
-                boundsOf: { [weak self] in self?.bounds ?? $0 },
                 occupants: { [weak self] in self?.space.state.occupants ?? [:] }),
             gridProvider: DragTracker.GridProvider(
                 grid: { [weak self] _ in self?.space.grid ?? GridLayout() },
-                setGrid: { [weak self] updated, _ in self?.space.grid = updated }),
-            apply: { _, _ in })
+                setGrid: { [weak self] updated, _ in self?.space.grid = updated },
+                visibleFrame: { [weak self] _ in self?.space.visibleFrame ?? .zero }),
+            onDragEnd: { _ in })
         writer = FrameWriter(
             gateway: gateway,
             isVisible: { [weak self] _ in self?.canvasVisible ?? true },

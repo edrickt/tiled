@@ -1,52 +1,76 @@
 import CoreGraphics
 import Foundation
 
-/// Owns the live drag-resize loop (observe & compensate): gateway change
-/// callbacks in, splitter moves and neighbor re-pushes out.
+/// Owns the live drag-resize loop (observe & decide): gateway change
+/// callbacks in, splitter moves and one drag-end decision out.
 ///
-/// Previously interleaved with placement records inside TilingController;
-/// the real bugs hid in how echo entries interacted with edge diffs, not
-/// in either alone. Now the whole loop (echo suppression, edge
-/// detection, splitter updates, apply coalescing) lives behind one
-/// interface and is testable through it with a fake gateway.
+/// The tracker decides; the coordinator acts. It never computes a rect
+/// and never schedules a write: at a drag's end it names the window and
+/// the gesture (`resize` / `snapback` / `untile`) through `onDragEnd`,
+/// and the coordinator routes that to the owning canvas's reassert. The
+/// canvas owns the rect math and the one write path, so the tracker can
+/// no longer disagree with it about where a tile is.
 ///
 /// Protocol: the controller feeds each gateway callback to
-/// `handleChange`, and every rect the tracker computes via
-/// `rect(for:in:)`; the dragged window's own edge is the source of truth
-/// and is skipped on re-push so the tracker never fights an in-progress
-/// native drag. Writes are bookkept as expected frames so our own echoes
-/// don't recurse.
+/// `handleChange`. Echo suppression swallows our own writes, edge
+/// detection maps a dragged edge onto the canvas's splitters and commits
+/// the fraction live (the only mutation the tracker performs), and a
+/// title-bar drag is tracked to its end. The dragged window's own frame
+/// is the source of truth for the splitter it moves; the tracker never
+/// re-pushes it mid-drag.
 ///
 /// Edge drags resize only the dragged window while the button is down:
-/// splitter fractions commit live, but the neighbor re-pushes wait for
-/// mouse-up (`mouseLifted`, wired by the controller's global event
-/// monitor). Resizing the tiles under a held button fights the drag and
-/// rewrites frames the user is still steering; on release the whole
-/// grid commits at once. A resize tick that trails the mouse-up (AX
-/// streams the drag's final frame) re-arms the pending apply, and the
-/// next mouse-up anywhere commits it.
+/// splitter fractions commit live, but the settle waits for mouse-up
+/// (`mouseLifted`, wired by the controller's global event monitor).
+/// Resizing the tiles under a held button fights the user's drag; on
+/// release the canvas reasserts the whole layout at once. A resize tick
+/// that trails the mouse-up (AX streams the drag's final frame) re-arms
+/// its canvas's pending resize, and the next mouse-up anywhere commits
+/// it.
 ///
 /// Title-bar drags (origin-only changes) are tracked separately from
 /// edge drags: moved ticks stream in, and when they go silent the drag
-/// ended: past the untile distance the window untiles where dropped
-/// (via the `onUntile` callback), otherwise it snaps back into its slot
-/// rect. A single far jump is never a hand drag, so it snaps back too.
+/// ended: past the untile distance the window untiles where dropped,
+/// otherwise it snaps back into its slot (the canvas reasserts with its
+/// existing splitters). A single far jump is never a hand drag, so it
+/// snaps back too.
 final class DragTracker {
-    /// Reads and writes splitter fractions: the canvas owns them, the
-    /// tracker only moves them. Nil keys are the display-less fallback
+    /// Reads and writes splitter fractions, and reads the canvas's one
+    /// stored visible frame. The canvas owns them; the tracker only
+    /// moves the splitters. Nil keys are the display-less fallback
     /// (headless tests and windows whose canvas is unknown). Injected at
     /// construction so a tracker never keeps a second copy of a canvas's
-    /// grid.
+    /// grid, and never resolves a frame from a window's own geometry.
     struct GridProvider {
         var grid: (TilingSpaceKey?) -> GridLayout
         var setGrid: (GridLayout, TilingSpaceKey?) -> Void
+        /// The canvas's one visible frame: the frame the live splitter
+        /// commit divides against. Deriving a per-drag frame from the
+        /// window's own geometry is exactly the bug the canvas's stored
+        /// frame replaced.
+        var visibleFrame: (TilingSpaceKey?) -> CGRect
+    }
+
+    /// What a drag's end asks the coordinator to do. The tracker decides
+    /// only: it names the window, and the coordinator performs the one
+    /// effect the pure core cannot (reading the achieved frame) and
+    /// routes the decision to the owning canvas.
+    enum DragDecision: Equatable {
+        /// An edge drag settled: reassert the window's canvas, with the
+        /// splitters reconciled to the dragged window's achieved frame.
+        case resize(WindowID)
+        /// A short title-bar drag ended: reassert the window's canvas
+        /// under its existing splitters, so the window snaps back into
+        /// its tile.
+        case snapback(WindowID)
+        /// A title-bar drag passed the untile distance: release the slot
+        /// and leave the window where it was dropped.
+        case untile(WindowID)
     }
 
     /// Reads live frames and resolves occupancy for the tracker.
     struct Context {
         var slotOf: (WindowID) -> Slot?
-        var frameOf: (WindowID) -> CGRect?
-        var boundsOf: (CGRect) -> CGRect
         var occupants: () -> [Slot: WindowID]
         /// Clock for echo-bookkeeping timestamps. Injectable so tests can
         /// fast-forward past the stale-write window without waiting on a
@@ -58,14 +82,13 @@ final class DragTracker {
         /// it. The controller wires this to its occupancy lookup; tests
         /// that never set it keep one grid.
         var spaceOf: (WindowID) -> TilingSpaceKey? = { _ in nil }
-        /// Occupants of one canvas, for neighbor re-push. Nil falls back
-        /// to `occupants()`.
+        /// Occupants of one canvas, for the two-thirds centering rule
+        /// when a drag resizes a two-thirds window. Nil falls back to
+        /// `occupants()`.
         var occupantsOf: ((TilingSpaceKey) -> [Slot: WindowID])? = nil
-        /// The window's live frame, as the app reports it; unlike
-        /// `frameOf`, which may prefer our last pushed target (intent)
-        /// for edge diffing. No-op write detection must consult the live
-        /// frame: intent says where we wanted the window, the live frame
-        /// says where it actually is.
+        /// The window's live frame, as the app reports it: the silent-
+        /// convergence check consults it before calling echo silence an
+        /// ignore.
         var liveFrameOf: (WindowID) -> CGRect? = { _ in nil }
     }
 
@@ -77,12 +100,9 @@ final class DragTracker {
     }
 
     private let context: Context
-    /// Pushes computed rects (excluding the dragged window). Refusal
-    /// attribution belongs to the canvas the push routes to.
-    private let apply: (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Void
-    /// Called when a title-bar drag ends past the untile distance: the
-    /// controller releases the slot and leaves the window where dropped.
-    private let onUntile: (WindowID) -> Void
+    /// One drag-end decision, routed by the coordinator to the owning
+    /// canvas. The tracker computes no rect and schedules no write.
+    private let onDragEnd: (DragDecision) -> Void
     private let log: (String) -> Void
     private var lastKnownFrames: [WindowID: CGRect] = [:]
     /// Frames recently pushed (echo suppression).
@@ -98,12 +118,9 @@ final class DragTracker {
     }
     private var drags: [WindowID: DragState] = [:]
 
-    private var applyScheduled = false
-    private var pendingRects: [WindowID: CGRect] = [:]
-    private var pendingExclusion: WindowID?
     /// Edge drags with splitter moves awaiting mouse-up, keyed by canvas.
-    /// The splitter fractions already committed; only the neighbor
-    /// re-push they imply waits for the click to lift (see `mouseLifted`).
+    /// The splitter fractions already committed; only the reassert they
+    /// imply waits for the click to lift (see `mouseLifted`).
     private var pendingResizeApplies: [TilingSpaceKey?: WindowID] = [:]
 
     private static let echoTolerance: CGFloat = 32
@@ -174,15 +191,13 @@ final class DragTracker {
     init(
         context: Context,
         gridProvider: GridProvider,
-        apply: @escaping (_ rects: [WindowID: CGRect], _ excluding: WindowID?) -> Void,
-        onUntile: @escaping (WindowID) -> Void = { _ in },
+        onDragEnd: @escaping (DragDecision) -> Void,
         scheduleDragEnd: @escaping DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         log: @escaping (String) -> Void = { _ in }
     ) {
         self.context = context
         self.gridProvider = gridProvider
-        self.apply = apply
-        self.onUntile = onUntile
+        self.onDragEnd = onDragEnd
         self.scheduleDragEnd = scheduleDragEnd
         self.log = log
     }
@@ -267,23 +282,6 @@ final class DragTracker {
         lastKnownFrames[id] = nil
         expectedFrames[id] = nil
         clearDrag(id)
-    }
-
-    /// Rect for `id`'s slot under its canvas's grid. Nil when the window
-    /// has no slot (untiled) or no readable frame.
-    func rect(for id: WindowID) -> CGRect? {
-        guard let slot = context.slotOf(id) else { return nil }
-        return rect(for: id, slot: slot)
-    }
-
-    /// Rect for `id` in `slot` (not necessarily its current one) under
-    /// its canvas's grid. The state that names a prospective slot lives
-    /// in the caller's canvas, which is why the slot comes in instead of
-    /// being read back from the tracker's session. Nil when the window
-    /// has no readable frame.
-    func rect(for id: WindowID, slot: Slot) -> CGRect? {
-        guard let frame = context.frameOf(id) else { return nil }
-        return grid(for: context.spaceOf(id)).rect(for: slot, in: context.boundsOf(frame))
     }
 
     // MARK: Change entry point
@@ -407,20 +405,19 @@ final class DragTracker {
     /// ticks and travels far enough untiles; accepted, since such moves
     /// are rare and the window ends up untiled where it was put.)
     private func endDrag(id: WindowID) {
-        guard let slot = context.slotOf(id), let drag = drags[id] else { return }
+        guard context.slotOf(id) != nil, let drag = drags[id] else { return }
         drags[id] = nil
         let distance = hypot(
             drag.lastFrame.origin.x - drag.startFrame.origin.x,
             drag.lastFrame.origin.y - drag.startFrame.origin.y)
         log("dragend win\(id) ticks=\(drag.ticks) distance=\(distance)")
         guard distance > Self.untileDragDistance, drag.ticks >= 2 else {
-            let rect = grid(for: context.spaceOf(id)).rect(for: slot, in: context.boundsOf(drag.lastFrame))
-            log("dragend win\(id) snapback -> \(rect)")
-            schedule(rects: [id: rect], excluding: nil)
+            log("dragend win\(id) snapback")
+            onDragEnd(.snapback(id))
             return
         }
         log("dragend win\(id) untile")
-        onUntile(id)
+        onDragEnd(.untile(id))
     }
 
     /// Drops all drag state for `id`, cancelling any pending drag end.
@@ -429,12 +426,15 @@ final class DragTracker {
         drags[id] = nil
     }
 
-    /// Detects which edges moved, maps them to grid boundaries, updates the
-    /// splitters from the dragged window's *actual* frame, then schedules
-    /// new rects for the neighbors.
+    /// Detects which edges moved, maps them to grid boundaries, and
+    /// updates the splitters from the dragged window's *actual* frame,
+    /// divided against the canvas's one stored visible frame. Commits the
+    /// fraction live and marks the canvas's resize pending for mouse-up.
     private func processResize(windowID id: WindowID, from old: CGRect, to new: CGRect) {
         guard let slot = context.slotOf(id) else { return }
-        let bounds = context.boundsOf(new)
+        let space = context.spaceOf(id)
+        let bounds = gridProvider.visibleFrame(space)
+        guard bounds.width > 0, bounds.height > 0 else { return }
         let threshold = Self.edgeMoveThreshold
 
         func moved(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) > threshold }
@@ -457,7 +457,6 @@ final class DragTracker {
             // The dragged window's own edge is the source of truth; skip it
             // below so we never fight an in-progress native drag.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
-            let space = context.spaceOf(id)
             let centered = GridLayout.centeringTwoThirds(
                 on: boundary, draggedSlot: slot, occupants: occupiedSlots(in: space))
             var spaceGrid = grid(for: space)
@@ -471,10 +470,10 @@ final class DragTracker {
             }
         }
         if changed {
-            // The splitter moved now, but the neighbors it will displace
-            // wait for mouse-up: pushing tiles while the button is down
-            // fights the drag the user is still steering.
-            pendingResizeApplies[context.spaceOf(id)] = id
+            // The splitter moved now, but the settle it implies waits for
+            // mouse-up: reasserting tiles while the button is down fights
+            // the drag the user is still steering.
+            pendingResizeApplies[space] = id
         }
     }
 
@@ -490,83 +489,17 @@ final class DragTracker {
 
     // MARK: Mouse-up commit
 
-    /// The user released the mouse button: commit every deferred neighbor
-    /// re-push at once, so the tiles around a resized window resize on
-    /// the click lifting, never under it. A trailing resize tick re-arms
-    /// its canvas's entry; the next mouse-up anywhere commits it.
+    /// The user released the mouse button: every deferred edge drag's
+    /// settle is now due. The tracker decides only; the coordinator reads
+    /// each dragged window's achieved frame and reasserts its canvas. A
+    /// trailing resize tick re-arms its canvas's entry; the next mouse-up
+    /// anywhere commits it.
     func mouseLifted() {
         guard !pendingResizeApplies.isEmpty else { return }
         let pending = pendingResizeApplies
         pendingResizeApplies = [:]
         for id in pending.values {
-            scheduleApply(excluding: id)
-        }
-    }
-
-    // MARK: Coalescing
-
-    /// Recomputes every occupant's rect under its canvas's grid, except
-    /// the dragged window, and schedules one push per runloop tick.
-    func reassertAll(occupants: [Slot: WindowID], excluding: WindowID? = nil) {
-        var rects: [WindowID: CGRect] = [:]
-        for (slot, occupant) in occupants {
-            guard occupant != excluding, let frame = context.frameOf(occupant) else { continue }
-            // Seed the diff baseline for windows the tracker hasn't seen:
-            // without this the first drag after a reassert diffs against a
-            // stale frame and misreads the edge.
-            if lastKnownFrames[occupant] == nil {
-                lastKnownFrames[occupant] = frame
-            }
-            rects[occupant] = grid(for: context.spaceOf(occupant)).rect(
-                for: slot, in: context.boundsOf(frame))
-        }
-        schedule(rects: rects, excluding: excluding)
-    }
-
-    private func scheduleApply(excluding id: WindowID) {
-        // Neighbor rects are computed now, pushed on the next tick: the
-        // dragged window keeps moving under the user's hand meanwhile.
-        // Only the dragged window's canvas re-pushes: neighbors on other
-        // displays and Spaces keep their frames, so a resize never
-        // crosses canvases.
-        if let space = context.spaceOf(id), let occupantsOf = context.occupantsOf {
-            reassertAll(occupants: occupantsOf(space), excluding: id)
-            return
-        }
-        reassertAll(occupants: context.occupants(), excluding: id)
-    }
-
-    private func schedule(rects: [WindowID: CGRect], excluding: WindowID?) {
-        for (id, rect) in rects {
-            // No-op writes are skipped, not pushed: nothing would change,
-            // nothing would echo, and the pending convergence check would
-            // evict an already-correct window. Live frame, not intent;
-            // intent equals the target by definition.
-            if let live = context.liveFrameOf(id),
-                Self.close(live, rect, tolerance: Self.noOpWriteTolerance)
-            {
-                log("skip win\(id) no-op write rect=\(rect)")
-                continue
-            }
-            pendingRects[id] = rect
-        }
-        pendingExclusion = excluding
-        guard !applyScheduled else { return }
-        applyScheduled = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.applyScheduled = false
-            let rects = self.pendingRects
-            self.pendingRects = [:]
-            let excluding = self.pendingExclusion
-            self.pendingExclusion = nil
-            for (id, rect) in rects {
-                self.markExpected(id, rect)
-            }
-            // `excluding` names a window whose frame is the drag's source
-            // of truth; nil is the snapback case (the dragged window itself
-            // is the only rect). Either way the rects must be pushed.
-            self.apply(rects, excluding)
+            onDragEnd(.resize(id))
         }
     }
 

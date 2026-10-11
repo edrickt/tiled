@@ -493,6 +493,113 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(canvas.state.slot(of: 2), .bottomLeft, "dragged window stays tiled")
     }
 
+    // MARK: Resize reassert (the drag's end)
+
+    func testMouseUpReassertsTheNeighbourFlushAgainstTheDraggedWindow() {
+        // The user-facing fix: an edge drag's mouse-up reasserts the
+        // canvas, the dragged window ends in its reconciled tile, and the
+        // neighbour abuts it. No gap, no overlap.
+        let middle = tileFocused(.sixthMiddle)
+        let right = tileFocused(.sixthRight)
+        let bounds = Self.screen.visibleFrame
+
+        // A real edge drag of the middle third's right edge out to 0.8 of
+        // the canvas frame: echo tick, then the escape.
+        var echo = gateway.frame(of: middle)!
+        echo.size.width -= 10
+        gateway.simulateChange(middle, to: echo)
+        var dragged = gateway.frame(of: middle)!
+        dragged.size.width = bounds.minX + 0.8 * bounds.width - dragged.minX
+        gateway.simulateChange(middle, to: dragged)
+
+        controller.mouseLifted()
+
+        let edge = bounds.minX + 0.8 * bounds.width
+        XCTAssertEqual(
+            gateway.frame(of: middle)!.maxX, edge, accuracy: 0.5,
+            "the dragged window ends in its reconciled tile")
+        XCTAssertEqual(
+            gateway.frame(of: right)!.minX, edge, accuracy: 0.5,
+            "the neighbour abuts the dragged window")
+        XCTAssertEqual(
+            gateway.frame(of: middle)!.maxX, gateway.frame(of: right)!.minX,
+            "flush: no gap, no overlap")
+    }
+
+    func testResizeThatEndsOnTheTileIssuesNoWrites() {
+        let middle = tileFocused(.sixthMiddle)
+        _ = tileFocused(.sixthRight)
+        let tile = gateway.frame(of: middle)!
+        gateway.clearWrites()
+
+        // A drag out and back onto the tile: the splitter moves live,
+        // then the window returns to its starting frame before release.
+        // Every occupant is already correct, so the reassert writes
+        // nothing: a clean drag costs nothing.
+        var echo = tile
+        echo.size.width -= 10
+        gateway.simulateChange(middle, to: echo)
+        var far = tile
+        far.size.width += 100
+        gateway.simulateChange(middle, to: far)
+        gateway.simulateSilentChange(middle, to: tile)
+
+        controller.mouseLifted()
+
+        XCTAssertTrue(
+            gateway.writes.isEmpty,
+            "a drag that ended on the tile asserts every occupant as already correct")
+    }
+
+    func testRefusedReassertWriteLandsOnTheCanvas() {
+        let middle = tileFocused(.sixthMiddle)
+        let right = tileFocused(.sixthRight)
+
+        // The neighbour refuses the reassert's resize write.
+        gateway.refuseNextWrites(right, count: 1)
+        gateway.clearWrites()
+
+        var echo = gateway.frame(of: middle)!
+        echo.size.width -= 10
+        gateway.simulateChange(middle, to: echo)
+        var dragged = gateway.frame(of: middle)!
+        dragged.size.width += 100
+        gateway.simulateChange(middle, to: dragged)
+
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            canvas.error, TilingSpace.refusalMessage(count: 1),
+            "a refused reassert write lands the standard message on the canvas")
+    }
+
+    func testExpandedTwoThirdsDoesNotDriveTheHiddenDivider() {
+        // An expanded window covers the layout: it no longer occupies its
+        // slot for the two-thirds divider rule. Dragging an adjacent
+        // third's edge must move only that splitter, never a hidden
+        // divider inside a covering window that is not on the grid.
+        let covering = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = covering
+        controller.handle(slot: .sixthsLeftTwoThirds)
+        controller.handleExpandToggle()
+        let third = tileFocused(.sixthRight)
+        let bounds = Self.screen.visibleFrame
+
+        var echo = gateway.frame(of: third)!
+        echo.origin.x += 5
+        echo.size.width -= 5
+        gateway.simulateChange(third, to: echo)
+        var dragged = echo
+        dragged.origin.x = 0.5 * bounds.width
+        dragged.size.width = bounds.maxX - dragged.minX
+        gateway.simulateChange(third, to: dragged)
+
+        XCTAssertEqual(canvas.grid.sixthsRightSplit, 0.5, accuracy: 0.01)
+        XCTAssertEqual(
+            canvas.grid.sixthsLeftSplit, 1.0 / 3.0, accuracy: 0.01,
+            "an expanded covering window does not drive the hidden divider")
+    }
+
     func testShortDragSnapsBackIntoTile() {
         let drag = tileAndDrag(10, 10) // net displacement ~28pt
         let expectation = XCTestExpectation(description: "snapback")

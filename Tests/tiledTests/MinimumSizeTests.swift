@@ -107,4 +107,43 @@ final class MinimumSizeTests: XCTestCase {
         }
         wait(for: [lifted], timeout: 1)
     }
+
+    /// The dragged window's *own* clamp, minimised: the left third is
+    /// dragged leftward past its floor. The app held it at 500pt wide,
+    /// short of the splitter the cursor moved to. The reassert trusts the
+    /// dragged window's achieved frame, so the splitter moves back to the
+    /// window's real edge and the neighbour abuts it: no gap and no
+    /// overlap, never a neighbour tracking the phantom splitter.
+    func testDraggedWindowClampedAtItsFloorLeavesNoGapOrOverlap() {
+        let left = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        tile(left, into: .sixthLeft)
+        let middle = gateway.addWindow(frame: CGRect(x: 533, y: 0, width: 800, height: 600))
+        tile(middle, into: .sixthMiddle)
+
+        // A real edge drag below the floor: echo tick, then a shrink the
+        // cursor drives to 320pt (below the 500pt floor).
+        var echo = gateway.frame(of: left)!
+        echo.size.width -= 10
+        gateway.simulateChange(left, to: echo)
+        var dragged = gateway.frame(of: left)!
+        dragged.size.width = 320
+        gateway.simulateChange(left, to: dragged)
+
+        // The app clamped the dragged window at its floor: its achieved
+        // right edge is 500, short of the splitter the cursor reached.
+        let achieved = CGRect(x: 0, y: 0, width: Self.minSize.width, height: 1000)
+        gateway.simulateSilentChange(left, to: achieved)
+
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            gateway.frame(of: left)!.maxX, achieved.maxX, accuracy: 0.5,
+            "the dragged window ends where the app actually left it")
+        XCTAssertEqual(
+            gateway.frame(of: middle)!.minX, achieved.maxX, accuracy: 0.5,
+            "the neighbour abuts the window's real edge: no gap, no overlap")
+        XCTAssertEqual(
+            gateway.frame(of: middle)!.minX, gateway.frame(of: left)!.maxX,
+            "flush to the dragged window, not the phantom splitter")
+    }
 }

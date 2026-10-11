@@ -300,6 +300,41 @@ final class SpaceIndependenceTests: XCTestCase {
             "the first Space kept the dragged splitter")
     }
 
+    func testMouseUpReassertStaysOnTheDraggedWindowsCanvas() {
+        // A resize's settle reasserts the dragged window's canvas alone:
+        // another display's window and splitters are never touched, even
+        // though its canvas is visible at the same time.
+        currentScreens = [Self.display, Self.otherDisplay]
+        gateway.activeSpaces = [
+            Self.displayID: Self.spaceA,
+            Self.otherDisplayID: Self.spaceA,
+        ]
+        let left = addFocusedWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+        controller.handle(slot: .topLeft)
+        let right = addFocusedWindow(
+            frame: CGRect(x: 2000, y: 100, width: 800, height: 600))
+        controller.handle(slot: .topLeft)
+
+        let rightFrame = gateway.frame(of: right)!
+        let rightGrid = controller.canvas(for: Self.otherDisplay.id).grid
+
+        // Drag the left display's window's edge, then release.
+        var echo = gateway.frame(of: left)!
+        echo.size.width -= 10
+        gateway.simulateChange(left, to: echo)
+        var dragged = gateway.frame(of: left)!
+        dragged.size.width -= 60
+        gateway.simulateChange(left, to: dragged)
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            gateway.frame(of: right), rightFrame,
+            "a resize on one display never moves another display's window")
+        XCTAssertEqual(
+            controller.canvas(for: Self.otherDisplay.id).grid, rightGrid,
+            "the splitter change stays on the dragged window's canvas")
+    }
+
     func testCloseInHiddenSpaceReflowsOnReturnWithoutWritingFirst() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)

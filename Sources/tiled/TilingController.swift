@@ -11,9 +11,10 @@ import AppKit
 /// chapters, notices) lives in `TilingSpace`; this module routes each
 /// action to the canvas that owns the window and applies the effects the
 /// returned `Outcome` names. The live drag-resize loop lives in
-/// `DragTracker` (echo suppression, edge detection, splitter moves, apply
-/// coalescing); this module feeds it gateway callbacks and performs the
-/// writes it schedules.
+/// `DragTracker` (echo suppression, edge detection, splitter moves, and a
+/// drag-end decision); this module feeds it gateway callbacks, routes its
+/// decision to the owning canvas, and reads the one effect the pure core
+/// cannot: the dragged window's achieved frame.
 final class TilingController {
     private let gateway: WindowGateway
     /// Drag-end debounce scheduler for the tracker's drag-out loop.
@@ -41,14 +42,13 @@ final class TilingController {
         log: { [weak self] in self?.dbg($0) })
 
     /// The drag-resize loop. Lazy so its context closures can capture
-    /// self: the tracker decides (echo, edges, splitters), this module
-    /// performs writes via `publishRects` and serves record reads. Grids
-    /// live on the canvases and travel through `GridProvider`.
+    /// self: the tracker decides (echo, edges, splitters, and a drag-end
+    /// decision), this module routes the decision to the owning canvas's
+    /// reassert and serves record reads. Grids and visible frames live on
+    /// the canvases and travel through `GridProvider`.
     private lazy var tracker: DragTracker = DragTracker(
         context: DragTracker.Context(
             slotOf: { [weak self] in self?.trackedSlot(of: $0) },
-            frameOf: { [weak self] in self?.frameForTracker($0) },
-            boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
             occupants: { [weak self] in self?.trackedOccupants ?? [:] },
             spaceOf: { [weak self] in self?.spaceOf(window: $0) },
             occupantsOf: { [weak self] space in self?.trackedOccupants(on: space) ?? [:] },
@@ -61,11 +61,12 @@ final class TilingController {
             setGrid: { [weak self] updated, space in
                 guard let self else { return }
                 self.mutateSpace(space ?? .displayless) { $0.grid = updated }
+            },
+            visibleFrame: { [weak self] space in
+                guard let self else { return .zero }
+                return self.spaces[space ?? .displayless]?.visibleFrame ?? .zero
             }),
-        apply: { [weak self] rects, excluding in
-            self?.publishRects(rects, excluding: excluding)
-        },
-        onUntile: { [weak self] in self?.untileFromDrag($0) },
+        onDragEnd: { [weak self] decision in self?.handleDragEnd(decision) },
         scheduleDragEnd: scheduleDragEnd,
         log: { [weak self] in self?.dbg($0) })
 
@@ -490,41 +491,9 @@ final class TilingController {
         }
     }
 
-    /// Routes tracker-scheduled pushes to the canvas that owns each
-    /// window: the canvas runs them through the shared write policy and
-    /// records refusals beside the windows that refused. `excluding`
-    /// names the window whose frame is the drag's source of truth; it is
-    /// informational, since snapback rects DO name the (formerly) dragged
-    /// window, with `excluding` nil.
-    private func publishRects(_ rects: [WindowID: CGRect], excluding: WindowID?) {
-        var byCanvas: [TilingSpaceKey: [WindowID: CGRect]] = [:]
-        for (id, target) in rects {
-            byCanvas[writeCanvas(for: id), default: [:]][id] = target
-        }
-        for (key, group) in byCanvas {
-            mutateSpace(key) {
-                $0.publish(
-                    rects: group, excluding: excluding,
-                    context: placementContext(for: key))
-            }
-        }
-        onChange?()
-    }
-
-    /// Frame the tracker diffs against: the last pushed target when known,
-    /// else the live frame, else the pre-tile frame. Prefers the pushed
-    /// target so a settle frame (the gateway applying our own write a
-    /// tick late) can never read as a user drag: echo suppression
-    /// compares against this, and it must be our intent, not the echo.
-    private func frameForTracker(_ id: WindowID) -> CGRect? {
-        guard let record = record(of: id) else { return nil }
-        if let pushed = tracker.lastPushedTarget(for: id) { return pushed }
-        return gateway.frame(of: record.handle) ?? record.preTileFrame
-    }
-
-    /// The window's frame as the app reports it: the no-op-write check
-    /// must never consult intent (`frameForTracker`), which equals the
-    /// push target by definition and would skip every push.
+    /// The window's frame as the app reports it: the silent-convergence
+    /// check consults it before calling echo silence an ignore. Never the
+    /// tracker's intent, which equals the push target by definition.
     private func liveFrameForTracker(_ id: WindowID) -> CGRect? {
         guard let record = record(of: id) else { return nil }
         return gateway.frame(of: record.handle)
@@ -551,17 +520,9 @@ final class TilingController {
         return largest.offset
     }
 
-    /// Screen owning `frame`: the display showing the largest share of
-    /// the window (straddles resolve to the mostly-visible side, never
-    /// jittering on the midpoint). Ties and zero-overlap fall back to the
-    /// midpoint screen, then main, so off-screen or inter-Space windows
-    /// still tile somewhere sane instead of using raw frame coordinates.
-    private func visibleBounds(for frame: CGRect) -> CGRect {
-        visibleScreen(for: frame)?.visibleFrame ?? NSScreen.main?.visibleFrame ?? frame
-    }
-
     /// Provider-backed screen info owning `frame` (same fallback chain
-    /// as `visibleBounds`): largest overlap, then midpoint, then main.
+    /// as the screen-ownership rule): largest overlap, then midpoint,
+    /// then main.
     private func visibleScreen(for frame: CGRect) -> ScreenInfo? {
         let infos = screens()
         if let index = Self.owningScreenIndex(frames: infos.map(\.frame), for: frame) {
@@ -933,14 +894,45 @@ final class TilingController {
         onChange?()
     }
 
-    // MARK: Live resize (observe & compensate)
+    // MARK: Live resize (observe & decide)
 
-    /// The user released the mouse button: commit every splitter move an
-    /// in-progress edge drag made, re-pushing the neighbor tiles the new
-    /// grid implies. Wired from the production mouse-up monitor; tests
-    /// call it directly.
+    /// The user released the mouse button: the tracker commits every
+    /// splitter move an in-progress edge drag made as a resize decision.
+    /// Wired from the production mouse-up monitor; tests call it directly.
     func mouseLifted() {
         tracker.mouseLifted()
+    }
+
+    /// Routes one drag-end decision to the owning canvas. The tracker
+    /// decided; the coordinator performs the one effect the pure core
+    /// cannot — reading the dragged window's achieved frame — and hands
+    /// it to the canvas's resize reassert. A snapback reasserts the same
+    /// canvas under its existing splitters; an untile is the unchanged
+    /// drag-out path.
+    private func handleDragEnd(_ decision: DragTracker.DragDecision) {
+        switch decision {
+        case .resize(let id):
+            guard let handle = handle(of: id), let achieved = gateway.frame(of: handle) else {
+                return
+            }
+            reassert(id, source: .resize(dragged: id, achieved: achieved))
+        case .snapback(let id):
+            reassert(id, source: .grid)
+        case .untile(let id):
+            untileFromDrag(id)
+        }
+    }
+
+    /// Reasserts the canvas owning `id` for the given source, then applies
+    /// the outcome and refreshes the menu. One spelling for the drag's
+    /// resize and snapback settles, which differ only in the source.
+    private func reassert(_ id: WindowID, source: TilingSpace.ReassertSource) {
+        guard let key = spaceOf(window: id) else { return }
+        let outcome = mutateSpace(key) {
+            $0.reassert(source, context: placementContext(for: key))
+        }
+        apply(outcome, on: key)
+        onChange?()
     }
 
     /// Production mouse-up registrar: global monitors deliver clicks that
