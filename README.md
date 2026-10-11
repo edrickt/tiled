@@ -217,10 +217,10 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (601 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (655 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
-| Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~10s per mutant |
+| Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |
 
 The unit suite drives the pure engine through `FakeWindowGateway`, with
 clocks, schedulers, and the display set injected; only a few live-screen
@@ -244,9 +244,10 @@ swift tools/repro/probe-spaces.swift     # what the live suites can cover here
 ./scripts/run-repro.sh                  # pre-release live check
 ./scripts/run-repro.sh tools/repro/multi-display-suite.swift  # two displays
 ./scripts/run-repro.sh tools/repro/driver.swift   # smaller focused driver
-python3 tools/mutation/mutate.py        # verify the suite still catches bugs
+python3 tools/mutation/mutate.py        # verify the suite still catches bugs (~3-4 min)
 python3 tools/mutation/mutate.py --since HEAD~3  # only mutants whose file changed since a ref
 python3 tools/mutation/mutate.py --list # show the injected-bug table
+python3 tools/mutation/mutate.py --workers 2    # fewer workers on a loaded machine
 ```
 
 ### Focused loops
@@ -282,10 +283,16 @@ checks the suite cannot drive.
 `tools/mutation` answers the question a green suite cannot ask itself:
 would these tests notice if the code stopped working? Each entry in
 `tools/mutation/mutants.json` is a plausible bug injected into `Sources/tiled`;
-a mutant that survives is a test gap. It exits non-zero on any survivor or
-unresolved mutant, so it can gate a release branch. Sources are restored from memory after each
-run, so uncommitted work is safe. While a stage is in flight, `--since <its base commit>` keeps
-the run to the mutants the stage can affect; run the full table before committing.
+a mutant that survives is a test gap. The table runs in parallel: each worker
+gets a scratch copy of `Sources`, `Tests`, and `Package.swift` (the real tree
+is never touched, so uncommitted work is safe), and mutants are handed out as
+workers free up. Before fanning out, the tool runs the unmutated suite once —
+a red baseline aborts instead of scoring mutants. It exits non-zero on any
+survivor or unresolved mutant, so it can gate a release branch. While a stage
+is in flight, `--since <its base commit>` keeps the run to the mutants the
+stage can affect; run the full table before committing. Four workers by
+default (`--workers N` to tune); the tool's own tests run with
+`python3 tools/mutation/test_mutate.py`.
 
 CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
 

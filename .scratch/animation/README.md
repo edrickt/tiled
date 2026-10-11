@@ -165,10 +165,12 @@ Then work the ticket:
    `SpikeAnimator.swift` shows the working shape: 60Hz step, cubic ease-out, first-step
    fail-fast, retarget, pure-origin hand detection, lag/refused-streak surrender.
 2. Build through the `tdd` skill: one red-green slice at a time.
-3. Gates after every working step:
-   - `swift build 2>&1 | grep -E "warning:|error:"` -> empty
-   - `swift test` -> all green
-   - `python3 tools/mutation/mutate.py` -> every mutant CAUGHT, none STALE
+3. Gates, tiered by cost - the full mutation table is a once-per-stage gate, not a per-step one:
+   - Every red-green slice: `swift test` -> all green (it compiles too, so warnings surface here).
+   - While iterating on the stage's subjects: `python3 tools/mutation/mutate.py --since <stage base>`
+     (optionally plus a positional filter, e.g. `mutate.py TilingSpace --since <stage base>`) ->
+     every selected mutant CAUGHT, none STALE; a stage that touched no mutation source passes.
+   - Once before commit: `python3 tools/mutation/mutate.py` -> the full table CAUGHT, none STALE.
 4. Close with the `code-review` skill (Standards + Spec) against the stage's base commit.
 5. Commit on `master` in the repo's style (imperative subject, the why in the body, gate evidence
    at the end), then update the stage ticket and the table above with the commit hash and status.
