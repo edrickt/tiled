@@ -763,7 +763,7 @@ struct TilingSpace {
         // visible.
         let canvas = space ?? .displayless
         let result = context.frameWriter.write(
-            id, handle: record.handle, to: target, on: canvas, check: .none)
+            id, handle: record.handle, to: target, bounds: bounds, on: canvas, check: .none)
         context.log(
             "applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) "
                 + "target=\(target) result=\(result)")
@@ -851,7 +851,8 @@ struct TilingSpace {
         for (id, target) in rects {
             guard let record = records[id] else { continue }
             if context.frameWriter.write(
-                id, handle: record.handle, to: target, on: context.space, check: .rollback)
+                id, handle: record.handle, to: target, bounds: visibleFrame,
+                on: context.space, check: .rollback)
                 == .refused
             {
                 failed += 1
@@ -1128,7 +1129,8 @@ struct TilingSpace {
         // canvas (the expansion stays out of state), and a no-op target
         // counts as success without a write.
         let result = context.frameWriter.write(
-            id, handle: record.handle, to: target, on: context.space, check: .none)
+            id, handle: record.handle, to: target, bounds: visibleFrame,
+            on: context.space, check: .none)
         switch result {
         case .written, .skippedNoOp: return .accepted
         case .deferredOffSpace: return .deferred
@@ -1147,7 +1149,7 @@ struct TilingSpace {
         grid = GridLayout()
         error = nil
         notice = nil
-        return reassert(context: context)
+        return reassert(.grid, context: context)
     }
 
     /// Restores the splitter fractions parked by the last reset. Nil
@@ -1160,7 +1162,7 @@ struct TilingSpace {
         splitterBackup = nil
         error = nil
         notice = "Splitters restored to their pre-reset positions."
-        return reassert(context: context)
+        return reassert(.grid, context: context)
     }
 
     /// Whether a splitter backup is parked: drives the menu row title
@@ -1173,27 +1175,99 @@ struct TilingSpace {
 
     // MARK: Reassert / publish
 
-    /// Recomputes and pushes rects for this canvas's occupants under its
-    /// own grid. Skips expanded windows (they cover the layout, not
-    /// their slot) and the caller's exclusions. This is the resize
-    /// propagation path after a display change, a reset, or a restore.
-    @discardableResult
-    mutating func reassert(excluding excluded: Set<WindowID> = [], context: Context) -> Outcome {
+    /// The trigger for one reassert. A small sum type, not a request
+    /// object: `.resize` is an edge drag's settle (the app's achieved
+    /// frame is authoritative), `.grid` is every path that already knows
+    /// its splitters are right (display change, swipe back, splitter
+    /// reset, title-bar snapback). No scope set and no convergence knob:
+    /// the coordinator's mouse-up wires `.resize` in stage 3, and a
+    /// future overlay-handle gesture would add its own case, not a
+    /// speculative one now.
+    enum ReassertSource: Equatable {
+        /// An edge resize settled: reconcile the dragged window's
+        /// splitters back to the edge the app actually achieved, then map
+        /// every rect under the reconciled grid.
+        case resize(dragged: WindowID, achieved: CGRect)
+        /// The splitters are already right: map every rect as they stand.
+        case grid
+    }
+
+    /// A reassert's pure result: the reconciled splitters plus every
+    /// in-scope occupant's target rect. No gateway, clock, or scheduler
+    /// touched it; the effectful wrapper stores and publishes it.
+    struct ReassertPlan: Equatable {
+        var grid: GridLayout
+        var rects: [WindowID: CGRect]
+    }
+
+    /// The pure half of a reassert: reconcile the splitters for a resize
+    /// (leave them alone otherwise), then derive every tiled,
+    /// non-expanded occupant's rect under this canvas's one visible
+    /// frame. The dragged window's achieved edge is reconciled into the
+    /// splitters BEFORE any rect is mapped, so neighbours abut the window
+    /// itself rather than a splitter the app could not reach.
+    func reassertPlan(_ source: ReassertSource) -> ReassertPlan {
+        let reconciled = reconciledGrid(source)
         var rects: [WindowID: CGRect] = [:]
-        for (slot, occupant) in state.occupants {
-            guard !excluded.contains(occupant), expanded[occupant] == nil,
-                records[occupant] != nil
-            else { continue }
-            rects[occupant] = grid.rect(for: slot, in: visibleFrame)
+        for (slot, occupant) in state.occupants where expanded[occupant] == nil {
+            rects[occupant] = reconciled.rect(for: slot, in: visibleFrame)
         }
-        return publish(rects: rects, excluding: nil, context: context)
+        return ReassertPlan(grid: reconciled, rects: rects)
+    }
+
+    /// The grid a reassert maps against. `.grid` leaves the splitters
+    /// alone; `.resize` moves each of the dragged window's movable edges
+    /// back to the achieved frame's edge, so the splitter sits where the
+    /// window actually landed. The two-thirds hidden-divider rule is the
+    /// grid's own, shared with the live drag loop.
+    private func reconciledGrid(_ source: ReassertSource) -> GridLayout {
+        guard case .resize(let dragged, let achieved) = source,
+            let slot = state.slot(of: dragged)
+        else { return grid }
+        let occupied = Set(state.occupants.keys)
+        var reconciled = grid
+        for edge in TileEdge.allCases {
+            guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
+            let position =
+                switch edge {
+                case .left: achieved.minX
+                case .right: achieved.maxX
+                case .top: achieved.maxY
+                case .bottom: achieved.minY
+                }
+            reconciled.update(
+                boundary: boundary, toPosition: position, in: visibleFrame,
+                centeringTwoThirds: GridLayout.centeringTwoThirds(
+                    on: boundary, draggedSlot: slot, occupants: occupied))
+        }
+        return reconciled
+    }
+
+    /// The effectful half: store the reconciled splitters, seed the drag
+    /// loop's diff baselines for every in-scope occupant (a skipped or
+    /// deferred write never reaches the loop's own mark), and publish
+    /// through the one write policy. A degenerate visible frame has no
+    /// rects to derive, so nothing is stored or written.
+    @discardableResult
+    mutating func reassert(_ source: ReassertSource, context: Context) -> Outcome {
+        guard visibleFrame.width > 0, visibleFrame.height > 0 else {
+            context.log("reassert skipped: degenerate visibleFrame \(visibleFrame)")
+            return Outcome()
+        }
+        let plan = reassertPlan(source)
+        grid = plan.grid
+        for (id, rect) in plan.rects {
+            context.tracker.seedBaseline(id, rect)
+        }
+        return publish(rects: plan.rects, excluding: nil, context: context)
     }
 
     /// Performs coalesced pushes through the shared write policy:
     /// no-op skip, off-Space deferral, echo marking, and the late
     /// convergence check belong to `FrameWriter`. Refusals land on this
     /// canvas, counted at once. `excluding` names the drag's source of
-    /// truth (informational; snapback rects name it with nil).
+    /// truth (informational; snapback rects name it with nil). The
+    /// tracker's separate push path still calls this until stage 3.
     @discardableResult
     mutating func publish(
         rects: [WindowID: CGRect], excluding: WindowID?, context: Context

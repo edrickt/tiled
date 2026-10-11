@@ -304,5 +304,53 @@
   "canvas frame ignores the display's visible frame (uses the full frame)",
   "            return info.visibleFrame\n        }\n        return mainScreenInfo(screens())?.visibleFrame",
   "            return info.frame\n        }\n        return mainScreenInfo(screens())?.visibleFrame"
+ ],
+ [
+  "Layout.swift",
+  "adjacent-third drag loses the two-thirds occupant's hidden divider",
+  "        switch boundary {\n        case .sixthsRightSplit:\n            return occupants.contains(.sixthsLeftTwoThirds) ? .sixthsLeftTwoThirds : nil",
+  "        switch boundary {\n        case .sixthsRightSplit:\n            return nil"
+ ],
+ [
+  "TilingSpace.swift",
+  "resize reassert never reconciles the splitter to the achieved edge",
+  "        let occupied = Set(state.occupants.keys)\n        var reconciled = grid\n        for edge in TileEdge.allCases {",
+  "        let occupied = Set(state.occupants.keys)\n        var reconciled = grid\n        for edge in TileEdge.allCases where false {"
+ ],
+ [
+  "TilingSpace.swift",
+  "resize reconcile leaves the two-thirds hidden divider uncentered",
+  "            reconciled.update(\n                boundary: boundary, toPosition: position, in: visibleFrame,\n                centeringTwoThirds: GridLayout.centeringTwoThirds(\n                    on: boundary, draggedSlot: slot, occupants: occupied))",
+  "            reconciled.update(\n                boundary: boundary, toPosition: position, in: visibleFrame,\n                centeringTwoThirds: nil)"
+ ],
+ [
+  "TilingSpace.swift",
+  "reassert writes rects but leaves the canvas's splitters unreconciled",
+  "        let plan = reassertPlan(source)\n        grid = plan.grid",
+  "        let plan = reassertPlan(source)\n        _ = plan.grid"
+ ],
+ [
+  "TilingSpace.swift",
+  "reassert plan drags expanded windows into their slots",
+  "        for (slot, occupant) in state.occupants where expanded[occupant] == nil {",
+  "        for (slot, occupant) in state.occupants where true {"
+ ],
+ [
+  "TilingSpace.swift",
+  "reassert seeds no diff baseline (first drag after it is dropped)",
+  "        for (id, rect) in plan.rects {\n            context.tracker.seedBaseline(id, rect)\n        }",
+  "        for (id, rect) in plan.rects {\n            _ = rect\n        }"
+ ],
+ [
+  "FrameWriter.swift",
+  "clamped write repinned inside its own frame, not the canvas",
+  "                applied: applied, target: target, bounds: bounds)",
+  "                applied: applied, target: target, bounds: applied)"
+ ],
+ [
+  "TilingSpace.swift",
+  "clamped write repinned against the window's own frame, not the canvas",
+  "                id, handle: record.handle, to: target, bounds: visibleFrame,\n                on: context.space, check: .rollback)",
+  "                id, handle: record.handle, to: target,\n                bounds: context.gateway.frame(of: record.handle) ?? visibleFrame,\n                on: context.space, check: .rollback)"
  ]
 ]

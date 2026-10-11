@@ -28,7 +28,6 @@ final class TilingController {
     private lazy var frameWriter = FrameWriter(
         gateway: gateway,
         isVisible: { [weak self] in self?.isVisible($0) ?? false },
-        boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
         markStale: { [weak self] space in
             guard let self else { return }
             self.staleSpaces.insert(space)
@@ -478,14 +477,15 @@ final class TilingController {
     /// reports refusals: the push half of the tracker's decide/push
     /// split. Nil reasserts every currently visible canvas (display
     /// changes); a key scopes to one canvas (reset, restore, stale
-    /// reassert).
-    private func applyAll(excluding excluded: Set<WindowID> = [], on space: TilingSpaceKey? = nil) {
+    /// reassert). The splitters are already correct on every one of these
+    /// paths, so the source is `.grid`.
+    private func applyAll(on space: TilingSpaceKey? = nil) {
         let keys: [TilingSpaceKey] =
             if let space { [space] } else { activeSpaceKeys() }
         staleSpaces.subtract(keys)
         for key in keys {
             mutateSpace(key) {
-                $0.reassert(excluding: excluded, context: placementContext(for: key))
+                $0.reassert(.grid, context: placementContext(for: key))
             }
         }
     }

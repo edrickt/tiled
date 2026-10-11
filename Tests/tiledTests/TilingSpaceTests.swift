@@ -922,24 +922,29 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .bottomRight, requester: b)
         harness.gateway.clearWrites()
 
-        let outcome = space.reassert(context: context())
+        let outcome = space.reassert(.grid, context: context())
 
         XCTAssertEqual(outcome.result, .placed)
         XCTAssertEqual(harness.frame(of: a), harness.rect(.topLeft))
         XCTAssertEqual(harness.frame(of: b), harness.rect(.bottomRight))
     }
 
-    func testReassertSkipsExpandedAndExcludedWindows() {
+    func testReassertSkipsExpandedWindows() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
         harness.apply(slot: .bottomRight, requester: b)
         space.expanded[a] = .zero
-        let bBefore = harness.frame(of: b)!
+        // Park the expanded window off its slot: it covers the layout, so
+        // the reassert must leave it where it is, not drag it into its
+        // slot. Non-expanded b re-derives (a no-op here, already right).
+        harness.gateway.setFrame(
+            harness.handle(of: a)!, to: CGRect(x: 5, y: 5, width: 100, height: 100))
+        let aBefore = harness.frame(of: a)!
 
-        space.reassert(excluding: [b], context: context())
+        space.reassert(.grid, context: context())
 
-        XCTAssertEqual(harness.frame(of: b), bBefore, "an excluded occupant is not written")
+        XCTAssertEqual(harness.frame(of: a), aBefore, "an expanded occupant is not written")
     }
 
     func testPublishWritesRectsAndReportsPluralRefusals() {

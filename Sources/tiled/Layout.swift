@@ -337,6 +337,33 @@ struct GridLayout: Equatable {
             centeringTwoThirds: slot.isTwoThirds ? slot : nil)
     }
 
+    /// The occupied two-thirds window whose hidden one-thirds divider
+    /// must follow `boundary`, if any. Dragging the two-thirds window's
+    /// own outer edge counts directly; so does dragging the adjacent
+    /// third's facing edge, since that is the same splitter resizing both
+    /// windows. Any other boundary leaves the two-thirds divider alone.
+    /// One declaration, shared by the live drag loop and the reassert's
+    /// reconcile, so the two paths can never disagree about which hidden
+    /// divider follows an edge.
+    static func centeringTwoThirds(
+        on boundary: GridBoundary, draggedSlot: Slot, occupants: Set<Slot>
+    ) -> Slot? {
+        if draggedSlot == .sixthsLeftTwoThirds, boundary == .sixthsRightSplit {
+            return draggedSlot
+        }
+        if draggedSlot == .sixthsRightTwoThirds, boundary == .sixthsLeftSplit {
+            return draggedSlot
+        }
+        switch boundary {
+        case .sixthsRightSplit:
+            return occupants.contains(.sixthsLeftTwoThirds) ? .sixthsLeftTwoThirds : nil
+        case .sixthsLeftSplit:
+            return occupants.contains(.sixthsRightTwoThirds) ? .sixthsRightTwoThirds : nil
+        default:
+            return nil
+        }
+    }
+
     /// The ordinary independent-splitter update: clamp the dragged
     /// fraction to its own range, then keep it from crossing its sibling.
     private mutating func updateIndependently(_ boundary: GridBoundary, to raw: CGFloat) -> Bool {

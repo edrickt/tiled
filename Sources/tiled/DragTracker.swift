@@ -201,6 +201,17 @@ final class DragTracker {
         clearDrag(id)
     }
 
+    /// Seeds only the diff baseline for `id`, without arming an echo
+    /// expectation. The canvas's reassert stores the frame it is about
+    /// to write, and must seed the baseline even for occupants whose
+    /// write the policy skips (already correct) or defers (off-Space):
+    /// those never reach `markExpected`, and without a baseline the
+    /// first drag after the reassert diffs against a stale frame and is
+    /// misread.
+    func seedBaseline(_ id: WindowID, _ frame: CGRect) {
+        lastKnownFrames[id] = frame
+    }
+
     /// Last rect pushed for `id` (via `markExpected`), if any: our
     /// intent for the window, as opposed to whatever the gateway last
     /// reported. Lets diffing prefer intent over echoes.
@@ -447,8 +458,8 @@ final class DragTracker {
             // below so we never fight an in-progress native drag.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
             let space = context.spaceOf(id)
-            let centered = centeredTwoThirds(
-                on: boundary, draggedSlot: slot, in: space)
+            let centered = GridLayout.centeringTwoThirds(
+                on: boundary, draggedSlot: slot, occupants: occupiedSlots(in: space))
             var spaceGrid = grid(for: space)
             if spaceGrid.update(
                 boundary: boundary, toPosition: position, in: bounds,
@@ -467,34 +478,14 @@ final class DragTracker {
         }
     }
 
-    /// The occupied two-thirds window whose hidden one-thirds divider
-    /// must follow `boundary`, if any. Dragging the two-thirds window's
-    /// own outer edge counts directly; so does dragging the adjacent
-    /// third's facing edge, since that is the same splitter resizing both
-    /// windows. Any other boundary leaves the two-thirds divider alone.
-    private func centeredTwoThirds(
-        on boundary: GridBoundary, draggedSlot: Slot, in space: TilingSpaceKey?
-    ) -> Slot? {
-        if draggedSlot == .sixthsLeftTwoThirds, boundary == .sixthsRightSplit {
-            return draggedSlot
-        }
-        if draggedSlot == .sixthsRightTwoThirds, boundary == .sixthsLeftSplit {
-            return draggedSlot
-        }
-        let occupants: [Slot: WindowID]
+    /// The occupied slots of the canvas a drag is resizing, for the
+    /// grid's occupant-aware two-thirds rule. Falls back to the shared
+    /// occupant map when the canvas cannot be resolved (legacy mode).
+    private func occupiedSlots(in space: TilingSpaceKey?) -> Set<Slot> {
         if let space, let occupantsOf = context.occupantsOf {
-            occupants = occupantsOf(space)
-        } else {
-            occupants = context.occupants()
+            return Set(occupantsOf(space).keys)
         }
-        switch boundary {
-        case .sixthsRightSplit:
-            return occupants[.sixthsLeftTwoThirds] != nil ? .sixthsLeftTwoThirds : nil
-        case .sixthsLeftSplit:
-            return occupants[.sixthsRightTwoThirds] != nil ? .sixthsRightTwoThirds : nil
-        default:
-            return nil
-        }
+        return Set(context.occupants().keys)
     }
 
     // MARK: Mouse-up commit

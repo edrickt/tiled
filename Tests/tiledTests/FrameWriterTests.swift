@@ -17,6 +17,10 @@ final class FrameWriterTests: XCTestCase {
     private let canvas = TilingSpaceKey(
         screen: ScreenID(rawValue: 1), space: SpaceID(rawValue: 10))
 
+    /// The canvas's one visible frame: the boundary a clamped write is
+    /// repinned against.
+    private static let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
@@ -28,13 +32,11 @@ final class FrameWriterTests: XCTestCase {
     }
 
     private func makeWriter(
-        visible: @escaping (TilingSpaceKey) -> Bool = { _ in true },
-        bounds: CGRect = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        visible: @escaping (TilingSpaceKey) -> Bool = { _ in true }
     ) -> FrameWriter {
         FrameWriter(
             gateway: gateway,
             isVisible: visible,
-            boundsOf: { _ in bounds },
             markStale: { [weak self] space in
                 self?.events.append("stale")
                 self?.staleMarks.append(space)
@@ -61,7 +63,7 @@ final class FrameWriterTests: XCTestCase {
             return target
         }
 
-        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+        let result = makeWriter().write(7, handle: handle, to: target, bounds: Self.bounds, on: canvas, check: .rollback)
 
         XCTAssertEqual(result, .written)
         XCTAssertEqual(gateway.writes.count, 1)
@@ -77,7 +79,7 @@ final class FrameWriterTests: XCTestCase {
         let frame = CGRect(x: 0, y: 0, width: 100, height: 100)
         let handle = gateway.addWindow(frame: frame)
 
-        let result = makeWriter().write(7, handle: handle, to: frame, on: canvas, check: .rollback)
+        let result = makeWriter().write(7, handle: handle, to: frame, bounds: Self.bounds, on: canvas, check: .rollback)
 
         XCTAssertEqual(result, .skippedNoOp)
         XCTAssertTrue(gateway.writes.isEmpty)
@@ -92,7 +94,7 @@ final class FrameWriterTests: XCTestCase {
         // A no-op target proves visibility is judged first: the write
         // defers and the canvas is marked stale instead of skipped.
         let result = makeWriter(visible: { _ in false })
-            .write(7, handle: handle, to: frame, on: canvas, check: .rollback)
+            .write(7, handle: handle, to: frame, bounds: Self.bounds, on: canvas, check: .rollback)
 
         XCTAssertEqual(result, .deferredOffSpace)
         XCTAssertTrue(gateway.writes.isEmpty)
@@ -105,7 +107,7 @@ final class FrameWriterTests: XCTestCase {
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         let target = CGRect(x: 40, y: 40, width: 300, height: 200)
 
-        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .none)
+        let result = makeWriter().write(7, handle: handle, to: target, bounds: Self.bounds, on: canvas, check: .none)
 
         XCTAssertEqual(result, .written)
         XCTAssertEqual(gateway.writes.count, 1)
@@ -118,7 +120,7 @@ final class FrameWriterTests: XCTestCase {
         gateway.refuseNextWrites(handle)
         let target = CGRect(x: 40, y: 40, width: 300, height: 200)
 
-        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+        let result = makeWriter().write(7, handle: handle, to: target, bounds: Self.bounds, on: canvas, check: .rollback)
 
         XCTAssertEqual(result, .refused)
         XCTAssertEqual(echoed, [7])
@@ -145,7 +147,7 @@ final class FrameWriterTests: XCTestCase {
         gateway.writtenFrame = clampWidthToFloor(500)
         let target = CGRect(x: 1300, y: 0, width: 300, height: 1000)
 
-        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+        let result = makeWriter().write(7, handle: handle, to: target, bounds: Self.bounds, on: canvas, check: .rollback)
 
         XCTAssertEqual(result, .written)
         XCTAssertEqual(gateway.writes.count, 2, "the repin is its own write")
@@ -165,7 +167,7 @@ final class FrameWriterTests: XCTestCase {
         gateway.writtenFrame = clampWidthToFloor(500)
         let target = CGRect(x: 0, y: 0, width: 300, height: 1000)
 
-        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+        let result = makeWriter().write(7, handle: handle, to: target, bounds: Self.bounds, on: canvas, check: .rollback)
 
         XCTAssertEqual(result, .written)
         XCTAssertEqual(gateway.writes.count, 1)
@@ -185,7 +187,7 @@ final class FrameWriterTests: XCTestCase {
         }
         let target = CGRect(x: 0, y: 0, width: 800, height: 300)
 
-        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+        let result = makeWriter().write(7, handle: handle, to: target, bounds: Self.bounds, on: canvas, check: .rollback)
 
         XCTAssertEqual(result, .written)
         XCTAssertEqual(
@@ -201,7 +203,7 @@ final class FrameWriterTests: XCTestCase {
         let handle = gateway.addWindow(frame: CGRect(x: 100, y: 0, width: 300, height: 300))
         let target = CGRect(x: 1500, y: 0, width: 300, height: 300)
 
-        let result = makeWriter().write(7, handle: handle, to: target, on: canvas, check: .rollback)
+        let result = makeWriter().write(7, handle: handle, to: target, bounds: Self.bounds, on: canvas, check: .rollback)
 
         XCTAssertEqual(result, .written)
         XCTAssertEqual(gateway.writes.count, 1)

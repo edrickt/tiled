@@ -36,9 +36,6 @@ struct FrameWriter {
 
     private let gateway: WindowGateway
     private let isVisible: (TilingSpaceKey) -> Bool
-    /// The visible frame a target sits in: the boundary a clamped write
-    /// must be pulled back inside (see `repinnedInsideBounds`).
-    private let boundsOf: (CGRect) -> CGRect
     private let markStale: (TilingSpaceKey) -> Void
     private let markExpected: (WindowID, CGRect) -> Void
     private let scheduleCheck: (WindowID, TilingSpaceKey) -> Void
@@ -47,7 +44,6 @@ struct FrameWriter {
     init(
         gateway: WindowGateway,
         isVisible: @escaping (TilingSpaceKey) -> Bool,
-        boundsOf: @escaping (CGRect) -> CGRect,
         markStale: @escaping (TilingSpaceKey) -> Void,
         markExpected: @escaping (WindowID, CGRect) -> Void,
         scheduleCheck: @escaping (WindowID, TilingSpaceKey) -> Void,
@@ -55,7 +51,6 @@ struct FrameWriter {
     ) {
         self.gateway = gateway
         self.isVisible = isVisible
-        self.boundsOf = boundsOf
         self.markStale = markStale
         self.markExpected = markExpected
         self.scheduleCheck = scheduleCheck
@@ -67,11 +62,13 @@ struct FrameWriter {
     /// draw no echo, and a marked expectation that never converges
     /// reads as a silent ignore); otherwise the expectation is armed
     /// before the write, and the declared check is scheduled only when
-    /// the gateway accepted the write.
+    /// the gateway accepted the write. `bounds` is the canvas's one
+    /// visible frame, the frame the target derived from: a clamped write
+    /// is repinned against it, never against the window's own frame.
     @discardableResult
     func write(
         _ id: WindowID, handle: WindowHandle, to target: CGRect,
-        on space: TilingSpaceKey, check: Check
+        bounds: CGRect, on space: TilingSpaceKey, check: Check
     ) -> Result {
         // A write to a canvas the user cannot see waits for the swipe
         // back: sizing an off-Space window can pull it onto the visible
@@ -105,7 +102,7 @@ struct FrameWriter {
         // stops shrinking at the screen edge, never off it.
         if let applied = gateway.frame(of: handle),
             let repinned = Self.repinnedInsideBounds(
-                applied: applied, target: target, bounds: boundsOf(target))
+                applied: applied, target: target, bounds: bounds)
         {
             gateway.setFrame(handle, to: repinned)
             markExpected(id, repinned)
