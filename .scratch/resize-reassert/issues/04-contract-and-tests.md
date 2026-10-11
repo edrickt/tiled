@@ -1,6 +1,6 @@
 # Stage 4 - Contract and test surface
 
-Status: ready-for-agent
+Status: DONE at `302042b` ("Delete the dead publish path and retarget the resize tests"), master.
 Blocked by: stage 3
 Blocks: none
 
@@ -22,3 +22,27 @@ now describe.
 
 Run the stages per `.scratch/resize-reassert/README.md` ("Running one stage in a fresh session"). On
 completion, record the commit hash here and in the README stage table.
+
+## What shipped
+
+- Deleted `TilingSpace.publish(rects:excluding:context:)`, a middle man over `writeRects` called only by
+  `reassert` with `excluding: nil`; `reassert` now calls `writeRects` directly.
+- Deleted the caller-less accessors `TilingController.writeCanvas(for:fallback:)` and
+  `DragTracker.lastPushedTarget(for:)`. Bounds resolution has one spelling: `TilingController.visibleFrame(for:)`
+  feeding each canvas's stored `visibleFrame`; no per-window resolver remains.
+- Retargeted `testPublishWritesRectsAndReportsPluralRefusals` to
+  `testReassertReportsPluralRefusalsOnTheCanvas` (same plural refusal count, driven through the reassert).
+  Tracker tests assert the emitted decision and live splitter fractions, never rects; the minimum-size test
+  keeps its no-gap-after-mouse-up assertion.
+- Added one plan test for the reassert's row-splitter reconcile plus two mutation entrants pinning the
+  top/bottom achieved-edge mapping.
+
+## Evidence
+
+- `swift build` clean, zero warnings.
+- `swift test`: 628/628.
+- `python3 tools/mutation/mutate.py`: 65/65 caught, none STALE/INVALID/TIMEOUT.
+- Code-review (Standards + Spec) against `20c6f71`: one Standards judgement call (the new test helper renamed
+  to `rowPosition(_:)`); Spec: all acceptance criteria met, no scope creep.
+
+This closes the resize-reassert arc.

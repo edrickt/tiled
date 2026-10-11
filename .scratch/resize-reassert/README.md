@@ -5,6 +5,13 @@ and 2 ("Give the canvas its own bounds"), taken together. Design settled by gril
 Vocabulary: `CONTEXT.md` (Visible frame, Reassert, Achieved frame). Decision: `docs/adr/0002-canvas-owns-visible-frame-and-reassert.md`.
 This file is the single source of truth for the design and the stage map.
 
+## Where this is
+
+Stages 1-4 are done. `master` at `302042b` ("Delete the dead publish path and retarget the resize tests"):
+the canvas owns one visible frame and the resize reassert, the drag loop decides only, and the dead publish
+path is gone with the resize tests moved to the seam they describe. 628 tests, 65/65 mutants. The arc is
+closed.
+
 ## Problem Statement
 
 Dragging a tiled window's edge to resize it is unreliable: the window does not always end up exactly in its
@@ -96,7 +103,7 @@ A good test here asserts observable outcomes through a seam — a window's frame
 | 1 | `issues/01-canvas-visible-frame.md` | Canvas owns one visible frame | - | DONE (`ebbb47a`) |
 | 2 | `issues/02-pure-reassert-plan.md` | Pure reassert plan + clamp reconcile | 1 | DONE (`6c0c5a4`) |
 | 3 | `issues/03-tracker-decides-only.md` | Drag loop decides only; canvas settles the resize | 2 | DONE (`2edfeba`) |
-| 4 | `issues/04-contract-and-tests.md` | Dead seams deleted; tests describe the new seam | 3 | ready-for-agent |
+| 4 | `issues/04-contract-and-tests.md` | Dead seams deleted; tests describe the new seam | 3 | DONE (`302042b`) |
 
 ## Running one stage in a fresh session
 
