@@ -7,10 +7,15 @@ This file is the single source of truth for the design and the stage map.
 
 ## Where this is
 
-Stages 1-4 are done. `master` at `302042b` ("Delete the dead publish path and retarget the resize tests"):
-the canvas owns one visible frame and the resize reassert, the drag loop decides only, and the dead publish
-path is gone with the resize tests moved to the seam they describe. 628 tests, 65/65 mutants. The arc is
-closed.
+Stages 1-5 are done. `master` at `0039d0c` ("Reconcile a neighbour's achieved edge in the resize settle"):
+the canvas owns one visible frame and the resize reassert, the drag loop decides only, the dead publish
+path is gone, and the resize settle reads a written neighbour's achieved frame back so a row-rounding app
+cannot leave a gap between tiles. 631 tests, 69/69 mutants. The arc is closed.
+
+Stage 5 closed a gap found by a live capture on 2026-10-11: a neighbour whose app rounds a
+programmatically-written frame (Terminal rounds a window's height to whole character rows) fell short of
+the splitter, and the stage-2 reconcile — dragged window only — never read it back. The corrective pass
+lives in the effectful reassert, is bounded, and is a fixed point.
 
 ## Problem Statement
 
@@ -91,7 +96,7 @@ A good test here asserts observable outcomes through a seam — a window's frame
 ## Out of Scope
 
 - Committing on the drag's own end (a resize transaction bound to the drag lifecycle) instead of the global mouse-up.
-- Repairing a *neighbour's* minimum-size clamp in the same pass (a fixed-point over clamped occupants). The dragged window's own clamp is in scope; a clamped neighbour is a follow-up.
+- A neighbour that clamps at its minimum size by *write-time* clamping; stage 5 covers the neighbour's *achieved* edge (an app that rounds or insets the frame it is written), which is the same readback.
 - Owned overlay resize handles.
 - Any change to drag-out, eviction, reflow, re-house, undo, expand, layout switching, or observation.
 - Making the no-op-write policy single is absorbed by this work, not deferred.
@@ -104,6 +109,7 @@ A good test here asserts observable outcomes through a seam — a window's frame
 | 2 | `issues/02-pure-reassert-plan.md` | Pure reassert plan + clamp reconcile | 1 | DONE (`6c0c5a4`) |
 | 3 | `issues/03-tracker-decides-only.md` | Drag loop decides only; canvas settles the resize | 2 | DONE (`2edfeba`) |
 | 4 | `issues/04-contract-and-tests.md` | Dead seams deleted; tests describe the new seam | 3 | DONE (`302042b`) |
+| 5 | `issues/05-neighbour-achieved-edge.md` | Reconcile a neighbour's achieved edge (row-rounding apps) | 4 | DONE (`0039d0c`) |
 
 ## Running one stage in a fresh session
 
