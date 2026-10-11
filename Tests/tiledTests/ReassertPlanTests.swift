@@ -5,10 +5,10 @@ import XCTest
 /// The reassert through its two layers: the pure plan (reconcile a
 /// clamped edge, then map every tiled, non-expanded occupant's rect
 /// under the canvas's one visible frame) and the thin effectful wrapper
-/// (store the grid, seed the drag baselines, publish). The pure layer
-/// takes no gateway, clock, or scheduler, so most of this suite is a
-/// value function pinned by values; the wrapper runs through the fake
-/// gateway like the rest of the canvas's suite.
+/// (store the grid, seed the drag baselines, write every rect). The
+/// pure layer takes no gateway, clock, or scheduler, so most of this
+/// suite is a value function pinned by values; the wrapper runs through
+/// the fake gateway like the rest of the canvas's suite.
 final class ReassertPlanTests: XCTestCase {
     private let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1200)
 
@@ -28,6 +28,13 @@ final class ReassertPlanTests: XCTestCase {
 
     private func position(_ fraction: CGFloat) -> CGFloat {
         bounds.minX + fraction * bounds.width
+    }
+
+    /// Screen-space y (AppKit, y grows upward) of a row fraction. The
+    /// horizontal splitters divide against the canvas's height; the
+    /// vertical ones against its width.
+    private func rowPosition(_ fraction: CGFloat) -> CGFloat {
+        bounds.minY + fraction * bounds.height
     }
 
     // MARK: Reconcile: the clamp gap
@@ -84,6 +91,39 @@ final class ReassertPlanTests: XCTestCase {
         XCTAssertNotEqual(
             plan.rects[3], grid.rect(for: .sixthRight, in: bounds),
             "rects are mapped after the reconcile, not from the phantom splitter")
+    }
+
+    func testResizeReconcileMovesTheDraggedHorizontalSplitter() {
+        // The quarters' left row splitter is dragged by either left-column
+        // window's facing edge. The reconcile must take the achieved
+        // frame's own edge — its bottom for the top window, its top for
+        // the bottom window — never the far screen edge, or the splitter
+        // jumps to 0 / 1 and the neighbour is dragged across the canvas.
+        let top = canvas([(.topLeft, 1), (.bottomLeft, 2)])
+        var topAchieved = top.grid.rect(for: .topLeft, in: bounds)
+        topAchieved.origin.y = rowPosition(0.4)
+        topAchieved.size.height = bounds.maxY - topAchieved.minY
+        let topPlan = top.reassertPlan(.resize(dragged: 1, achieved: topAchieved))
+
+        XCTAssertEqual(
+            topPlan.grid.leftRowSplit, 0.4, accuracy: 0.001,
+            "a top window's bottom edge reconciles the row splitter")
+        XCTAssertEqual(topPlan.rects[1]!.minY, rowPosition(0.4), accuracy: 0.5)
+        XCTAssertEqual(
+            topPlan.rects[2]!.maxY, rowPosition(0.4), accuracy: 0.5,
+            "the bottom neighbour abuts the window's real edge")
+
+        let bottom = canvas([(.topLeft, 1), (.bottomLeft, 2)])
+        var bottomAchieved = bottom.grid.rect(for: .bottomLeft, in: bounds)
+        bottomAchieved.size.height = rowPosition(0.6) - bottomAchieved.minY
+        let bottomPlan = bottom.reassertPlan(.resize(dragged: 2, achieved: bottomAchieved))
+
+        XCTAssertEqual(
+            bottomPlan.grid.leftRowSplit, 0.6, accuracy: 0.001,
+            "a bottom window's top edge reconciles the row splitter")
+        XCTAssertEqual(
+            bottomPlan.rects[1]!.minY, rowPosition(0.6), accuracy: 0.5,
+            "the top neighbour abuts the window's real edge")
     }
 
     // MARK: Source `.grid`

@@ -1266,14 +1266,6 @@ final class TilingController {
         spaceOf(window: id).flatMap { spaces[$0]?.handle(of: id) }
     }
 
-    /// The canvas a window's frame write belongs to: its own canvas when
-    /// known, else the caller's passed canvas, else the focused one. The
-    /// one spelling of that precedence, so visibility, verification, and
-    /// refusal attribution cannot drift apart.
-    private func writeCanvas(for id: WindowID, fallback: TilingSpaceKey? = nil) -> TilingSpaceKey {
-        spaceOf(window: id) ?? fallback ?? focusedSpaceKey()
-    }
-
     /// Canvas key for a display: the Space shown there right now, resolved
     /// fresh so a swipe is reflected on the next action. A nil or unknown
     /// screen falls back to the main display's canvas, then to the

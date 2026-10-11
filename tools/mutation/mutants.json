@@ -325,6 +325,18 @@
  ],
  [
   "TilingSpace.swift",
+  "resize reconcile takes a top window's far edge (row splitter to the screen top)",
+  "                case .top: achieved.maxY\n                case .bottom: achieved.minY",
+  "                case .top: achieved.minY\n                case .bottom: achieved.minY"
+ ],
+ [
+  "TilingSpace.swift",
+  "resize reconcile takes a bottom window's far edge (row splitter to the screen bottom)",
+  "                case .top: achieved.maxY\n                case .bottom: achieved.minY",
+  "                case .top: achieved.maxY\n                case .bottom: achieved.maxY"
+ ],
+ [
+  "TilingSpace.swift",
   "reassert writes rects but leaves the canvas's splitters unreconciled",
   "        let plan = reassertPlan(source)\n        grid = plan.grid",
   "        let plan = reassertPlan(source)\n        _ = plan.grid"

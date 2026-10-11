@@ -227,13 +227,6 @@ final class DragTracker {
         lastKnownFrames[id] = frame
     }
 
-    /// Last rect pushed for `id` (via `markExpected`), if any: our
-    /// intent for the window, as opposed to whatever the gateway last
-    /// reported. Lets diffing prefer intent over echoes.
-    func lastPushedTarget(for id: WindowID) -> CGRect? {
-        expectedFrames[id]?.frame
-    }
-
     /// Convergence verdict for one pending write, read by the controller's
     /// late verification. Nil = inconclusive, leave the window alone:
     /// the entry is gone (consumed by success, cleared by takeover, or
@@ -273,11 +266,8 @@ final class DragTracker {
 
     /// Forgets a window: untile, restore, and prune paths call this so
     /// stale echo entries never swallow a future drag on a recycled id.
-    /// Push targets are intentionally kept: undo chapters replay writes
-    /// for ids whose frames were restored out from under them, and the
-    /// intent (last pushed target) must survive the record clearing.
-    /// Fresh `markExpected` calls overwrite; only recycled ids could
-    /// collide, and those re-mark on their first new write.
+    /// The echo entry and diff baseline are dropped together; a fresh
+    /// `markExpected` on a recycled id re-marks it on its first new write.
     func forget(_ id: WindowID) {
         lastKnownFrames[id] = nil
         expectedFrames[id] = nil

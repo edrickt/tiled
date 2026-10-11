@@ -913,7 +913,7 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertTrue(space.hasSplitterBackup, "the reset still counts as the receipt")
     }
 
-    // MARK: Reassert and publish
+    // MARK: Reassert
 
     func testReassertWritesEveryOccupantUnderItsSlot() {
         let a = harness.addWindow()
@@ -947,7 +947,7 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(harness.frame(of: a), aBefore, "an expanded occupant is not written")
     }
 
-    func testPublishWritesRectsAndReportsPluralRefusals() {
+    func testReassertReportsPluralRefusalsOnTheCanvas() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
@@ -958,9 +958,7 @@ final class TilingSpaceTests: XCTestCase {
         harness.gateway.refuseNextWrites(harness.handle(of: a)!)
         harness.gateway.refuseNextWrites(harness.handle(of: b)!)
 
-        space.publish(
-            rects: [a: harness.rect(.topLeft), b: harness.rect(.bottomRight)],
-            excluding: nil, context: context())
+        space.reassert(.grid, context: context())
 
         XCTAssertEqual(
             space.error, "Couldn't move 2 windows: an app refused to resize.")

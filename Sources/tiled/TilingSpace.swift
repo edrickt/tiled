@@ -841,11 +841,11 @@ struct TilingSpace {
         }
     }
 
-    /// Performs one coalesced push through the shared write policy,
-    /// counting refusals and recording the generic refusal message on
-    /// this canvas. Deferred (off-Space) writes are not failures: the
-    /// FrameWriter has already marked the canvas stale and the pushed
-    /// state stands. Shared by reflow and the tracker's publish path.
+    /// Performs one push through the shared write policy, counting
+    /// refusals and recording the generic refusal message on this canvas.
+    /// Deferred (off-Space) writes are not failures: the FrameWriter has
+    /// already marked the canvas stale and the pushed state stands.
+    /// Shared by reflow and the reassert.
     private mutating func writeRects(_ rects: [WindowID: CGRect], context: Context) -> Int {
         var failed = 0
         for (id, target) in rects {
@@ -1173,7 +1173,7 @@ struct TilingSpace {
     /// 0 when no chapter is parked.
     var evictedCount: Int { undoStack.last?.snapshot.count ?? 0 }
 
-    // MARK: Reassert / publish
+    // MARK: Reassert
 
     /// The trigger for one reassert. A small sum type, not a request
     /// object: `.resize` is an edge drag's settle (the app's achieved
@@ -1194,7 +1194,7 @@ struct TilingSpace {
 
     /// A reassert's pure result: the reconciled splitters plus every
     /// in-scope occupant's target rect. No gateway, clock, or scheduler
-    /// touched it; the effectful wrapper stores and publishes it.
+    /// touched it; the effectful wrapper stores and writes it.
     struct ReassertPlan: Equatable {
         var grid: GridLayout
         var rects: [WindowID: CGRect]
@@ -1245,9 +1245,9 @@ struct TilingSpace {
 
     /// The effectful half: store the reconciled splitters, seed the drag
     /// loop's diff baselines for every in-scope occupant (a skipped or
-    /// deferred write never reaches the loop's own mark), and publish
-    /// through the one write policy. A degenerate visible frame has no
-    /// rects to derive, so nothing is stored or written.
+    /// deferred write never reaches the loop's own mark), then write every
+    /// rect through the one write policy. A degenerate visible frame has
+    /// no rects to derive, so nothing is stored or written.
     @discardableResult
     mutating func reassert(_ source: ReassertSource, context: Context) -> Outcome {
         guard visibleFrame.width > 0, visibleFrame.height > 0 else {
@@ -1259,20 +1259,7 @@ struct TilingSpace {
         for (id, rect) in plan.rects {
             context.tracker.seedBaseline(id, rect)
         }
-        return publish(rects: plan.rects, excluding: nil, context: context)
-    }
-
-    /// Performs coalesced pushes through the shared write policy:
-    /// no-op skip, off-Space deferral, echo marking, and the late
-    /// convergence check belong to `FrameWriter`. Refusals land on this
-    /// canvas, counted at once. `excluding` names the drag's source of
-    /// truth (informational; snapback rects name it with nil). The
-    /// tracker's separate push path still calls this until stage 3.
-    @discardableResult
-    mutating func publish(
-        rects: [WindowID: CGRect], excluding: WindowID?, context: Context
-    ) -> Outcome {
-        _ = writeRects(rects, context: context)
+        _ = writeRects(plan.rects, context: context)
         return Outcome()
     }
 }
