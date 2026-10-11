@@ -94,7 +94,7 @@ A good test here asserts observable outcomes through a seam — a window's frame
 | # | Ticket | Delivers | Blocked by | Status |
 |---|--------|----------|------------|--------|
 | 1 | `issues/01-canvas-visible-frame.md` | Canvas owns one visible frame | - | DONE (`ebbb47a`) |
-| 2 | `issues/02-pure-reassert-plan.md` | Pure reassert plan + clamp reconcile | 1 | ready-for-agent |
+| 2 | `issues/02-pure-reassert-plan.md` | Pure reassert plan + clamp reconcile | 1 | DONE (`6c0c5a4`) |
 | 3 | `issues/03-tracker-decides-only.md` | Drag loop decides only; canvas settles the resize | 2 | ready-for-agent |
 | 4 | `issues/04-contract-and-tests.md` | Dead seams deleted; tests describe the new seam | 3 | ready-for-agent |
 
