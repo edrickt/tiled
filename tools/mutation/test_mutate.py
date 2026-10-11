@@ -17,7 +17,7 @@ import mutate
 MUTANTS = [
     ("TilingSpace.swift", "swap write-home deleted", "a", "b"),
     ("Layout.swift", "grid rounds down", "c", "d"),
-    ("Animator.swift", "step schedule stretched", "e", "f"),
+    ("DragTracker.swift", "escape tolerance widened", "e", "f"),
 ]
 
 
@@ -33,7 +33,7 @@ class SelectMutantsTests(unittest.TestCase):
 
     def test_filter_matches_path(self):
         self.assertEqual(
-            mutate.select_mutants(MUTANTS, filter="Animator"),
+            mutate.select_mutants(MUTANTS, filter="DragTracker"),
             [MUTANTS[2]],
         )
 

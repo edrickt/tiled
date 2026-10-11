@@ -30,25 +30,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(AppSettings(defaults: defaults).hideMenuBarIcon)
     }
 
-    func testAnimateLayoutChangesDefaultsOn() {
-        // UserDefaults.bool returns false for a missing key; the default
-        // must come from the key's absence, not that zero value: existing
-        // installs upgrade into animation, never out of it.
-        let (settings, _) = makeSettings()
-        XCTAssertTrue(settings.animateLayoutChanges)
-    }
-
-    func testAnimateLayoutChangesPersists() {
-        // Persistence across launches is the same defaults key read by a
-        // fresh AppSettings: off must survive, and so must turning it
-        // back on.
-        let (_, defaults) = makeSettings()
-        AppSettings(defaults: defaults).animateLayoutChanges = false
-        XCTAssertFalse(AppSettings(defaults: defaults).animateLayoutChanges)
-        AppSettings(defaults: defaults).animateLayoutChanges = true
-        XCTAssertTrue(AppSettings(defaults: defaults).animateLayoutChanges)
-    }
-
     func testWelcomeShownByDefault() {
         let (settings, _) = makeSettings()
         XCTAssertFalse(settings.didDismissWelcome)

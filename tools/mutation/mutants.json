@@ -8,7 +8,7 @@
  [
   "TilingSpace.swift",
   "swap write-home deleted (screen/state diverge)",
-  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            applyLayout(for: displaced, context: context, on: context.space, animated: false)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
+  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            applyLayout(for: displaced, context: context, on: context.space)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
   "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")"
  ],
  [
@@ -272,8 +272,8 @@
  [
   "FrameWriter.swift",
   "no-op write pushed anyway (expectation never converges)",
-  "            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)",
-  "            DragTracker.close(live, target, tolerance: -1)"
+  "        if let live = gateway.frame(of: handle),\n            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
+  ""
  ],
  [
   "FrameWriter.swift",
@@ -296,211 +296,7 @@
  [
   "FrameWriter.swift",
   "echo expectation not armed (own write reads as a user drag)",
-  "        markExpected(id, target)\n        if animated, let animator",
-  "        if animated, let animator"
- ],
- [
-  "FrameWriter.swift",
-  "retarget restarts from the abandoned target (motion jumps)",
-  "                id: id, handle: handle, from: live, to: target",
-  "                id: id, handle: handle, from: target, to: target"
- ],
- [
-  "FrameWriter.swift",
-  "first-step refusal reported as success (state stays tiled)",
-  "            guard accepted else {\n                log(\"write win\\(id) refused gliding first step target=\\(target)\")\n                return .refused\n            }",
-  "            _ = accepted"
- ],
- [
-  "Animator.swift",
-  "ease-out curve replaced with linear (motion pace drifts)",
-  "        return 1 - pow(1 - clamped, 3)",
-  "        return clamped"
- ],
- [
-  "Animator.swift",
-  "hand takeover never detected (a grab mid-glide is overwritten)",
-  "    static let handTolerance: CGFloat = 8",
-  "    static let handTolerance: CGFloat = 8_000_000"
- ],
- [
-  "Animator.swift",
-  "Reduce Motion ignored (glides under an accessibility opt-out)",
-  "    var isAnimating: Bool { isEnabled() && !reduceMotion() }",
-  "    var isAnimating: Bool { isEnabled() }"
- ],
- [
-  "Animator.swift",
-  "glide never lands (final target left to the steps)",
-  "        if progress >= 1 {",
-  "        if progress >= 100 {"
- ],
- [
-  "Animator.swift",
-  "landing skips the write policy (clamp repin lost)",
-  "            glides[handle] = nil\n            land()",
-  "            glides[handle] = nil"
- ],
- [
-  "FrameWriter.swift",
-  "landing takes the no-op shortcut (screen stops short of state)",
-  "            animated: false, allowNoOpSkip: false)",
-  "                    animated: false, allowNoOpSkip: true)"
- ],
- [
-  "TilingSpace.swift",
-  "restore ignores the animator (untile snaps instead of gliding)",
-  "            if animated, context.animator.isAnimating,\n                let live = context.gateway.frame(of: record.handle)",
-  "            if false,\n                let live = context.gateway.frame(of: record.handle)"
- ],
- [
-  "TilingSpace.swift",
-  "instant restore leaves an in-flight glide running (a stale step overwrites the release)",
-  "                context.animator.cancel(handle: record.handle)\n                restored = context.gateway.setFrame(record.handle, to: target)",
-  "                restored = context.gateway.setFrame(record.handle, to: target)"
- ],
- [
-  "TilingSpace.swift",
-  "restore glide never writes its final frame",
-  "                ) {\n                    _ = context.gateway.setFrame(record.handle, to: target)\n                }",
-  "                ) {\n                }"
- ],
- [
-  "TilingSpace.swift",
-  "restore glide starts from the pre-tile target (the release never moves)",
-  "                    id: id, handle: record.handle, from: live, to: target",
-  "                    id: id, handle: record.handle, from: target, to: target"
- ],
- [
-  "Animator.swift",
-  "retarget leaves the older glide running (one window, two steppers)",
-  "        cancel(handle: handle)\n        let glide = Glide(",
-  "        let glide = Glide("
- ],
- [
-  "TilingSpace.swift",
-  "untileAll chapter records the mid-glide frame (later restore misses)",
-  "                guard let handle = handles[id],\n                    let frame = preTileFrames[id],\n                    context.gateway.frame(of: handle) != nil\n                else { continue }",
-  "                guard let handle = handles[id],\n                    let frame = context.gateway.frame(of: handle)\n                else { continue }"
- ],
- [
-  "TilingSpace.swift",
-  "untileAll builds a chapter from unreadable frames",
-  "                guard let handle = handles[id],\n                    let frame = preTileFrames[id],\n                    context.gateway.frame(of: handle) != nil\n                else { continue }",
-  "                guard let handle = handles[id],\n                    let frame = preTileFrames[id]\n                else { continue }"
- ],
- [
-  "TilingController.swift",
-  "display reassert glides (correctness waits on animation)",
-  "                $0.reassert(\n                    excluding: excluded, context: placementContext(for: key),\n                    animated: false)",
-  "                $0.reassert(\n                    excluding: excluded, context: placementContext(for: key),\n                    animated: true)"
- ],
- [
-  "TilingSpace.swift",
-  "reassert ignores its motion declaration (display reassert glides)",
-  "        return publish(rects: rects, excluding: nil, context: context, animated: animated)",
-  "        return publish(rects: rects, excluding: nil, context: context, animated: true)"
- ],
- [
-  "TilingSpace.swift",
-  "publish ignores its motion declaration (reassert glides)",
-  "        _ = writeRects(rects, context: context, animated: animated)",
-  "        _ = writeRects(rects, context: context, animated: true)"
- ],
- [
-  "TilingSpace.swift",
-  "swap rollback write glides (screen lags the rolled-back state)",
-  "            applyLayout(for: displaced, context: context, on: context.space, animated: false)",
-  "            applyLayout(for: displaced, context: context, on: context.space, animated: true)"
- ],
- [
-  "TilingSpace.swift",
-  "reflow rollback write glides (survivor lags the rolled-back state)",
-  "            _ = writeRects(oldRects, context: context, animated: false)",
-  "            _ = writeRects(oldRects, context: context, animated: true)"
- ],
- [
-  "TilingSpace.swift",
-  "refused re-house fallback restore glides",
-  "                _ = restore(window: wid, context: context, animated: false)\n                context.log(\"rehouse FAILED win\\(wid) -> \\(home.rawValue); falling back to eviction\")",
-  "                _ = restore(window: wid, context: context, animated: true)\n                context.log(\"rehouse FAILED win\\(wid) -> \\(home.rawValue); falling back to eviction\")"
- ],
- [
-  "TilingSpace.swift",
-  "refused requester's re-house victim restore glides",
-  "            _ = restore(window: wid, context: context, animated: false)\n            context.log(\"rehouse SKIPPED win\\(wid): requester placement failed\")",
-  "            _ = restore(window: wid, context: context, animated: true)\n            context.log(\"rehouse SKIPPED win\\(wid): requester placement failed\")"
- ],
- [
-  "FrameWriter.swift",
-  "refused landing not surfaced (silent off-target window)",
-  "        guard result == .refused else { return }\n        log(\"write win\\(id) landing refused target=\\(target)\")\n        onLandingFailed(id, space)",
-  "        guard result == .refused else { return }\n        log(\"write win\\(id) landing refused target=\\(target)\")"
- ],
- [
-  "FrameWriter.swift",
-  "instant write leaves the glide running (rollback overwritten)",
-  "        animator?.cancel(handle: handle)\n        guard gateway.setFrame(handle, to: target) else {",
-  "        guard gateway.setFrame(handle, to: target) else {"
- ],
- [
-  "Animator.swift",
-  "lag tolerance widened (a natively animating app is never surrendered)",
-  "    private static let lagTolerance: CGFloat = 60",
-  "    private static let lagTolerance: CGFloat = 60_000_000"
- ],
- [
-  "Animator.swift",
-  "lag streak limit widened (surrender never fires on a lagging app)",
-  "    private static let lagStreakLimit = 3",
-  "    private static let lagStreakLimit = 300"
- ],
- [
-  "Animator.swift",
-  "refused-step streak limit widened (refusals keep stepping forever)",
-  "    private static let refusedStreakLimit = 3",
-  "    private static let refusedStreakLimit = 300"
- ],
- [
-  "Animator.swift",
-  "surrender drops the glide without the policy landing",
-  "        guard let glide = glides.removeValue(forKey: handle) else { return }\n        land()\n        log(\"glide win\\(glide.id) surrendered: \\(reason); landed target=\\(glide.target)\")",
-  "        guard let glide = glides.removeValue(forKey: handle) else { return }\n        log(\"glide win\\(glide.id) surrendered: \\(reason); landed target=\\(glide.target)\")"
- ],
- [
-  "AppSettings.swift",
-  "animation setting defaults off for a missing key",
-  "            defaults.object(forKey: Self.animateLayoutChangesKey) == nil\n                ? true\n                : defaults.bool(forKey: Self.animateLayoutChangesKey)",
-  "            defaults.bool(forKey: Self.animateLayoutChangesKey)"
- ],
- [
-  "AppSettings.swift",
-  "animation setting persisted inverted",
-  "        set { defaults.set(newValue, forKey: Self.animateLayoutChangesKey) }",
-  "        set { defaults.set(!newValue, forKey: Self.animateLayoutChangesKey) }"
- ],
- [
-  "SettingsGeneralTab.swift",
-  "animation checkbox ignores the stored setting",
-  "        animateLayoutChangesCheckbox?.state = settings.animateLayoutChanges ? .on : .off",
-  "        animateLayoutChangesCheckbox?.state = .on"
- ],
- [
-  "SettingsGeneralTab.swift",
-  "animation checkbox writes the setting inverted",
-  "        settings.animateLayoutChanges = sender.state == .on",
-  "        settings.animateLayoutChanges = sender.state == .off"
- ],
- [
-  "TilingController.swift",
-  "animation setting ignored (always animates)",
-  "        isEnabled: animationEnabled,",
-  "        isEnabled: { true },"
- ],
- [
-  "Animator.swift",
-  "Reduce Motion loses to the toggle (precedence inverted)",
-  "    var isAnimating: Bool { isEnabled() && !reduceMotion() }",
-  "    var isAnimating: Bool { isEnabled() || !reduceMotion() }"
+  "        markExpected(id, target)\n        guard gateway.setFrame",
+  "        guard gateway.setFrame"
  ]
 ]

@@ -53,22 +53,6 @@ _Avoid_: maximize, zoom, fullscreen
 Untiling by dragging: a title-bar drag past the untile distance releases the slot and leaves the window where dropped: the drop is the placement, never a pre-tile restore. A shorter drag snaps back into the tile.
 _Avoid_: drag-to-untile, fling
 
-**Tiled-driven animation**:
-Tiled stepping a window's frame through intermediate positions toward its target, so a layout change reads as motion instead of a jump. Decorative: every write-policy rule (no-op skip, off-Space deferral, echo marking, clamp repin, refusal rollback, verification) keeps its meaning, and a dropped step never changes where the window finally lands. Runs for every Tiled-initiated move except live drag-resizing (the hand owns the frame) and display reassert; a user's drag always wins over an in-flight animation.
-_Avoid_: motion, tween, transition
-
-**App-native animation**:
-An app smoothing its own window resize (commonly over 0.2–0.5s), producing a trailing stream of frame changes after Tiled's write. Distinct from Tiled-driven animation; a window lagging its step schedule surrenders to it rather than being fought.
-_Avoid_: system animation, OS animation
-
-**Retarget**:
-Superseding an in-flight Tiled-driven animation with a newer target: the old target is abandoned and motion continues from the window's current frame. Animations never queue; a drag cancels one outright.
-_Avoid_: interrupt, override, preempt
-
-**Graceful surrender**:
-Dropping Tiled-driven animation for one window that is not tracking its step schedule — its final write still lands, so an app-native animation or the refusal path can finish the move — while the other windows in the change keep animating.
-_Avoid_: fallback, abort, bail-out
-
 **Requester**:
 The window asking to be tiled in the current `handle` call; never evicts itself.
 _Avoid_: focused window (focus is how it's usually found, not what it is)

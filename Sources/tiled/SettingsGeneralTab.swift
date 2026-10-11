@@ -1,7 +1,7 @@
 import AppKit
 import ServiceManagement
 
-/// The General tab: three checkboxes plus the guide re-entry.
+/// The General tab: two checkboxes plus the guide re-entry.
 ///
 /// Owns its controls and their actions; the shell reads `firstControl`
 /// for initial-focus placement and refreshes values via `loadValues`.
@@ -26,7 +26,6 @@ final class GeneralTab: NSObject {
 
     private var launchAtLoginCheckbox: NSButton!
     private var hideIconCheckbox: NSButton!
-    private var animateLayoutChangesCheckbox: NSButton!
     private var permissionRow: NSStackView!
     private var loginFailureLabel: NSTextField!
     /// Last probed trust state, so a visible permission-row flip can be
@@ -134,19 +133,6 @@ final class GeneralTab: NSObject {
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stack.addArrangedSubview(hint)
 
-        // Tiled-driven animation is decorative, so its toggle sits with
-        // the other app-behaviour switches. The controller reads the
-        // setting live per move, so the checkbox writes it and nothing
-        // else: no menu or controller refresh, the next move honours the
-        // flip. Reduce Motion keeps precedence inside the animator.
-        animateLayoutChangesCheckbox = NSButton(
-            checkboxWithTitle: "Animate layout changes",
-            target: self, action: #selector(animateLayoutChangesToggled(_:)))
-        animateLayoutChangesCheckbox.toolTip =
-            "Windows glide to their new positions over 180ms. "
-            + "Reduce Motion in System Settings always wins."
-        stack.addArrangedSubview(animateLayoutChangesCheckbox)
-
         let divider = NSBox()
         divider.boxType = .separator
         stack.addArrangedSubview(divider)
@@ -181,7 +167,6 @@ final class GeneralTab: NSObject {
     func loadValues() {
         launchAtLoginCheckbox?.state = currentLaunchAtLogin ? .on : .off
         hideIconCheckbox?.state = settings.hideMenuBarIcon ? .on : .off
-        animateLayoutChangesCheckbox?.state = settings.animateLayoutChanges ? .on : .off
         refreshPermissionState()
     }
 
@@ -239,12 +224,6 @@ final class GeneralTab: NSObject {
                 "Tiled must be running as an installed app bundle for it to work."
             loginFailureLabel.isHidden = false
         }
-    }
-
-    /// Writes the setting only: the controller reads it live per move,
-    /// so the flip applies to the next move with no refresh.
-    @objc private func animateLayoutChangesToggled(_ sender: NSButton) {
-        settings.animateLayoutChanges = sender.state == .on
     }
 
     @objc private func hideIconToggled(_ sender: NSButton) {
