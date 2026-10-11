@@ -192,6 +192,77 @@ final class ReassertPlanTests: XCTestCase {
         XCTAssertEqual(plan.rects[1], canvas.grid.rect(for: .topLeft, in: bounds))
     }
 
+    // MARK: Neighbour achieved edge
+
+    /// A harness whose written windows keep their top edge and round
+    /// their height down to a whole 16pt row, like Terminal: the app
+    /// model behind the reported gap.
+    private func rowRoundingHarness() -> TilingSpaceHarness {
+        let harness = TilingSpaceHarness()
+        harness.gateway.writtenFrame = { _, target in
+            let height = (target.height / 16).rounded(.down) * 16
+            return CGRect(
+                x: target.minX, y: target.maxY - height,
+                width: target.width, height: height)
+        }
+        return harness
+    }
+
+    /// The reported live case at the canvas seam: the resize settle
+    /// writes the top neighbour to the splitter, the app rounds its
+    /// height down, its bottom edge falls short, and the corrective
+    /// readback pulls the splitter to the neighbour's achieved edge so
+    /// the stacked tiles abut.
+    func testNeighbourAchievedEdgePullsTheSplitterAndTheTilesAbut() {
+        let harness = rowRoundingHarness()
+        let top = harness.addWindow()
+        let bottom = harness.addWindow()
+        harness.apply(slot: .sixthTopLeft, requester: top)
+        harness.apply(slot: .sixthBottomLeft, requester: bottom)
+        // A drag of the bottom window's top edge to 0.62 of the canvas.
+        harness.space.grid.sixthsLeftRowSplit = 0.62
+        var achieved = harness.space.grid.rect(for: .sixthBottomLeft, in: harness.bounds)
+        achieved.size.height = 0.62 * harness.bounds.height - achieved.minY
+
+        harness.space.reassert(
+            .resize(dragged: bottom, achieved: achieved), context: harness.context())
+
+        let topFrame = harness.frame(of: top)!
+        let bottomFrame = harness.frame(of: bottom)!
+        XCTAssertEqual(
+            bottomFrame.maxY, topFrame.minY, accuracy: 0.5,
+            "the stacked tiles abut: no gap, no overlap")
+        XCTAssertEqual(
+            harness.space.grid.sixthsLeftRowSplit,
+            topFrame.minY / harness.bounds.height, accuracy: 0.001,
+            "the splitter followed the neighbour's achieved edge")
+    }
+
+    /// The corrective pass is a fixed point: once the splitter sits on
+    /// the neighbour's achieved edge, a second settle writes nothing.
+    /// The harness canvas is a whole number of rows tall, so the app can
+    /// apply every target exactly and the residual that a non-row screen
+    /// leaves lands nowhere.
+    func testSecondReassertAfterCorrectingTheNeighbourWritesNothing() {
+        let harness = rowRoundingHarness()
+        let top = harness.addWindow()
+        let bottom = harness.addWindow()
+        harness.apply(slot: .sixthTopLeft, requester: top)
+        harness.apply(slot: .sixthBottomLeft, requester: bottom)
+        harness.space.grid.sixthsLeftRowSplit = 0.62
+        var achieved = harness.space.grid.rect(for: .sixthBottomLeft, in: harness.bounds)
+        achieved.size.height = 0.62 * harness.bounds.height - achieved.minY
+        harness.space.reassert(
+            .resize(dragged: bottom, achieved: achieved), context: harness.context())
+
+        harness.gateway.clearWrites()
+        harness.space.reassert(.grid, context: harness.context())
+
+        XCTAssertTrue(
+            harness.gateway.writes.isEmpty,
+            "a second settle after the corrective pass issues no extra writes")
+    }
+
     // MARK: Effectful wrapper
 
     func testSecondIdenticalReassertWritesNothing() {

@@ -822,7 +822,7 @@ struct TilingSpace {
                 rects[move.window] = grid.rect(for: move.to, in: visibleFrame)
             }
         }
-        if writeRects(rects, context: context) > 0 {
+        if writeRects(rects, context: context).failed > 0 {
             var rolled = state
             for move in moves { rolled.commit(window: move.window, into: move.from) }
             state = rolled
@@ -841,29 +841,38 @@ struct TilingSpace {
         }
     }
 
+    /// One push pass through the shared write policy: the pairs the
+    /// gateway actually wrote, which the reassert reads back as achieved
+    /// frames, plus the refusal count reflow rolls back on. Deferred
+    /// (off-Space) writes are neither: the FrameWriter has already marked
+    /// the canvas stale and the pushed state stands.
+    private struct WritePass {
+        var written: [(id: WindowID, target: CGRect)] = []
+        var failed = 0
+    }
+
     /// Performs one push through the shared write policy, counting
     /// refusals and recording the generic refusal message on this canvas.
-    /// Deferred (off-Space) writes are not failures: the FrameWriter has
-    /// already marked the canvas stale and the pushed state stands.
     /// Shared by reflow and the reassert.
-    private mutating func writeRects(_ rects: [WindowID: CGRect], context: Context) -> Int {
-        var failed = 0
+    private mutating func writeRects(_ rects: [WindowID: CGRect], context: Context) -> WritePass {
+        var pass = WritePass()
         for (id, target) in rects {
             guard let record = records[id] else { continue }
-            if context.frameWriter.write(
+            let result = context.frameWriter.write(
                 id, handle: record.handle, to: target, bounds: visibleFrame,
                 on: context.space, check: .rollback)
-                == .refused
-            {
-                failed += 1
+            switch result {
+            case .written: pass.written.append((id: id, target: target))
+            case .refused: pass.failed += 1
+            case .skippedNoOp, .deferredOffSpace: break
             }
         }
         // Refusals land on the canvas whose windows refused, not on
         // whatever happens to be focused when the menu is next read.
-        if failed > 0 {
-            error = Self.refusalMessage(count: failed)
+        if pass.failed > 0 {
+            error = Self.refusalMessage(count: pass.failed)
         }
-        return failed
+        return pass
     }
 
     static func refusalMessage(count: Int) -> String {
@@ -1228,13 +1237,7 @@ struct TilingSpace {
         var reconciled = grid
         for edge in TileEdge.allCases {
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
-            let position =
-                switch edge {
-                case .left: achieved.minX
-                case .right: achieved.maxX
-                case .top: achieved.maxY
-                case .bottom: achieved.minY
-                }
+            let position = Self.position(of: edge, in: achieved)
             reconciled.update(
                 boundary: boundary, toPosition: position, in: visibleFrame,
                 centeringTwoThirds: GridLayout.centeringTwoThirds(
@@ -1245,21 +1248,105 @@ struct TilingSpace {
 
     /// The effectful half: store the reconciled splitters, seed the drag
     /// loop's diff baselines for every in-scope occupant (a skipped or
-    /// deferred write never reaches the loop's own mark), then write every
-    /// rect through the one write policy. A degenerate visible frame has
-    /// no rects to derive, so nothing is stored or written.
+    /// deferred write never reaches the loop's own mark), write every
+    /// rect through the one write policy, then reconcile each *written*
+    /// occupant's achieved edge back onto the splitter it rides. A
+    /// degenerate visible frame has no rects to derive, so nothing is
+    /// stored or written.
     @discardableResult
     mutating func reassert(_ source: ReassertSource, context: Context) -> Outcome {
         guard visibleFrame.width > 0, visibleFrame.height > 0 else {
             context.log("reassert skipped: degenerate visibleFrame \(visibleFrame)")
             return Outcome()
         }
-        let plan = reassertPlan(source)
+        var plan = reassertPlan(source)
         grid = plan.grid
-        for (id, rect) in plan.rects {
+        seedBaselines(plan.rects, context: context)
+        var pass = writeRects(plan.rects, context: context)
+        // A neighbour whose app rounds or insets the frame it is written
+        // falls short of the splitter and leaves a gap. Read every
+        // written occupant's achieved frame back; a diverged splitter
+        // edge moves its splitter to the achieved position, then the
+        // layout is re-planned and re-written. Bounded: the reported
+        // row-rounding case converges in one extra pass, and the cap
+        // stops two neighbours that each pull the shared splitter their
+        // way from oscillating forever. Only written occupants are read
+        // back: a skipped no-op write has no new achieved frame.
+        for _ in 0..<Self.maxAchievedEdgePasses {
+            guard reconcileAchievedEdges(pass.written, context: context) else { break }
+            plan = reassertPlan(.grid)
+            seedBaselines(plan.rects, context: context)
+            pass = writeRects(plan.rects, context: context)
+        }
+        return Outcome()
+    }
+
+    /// How many achieved-edge corrective passes one reassert may run.
+    /// The reported row-rounding case converges in one extra pass (the
+    /// neighbour pulls the splitter to its achieved edge, and the second
+    /// readback finds the geometry already flush); the small cap stops
+    /// two neighbours that each pull the shared splitter their way from
+    /// oscillating forever.
+    private static let maxAchievedEdgePasses = 2
+
+    /// Seeds the drag loop's diff baseline for every rect a reassert is
+    /// about to write: a skipped or deferred write never reaches
+    /// markExpected, so without the seed the first drag after the
+    /// reassert diffs against a stale frame and is misread.
+    private func seedBaselines(_ rects: [WindowID: CGRect], context: Context) {
+        for (id, rect) in rects {
             context.tracker.seedBaseline(id, rect)
         }
-        _ = writeRects(plan.rects, context: context)
-        return Outcome()
+    }
+
+    /// Reconciles every written occupant's achieved edge back onto the
+    /// splitter that edge rides, returning whether any splitter moved.
+    /// An app that rounds or insets a programmatically-written frame can
+    /// leave a neighbour short of the splitter, opening a gap; the
+    /// achieved edge is authoritative, exactly as the dragged window's
+    /// is, so the splitter follows it and the tiles abut. An edge on a
+    /// screen edge has no boundary (fixed) and is left alone: the
+    /// residual an app cannot remove lands there, never between tiles.
+    /// The readback is the one effect the pure plan cannot perform, so it
+    /// lives here, in the effectful half.
+    private mutating func reconcileAchievedEdges(
+        _ written: [(id: WindowID, target: CGRect)], context: Context
+    ) -> Bool {
+        var reconciled = grid
+        let occupied = Set(state.occupants.keys)
+        var changed = false
+        for entry in written {
+            guard let slot = state.slot(of: entry.id),
+                let record = records[entry.id],
+                let achieved = context.gateway.frame(of: record.handle)
+            else { continue }
+            for edge in TileEdge.allCases {
+                guard let boundary = GridLayout.boundary(edge: edge, slot: slot)
+                else { continue }
+                let target = Self.position(of: edge, in: entry.target)
+                let landed = Self.position(of: edge, in: achieved)
+                guard abs(landed - target) > DragTracker.noOpWriteTolerance
+                else { continue }
+                if reconciled.update(
+                    boundary: boundary, toPosition: landed, in: visibleFrame,
+                    centeringTwoThirds: GridLayout.centeringTwoThirds(
+                        on: boundary, draggedSlot: slot, occupants: occupied))
+                {
+                    changed = true
+                }
+            }
+        }
+        grid = reconciled
+        return changed
+    }
+
+    /// The screen-space position of one frame edge (AppKit coords).
+    private static func position(of edge: TileEdge, in frame: CGRect) -> CGFloat {
+        switch edge {
+        case .left: frame.minX
+        case .right: frame.maxX
+        case .top: frame.maxY
+        case .bottom: frame.minY
+        }
     }
 }

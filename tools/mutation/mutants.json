@@ -326,20 +326,20 @@
  [
   "TilingSpace.swift",
   "resize reconcile takes a top window's far edge (row splitter to the screen top)",
-  "                case .top: achieved.maxY\n                case .bottom: achieved.minY",
-  "                case .top: achieved.minY\n                case .bottom: achieved.minY"
+  "        case .top: frame.maxY\n        case .bottom: frame.minY",
+  "        case .top: frame.minY\n        case .bottom: frame.minY"
  ],
  [
   "TilingSpace.swift",
   "resize reconcile takes a bottom window's far edge (row splitter to the screen bottom)",
-  "                case .top: achieved.maxY\n                case .bottom: achieved.minY",
-  "                case .top: achieved.maxY\n                case .bottom: achieved.maxY"
+  "        case .top: frame.maxY\n        case .bottom: frame.minY",
+  "        case .top: frame.maxY\n        case .bottom: frame.maxY"
  ],
  [
   "TilingSpace.swift",
   "reassert writes rects but leaves the canvas's splitters unreconciled",
-  "        let plan = reassertPlan(source)\n        grid = plan.grid",
-  "        let plan = reassertPlan(source)\n        _ = plan.grid"
+  "        var plan = reassertPlan(source)\n        grid = plan.grid",
+  "        var plan = reassertPlan(source)\n        _ = plan.grid"
  ],
  [
   "TilingSpace.swift",
@@ -350,8 +350,32 @@
  [
   "TilingSpace.swift",
   "reassert seeds no diff baseline (first drag after it is dropped)",
-  "        for (id, rect) in plan.rects {\n            context.tracker.seedBaseline(id, rect)\n        }",
-  "        for (id, rect) in plan.rects {\n            _ = rect\n        }"
+  "        for (id, rect) in rects {\n            context.tracker.seedBaseline(id, rect)\n        }",
+  "        for (id, rect) in rects {\n            _ = rect\n        }"
+ ],
+ [
+  "TilingSpace.swift",
+  "neighbour achieved-edge reconcile never runs (gap reopens)",
+  "            guard reconcileAchievedEdges(pass.written, context: context) else { break }",
+  "            guard reconcileAchievedEdges([], context: context) else { break }"
+ ],
+ [
+  "TilingSpace.swift",
+  "neighbour reconcile moves the splitter to the target, not the achieved edge",
+  "                if reconciled.update(\n                    boundary: boundary, toPosition: landed, in: visibleFrame,",
+  "                if reconciled.update(\n                    boundary: boundary, toPosition: target, in: visibleFrame,"
+ ],
+ [
+  "TilingSpace.swift",
+  "neighbour reconcile ignores divergences below the echo tolerance",
+  "                guard abs(landed - target) > DragTracker.noOpWriteTolerance\n                else { continue }",
+  "                guard abs(landed - target) > 32\n                else { continue }"
+ ],
+ [
+  "TilingSpace.swift",
+  "corrective pass re-applies the resize reconcile (undoes the neighbour)",
+  "            plan = reassertPlan(.grid)",
+  "            plan = reassertPlan(source)"
  ],
  [
   "FrameWriter.swift",
