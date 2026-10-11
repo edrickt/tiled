@@ -19,7 +19,7 @@ _Avoid_: desktop, workspace, virtual desktop
 **Tiling space (canvas)**:
 One display's one Mission Control Space: its occupancy, layout, splitters, undo chapters, and notices. Tiling acts on the requesting window's canvas; menus aggregate the visible canvases (the manage list groups per display). A canvas whose Space id the OS withholds falls back to per-display state.
 _Avoid_: monitor space (prose for the display dimension only), screen (AppKit type), desktop
-_Code_: `TilingSpace` (one canvas's occupancy, records, splitters, expansion, and placement pipeline), `TilingSpaceKey` (display + Space identity)
+_Code_: `TilingSpace` (one canvas's occupancy, records, splitters, expansion, visible frame, and placement pipeline), `TilingSpaceKey` (display + Space identity)
 
 **Cell**:
 An atomic unit of the shared 4×2 refinement both layouts are built from; overlap is cell-set intersection.
@@ -28,6 +28,21 @@ _Avoid_: sub-tile, block
 **Splitter**:
 A movable divider between tiles whose fraction the drag-resize loop updates; screen edges are fixed, not splitters.
 _Avoid_: divider, separator, boundary (the code name is GridBoundary)
+
+**Visible frame**:
+The one display geometry a canvas tiles against: the visible frame of the display that canvas lives on, menu bar and Dock excluded. The canvas owns it, resolved once when the canvas is established and refreshed on a display change, a swipe back, and a splitter reset; every rect on the canvas derives from this one frame, so two occupants can never disagree about where their shared edge is.
+_Avoid_: screen bounds, monitor frame, working area (one step of the screen-resolution chain, not the canvas's stored geometry)
+_Code_: `TilingSpace.visibleFrame` (replaces the per-window `Context.boundsOf`)
+
+**Reassert**:
+Putting the screen back on the grid after a drag: the canvas reconciles any app-clamped edge back to the dragged window's achieved frame, re-derives every tiled occupant's rect under its one visible frame, and writes them — the dragged window included, unlike a resize mid-drag. One reassert covers an edge drag's mouse-up, a title-bar snapback, a display change, a swipe back, and a splitter reset.
+_Avoid_: settle (the placement pipeline's own step), reflow (reflow merges freed cells into a survivor; reassert changes no slot), refresh
+_Code_: `TilingSpace.reassert(_:context:)`, over the pure core `TilingSpace.reassertPlan(_:)`
+
+**Achieved frame**:
+Where an app actually left the window, which an app's minimum-size floor can hold short of the splitter the cursor moved. The reassert trusts the achieved frame over the splitter, so neighbours abut the window itself and never the splitter it could not reach.
+_Avoid_: actual frame, clamped frame (a clamp is one cause), intent (the drag loop's pushed target, which is where we aimed, not where the app landed)
+_Code_: the dragged window's live frame, read at reassert
 
 **Eviction**:
 Untiling a window to make room, restoring its pre-tile frame; what `plan` returns when another window overlaps the requested slot.
