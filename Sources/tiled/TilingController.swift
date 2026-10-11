@@ -4,7 +4,8 @@ import AppKit
 /// `WindowGateway`, never touching AX types directly. All element
 /// identity, coordinate conversion, observation, and activation live
 /// behind the seam; the coordinator keeps focus and handle resolution,
-/// the handle->id table, bounds, and the death clock.
+/// the handle->id table, the visible-frame resolution, and the death
+/// clock.
 ///
 /// Each canvas's state (occupancy, records, expansion, splitters, undo
 /// chapters, notices) lives in `TilingSpace`; this module routes each
@@ -214,6 +215,7 @@ final class TilingController {
         ) { [weak self] _ in
             guard let self else { return }
             self.dbg("screens changed; reasserting visible canvases")
+            self.refreshVisibleFrames(of: Array(self.spaces.keys))
             self.staleSpaces.formUnion(self.spaces.keys)
             self.applyAll()
             self.onChange?()
@@ -273,6 +275,7 @@ final class TilingController {
     /// canvases, so both the stale reassert and the menu refresh are
     /// unconditional; only the glyph is scoped to the focused canvas.
     private func activeSpaceMayHaveChanged() {
+        refreshVisibleFrames(of: activeSpaceKeys())
         reassertStaleActiveSpaces()
         let key = focusedSpaceKey()
         if !hasResolvedFocusedSpace || key != lastFocusedSpace {
@@ -401,7 +404,6 @@ final class TilingController {
             gateway: gateway,
             frameWriter: frameWriter,
             tracker: tracker,
-            boundsOf: { [weak self] in self?.visibleBounds(for: $0) ?? $0 },
             space: key,
             allocateID: { [weak self] handle in
                 guard let self else { return 0 }
@@ -579,6 +581,39 @@ final class TilingController {
         infos.first
     }
 
+    /// The visible frame of the display a canvas lives on: the one
+    /// geometry every rect on that canvas derives from, resolved from the
+    /// canvas's own display and never from a window's frame. A display-less
+    /// key (headless, withheld Space) uses the main screen, then the live
+    /// main screen, then zero.
+    private func visibleFrame(for space: TilingSpaceKey) -> CGRect {
+        if let screen = space.screen,
+            let info = screens().first(where: { $0.id == screen })
+        {
+            return info.visibleFrame
+        }
+        return mainScreenInfo(screens())?.visibleFrame
+            ?? NSScreen.main?.visibleFrame ?? .zero
+    }
+
+    /// A brand-new canvas with its visible frame resolved from its own
+    /// display. Existing canvases keep their frame until one of the
+    /// refresh events; the coordinator never re-resolves per action.
+    private func establishedCanvas(for space: TilingSpaceKey) -> TilingSpace {
+        var canvas = TilingSpace()
+        canvas.visibleFrame = visibleFrame(for: space)
+        return canvas
+    }
+
+    /// Re-resolves the stored visible frame of the named canvases: the
+    /// refresh half of a display change and a swipe back. Keys without a
+    /// canvas yet are left alone; they resolve on first use.
+    private func refreshVisibleFrames(of keys: [TilingSpaceKey]) {
+        for key in keys where spaces[key] != nil {
+            spaces[key]?.visibleFrame = visibleFrame(for: key)
+        }
+    }
+
     /// Canvas for a tiling request: a tiled window's own canvas wins (it
     /// never migrates mid-session), else the owning display's currently
     /// shown Space from the window's live frame, else its pre-tile frame,
@@ -742,8 +777,9 @@ final class TilingController {
     }
 
     private func resetDividers(in space: TilingSpaceKey) {
-        mutateSpace(space) {
-            $0.resetSplitters(context: placementContext(for: space))
+        mutateSpace(space) { canvas in
+            canvas.visibleFrame = visibleFrame(for: space)
+            _ = canvas.resetSplitters(context: placementContext(for: space))
         }
         onChange?()
     }
@@ -1207,7 +1243,7 @@ final class TilingController {
 
     @discardableResult
     private func mutateSpace<T>(_ space: TilingSpaceKey, _ body: (inout TilingSpace) -> T) -> T {
-        var value = spaces[space] ?? TilingSpace()
+        var value = spaces[space] ?? establishedCanvas(for: space)
         let result = body(&value)
         spaces[space] = value
         return result

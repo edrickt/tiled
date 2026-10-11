@@ -27,8 +27,9 @@ struct EvictedWindow {
 /// commit, settle, reflow) for that canvas.
 ///
 /// The coordinator keeps focus and handle resolution, the handle->id
-/// allocation table, observation, bounds, and the death clock; every
-/// piece of per-canvas state lives here. Records being canvas-owned is
+/// allocation table, observation, the visible-frame resolution, and the
+/// death clock; every piece of per-canvas state lives here. Records being
+/// canvas-owned is
 /// what makes `spaceOf(window:)` derivable: a window's canvas is the one
 /// holding its record, so ownership cannot drift from a second registry.
 ///
@@ -41,6 +42,14 @@ struct TilingSpace {
     /// Splitter fractions for this canvas. The tracker moves them through
     /// its `GridProvider`, which reads and writes here.
     var grid = GridLayout()
+    /// The one display geometry this canvas tiles against: the visible
+    /// frame of the display the canvas lives on. The coordinator resolves
+    /// it when the canvas is established and refreshes it on a display
+    /// change, a swipe back, and a splitter reset; the canvas only stores
+    /// and reads it. Every rect on the canvas derives from this one frame,
+    /// so two occupants can never disagree about where their shared edge
+    /// is. Never resolved from a window's own frame.
+    var visibleFrame: CGRect = .zero
     /// Managed windows: the handle to reach them plus the frame untiling
     /// restores. A window records here when the coordinator hands it
     /// over, and leaves when an action forgets it.
@@ -70,7 +79,6 @@ struct TilingSpace {
         let gateway: WindowGateway
         let frameWriter: FrameWriter
         let tracker: DragTracker
-        let boundsOf: (CGRect) -> CGRect
         /// The canvas every write without a better owner belongs to: the
         /// canvas this action is running on.
         let space: TilingSpaceKey
@@ -338,7 +346,7 @@ struct TilingSpace {
             if let record = records[id],
                 let slot = state.slot(of: id),
                 let current = context.gateway.frame(of: record.handle),
-                current == grid.rect(for: slot, in: context.boundsOf(current))
+                current == grid.rect(for: slot, in: visibleFrame)
             {
                 context.log("undo SKIP-WRITE win\(id) already placed")
                 restored += 1
@@ -744,8 +752,7 @@ struct TilingSpace {
         for id: WindowID, context: Context, on space: TilingSpaceKey?
     ) -> Bool {
         guard let record = records[id], let slot = state.slot(of: id) else { return false }
-        let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-        let bounds = context.boundsOf(current)
+        let bounds = visibleFrame
         let target = grid.rect(for: slot, in: bounds)
         // The shared write policy: a no-op target counts as success
         // without a write, and a hidden canvas defers (false: the branch
@@ -811,9 +818,8 @@ struct TilingSpace {
         // writes and marks the canvas stale for the swipe back.
         var rects: [WindowID: CGRect] = [:]
         for move in moves {
-            if let record = records[move.window] {
-                let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-                rects[move.window] = grid.rect(for: move.to, in: context.boundsOf(current))
+            if records[move.window] != nil {
+                rects[move.window] = grid.rect(for: move.to, in: visibleFrame)
             }
         }
         if writeRects(rects, context: context) > 0 {
@@ -822,9 +828,8 @@ struct TilingSpace {
             state = rolled
             var oldRects: [WindowID: CGRect] = [:]
             for move in moves {
-                if let record = records[move.window] {
-                    let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-                    oldRects[move.window] = grid.rect(for: move.from, in: context.boundsOf(current))
+                if records[move.window] != nil {
+                    oldRects[move.window] = grid.rect(for: move.from, in: visibleFrame)
                 }
             }
             _ = writeRects(oldRects, context: context)
@@ -952,8 +957,8 @@ struct TilingSpace {
             // restore just put us. Without this the undo's own writes
             // read as a user drag and the grid moves under them.
             for (slot, id) in chapter {
-                if let record = records[id] {
-                    let target = grid.rect(for: slot, in: context.boundsOf(record.preTileFrame))
+                if records[id] != nil {
+                    let target = grid.rect(for: slot, in: visibleFrame)
                     context.tracker.markExpected(id, target)
                 }
             }
@@ -1024,10 +1029,10 @@ struct TilingSpace {
     private mutating func expand(_ id: WindowID, context: Context) -> Outcome {
         guard let record = records[id] else { return Outcome() }
         let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-        // No readable frame anywhere: there is no sane screen to expand
-        // onto, so refuse to guess (visibleBounds would fall back to main).
+        // No readable frame anywhere: the window has no sane geometry to
+        // return to on collapse, so refuse to guess.
         guard current != .zero else { return Outcome() }
-        let target = context.boundsOf(current)
+        let target = visibleFrame
         error = nil
         notice = nil
         let result = writeExpandedFrame(id, to: target, context: context)
@@ -1086,9 +1091,8 @@ struct TilingSpace {
     /// window never left its slot, so there is nothing to restore or
     /// evict.
     private func retileExpanded(_ id: WindowID, context: Context) -> ExpandedWrite? {
-        guard let record = records[id], let slot = state.slot(of: id) else { return nil }
-        let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-        let target = grid.rect(for: slot, in: context.boundsOf(current))
+        guard records[id] != nil, let slot = state.slot(of: id) else { return nil }
+        let target = grid.rect(for: slot, in: visibleFrame)
         let result = writeExpandedFrame(id, to: target, context: context)
         context.log("retile expanded win\(id) -> \(slot.rawValue) target=\(target)")
         return result
@@ -1178,10 +1182,9 @@ struct TilingSpace {
         var rects: [WindowID: CGRect] = [:]
         for (slot, occupant) in state.occupants {
             guard !excluded.contains(occupant), expanded[occupant] == nil,
-                let record = records[occupant]
+                records[occupant] != nil
             else { continue }
-            let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-            rects[occupant] = grid.rect(for: slot, in: context.boundsOf(current))
+            rects[occupant] = grid.rect(for: slot, in: visibleFrame)
         }
         return publish(rects: rects, excluding: nil, context: context)
     }

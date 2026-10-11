@@ -298,5 +298,11 @@
   "echo expectation not armed (own write reads as a user drag)",
   "        markExpected(id, target)\n        guard gateway.setFrame",
   "        guard gateway.setFrame"
+ ],
+ [
+  "TilingController.swift",
+  "canvas frame ignores the display's visible frame (uses the full frame)",
+  "            return info.visibleFrame\n        }\n        return mainScreenInfo(screens())?.visibleFrame",
+  "            return info.frame\n        }\n        return mainScreenInfo(screens())?.visibleFrame"
  ]
 ]

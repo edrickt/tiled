@@ -17,13 +17,15 @@ final class TilingSpaceHarness {
     /// Whether the injected visibility policy sees the canvas. Hidden
     /// canvas tests flip this; everyone else writes as on a visible one.
     var canvasVisible = true
-    /// Injected bounds: every placement, reflow, and expand derives its
-    /// target from this rect, never a live `NSScreen`.
+    /// Injected bounds: the canvas's one stored visible frame. Every
+    /// placement, reflow, and expand derives its target from this rect,
+    /// never a live `NSScreen`.
     var bounds = CGRect(x: 0, y: 0, width: 1600, height: 1200)
     private(set) var tracker: DragTracker!
     private(set) var writer: FrameWriter!
 
     init() {
+        space.visibleFrame = bounds
         tracker = DragTracker(
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.space.state.slot(of: $0) },
@@ -57,7 +59,6 @@ final class TilingSpaceHarness {
             gateway: gateway,
             frameWriter: writer,
             tracker: tracker,
-            boundsOf: { [weak self] in self?.bounds ?? $0 },
             space: .displayless,
             allocateID: { [weak self] _ in
                 guard let self else { return 0 }

@@ -422,4 +422,39 @@ final class PerMonitorTests: XCTestCase {
             "the focused canvas is untouched")
         XCTAssertNil(controller.canvas(for: rightID).state.occupant(of: .topLeft))
     }
+
+    // MARK: One visible frame per canvas
+
+    /// The canvas owns one visible frame: two occupants of one canvas
+    /// derive their shared edge from that one frame, so their frames
+    /// touch even when one window's own frame has drifted onto another
+    /// display. Resolving bounds from each window's own frame would size
+    /// the drifted window against the other display and open a gap at the
+    /// shared edge.
+    func testTwoOccupantsOfOneCanvasStayFlushAgainstOneFrame() {
+        let a = tileOnLeft()
+        controller.handle(slot: .leftHalf)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 100, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .rightHalf)
+
+        // The right occupant's live frame drifts onto the second display
+        // (an app that moved or rounded it) without a user drag.
+        gateway.simulateSilentChange(
+            b, to: CGRect(x: 1700, y: 100, width: 800, height: 600))
+
+        // A splitter reset re-asserts the canvas under its own frame.
+        controller.resetDividers(on: leftID)
+
+        let leftBounds = Self.left.visibleFrame
+        let leftFrame = GridLayout().rect(for: .leftHalf, in: leftBounds)
+        let rightFrame = GridLayout().rect(for: .rightHalf, in: leftBounds)
+        XCTAssertEqual(gateway.frame(of: a), leftFrame)
+        XCTAssertEqual(
+            gateway.frame(of: b), rightFrame,
+            "the drifted occupant re-derives from the canvas's own frame")
+        XCTAssertEqual(
+            gateway.frame(of: a)!.maxX, gateway.frame(of: b)!.minX,
+            "two occupants of one canvas share one bounds, so their frames touch")
+    }
 }
