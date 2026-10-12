@@ -1315,13 +1315,23 @@ final class TilingController {
         return gateway.activeSpace(on: info.displayID)
     }
 
-    /// Whether `space` is the canvas the user can see right now. A nil
-    /// Space id (fallback mode) or nil display (headless tests) is
-    /// treated as visible: there is no hidden canvas to protect. When
-    /// the window server cannot name the visible Space either, the write
-    /// is deferred too: the next successful lookup re-asserts it.
+    /// Whether `space` is the canvas the user can see right now.
+    ///
+    /// A key with no display (headless tests, `TilingSpaceKey.displayless`)
+    /// is genuinely display-less: there is no hidden canvas to protect, so
+    /// it stays visible. A key whose display is no longer attached is never
+    /// visible, even when its Space id is withheld: its stored frame may
+    /// already belong to another display, so writing it would lay the
+    /// window out against the wrong geometry. On an attached display a
+    /// withheld Space id is the per-display fallback the user is looking
+    /// at, so it stays visible; an identified canvas is visible when it is
+    /// the Space shown there. When the window server cannot name the
+    /// visible Space either, the write is deferred too: the next
+    /// successful lookup re-asserts it.
     private func isVisible(_ space: TilingSpaceKey) -> Bool {
-        guard let screen = space.screen, let id = space.space else { return true }
+        guard let screen = space.screen else { return true }
+        guard screens().contains(where: { $0.id == screen }) else { return false }
+        guard let id = space.space else { return true }
         return activeSpaceID(on: screen) == id
     }
 

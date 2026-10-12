@@ -18,7 +18,7 @@ display-less keys.
 
 **Findings:** report M7 (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (4101d37)
 
 - [ ] After a display is unplugged, a hotkey targeting a window on that display's (withheld,
       nil-Space) canvas defers instead of writing; the canvas is marked stale.
