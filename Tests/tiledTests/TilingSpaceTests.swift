@@ -629,6 +629,148 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertTrue(harness.gateway.writes.isEmpty, "the rollback itself writes nothing")
     }
 
+    // MARK: Restore policy
+
+    /// A pre-tile restore on a hidden canvas defers too: the evicted
+    /// window is not dragged through Mission Control, its slot is
+    /// released, and the parked restore lands on the swipe-back reassert —
+    /// the same off-Space contract every other write obeys.
+    func testHiddenCanvasEvictionDefersTheRestoreAndReconcilesOnReturn() {
+        let original = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let a = harness.addWindow(frame: original)
+        harness.apply(slot: .topLeft, requester: a)
+        XCTAssertEqual(space.records[a]?.preTileFrame, original)
+        harness.gateway.clearWrites()
+        harness.clearExpectedWrites()
+        let b = harness.addWindow()
+        harness.canvasVisible = false
+
+        harness.apply(slot: .topLeft, requester: b)
+
+        XCTAssertTrue(
+            harness.gateway.writes.isEmpty,
+            "a hidden canvas never drags the evicted window through Mission Control")
+        XCTAssertTrue(
+            harness.expectedWrites.isEmpty,
+            "a deferred restore arms no phantom expectation")
+        XCTAssertNil(space.state.slot(of: a), "the eviction releases the slot")
+        XCTAssertNil(space.error, "a deferral is not an app refusal")
+
+        harness.canvasVisible = true
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(
+            harness.frame(of: a), original,
+            "the parked restore lands when the canvas becomes visible")
+    }
+
+    /// A hidden untile-all parks every restore (its re-observation of the
+    /// windows for the undo chapter must not discard them) and lands them
+    /// all on the swipe back.
+    func testHiddenCanvasUntileAllParksEveryRestoreAndReconcilesOnReturn() {
+        let aFrame = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let bFrame = CGRect(x: 500, y: 40, width: 400, height: 300)
+        let a = harness.addWindow(frame: aFrame)
+        harness.apply(slot: .topLeft, requester: a)
+        let b = harness.addWindow(frame: bFrame)
+        harness.apply(slot: .topRight, requester: b)
+        harness.gateway.clearWrites()
+        harness.canvasVisible = false
+
+        space.untileAll(context: context())
+
+        XCTAssertTrue(harness.gateway.writes.isEmpty, "a hidden canvas is never written blind")
+        XCTAssertEqual(space.deferredRestores.count, 2, "both restores are parked")
+
+        harness.canvasVisible = true
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(harness.frame(of: a), aFrame)
+        XCTAssertEqual(harness.frame(of: b), bFrame)
+    }
+
+    /// Re-tiling a parked window before the canvas returns discards its
+    /// stale restore, so the swipe-back cannot yank it out of the slot it
+    /// just took.
+    func testRetilingAParkedWindowDiscardsTheStaleRestore() {
+        let original = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let a = harness.addWindow(frame: original)
+        harness.apply(slot: .topLeft, requester: a)
+        let b = harness.addWindow()
+        harness.canvasVisible = false
+        harness.apply(slot: .topLeft, requester: b)
+        XCTAssertNil(space.state.slot(of: a))
+        XCTAssertFalse(space.deferredRestores.isEmpty, "the hidden restore is parked")
+
+        // Before the canvas returns, the user tiles the window again.
+        harness.apply(slot: .bottomRight, requester: a)
+
+        XCTAssertTrue(
+            space.deferredRestores.isEmpty,
+            "re-tiling the window discards its stale parked restore")
+    }
+
+    /// The restore takes the same no-op skip as every other write: a
+    /// window already sitting at its pre-tile frame is not rewritten, so
+    /// its settling app is never re-armed into a phantom drag.
+    func testRestoreSkipsAnAlreadyCorrectFrame() {
+        let original = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let a = harness.addWindow(frame: original)
+        harness.apply(slot: .topLeft, requester: a)
+        // The app resisted the tile and never left its pre-tile frame.
+        harness.gateway.simulateSilentChange(harness.handle(of: a)!, to: original)
+        harness.gateway.clearWrites()
+        harness.clearExpectedWrites()
+
+        space.untile(window: a, reflowing: false, context: context())
+
+        XCTAssertTrue(
+            harness.gateway.writes.isEmpty,
+            "an already-correct restore issues no write")
+        XCTAssertTrue(
+            harness.expectedWrites.isEmpty,
+            "and arms no echo for a frame that needs no write")
+        XCTAssertNil(space.state.slot(of: a), "the slot is released regardless")
+    }
+
+    /// A restore on a visible canvas is unchanged: the pre-tile frame is
+    /// written and the slot released, with nothing parked for later.
+    func testVisibleRestoreWritesThePreTileFrameAndReleasesTheSlot() {
+        let original = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let a = harness.addWindow(frame: original)
+        harness.apply(slot: .topLeft, requester: a)
+        harness.gateway.clearWrites()
+        harness.clearExpectedWrites()
+
+        space.untile(window: a, reflowing: false, context: context())
+
+        XCTAssertEqual(harness.frame(of: a), original)
+        XCTAssertNil(space.state.slot(of: a))
+        XCTAssertTrue(space.deferredRestores.isEmpty, "a visible restore is never parked")
+        XCTAssertEqual(
+            harness.expectedWrites, [a],
+            "the restore arms its echo like every other write")
+        XCTAssertNil(
+            harness.tracker.convergence(for: a),
+            "and clears it when the window is untiled: no phantom expectation")
+    }
+
+    /// A pre-tile frame that straddles the canvas edge is the app's own
+    /// placement: the restore is left exactly where the user had it,
+    /// never yanked back inside the visible frame.
+    func testStraddlingPreTileRestoreIsLeftWhereTheAppPutIt() {
+        let straddling = CGRect(x: 1500, y: 0, width: 300, height: 300)
+        let a = harness.addWindow(frame: straddling)
+        harness.apply(slot: .topLeft, requester: a)
+        XCTAssertEqual(space.records[a]?.preTileFrame, straddling)
+
+        space.untile(window: a, reflowing: false, context: context())
+
+        XCTAssertEqual(
+            harness.frame(of: a), straddling,
+            "a straddling pre-tile frame the app applied is never repinned")
+    }
+
     // MARK: Untile all
 
     func testUntileAllNoticesBuildsAChapterAndObservesTheRestored() {
