@@ -21,7 +21,7 @@ that merges, re-check family 3 (the write policy) against the `WriteExpectations
 |---|--------|-----------|----------|--------|
 | 01 | One canvas per window | – | M1 | ready-for-agent |
 | 02 | A record dies with its tiling | 01 | M6, L2 | ready-for-agent |
-| 03 | Death confirmation excludes sleep | – | M2 (clock) | ready-for-agent |
+| 03 | Death confirmation excludes sleep | – | M2 (clock) | DONE (`7e4da22`) |
 | 04 | A moved listed frame is alive | 03 | M2 (frame) | ready-for-agent |
 | 05 | One deferred-off-Space contract | – | M9 | DONE (`afa6e98`) |
 | 06 | A deferred request is retained | 05 | M10, M12 | ready-for-agent |
