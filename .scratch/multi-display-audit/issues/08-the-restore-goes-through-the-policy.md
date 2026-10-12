@@ -17,7 +17,7 @@ and reconcile, while keeping the straddling pre-tile behaviour (`FrameWriter.swi
 
 **Findings:** report M4 (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (2fcb3aa)
 
 - [ ] A pre-tile restore to a window on an invisible canvas defers instead of writing (no
       Mission-Control pull), and is reconciled on swipe-back.

@@ -468,6 +468,42 @@ final class SpaceIndependenceTests: XCTestCase {
             "a cleared stale mark does not reassert an app-moved window")
     }
 
+    func testHiddenSpaceEvictionDefersTheRestoreAndReconcilesOnReturn() {
+        // Three windows tiled on Space A, then the user swipes to B and
+        // issues a request that evicts two of them. The restores must not
+        // drag those windows through Mission Control while A is hidden;
+        // they land on A when the user swipes back.
+        let aFrame = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let dFrame = CGRect(x: 200, y: 200, width: 500, height: 400)
+        let a = addFocusedWindow(frame: aFrame)
+        controller.handle(slot: .topLeft)
+        let d = addFocusedWindow(frame: dFrame)
+        controller.handle(slot: .bottomLeft)
+        let e = addFocusedWindow(frame: CGRect(x: 300, y: 300, width: 400, height: 300))
+        controller.handle(slot: .bottomRight)
+
+        // The user swipes away; a request on the (hidden) Space A evicts
+        // two windows to make room for e.
+        switchTo(Self.spaceB)
+        gateway.focused = e
+        let aTiled = gateway.frame(of: a)!
+        let dTiled = gateway.frame(of: d)!
+        gateway.clearWrites()
+        controller.handle(slot: .leftHalf)
+
+        XCTAssertFalse(
+            gateway.writes.contains { $0.handle == a || $0.handle == d },
+            "a hidden Space never drags its evicted windows through Mission Control")
+        XCTAssertEqual(
+            gateway.frame(of: a), aTiled,
+            "a deferred restore leaves the window where it was, not blind-written")
+        XCTAssertEqual(gateway.frame(of: d), dTiled)
+
+        switchTo(Self.spaceA)
+        XCTAssertEqual(gateway.frame(of: a), aFrame, "the parked restore lands on return")
+        XCTAssertEqual(gateway.frame(of: d), dFrame)
+    }
+
     func testScreenChangeWhileHiddenReassertsWhenTheSpaceReturns() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)
