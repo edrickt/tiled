@@ -19,7 +19,7 @@ that merges, re-check family 3 (the write policy) against the `WriteExpectations
 
 | # | Ticket | Blocked by | Findings | Status |
 |---|--------|-----------|----------|--------|
-| 01 | One canvas per window | – | M1 | ready-for-agent |
+| 01 | One canvas per window | – | M1 | DONE (`f82d4e5`) |
 | 02 | A record dies with its tiling | 01 | M6, L2 | ready-for-agent |
 | 03 | Death confirmation excludes sleep | – | M2 (clock) | DONE (`7e4da22`) |
 | 04 | A moved listed frame is alive | 03 | M2 (frame) | DONE (`b163b6d`) |
