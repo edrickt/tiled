@@ -412,5 +412,23 @@
   "resize reassert downgraded to a grid reassert (clamp not reconciled)",
   "            reassert(id, source: .resize(dragged: id, achieved: achieved))",
   "            reassert(id, source: .grid)"
+ ],
+ [
+  "StatusIcon.swift",
+  "spoken status line drops the display name (VoiceOver cannot tell the monitor)",
+  "        return line + \", on \" + displayName",
+  "        return line"
+ ],
+ [
+  "TilingController.swift",
+  "spoken display name kept on a single display (glyph names a non-choice)",
+  "        guard infos.count > 1 else { return nil }",
+  "        guard infos.count > 0 else { return nil }"
+ ],
+ [
+  "AppDelegate.swift",
+  "icon pass re-resolves the canvas key (glyph can mix two canvases)",
+  "        let key = canvasKey()\n        let focused = canvas(key)",
+  "        let key = canvasKey()\n        let focused = canvas(canvasKey())"
  ]
 ]

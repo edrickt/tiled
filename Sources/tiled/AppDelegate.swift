@@ -204,10 +204,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the icon depicts the layout the next hotkey acts on, whether the
     /// user got there by focusing another display or swiping Spaces.
     private func iconSnapshot() -> StatusIcon.Snapshot {
-        let canvas = controller.canvas(for: controller.focusedScreen)
+        Self.iconSnapshot(
+            canvasKey: { controller.focusedTilingSpace },
+            canvas: { controller.canvas(for: $0) },
+            displayName: { controller.displayName(for: $0) })
+    }
+
+    /// The icon half of a refresh pass that already resolved its one canvas
+    /// key: the glyph is built from that same key, so the menu and the icon
+    /// can never describe different canvases when focus moves mid-pass.
+    private func iconSnapshot(space: TilingSpaceKey) -> StatusIcon.Snapshot {
+        Self.iconSnapshot(
+            canvasKey: { space },
+            canvas: { controller.canvas(for: $0) },
+            displayName: { controller.displayName(for: $0) })
+    }
+
+    /// Builds one icon pass from a single resolved canvas key. The key is
+    /// read exactly once, here, and both the occupancy map and the spoken
+    /// display name derive from it, so a focus move landing mid-pass can
+    /// never pair one canvas's glyph with another canvas's name. The three
+    /// lookups are parameters so a test can count the reads without a live
+    /// controller.
+    static func iconSnapshot(
+        canvasKey: () -> TilingSpaceKey,
+        canvas: (TilingSpaceKey) -> TilingSpace,
+        displayName: (TilingSpaceKey) -> String?
+    ) -> StatusIcon.Snapshot {
+        let key = canvasKey()
+        let focused = canvas(key)
         return StatusIcon.snapshot(
-            layout: canvas.state.activeLayout,
-            occupants: canvas.state.occupants)
+            layout: focused.state.activeLayout,
+            occupants: focused.state.occupants,
+            displayName: displayName(key))
     }
 
     /// The menu-bar glyph states the product's core idea twice over: the
@@ -408,8 +437,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // runloop tick, and the permission poll fires once a second, but
         // the menu only cares about state, warnings, and window rows.
         // Building an NSMenu with submenus on every tick is pure waste.
-        let snapshot = menuSnapshot()
-        let icon = iconSnapshot()
+        // One canvas key for the whole pass: the menu and the glyph are two
+        // views of the same canvas, so a focus move landing between building
+        // them can never leave them describing different canvases.
+        let space = controller.focusedTilingSpace
+        let snapshot = menuSnapshot(space: space)
+        let icon = iconSnapshot(space: space)
         let plan = Self.refreshPlan(
             menuChanged: force || snapshot != lastMenuSnapshot || statusItem?.menu == nil,
             iconChanged: lastIconSnapshot != icon || statusItem?.button?.image == nil,
@@ -450,9 +483,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `notice` clears on every new action, so the menu carries each
     /// outcome until the next one replaces it.
     private func menuSnapshot() -> MenuModel.Snapshot {
+        menuSnapshot(space: controller.focusedTilingSpace)
+    }
+
+    /// Menu snapshot from an already-resolved canvas key. A refresh pass
+    /// resolves the key once and hands the same one to the menu and the
+    /// icon, so the two halves can never describe different canvases.
+    private func menuSnapshot(space: TilingSpaceKey) -> MenuModel.Snapshot {
         // One canvas read for the whole pass: every unscoped field
         // describes the focused canvas's own surface.
-        let canvas = controller.canvas(for: controller.focusedTilingSpace)
+        let canvas = controller.canvas(for: space)
         let warnings = activeWarnings
         let rows = controller.tiledWindowsInfo
         let presentation = Self.monitorPresentation(
@@ -463,7 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let screen {
                     return controller.canvas(for: screen).state.activeLayout
                 }
-                return controller.canvas(for: controller.focusedTilingSpace).state.activeLayout
+                return canvas.state.activeLayout
             })
         return MenuModel.Snapshot(
             isTrusted: controller.isTrusted,

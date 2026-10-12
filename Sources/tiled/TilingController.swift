@@ -1018,6 +1018,17 @@ final class TilingController {
         allTiledWindowsInfo()
     }
 
+    /// The display name to speak for a canvas, or nil when naming it would
+    /// distinguish nothing: with a single display attached the glyph's
+    /// monitor is unambiguous and the VoiceOver line is left alone. With
+    /// more than one display the name tells the user which monitor the
+    /// glyph depicts, matching the menu headers.
+    func displayName(for space: TilingSpaceKey) -> String? {
+        let infos = screens()
+        guard infos.count > 1 else { return nil }
+        return infos.first(where: { $0.id == space.screen })?.name
+    }
+
     /// Tiled windows on the focused canvas (tile submenu scope).
     var focusedTiledWindowsInfo: [TiledWindowInfo] {
         let key = focusedSpaceKey()
