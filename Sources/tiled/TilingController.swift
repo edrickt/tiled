@@ -103,12 +103,22 @@ final class TilingController {
     /// can run, and on wake the probes answer again — while a really
     /// dead window releases its slot on the next tick.
     private let deathConfirmation: TimeInterval
-    /// Clock for the confirmation window. Injectable so tests advance
-    /// time instead of waiting on real seconds.
+    /// Wall clock for the pending-death log only. The confirmation
+    /// window itself measures `uptime`. Injectable so tests can move
+    /// the wall clock across a simulated sleep.
     private let now: () -> Date
-    /// First dead-probe sighting per window. Cleared when the probe
-    /// recovers or the record goes away.
-    private var deadSince: [WindowID: Date] = [:]
+    /// Monotonic awake clock for the confirmation window: seconds of
+    /// uptime that do NOT include machine sleep. A wall clock would let
+    /// a lid close add its sleeping hours to a pending death, so a
+    /// `deadSince` entry left before sleep would confirm on the first
+    /// post-wake tick and untile a live window. Uptime freezes across
+    /// the sleep, so the window still needs its full `deathConfirmation`
+    /// seconds with the machine awake. Injectable so tests advance it
+    /// instead of waiting on real seconds.
+    private let uptime: () -> TimeInterval
+    /// Uptime at the first dead-probe sighting per window. Cleared when
+    /// the probe recovers or the record goes away.
+    private var deadSince: [WindowID: TimeInterval] = [:]
     /// Last focused canvas (display plus Mission Control Space) observed
     /// through `gateway`. The first focus callback always reports; later
     /// moves within one canvas are filtered so an AX event per window
@@ -178,6 +188,7 @@ final class TilingController {
         screens: ScreenProvider? = nil,
         deathConfirmation: TimeInterval = 3.0,
         now: @escaping () -> Date = Date.init,
+        uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         observeMouseUp: (@escaping () -> Void) -> Void = { _ in }
     ) {
         self.gateway = gateway
@@ -185,6 +196,7 @@ final class TilingController {
         self.scheduleVerify = scheduleVerify
         self.deathConfirmation = deathConfirmation
         self.now = now
+        self.uptime = uptime
         self.screens = screens ?? { NSScreen.screens.enumerated().map { ScreenInfo(appKit: $0.element, index: $0.offset) } }
         // Windows closed while tiled otherwise linger as ghosts until the
         // next hotkey; release their slots within seconds instead.
@@ -651,11 +663,14 @@ final class TilingController {
             }
         }
         let timestamp = now()
+        let awake = uptime()
         for entry in dead {
-            let first = deadSince[entry.id] ?? timestamp
-            guard timestamp.timeIntervalSince(first) >= deathConfirmation else {
+            let first = deadSince[entry.id] ?? awake
+            guard awake - first >= deathConfirmation else {
                 deadSince[entry.id] = first
-                dbg("prune win\(entry.id): dead handle, awaiting confirmation")
+                dbg(
+                    "prune win\(entry.id): dead handle sighted at \(timestamp), "
+                        + "awaiting confirmation")
                 continue
             }
             deadSince[entry.id] = nil

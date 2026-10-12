@@ -22,6 +22,10 @@ final class LidSleepWakeTests: XCTestCase {
     private var dragEndFires: [() -> Void] = []
     /// Captured convergence-check fires.
     private var verifyFires: [() -> Void] = []
+    /// Injectable wall clock, advanced across a simulated sleep.
+    private var wall: Date = Date(timeIntervalSince1970: 0)
+    /// Injectable monotonic awake clock: frozen while the machine sleeps.
+    private var awake: TimeInterval = 1000
 
     override func setUp() {
         super.setUp()
@@ -29,6 +33,8 @@ final class LidSleepWakeTests: XCTestCase {
         currentScreens = [Self.builtIn]
         dragEndFires = []
         verifyFires = []
+        wall = Date(timeIntervalSince1970: 0)
+        awake = 1000
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             scheduleDragEnd: { [self] fire in
@@ -148,5 +154,86 @@ final class LidSleepWakeTests: XCTestCase {
         XCTAssertEqual(
             controller.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft), 1,
             "the window keeps its slot across a clamshell lid cycle")
+    }
+
+    // MARK: Loop 4: a pending death must not ride out a sleep
+
+    func testPendingDeathDoesNotConfirmAcrossASleep() {
+        // The confirmation window measures the window's absence, not wall
+        // time: eight sleeping hours are not eight seconds of observation.
+        // A wall clock lets the pending death left before the lid closed
+        // confirm on the first post-wake tick, untiling a live window.
+        let timed = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            scheduleDragEnd: { [self] fire in
+                dragEndFires.append(fire)
+                return {}
+            },
+            scheduleVerify: { [self] fire in
+                verifyFires.append(fire)
+                return {}
+            },
+            screens: { [self] in currentScreens },
+            deathConfirmation: 3,
+            now: { [self] in wall },
+            uptime: { [self] in awake })
+        let a = addFocusedWindow()
+        timed.handle(slot: .topLeft)
+        gateway.probeDead.insert(a)
+
+        // First sighting while awake: a maybe, never a release.
+        timed.pruneDeadWindows()
+        XCTAssertEqual(timed.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft), 1)
+
+        // The lid closes: eight wall-clock hours pass while the machine
+        // sleeps, so the monotonic uptime clock does not move. The first
+        // post-wake tick must not read them as dead time.
+        wall = wall.addingTimeInterval(8 * 60 * 60)
+        timed.pruneDeadWindows()
+        XCTAssertEqual(
+            timed.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft), 1,
+            "sleeping hours must not count toward death confirmation")
+
+        // The machine is awake for the full confirmation interval: now
+        // the sustained dead reading confirms and releases the slot.
+        awake += 3
+        wall = wall.addingTimeInterval(3)
+        timed.pruneDeadWindows()
+        XCTAssertNil(
+            timed.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft),
+            "a window still dead after a full awake interval is pruned")
+    }
+
+    func testConfirmedDeathStillPrunesWhileAwake() {
+        // The mirror of the sleep case: with the machine staying awake, a
+        // window that keeps reading dead confirms after its interval. The
+        // sleep-proof clock must not disable ordinary death detection.
+        let timed = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            scheduleDragEnd: { [self] fire in
+                dragEndFires.append(fire)
+                return {}
+            },
+            scheduleVerify: { [self] fire in
+                verifyFires.append(fire)
+                return {}
+            },
+            screens: { [self] in currentScreens },
+            deathConfirmation: 3,
+            uptime: { [self] in awake })
+        let a = addFocusedWindow()
+        timed.handle(slot: .topLeft)
+        gateway.probeDead.insert(a)
+
+        timed.pruneDeadWindows()
+        XCTAssertEqual(
+            timed.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft), 1,
+            "the first sighting only marks")
+
+        awake += 3
+        timed.pruneDeadWindows()
+        XCTAssertNil(
+            timed.canvas(for: Self.builtIn.id).state.occupant(of: .topLeft),
+            "death confirmed after a full awake interval releases the slot")
     }
 }
