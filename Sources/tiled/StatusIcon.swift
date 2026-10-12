@@ -24,6 +24,11 @@ enum StatusIcon {
         /// lit cells, so a half or a third would overstate the spoken
         /// occupancy; the VoiceOver line needs the window count.
         var occupiedSlots: Int
+        /// Display the glyph depicts, when naming it distinguishes the
+        /// depiction (more than one display attached). Nil on a single
+        /// display, where the monitor is unambiguous and the spoken line
+        /// stays as it was.
+        var displayName: String?
     }
 
     /// The icon cells for a layout, in drawing order (left to right, top
@@ -53,22 +58,35 @@ enum StatusIcon {
     }
 
     /// One immutable pass over the state the icon reads: geometry plus
-    /// fill, so the delegate diffs a single value.
+    /// fill, so the delegate diffs a single value. `displayName` travels
+    /// with the snapshot so the spoken line names the monitor the glyph
+    /// depicts; it is part of equality, so a focus move to another display
+    /// redraws the icon's accessible description even when the occupancy
+    /// map is identical.
     static func snapshot(
-        layout: LayoutKind, occupants: [Slot: WindowID]
+        layout: LayoutKind, occupants: [Slot: WindowID],
+        displayName: String? = nil
     ) -> Snapshot {
         Snapshot(
             layout: layout,
             filled: filledCells(layout: layout, occupants: occupants),
-            occupiedSlots: Set(occupants.values).count)
+            occupiedSlots: Set(occupants.values).count,
+            displayName: displayName)
     }
 
     /// VoiceOver line for the occupancy map: layout plus how many windows
     /// are tiled. Pure so the count is testable, and window-based so a
-    /// half reports "1 of 4 slots occupied", not "2 of 4".
+    /// half reports "1 of 4 slots occupied", not "2 of 4". When the
+    /// snapshot names a display (more than one attached), the line ends
+    /// by naming it, matching the menu headers so a VoiceOver user can
+    /// tell which monitor the glyph describes.
     static func accessibilityDescription(_ snapshot: Snapshot) -> String {
         let total = cells(for: snapshot.layout).count
-        return "Tiled \(snapshot.layout.title) layout, "
+        let line = "Tiled \(snapshot.layout.title) layout, "
             + "\(snapshot.occupiedSlots) of \(total) slots occupied"
+        guard let displayName = snapshot.displayName, !displayName.isEmpty else {
+            return line
+        }
+        return line + ", on " + displayName
     }
 }

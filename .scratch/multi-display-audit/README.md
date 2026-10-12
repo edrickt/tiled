@@ -27,10 +27,10 @@ that merges, re-check family 3 (the write policy) against the `WriteExpectations
 | 06 | A deferred request is retained | 05 | M10, M12 | ready-for-agent |
 | 07 | Unknown Space is not an app refusal | 05 | M3 | ready-for-agent |
 | 08 | The restore goes through the write policy | – | M4 | ready-for-agent |
-| 09 | Visibility requires an attached display | – | M7 | ready-for-agent |
+| 09 | Visibility requires an attached display | – | M7 | DONE (`4101d37`) |
 | 10 | An absent display keeps its frame | 09 | M8, L5 | ready-for-agent |
 | 11 | Menu sections key on the display | – | M14, M16 | DONE (`5b8b1b3`) |
-| 12 | One canvas key per icon pass | – | L12 | ready-for-agent |
+| 12 | One canvas key per icon pass | – | L12 | DONE (`1b2b6a0`) |
 
 Edges 01→02 and 03→04 are **collision serialisation** (each pair shares files), not semantic
 dependencies; 05→06 and 05→07 are semantic (ticket 05 decides the contract the other two encode),

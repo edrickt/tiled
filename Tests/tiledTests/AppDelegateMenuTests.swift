@@ -186,6 +186,30 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(presentation.tiledWindows.map(\.screen), [display, display])
     }
 
+    // MARK: Icon pass (iconSnapshot)
+
+    func testIconPassResolvesTheFocusedCanvasOnce() {
+        // The glyph must resolve one canvas key per pass and derive both
+        // its occupancy map and its spoken display name from that single
+        // key: a second resolution could land after a focus move and
+        // describe a different canvas than the glyph. Counting the key
+        // reads catches a regression that resolves it twice.
+        let key = TilingSpaceKey(
+            screen: ScreenID(rawValue: 1), space: SpaceID(rawValue: 7))
+        var keyReads = 0
+        var canvasKeys: [TilingSpaceKey] = []
+        var nameKeys: [TilingSpaceKey] = []
+        let snapshot = AppDelegate.iconSnapshot(
+            canvasKey: { keyReads += 1; return key },
+            canvas: { canvasKeys.append($0); return TilingSpace() },
+            displayName: { nameKeys.append($0); return "Built-in" })
+
+        XCTAssertEqual(keyReads, 1, "one canvas key resolution per icon pass")
+        XCTAssertEqual(canvasKeys, [key])
+        XCTAssertEqual(nameKeys, [key])
+        XCTAssertEqual(snapshot.displayName, "Built-in")
+    }
+
     // MARK: Refresh ordering (refreshPlan)
 
     func testIconChangeRedrawsWithoutRebuildingTheMenu() {
