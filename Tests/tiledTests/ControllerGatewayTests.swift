@@ -28,6 +28,9 @@ final class ControllerGatewayTests: XCTestCase {
     /// Injectable clock for the death-confirmation window (the transient
     /// tests advance it instead of waiting on real time).
     private var clock: Date = Date()
+    /// Injectable monotonic awake clock: what the confirmation window
+    /// actually measures (sleep excluded).
+    private var awake: TimeInterval = 0
 
     override func setUp() {
         super.setUp()
@@ -35,6 +38,8 @@ final class ControllerGatewayTests: XCTestCase {
         dragEndFires = []
         verifyFires = []
         verifyCancels = 0
+        clock = Date()
+        awake = 0
         // No runloop timer: tests drive pruneDeadWindows directly so a
         // live 5-second timer can't fire mid-test. Drag ends and
         // convergence checks fire via the captured schedulers instead
@@ -325,7 +330,8 @@ final class ControllerGatewayTests: XCTestCase {
         let transient = TilingController(
             gateway: gateway, pruneInterval: nil,
             scheduleDragEnd: { _ in {} }, scheduleVerify: { _ in {} },
-            now: { [self] in clock })
+            now: { [self] in clock },
+            uptime: { [self] in awake })
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         transient.handle(slot: .topLeft)
@@ -338,6 +344,7 @@ final class ControllerGatewayTests: XCTestCase {
 
         // Still dead but inside the window: still a maybe.
         clock = clock.addingTimeInterval(1)
+        awake += 1
         transient.pruneDeadWindows()
         XCTAssertEqual(
             localCanvas(transient).state.slot(of: 1), .topLeft,
@@ -357,7 +364,8 @@ final class ControllerGatewayTests: XCTestCase {
         let timed = TilingController(
             gateway: gateway, pruneInterval: nil,
             scheduleDragEnd: { _ in {} }, scheduleVerify: { _ in {} },
-            now: { [self] in clock })
+            now: { [self] in clock },
+            uptime: { [self] in awake })
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         timed.handle(slot: .topLeft)
@@ -367,6 +375,7 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(localCanvas(timed).state.slot(of: 1), .topLeft, "first sighting only marks")
 
         clock = clock.addingTimeInterval(4)
+        awake += 4
         timed.pruneDeadWindows()
         XCTAssertNil(
             localCanvas(timed).state.slot(of: 1),
