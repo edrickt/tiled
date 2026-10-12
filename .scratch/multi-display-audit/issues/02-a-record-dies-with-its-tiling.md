@@ -18,7 +18,7 @@ clear the handle table for every id a canvas forgets.
 
 **Findings:** report M6, L2 (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (6400622)
 
 - [ ] After a refused first placement, no record and no canvas ownership remain for the window.
 - [ ] Pressing Evict on an untiled window (`.nothingToEvict`) leaves no record behind.
