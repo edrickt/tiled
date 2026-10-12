@@ -60,16 +60,18 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(outcome.result, .refused(windowName: "TestApp"))
     }
 
-    func testTileOnAHiddenCanvasDefersTheWriteAndRollsBack() {
+    func testTileOnAHiddenCanvasDefersAndStands() {
         let id = harness.addWindow()
         harness.canvasVisible = false
 
         let outcome = harness.apply(slot: .topLeft, requester: id)
 
         XCTAssertTrue(harness.gateway.writes.isEmpty, "a hidden canvas is never written blind")
-        XCTAssertNil(space.state.slot(of: id), "the placement rolls back rather than diverge")
-        XCTAssertNotNil(space.error)
-        XCTAssertEqual(outcome.result, .refused(windowName: "TestApp"))
+        XCTAssertEqual(
+            space.state.slot(of: id), .topLeft,
+            "the deferred placement stands and reconciles when the canvas is visible")
+        XCTAssertNil(space.error, "a deferral is not an app refusal")
+        XCTAssertEqual(outcome.result, .deferred)
     }
 
     func testSameSlotRequestIsAStrictNoopThatPreservesTheNotice() {

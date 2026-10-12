@@ -150,6 +150,10 @@ final class TilingController {
         /// A ⌥⇧⏎ expand write was refused: same shape as `.refused` but
         /// the announcement must not say “tiled”.
         case expandRefused(windowName: String?)
+        /// A tiling write was deferred: its canvas is on a Space the user
+        /// cannot see, so the intent stands and reconciles on return.
+        /// Never an app refusal: the app did nothing wrong.
+        case deferred
         /// The ⌥⇧⌫ evict key was pressed on an untiled window: nothing
         /// holds a slot, so there is nothing to release. Answers instead
         /// of staying silent: the hotkey path never no-ops quietly.
@@ -363,6 +367,8 @@ final class TilingController {
             onFeedback?(.refused(windowName: windowName))
         case .expandRefused(let windowName):
             onFeedback?(.expandRefused(windowName: windowName))
+        case .deferred:
+            onFeedback?(.deferred)
         case .placed, .alreadyTiled, .nothingToEvict:
             break
         }

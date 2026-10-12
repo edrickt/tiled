@@ -12,14 +12,19 @@ struct FrameWriter {
         /// The live frame already matches the target: no write issued.
         case skippedNoOp
         /// The canvas is not the visible Space: no write issued, and the
-        /// canvas is marked stale for the swipe back.
+        /// canvas is marked stale for the swipe back. Not a failure: the
+        /// write's intent stands and reconciles when the canvas becomes
+        /// visible (see `stands`).
         case deferredOffSpace
         /// The gateway refused the write.
         case refused
 
-        /// The write is on screen, or already correct: callers count
-        /// both as a successful placement.
-        var isAccepted: Bool { self == .written || self == .skippedNoOp }
+        /// Whether the write's intent stands: it happened, was already
+        /// correct, or was deferred off-Space (and reconciles when the
+        /// canvas becomes visible). Only a gateway refusal is a failure.
+        /// The one reading every push path shares, so a deferral cannot
+        /// mean one thing to a placement and another to a reflow.
+        var stands: Bool { self != .refused }
     }
 
     /// What a silent ignore of this write means. Every write must
