@@ -16,12 +16,12 @@ Group and match by `ScreenID`, using `screenName` only for the header text.
 
 **Findings:** report M14, M16 (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (46aff9a)
 
-- [ ] Two displays sharing a name render as two sections, each with its own layout and count.
-- [ ] Two unlabeled displays no longer merge into one `"Display"` section.
-- [ ] A display with both an identified and a withheld canvas lists each window once, under that
+- [x] Two displays sharing a name render as two sections, each with its own layout and count.
+- [x] Two unlabeled displays no longer merge into one `"Display"` section.
+- [x] A display with both an identified and a withheld canvas lists each window once, under that
       display's section.
-- [ ] The header still shows the human-readable display name; the section key is the `ScreenID`.
-- [ ] Pinned by tests: duplicate-`screenName` case; two-canvas-per-display case.
-- [ ] Gates green: warning-free build, full suite, every mutant CAUGHT.
+- [x] The header still shows the human-readable display name; the section key is the `ScreenID`.
+- [x] Pinned by tests: duplicate-`screenName` case; two-canvas-per-display case.
+- [x] Gates green: warning-free build, full suite, every mutant CAUGHT.
