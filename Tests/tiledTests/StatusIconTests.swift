@@ -194,6 +194,24 @@ extension StatusIconTests {
             "Tiled Sixths layout, 2 of 6 slots occupied")
     }
 
+    func testAccessibilityDescriptionNamesTheDisplayOnlyWhenMultiMonitor() {
+        // The menu headers name the display; the glyph's spoken line must
+        // too, or a VoiceOver user cannot tell which monitor the icon
+        // depicts. With one display the name adds nothing and the line is
+        // unchanged.
+        let single = StatusIcon.snapshot(
+            layout: .quarters, occupants: [.topLeft: 1], displayName: nil)
+        XCTAssertEqual(
+            StatusIcon.accessibilityDescription(single),
+            "Tiled Quarters layout, 1 of 4 slots occupied")
+
+        let multi = StatusIcon.snapshot(
+            layout: .quarters, occupants: [.topLeft: 1], displayName: "Studio Display")
+        XCTAssertEqual(
+            StatusIcon.accessibilityDescription(multi),
+            "Tiled Quarters layout, 1 of 4 slots occupied, on Studio Display")
+    }
+
     func testUnroundedCellIsTheFullRect() {
         // No corners or zero radius: the path is the rect itself.
         let rect = NSRect(x: 2, y: 3, width: 10, height: 8)
