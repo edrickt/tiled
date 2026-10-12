@@ -18,7 +18,7 @@ write.
 
 **Findings:** report M8, L5 (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (90bed89)
 
 - [ ] Unplugging a display does not change its canvas's stored visible frame; the last-known frame
       survives until replug recomputes it.
