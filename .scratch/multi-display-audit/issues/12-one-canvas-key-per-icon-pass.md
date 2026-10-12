@@ -17,12 +17,12 @@ to the accessibility description when more than one display is attached.
 
 **Findings:** report L12 (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (1b2b6a0)
 
-- [ ] The icon snapshot resolves its canvas once per pass; a display change cannot make the menu
+- [x] The icon snapshot resolves its canvas once per pass; a display change cannot make the menu
       and icon disagree mid-pass.
-- [ ] With more than one display, the icon's accessibility description names the display it
+- [x] With more than one display, the icon's accessibility description names the display it
       depicts; with one display it is unchanged.
-- [ ] Pinned by tests: single key per pass (no second `actionSpaceKey` read), and the
+- [x] Pinned by tests: single key per pass (no second `actionSpaceKey` read), and the
       accessibility description in single- vs multi-display.
-- [ ] Gates green: warning-free build, full suite, every mutant CAUGHT.
+- [x] Gates green: warning-free build, full suite, every mutant CAUGHT.
