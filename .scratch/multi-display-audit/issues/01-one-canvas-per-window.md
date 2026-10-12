@@ -16,7 +16,7 @@ double-book). A record for a handle that is already live elsewhere must never be
 
 **Findings:** report M1 (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (f82d4e5)
 
 - [ ] After evict on canvas C → re-tile on canvas D → undo on C, the handle has exactly one live
       record, on exactly one canvas, and both canvases never write it in the same pass.
