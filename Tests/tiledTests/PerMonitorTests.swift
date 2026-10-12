@@ -419,6 +419,65 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertEqual(controller.canvas(for: leftID).state.occupant(of: .topLeft), 1)
     }
 
+    // MARK: A record dies with its tiling
+
+    /// A refused first placement releases the window: no slot and no
+    /// record survive, because the record IS the canvas ownership. A
+    /// stale record would pin the window's canvas, so a later tile after
+    /// the user drags it to the other display would land back on the
+    /// first display.
+    func testRefusedFirstPlacementReleasesOwnershipSoTheNextTileUsesTheNewDisplay() {
+        let handle = tileOnLeft()
+        gateway.refuseNextWrites(handle)
+        controller.handle(slot: .topLeft)
+
+        XCTAssertNil(
+            controller.canvas(for: leftID).state.occupant(of: .topLeft),
+            "a refused first placement commits no slot")
+        XCTAssertTrue(
+            controller.canvas(for: leftID).records.isEmpty,
+            "a refused first placement leaves no record behind")
+
+        // The user drags the window to the right display and tiles it there.
+        gateway.simulateChange(handle, to: CGRect(x: 2500, y: 200, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+
+        XCTAssertNil(
+            controller.canvas(for: leftID).state.occupant(of: .topLeft),
+            "the window does not tile back onto the refused display")
+        XCTAssertNotNil(
+            controller.canvas(for: rightID).state.occupant(of: .topLeft),
+            "the request lands on the display the window is now on")
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            GridLayout().rect(for: .topLeft, in: Self.right.visibleFrame),
+            "the write targets the new display's frame")
+    }
+
+    /// The same ownership rule covers a no-op evict: pressing Evict on an
+    /// untiled window must not leave a record pinning the display, or the
+    /// next tile after a drag to the other monitor lands on the first.
+    func testNoOpEvictReleasesOwnershipSoTheNextTileUsesTheNewDisplay() {
+        let handle = tileOnLeft()
+        controller.handleEvict() // nothing to evict: the window is untiled
+
+        XCTAssertTrue(
+            controller.canvas(for: leftID).records.isEmpty,
+            "a no-op evict leaves no record behind")
+
+        gateway.simulateChange(handle, to: CGRect(x: 2500, y: 200, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+
+        XCTAssertNil(
+            controller.canvas(for: leftID).state.occupant(of: .topLeft),
+            "the window does not tile back onto the old display")
+        XCTAssertNotNil(
+            controller.canvas(for: rightID).state.occupant(of: .topLeft),
+            "the request lands on the display the window is now on")
+    }
+
     /// A screen-scoped action on the unfocused monitor dissolves that
     /// monitor's canvas and leaves the focused one alone. The read is
     /// explicit per canvas: no derived surface reports the actor.

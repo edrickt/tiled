@@ -203,6 +203,27 @@ final class UndoIntegrityTests: XCTestCase {
             "the tiled requester returns to the slot it vacated")
     }
 
+    /// An undo restore that fails forgets the window on the canvas but
+    /// must also drop the coordinator's handle->id entry (and the
+    /// pending-death clock) for the forgotten id — not just the
+    /// requester's. A leftover entry is the leak the audit found.
+    func testFailedUndoRestoreClearsTheRegistryEntryForTheForgottenWindow() {
+        let w = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        let x = focusNewWindow(CGRect(x: 40, y: 40, width: 500, height: 400))
+        controller.handle(slot: .leftHalf) // evicts w; chapter on w
+        XCTAssertFalse(canvas.undoStack.isEmpty, "the eviction is undoable")
+
+        // Undo's re-tile of the evicted window is refused: the canvas
+        // forgets its fresh record, so the registry must let it go too.
+        gateway.refuseNextWrites(w)
+        controller.undoLastDisplacement()
+
+        XCTAssertNil(
+            controller.registeredID(for: w),
+            "the forgotten window leaves no handle->id entry behind")
+    }
+
     func testUntileAllDropsAChapterItCouldNotRebuild() {
         let a = focusNewWindow()
         controller.handle(slot: .topLeft)

@@ -667,6 +667,12 @@ final class TilingController {
         return id
     }
 
+    /// Test seam for the ownership invariant (audit M1/L2): the id the
+    /// handle table currently names for `handle`, if any. A forgotten
+    /// window must leave no entry behind; a live tiled window names its
+    /// canvas's id.
+    func registeredID(for handle: WindowHandle) -> WindowID? { windowIDs[handle] }
+
     /// Issues an id for `handle` on the canvas that is about to own it,
     /// enforcing one canvas per handle: a record the handle still wears on
     /// another canvas is released first, so the handle table never points
@@ -937,6 +943,12 @@ final class TilingController {
             for window in result.observe {
                 observe(window: window)
             }
+            // A restore the canvas refused left no record: clear the
+            // handle table (and death clock) for every id it forgot, not
+            // just the requester's.
+            for window in result.forget {
+                forgetBookkeeping(window)
+            }
             if result.notice != nil {
                 restored += group.count
             }
@@ -1183,15 +1195,19 @@ final class TilingController {
         }
         let id = windowID(for: handle)
         let key = spaceOf(window: id) ?? focusedSpaceKey()
-        let outcome = mutateSpace(key) { canvas in
-            canvas.attach(id, handle: handle)
-            return canvas.evict(window: id, context: placementContext(for: key))
+        // No pre-attach: a window with no slot is not tiled, and handing
+        // it a record only for the eviction to find no slot would leave
+        // stale ownership behind. The eviction forgets any record it
+        // finds, and this applies that release so the handle table goes
+        // with it.
+        let outcome = mutateSpace(key) {
+            $0.evict(window: id, context: placementContext(for: key))
         }
+        apply(outcome, on: key)
         if case .nothingToEvict = outcome.result {
             onFeedback?(.nothingToEvict)
             return
         }
-        apply(outcome, on: key)
         onChange?()
     }
 

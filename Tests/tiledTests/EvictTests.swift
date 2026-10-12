@@ -146,6 +146,18 @@ final class EvictTests: XCTestCase {
         XCTAssertTrue(canvas.state.occupants.isEmpty)
     }
 
+    func testEvictUntiledWindowLeavesNoRecord() {
+        // A no-op evict must not hand the window a record: a record is
+        // ownership, and a stale one would pin the window's canvas
+        // against a later tile (including one after a drag to the other
+        // display).
+        addFocusedWindow()
+        controller.handleEvict()
+        XCTAssertTrue(
+            canvas.records.isEmpty,
+            "pressing Evict on an untiled window leaves no record behind")
+    }
+
     func testEvictExpandedWindowRestoresPreTile() {
         let original = CGRect(x: 120, y: 90, width: 700, height: 500)
         let handle = addFocusedWindow(frame: original)

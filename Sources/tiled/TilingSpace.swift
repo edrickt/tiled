@@ -150,6 +150,11 @@ struct TilingSpace {
         var notice: String?
         var error: String?
         var observe: [WindowID] = []
+        /// Windows the undo released: a restore whose re-tile was refused
+        /// forgets the record, so the coordinator clears its handle table,
+        /// death clock, and pending verification for them, exactly as it
+        /// does for a placement's `forget`.
+        var forget: [WindowID] = []
     }
 
     // MARK: Records
@@ -262,6 +267,14 @@ struct TilingSpace {
         // request left free, so its record and observation survive.
         outcome.forget = decision.windowsToRestore(requester: id)
             .filter { $0 != commit.rehoused }
+        // A refused placement releases the requester's record (see
+        // `place`). Record presence is the ownership primitive, so the
+        // coordinator must clear its handle-table entry too: a later
+        // request then re-resolves the window from its live frame,
+        // landing on whichever display it is actually on.
+        if commit.refusal != nil, records[id] == nil {
+            outcome.forget.append(id)
+        }
         // Reflow: the cells the event freed (eviction remainders, the
         // requester's vacated tile) flow into the one survivor that
         // merges with them into a whole slot. Skipped when the placement
@@ -354,6 +367,10 @@ struct TilingSpace {
         var result = UndoOutcome()
         if let requester {
             _ = restore(window: requester, context: context)
+            // The requester's record is released whether its restore
+            // succeeded or was refused: report it so the coordinator drops
+            // the handle-table entry with the record.
+            result.forget.append(requester)
         }
         var restored = 0
         for entry in snapshot {
@@ -375,7 +392,6 @@ struct TilingSpace {
             record.preTileFrame = entry.preTileFrame
             records[id] = record
             state.commit(window: id, into: entry.slot)
-            result.observe.append(id)
             // The frame may already be correct (e.g. an untile-all chapter
             // whose windows still sit at their pre-tile frames, or a
             // settle frame the gateway applied late): skip the write and
@@ -389,12 +405,18 @@ struct TilingSpace {
             {
                 context.log("undo SKIP-WRITE win\(id) already placed")
                 restored += 1
+                result.observe.append(id)
             } else if applyLayout(for: id, context: context, on: entry.space).stands {
                 // A deferred off-Space write stands: the window keeps its
                 // slot and reconciles when the canvas becomes visible.
                 restored += 1
+                result.observe.append(id)
             } else {
+                // The re-tile was refused: the window is not tiled, so its
+                // record goes and the coordinator must clear the matching
+                // handle-table entry (not only the requester's).
                 forget(id, context: context)
+                result.forget.append(id)
             }
         }
         if restored > 0 {
@@ -429,8 +451,10 @@ struct TilingSpace {
         let placeResult = place(
             window: id, into: slot, context: context, observed: &commit.observed,
             deferred: &commit.deferred)
-        if records[id] == nil {
-            // `place` bailed (no record): nothing to snapshot.
+        if records[id] == nil, placeResult == nil {
+            // `place` bailed (no record): nothing to snapshot. A refused
+            // write also drops the record now, but carries its refusal in
+            // `placeResult`, so it falls through to be narrated below.
             Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
         } else if placeResult == nil, restoreFailures.isEmpty, !evicted.isEmpty {
             let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
@@ -747,10 +771,16 @@ struct TilingSpace {
         if result == .refused {
             // The window refused the frame (some apps ignore AX resizes):
             // roll back occupancy so state and screen agree, and say so.
-            state.remove(window: id)
-            context.tracker.forget(id)
+            // The record goes with the occupancy: a record exists only
+            // while the window is tiled, so a refused placement must not
+            // leave the window owned by this canvas. `settle` folds the
+            // release into `outcome.forget`, so the coordinator drops its
+            // handle-table entry too. Name the window before the record
+            // (the only source of its app name) goes.
+            let failed = refusal(for: id, context: context)
+            forget(id, context: context)
             context.log("place FAILED win\(id) -> \(slot.rawValue)")
-            return refusal(for: id, context: context)
+            return failed
         }
         // A deferred off-Space write is not a failure: the occupancy
         // stands and reconciles when the canvas becomes visible.
@@ -1013,7 +1043,12 @@ struct TilingSpace {
     /// window holds no slot. The coordinator answers `.nothingToEvict`.
     mutating func evict(window id: WindowID, context: Context) -> Outcome {
         guard state.slot(of: id) != nil else {
-            return Outcome(result: .nothingToEvict)
+            // No slot: not tiled, so any record the window still wears is
+            // stale ownership. Drop it: a record exists only while the
+            // window is tiled, and the coordinator clears its handle
+            // table through the outcome.
+            forget(id, context: context)
+            return Outcome(result: .nothingToEvict, forget: [id])
         }
         return untile(window: id, reflowing: true, context: context)
     }
