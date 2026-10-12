@@ -116,8 +116,8 @@
  [
   "TilingController.swift",
   "death needs 63s+ of dead probes to confirm",
-  "guard timestamp.timeIntervalSince(first) >= deathConfirmation else {",
-  "guard timestamp.timeIntervalSince(first) >= deathConfirmation + 60 else {"
+  "guard awake - first >= deathConfirmation else {",
+  "guard awake - first >= deathConfirmation + 60 else {"
  ],
  [
   "TilingSpace.swift",
@@ -194,8 +194,14 @@
  [
   "TilingController.swift",
   "hidden canvas treated as visible (reflow writes off-Space windows)",
-  "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen, let id = space.space else { return true }\n        return activeSpaceID(on: screen) == id\n    }",
+  "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen else { return true }\n        guard screens().contains(where: { $0.id == screen }) else { return false }\n        guard let id = space.space else { return true }\n        return activeSpaceID(on: screen) == id\n    }",
   "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        true\n    }"
+ ],
+ [
+  "TilingController.swift",
+  "unplugged canvas treated as attached (removed display written)",
+  "        guard screens().contains(where: { $0.id == screen }) else { return false }",
+  "        guard screens().contains(where: { $0.id == screen }) else { return true }"
  ],
  [
   "DisplaySpace.swift",
@@ -412,5 +418,23 @@
   "resize reassert downgraded to a grid reassert (clamp not reconciled)",
   "            reassert(id, source: .resize(dragged: id, achieved: achieved))",
   "            reassert(id, source: .grid)"
+ ],
+ [
+  "StatusIcon.swift",
+  "spoken status line drops the display name (VoiceOver cannot tell the monitor)",
+  "        return line + \", on \" + displayName",
+  "        return line"
+ ],
+ [
+  "TilingController.swift",
+  "spoken display name kept on a single display (glyph names a non-choice)",
+  "        guard infos.count > 1 else { return nil }",
+  "        guard infos.count > 0 else { return nil }"
+ ],
+ [
+  "AppDelegate.swift",
+  "icon pass re-resolves the canvas key (glyph can mix two canvases)",
+  "        let key = canvasKey()\n        let focused = canvas(key)",
+  "        let key = canvasKey()\n        let focused = canvas(canvasKey())"
  ]
 ]

@@ -134,6 +134,23 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertEqual(reports, 3)
     }
 
+    func testDisplayNameNamesTheDisplayOnlyWhenMoreThanOneIsAttached() {
+        // Two displays: the glyph's spoken line names the monitor it
+        // depicts, matching the menu headers. One display: the name
+        // would distinguish nothing, so the line stays unnamed.
+        XCTAssertEqual(
+            controller.displayName(for: TilingSpaceKey(screen: leftID, space: nil)),
+            "Display 1")
+        XCTAssertEqual(
+            controller.displayName(for: TilingSpaceKey(screen: rightID, space: nil)),
+            "Display 2")
+
+        let single = TilingController(
+            gateway: FakeWindowGateway(), pruneInterval: nil,
+            screens: { [Self.left] }, deathConfirmation: 0)
+        XCTAssertNil(single.displayName(for: TilingSpaceKey(screen: leftID, space: nil)))
+    }
+
     func testCrossLayoutRequestOnlySwitchesItsOwnMonitor() {
         tileOnLeft()
         controller.handle(slot: .topLeft)

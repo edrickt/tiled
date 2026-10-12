@@ -164,4 +164,75 @@ final class DisplayIdentityTests: XCTestCase {
             "replug reasserts the kept canvas against the display's bounds")
         XCTAssertEqual(controller.canvas(for: Self.left.id).state.occupant(of: .topLeft), leftHandle.id)
     }
+
+    /// A canvas established with the OS withholding the Space id keys
+    /// `(screen, nil)`. Once its display is unplugged that canvas is
+    /// invisible: a hotkey must defer rather than lay the window out
+    /// against the main display's frame, and replug must reassert it.
+    func testHotkeyOnAWithheldCanvasOfAnUnpluggedDisplayDefersThenReassertsOnReplug() {
+        var current = [Self.left, Self.right]
+        let gateway = FakeWindowGateway()
+        // No Space ids are named, so each display's canvas is its
+        // per-display fallback: (screen, nil).
+        let controller = makeController(gateway: gateway, screens: { current })
+        let withheld = TilingSpaceKey(screen: Self.right.id, space: nil)
+
+        let rightHandle = addWindow(
+            CGRect(x: 2000, y: 100, width: 800, height: 600), to: gateway)
+        controller.handle(slot: .topLeft)
+        let tiledFrame = gateway.frame(of: rightHandle)!
+        XCTAssertEqual(
+            controller.canvas(for: withheld).state.occupant(of: .topLeft), rightHandle.id,
+            "the window tiled onto the display's withheld canvas")
+
+        // The right display goes away; its kept canvas must never be
+        // written in the dark.
+        current = [Self.left]
+        screenChange()
+
+        // A hotkey still resolves the window's own (now unplugged)
+        // canvas, and that canvas is not visible.
+        gateway.focused = rightHandle
+        var feedbacks: [TilingController.Feedback] = []
+        controller.onFeedback = { feedbacks.append($0) }
+        controller.handle(slot: .topRight)
+
+        XCTAssertEqual(
+            gateway.frame(of: rightHandle), tiledFrame,
+            "an unplugged display's withheld canvas is not written")
+        guard case .deferred = feedbacks.first else {
+            return XCTFail("expected .deferred, got \(feedbacks)")
+        }
+        XCTAssertEqual(
+            controller.canvas(for: withheld).state.slot(of: rightHandle.id), .topRight,
+            "the deferred placement stands on the kept canvas")
+
+        // Replug: the kept canvas reasserts against the restored display.
+        current = [Self.left, Self.right]
+        screenChange()
+        XCTAssertEqual(
+            gateway.frame(of: rightHandle),
+            GridLayout().rect(for: .topRight, in: Self.right.visibleFrame),
+            "replug reasserts the kept canvas against the restored display")
+    }
+
+    /// With no displays at all the canvas is genuinely display-less
+    /// (`TilingSpaceKey.displayless`): there is no hidden canvas to
+    /// protect, so it stays visible and still writes.
+    func testDisplaylessCanvasStaysVisible() {
+        let gateway = FakeWindowGateway()
+        let controller = makeController(gateway: gateway, screens: { [] })
+
+        let handle = addWindow(
+            CGRect(x: 100, y: 100, width: 800, height: 600), to: gateway)
+        let original = gateway.frame(of: handle)!
+        controller.handle(slot: .topLeft)
+
+        XCTAssertEqual(
+            controller.canvas(for: .displayless).state.occupant(of: .topLeft), handle.id,
+            "the window tiles onto the display-less canvas")
+        XCTAssertNotEqual(
+            gateway.frame(of: handle), original,
+            "the display-less canvas is visible and still writes")
+    }
 }

@@ -21,16 +21,16 @@ that merges, re-check family 3 (the write policy) against the `WriteExpectations
 |---|--------|-----------|----------|--------|
 | 01 | One canvas per window | – | M1 | ready-for-agent |
 | 02 | A record dies with its tiling | 01 | M6, L2 | ready-for-agent |
-| 03 | Death confirmation excludes sleep | – | M2 (clock) | ready-for-agent |
+| 03 | Death confirmation excludes sleep | – | M2 (clock) | DONE (`7e4da22`) |
 | 04 | A moved listed frame is alive | 03 | M2 (frame) | ready-for-agent |
 | 05 | One deferred-off-Space contract | – | M9 | DONE (`afa6e98`) |
 | 06 | A deferred request is retained | 05 | M10, M12 | ready-for-agent |
 | 07 | Unknown Space is not an app refusal | 05 | M3 | ready-for-agent |
 | 08 | The restore goes through the write policy | – | M4 | ready-for-agent |
-| 09 | Visibility requires an attached display | – | M7 | ready-for-agent |
+| 09 | Visibility requires an attached display | – | M7 | DONE (`4101d37`) |
 | 10 | An absent display keeps its frame | 09 | M8, L5 | ready-for-agent |
 | 11 | Menu sections key on the display | – | M14, M16 | DONE (`5b8b1b3`) |
-| 12 | One canvas key per icon pass | – | L12 | ready-for-agent |
+| 12 | One canvas key per icon pass | – | L12 | DONE (`1b2b6a0`) |
 
 Edges 01→02 and 03→04 are **collision serialisation** (each pair shares files), not semantic
 dependencies; 05→06 and 05→07 are semantic (ticket 05 decides the contract the other two encode),
