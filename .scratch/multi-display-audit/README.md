@@ -23,7 +23,7 @@ that merges, re-check family 3 (the write policy) against the `WriteExpectations
 | 02 | A record dies with its tiling | 01 | M6, L2 | ready-for-agent |
 | 03 | Death confirmation excludes sleep | – | M2 (clock) | ready-for-agent |
 | 04 | A moved listed frame is alive | 03 | M2 (frame) | ready-for-agent |
-| 05 | One deferred-off-Space contract | – | M9 | needs-decision |
+| 05 | One deferred-off-Space contract | – | M9 | DONE (`afa6e98`) |
 | 06 | A deferred request is retained | 05 | M10, M12 | ready-for-agent |
 | 07 | Unknown Space is not an app refusal | 05 | M3 | ready-for-agent |
 | 08 | The restore goes through the write policy | – | M4 | ready-for-agent |
