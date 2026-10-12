@@ -67,11 +67,12 @@ final class LiveWindowGateway: WindowGateway {
     private var focusedCache: (handle: WindowHandle?, stamp: Date)?
     private static let focusedCacheLifetime: TimeInterval = 0.05
     /// Last successfully-read frame per handle: the geometry a death
-    /// confirmation matches against. Window element identity is useless
-    /// for that check — after a display teardown a held element stops
-    /// comparing equal (CFEqual) to the app's fresh reference for the
-    /// same window (observed on live AX: `listed=no` while the app
-    /// listed every window) — but the window's frame is stable.
+    /// confirmation matches against, refreshed by every frame read and by
+    /// a successful liveness probe. Geometry alone is not enough: after a
+    /// display teardown a held element stops comparing equal (CFEqual) to
+    /// the app's fresh reference for the same window (observed on live AX:
+    /// `listed=no` while the app listed every window), so the frame is the
+    /// fallback the app-list match leans on.
     private var lastFrames: [WindowHandle: CGRect] = [:]
     /// Observer per pid; registrations outlive untiled records and can
     /// never be unregistered, so they are created once and shared.
@@ -214,52 +215,61 @@ final class LiveWindowGateway: WindowGateway {
         var value: CFTypeRef?
         let probeError = AXUIElementCopyAttributeValue(
             element, kAXPositionAttribute as CFString, &value)
-        guard probeError != .success else { return .alive }
-        // The probe failed — but a failure can be a transient. Across a
-        // lid close/open, window-level probes fail (.invalidUIElement on
-        // held refs, .attributeUnsupported on fresh refs) for LIVE
-        // windows; the app element keeps answering and still lists them.
-        // Death is therefore confirmed against the app's own window
-        // list, never from the window probe alone. Which is also why the
-        // owning process gets a vote: a process that no longer exists
-        // owns no live windows, and its AX answers (.cannotComplete) are
-        // not a maybe.
+        // The frame read alongside a successful probe is the death match's
+        // one chance to catch up with a window nothing else re-reads (move
+        // notifications can fail to register, and a user drag or a sleep
+        // rescale then moves it): the baseline must not keep the frame the
+        // window left behind.
+        let probedFrame = probeError == .success ? Self.frame(of: element) : nil
         let processAlive = Self.processExists(pid)
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
-        var listRef: CFTypeRef?
-        let listError = AXUIElementCopyAttributeValue(
-            app, kAXWindowsAttribute as CFString, &listRef)
-        let list = listRef as? [AXUIElement] ?? []
-        // Geometry membership, not element identity: a listed window
-        // whose frame matches the last read frame means the window is
-        // alive. During the teardown listed windows' frame reads fail
-        // too, so membership stays undeterminable — a maybe, never a
-        // death. Absence is only confirmed when the app answers and at
-        // least one listed frame reads and none matches.
-        var match: Bool?
-        if let cached = lastFrames[handle] {
-            let readFrames = list.compactMap { Self.frame(of: $0) }
-            if readFrames.contains(where: { Self.framesClose($0, cached) }) {
-                match = true
-            } else if list.isEmpty || readFrames.count == list.count {
-                // Every listed frame read and none matched (or the app
-                // lists nothing at all): the window is really gone.
-                match = false
-            }
-            // Some listed frames unreadable: undeterminable — a maybe.
+        var appAnswer = Self.AppWindowAnswer(
+            appWindowsError: .success, listedFrames: [], processAlive: processAlive,
+            identityListed: false, identityFrame: nil)
+        if probeError != .success {
+            // The probe failed — but a failure can be a transient. Across a
+            // lid close/open, window-level probes fail (.invalidUIElement on
+            // held refs, .attributeUnsupported on fresh refs) for LIVE
+            // windows; the app element keeps answering and still lists them.
+            // Death is therefore confirmed against the app's own window
+            // list, never from the window probe alone. Which is also why the
+            // owning process gets a vote: a process that no longer exists
+            // owns no live windows, and its AX answers (.cannotComplete) are
+            // not a maybe.
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, Self.messagingTimeout)
+            var listRef: CFTypeRef?
+            let listError = AXUIElementCopyAttributeValue(
+                app, kAXWindowsAttribute as CFString, &listRef)
+            let list = listRef as? [AXUIElement] ?? []
+            // The app's fresh list naming our own element is the primary
+            // membership signal: a frame that moved or rescaled during
+            // sleep is still the window the app lists, not absence.
+            // Geometry stays the fallback, because after a display
+            // teardown a held element stops comparing equal.
+            let mine = list.first { CFEqual($0, element) }
+            // Frames only matter where the failed handle has a baseline to
+            // compare them against; the count of listed windows still
+            // decides absence.
+            let listedFrames: [CGRect?] =
+                lastFrames[handle] != nil ? list.map { Self.frame(of: $0) } : []
+            appAnswer = Self.AppWindowAnswer(
+                appWindowsError: listError, listedFrames: listedFrames,
+                processAlive: processAlive, identityListed: mine != nil,
+                identityFrame: mine.flatMap { Self.frame(of: $0) })
         }
-        let verdict = Self.liveness(
-            probeError: probeError, appWindowsError: listError, appWindowMatch: match,
-            processAlive: processAlive)
+        let pass = Self.livenessPass(
+            probe: Self.LivenessProbe(error: probeError, frame: probedFrame),
+            baseline: lastFrames[handle], appAnswer: appAnswer)
+        if let refreshed = pass.baseline {
+            lastFrames[handle] = refreshed
+        }
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog(
-                "Tiled: [DEBUG-lv] win handle %ld probe=%d appList err=%d count=%ld match=%@ processAlive=%d → %@",
-                handle.id, probeError.rawValue, listError.rawValue,
-                list.count,
-                match.map { $0 ? "yes" : "no" } ?? "unknown",
+                "Tiled: [DEBUG-lv] win handle %ld probe=%d appList err=%d count=%ld identity=%d processAlive=%d → %@",
+                handle.id, probeError.rawValue, appAnswer.appWindowsError.rawValue,
+                appAnswer.listedFrames.count, appAnswer.identityListed ? 1 : 0,
                 processAlive ? 1 : 0,
-                verdict == .alive ? "alive" : verdict == .dead ? "dead" : "unknown")
+                pass.verdict == .alive ? "alive" : pass.verdict == .dead ? "dead" : "unknown")
         }
         // A dead verdict is not a retirement. The controller confirms it
         // across `deathConfirmation`, precisely so a transient (a lid
@@ -269,7 +279,93 @@ final class LiveWindowGateway: WindowGateway {
         // confirmation window to a single tick. The element stays until
         // the controller confirms and forgets the window, which is when
         // `release` runs and the slot actually frees.
-        return verdict
+        return pass.verdict
+    }
+
+    /// Raw answers for one window's liveness observation, gathered by the
+    /// adapter and judged purely by `livenessPass` so the death standard
+    /// and the frame-baseline refresh are testable without AX.
+    struct LivenessProbe {
+        /// The per-window position-probe error.
+        var error: AXError
+        /// The frame read when the probe answered; nil when the probe
+        /// failed or the frame would not read.
+        var frame: CGRect?
+    }
+
+    /// What one owning app answered about its windows.
+    struct AppWindowAnswer {
+        /// The app element's window-list read.
+        var appWindowsError: AXError
+        /// One entry per listed window, in order: its frame, or nil when
+        /// that frame would not read (membership stays undeterminable).
+        var listedFrames: [CGRect?]
+        /// Whether the owning process still exists.
+        var processAlive: Bool
+        /// Whether the app's fresh list contains the probed window's own
+        /// element: the app still names this exact window, wherever its
+        /// frame moved. Death confirmation is geometric, so this is an
+        /// additional membership signal, never a replacement.
+        var identityListed: Bool
+        /// The probed window's frame as the app's list reports it, when
+        /// the list contains it and its frame reads. Refreshes the
+        /// baseline after a move.
+        var identityFrame: CGRect?
+    }
+
+    /// One window's liveness pass assembled from its raw answers. A
+    /// successful probe is alive and refreshes the frame baseline; a
+    /// failed probe is judged against its app's answer. Returns the
+    /// verdict and the baseline to cache. Pure, so the assembly and the
+    /// baseline rules are testable without AX.
+    static func livenessPass(
+        probe: LivenessProbe, baseline: CGRect?, appAnswer: AppWindowAnswer
+    ) -> (verdict: Liveness, baseline: CGRect?) {
+        if probe.error == .success {
+            // A successful probe refreshes the baseline: it is the only
+            // chance to track a window nothing reads, and a frame that
+            // will not read keeps the old baseline — a maybe, never a
+            // reset to nothing.
+            return (.alive, probe.frame ?? baseline)
+        }
+        let match = appWindowMatch(
+            baseline: baseline, listedFrames: appAnswer.listedFrames,
+            identityListed: appAnswer.identityListed)
+        let verdict = Self.liveness(
+            probeError: probe.error, appWindowsError: appAnswer.appWindowsError,
+            appWindowMatch: match, processAlive: appAnswer.processAlive)
+        // The app still lists the window: refresh the baseline to where
+        // the app reports it, so the next comparison does not judge
+        // against the frame the window left.
+        return (verdict, appAnswer.identityFrame ?? baseline)
+    }
+
+    /// Whether the app's window list contains the probed window, from its
+    /// last-read baseline and the app's listed frames. A listed window is
+    /// membership even at a moved or rescaled frame: `identityListed`
+    /// (the app's fresh list naming the window's own element) matches
+    /// outright. Otherwise geometry decides: a listed frame close to the
+    /// baseline is a match; the app answering with a complete list and no
+    /// match means absent; an unreadable listed frame, or no baseline
+    /// read yet, is a maybe. Never identity alone for absence — after a
+    /// display teardown a held element stops comparing equal, so a false
+    /// negative there falls through to geometry, not death.
+    static func appWindowMatch(
+        baseline: CGRect?, listedFrames: [CGRect?], identityListed: Bool
+    ) -> Bool? {
+        if identityListed { return true }
+        guard let baseline else { return nil }
+        let readFrames = listedFrames.compactMap { $0 }
+        if readFrames.contains(where: { Self.framesClose($0, baseline) }) {
+            return true
+        }
+        if listedFrames.isEmpty || readFrames.count == listedFrames.count {
+            // Every listed frame read and none matched (or the app lists
+            // nothing at all): the window is really gone.
+            return false
+        }
+        // Some listed frames unreadable: undeterminable — a maybe.
+        return nil
     }
 
     /// Drops a pid's shared observer once nothing is left to observe:

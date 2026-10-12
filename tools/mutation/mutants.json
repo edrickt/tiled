@@ -412,5 +412,29 @@
   "resize reassert downgraded to a grid reassert (clamp not reconciled)",
   "            reassert(id, source: .resize(dragged: id, achieved: achieved))",
   "            reassert(id, source: .grid)"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a listed window at a moved frame confirmed dead (identity membership ignored)",
+  "        if identityListed { return true }",
+  "        if false { return true }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "successful probe leaves the death-match baseline stale",
+  "            return (.alive, probe.frame ?? baseline)",
+  "            return (.alive, baseline)"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a listed moved window leaves the baseline on the frame it left",
+  "        return (verdict, appAnswer.identityFrame ?? baseline)",
+  "        return (verdict, baseline)"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "an absent listed window never confirms death",
+  "        if listedFrames.isEmpty || readFrames.count == listedFrames.count {",
+  "        if false {"
  ]
 ]

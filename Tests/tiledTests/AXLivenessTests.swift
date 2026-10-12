@@ -130,4 +130,109 @@ final class AXLivenessTests: XCTestCase {
         XCTAssertTrue(
             LiveWindowGateway.processExists(1), "launchd exists but is not signallable: EPERM is not death")
     }
+
+    // MARK: A moved listed frame is membership
+
+    /// The window the app still lists has moved or rescaled (lid sleep,
+    /// display-mode change) while its own probe transiently fails. Its
+    /// frame no longer matches the baseline, but the app naming the window
+    /// is membership, not death: the verdict is not `.dead`. (A failed
+    /// probe is never asserted `.alive`; membership only lifts it out of
+    /// death.) The stale baseline is refreshed to where the app now
+    /// reports the window.
+    func testListedWindowAtAMovedFrameIsNotDead() {
+        let baseline = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let moved = CGRect(x: 40, y: 60, width: 700, height: 500)
+        let pass = LiveWindowGateway.livenessPass(
+            probe: LiveWindowGateway.LivenessProbe(error: .invalidUIElement, frame: nil),
+            baseline: baseline,
+            appAnswer: LiveWindowGateway.AppWindowAnswer(
+                appWindowsError: .success, listedFrames: [moved], processAlive: true,
+                identityListed: true, identityFrame: moved))
+        XCTAssertEqual(
+            pass.verdict, .unknown,
+            "the app still lists the window: a moved frame is membership, not death")
+        XCTAssertEqual(
+            pass.baseline, moved,
+            "the successful listing refreshes the baseline to the window's new frame")
+    }
+
+    /// A successful probe is the baseline's one chance to catch up with a
+    /// window nothing else re-reads (unregistered move notifications): the
+    /// verdict is alive and the cached baseline becomes the probed frame.
+    /// A frame that will not read keeps the old baseline — a maybe, never
+    /// a reset to nothing.
+    func testSuccessfulProbeRefreshesTheFrameBaseline() {
+        let stale = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let moved = CGRect(x: 300, y: 200, width: 400, height: 300)
+        let appAnswer = LiveWindowGateway.AppWindowAnswer(
+            appWindowsError: .cannotComplete, listedFrames: [], processAlive: true,
+            identityListed: false, identityFrame: nil)
+        let pass = LiveWindowGateway.livenessPass(
+            probe: LiveWindowGateway.LivenessProbe(error: .success, frame: moved),
+            baseline: stale, appAnswer: appAnswer)
+        XCTAssertEqual(pass.verdict, .alive)
+        XCTAssertEqual(
+            pass.baseline, moved,
+            "a successful probe refreshes the baseline to where the window is now")
+
+        let unreadable = LiveWindowGateway.livenessPass(
+            probe: LiveWindowGateway.LivenessProbe(error: .success, frame: nil),
+            baseline: stale, appAnswer: appAnswer)
+        XCTAssertEqual(
+            unreadable.baseline, stale,
+            "an unreadable probe frame leaves the baseline alone")
+    }
+
+    /// The point of the refresh: the next failed probe compares against the
+    /// frame the window is at now, not the one it left — so the geometry
+    /// fallback matches even when element identity does not.
+    func testRefreshedBaselineFeedsTheNextComparison() {
+        let start = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let moved = CGRect(x: 300, y: 200, width: 400, height: 300)
+        let first = LiveWindowGateway.livenessPass(
+            probe: LiveWindowGateway.LivenessProbe(error: .success, frame: moved),
+            baseline: start,
+            appAnswer: LiveWindowGateway.AppWindowAnswer(
+                appWindowsError: .cannotComplete, listedFrames: [], processAlive: true,
+                identityListed: false, identityFrame: nil))
+        XCTAssertEqual(first.baseline, moved, "the successful probe refreshes the baseline")
+
+        let second = LiveWindowGateway.livenessPass(
+            probe: LiveWindowGateway.LivenessProbe(error: .invalidUIElement, frame: nil),
+            baseline: first.baseline,
+            appAnswer: LiveWindowGateway.AppWindowAnswer(
+                appWindowsError: .success, listedFrames: [moved], processAlive: true,
+                identityListed: false, identityFrame: nil))
+        XCTAssertEqual(
+            second.verdict, .unknown,
+            "the listed frame matches the refreshed baseline: a maybe, never death")
+    }
+
+    /// Genuine death is unaffected: the app answered with a complete list
+    /// and the window is not on it. Neither an empty list nor a list whose
+    /// frames all read and miss the baseline is membership.
+    func testAbsentWindowIsDead() {
+        let baseline = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let elsewhere = CGRect(x: 900, y: 900, width: 400, height: 300)
+        let absentFromOthers = LiveWindowGateway.livenessPass(
+            probe: LiveWindowGateway.LivenessProbe(error: .invalidUIElement, frame: nil),
+            baseline: baseline,
+            appAnswer: LiveWindowGateway.AppWindowAnswer(
+                appWindowsError: .success, listedFrames: [elsewhere], processAlive: true,
+                identityListed: false, identityFrame: nil))
+        XCTAssertEqual(
+            absentFromOthers.verdict, .dead,
+            "the app answered, every listed frame read, and none is the window")
+
+        let absentFromEmpty = LiveWindowGateway.livenessPass(
+            probe: LiveWindowGateway.LivenessProbe(error: .invalidUIElement, frame: nil),
+            baseline: baseline,
+            appAnswer: LiveWindowGateway.AppWindowAnswer(
+                appWindowsError: .success, listedFrames: [], processAlive: true,
+                identityListed: false, identityFrame: nil))
+        XCTAssertEqual(
+            absentFromEmpty.verdict, .dead,
+            "the app lists no windows at all: the window is really gone")
+    }
 }
