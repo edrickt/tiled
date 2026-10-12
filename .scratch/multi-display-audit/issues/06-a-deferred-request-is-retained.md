@@ -15,7 +15,7 @@ matching the reflow reconciliation.
 
 **Findings:** report M10, M12 (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (eeb07ee)
 
 - [ ] A placement deferred for an invisible canvas lands in its requested slot when the canvas
       becomes visible (swipe back), without a second user action.
