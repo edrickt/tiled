@@ -425,10 +425,7 @@ final class TilingController {
             space: key,
             allocateID: { [weak self] handle in
                 guard let self else { return 0 }
-                let id = self.nextID
-                self.nextID += 1
-                self.windowIDs[handle] = id
-                return id
+                return self.allocateID(for: handle, on: key)
             },
             log: { [weak self] message in self?.dbg(message) })
     }
@@ -668,6 +665,36 @@ final class TilingController {
     private func recordID(for handle: WindowHandle) -> WindowID? {
         guard let id = windowIDs[handle], spaceOf(window: id) != nil else { return nil }
         return id
+    }
+
+    /// Issues an id for `handle` on the canvas that is about to own it,
+    /// enforcing one canvas per handle: a record the handle still wears on
+    /// another canvas is released first, so the handle table never points
+    /// at two live records and no canvas double-books the window. A canvas
+    /// calls this only when it has no record of its own for the handle (a
+    /// pruned undo entry, an untile-all re-observation); the table's
+    /// mapping is never overwritten while it still names a live record.
+    private func allocateID(for handle: WindowHandle, on key: TilingSpaceKey) -> WindowID {
+        if let existing = windowIDs[handle],
+            let owner = spaceOf(window: existing), owner != key
+        {
+            releaseForeignRecord(existing, on: owner)
+        }
+        let id = nextID
+        nextID += 1
+        windowIDs[handle] = id
+        return id
+    }
+
+    /// Releases the record `id` holds on `owner` because another canvas is
+    /// claiming its handle: the freed cells reflow and the coordinator's
+    /// bookkeeping drops the id, but no frame is written — the claiming
+    /// canvas owns the window's next write.
+    private func releaseForeignRecord(_ id: WindowID, on owner: TilingSpaceKey) {
+        let outcome = mutateSpace(owner) {
+            $0.release(window: id, context: placementContext(for: owner))
+        }
+        apply(outcome, on: owner)
     }
 
     /// Drops records whose handle is gone (window closed, app quit).

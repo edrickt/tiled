@@ -276,6 +276,50 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertNil(controller.canvas(for: Self.display.id).state.slot(of: challenger.id))
     }
 
+    /// M1: a handle resolves to at most one canvas record. A window evicted
+    /// on one canvas, re-tiled on another, then restored by the first
+    /// canvas's undo must leave exactly one live record, and the menu must
+    /// count it once. Both canvases are visible at once (two displays), so
+    /// a duplicate is directly observable.
+    func testUndoReclaimsAWindowRetiledOnAnotherCanvas() {
+        currentScreens = [Self.display, Self.otherDisplay]
+        gateway.activeSpaces = [
+            Self.displayID: Self.spaceA,
+            Self.otherDisplayID: Self.spaceA,
+        ]
+        let origin = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let other = TilingSpaceKey(screen: Self.otherDisplay.id, space: Self.spaceA)
+
+        let w = addFocusedWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+        controller.handle(slot: .topLeft)
+        addFocusedWindow(frame: CGRect(x: 200, y: 200, width: 500, height: 400))
+        controller.handle(slot: .topLeft) // evicts w on the first display
+
+        // The evicted window is moved to the second display and tiled
+        // there: a fresh record for the same handle on the other canvas.
+        gateway.simulateSilentChange(w, to: CGRect(x: 2000, y: 100, width: 800, height: 600))
+        gateway.focused = w
+        controller.handle(slot: .topLeft)
+        XCTAssertTrue(
+            controller.canvas(for: other).records.values.contains { $0.handle == w },
+            "the window is tiled on the second canvas")
+
+        // Undoing the eviction returns the window to the canvas it left.
+        gateway.clearWrites()
+        controller.undoLastDisplacement(on: Self.display.id)
+
+        let owners = [origin, other].filter { key in
+            controller.canvas(for: key).records.values.contains { $0.handle == w }
+        }
+        XCTAssertEqual(owners, [origin], "a handle resolves to exactly one canvas")
+        XCTAssertEqual(
+            gateway.writes.filter { $0.handle == w }.count, 1,
+            "only the reclaiming canvas writes the moved window")
+        XCTAssertEqual(
+            controller.allTiledWindowsInfo().count, 1,
+            "the window is counted once across the visible canvases")
+    }
+
     func testSplittersAreIndependentPerSpace() {
         let handle = addFocusedWindow()
         controller.handle(slot: .topLeft)

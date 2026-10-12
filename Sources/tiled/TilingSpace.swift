@@ -1018,10 +1018,12 @@ struct TilingSpace {
         return untile(window: id, reflowing: true, context: context)
     }
 
-    /// Releases a confirmed-dead window: the untile path without a frame
-    /// write (the window is gone), reflowing its freed cells and pushing
-    /// the survivor chapter. The coordinator's prune and destroy paths
-    /// call this once the death standard agrees.
+    /// Releases a window with no frame write: the untile path without the
+    /// restore (the window is gone or is leaving this canvas), reflowing
+    /// its freed cells and pushing the survivor chapter. The coordinator's
+    /// prune and destroy paths call this once the death standard agrees;
+    /// it also releases a live record another canvas is about to claim, so
+    /// a handle never resolves to two canvases at once.
     mutating func release(window id: WindowID, context: Context) -> Outcome {
         leave(window: id, from: state.slot(of: id), context: context)
     }
