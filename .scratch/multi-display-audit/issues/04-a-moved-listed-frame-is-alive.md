@@ -14,7 +14,7 @@ the baseline on a successful probe/listing.
 
 **Findings:** report M2 (frame half) (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (b163b6d)
 
 - [ ] A window that appears in the app's window list but at a moved/rescaled frame is **not**
       reported dead.
