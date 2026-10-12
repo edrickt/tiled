@@ -165,6 +165,39 @@ final class DisplayIdentityTests: XCTestCase {
         XCTAssertEqual(controller.canvas(for: Self.left.id).state.occupant(of: .topLeft), leftHandle.id)
     }
 
+    /// An unplugged display's kept canvas must keep the geometry it had.
+    /// Re-resolving it from the provider while its display is absent would
+    /// write the main display's frame into the kept canvas, so the last-known
+    /// frame survives until replug recomputes it.
+    func testUnpluggedDisplayKeepsItsStoredVisibleFrameForReplug() {
+        var current = [Self.left, Self.right]
+        let gateway = FakeWindowGateway()
+        let controller = makeController(gateway: gateway, screens: { current })
+
+        let rightHandle = addWindow(
+            CGRect(x: 2000, y: 100, width: 800, height: 600), to: gateway)
+        controller.handle(slot: .topLeft)
+        let kept = controller.canvas(for: Self.right.id).visibleFrame
+        XCTAssertEqual(kept, Self.right.visibleFrame)
+
+        // The right display goes away. Its kept canvas must not adopt the
+        // main display's geometry: the last-known frame survives the unplug.
+        current = [Self.left]
+        screenChange()
+        XCTAssertEqual(
+            controller.canvas(for: Self.right.id).visibleFrame, kept,
+            "an unplugged canvas keeps its last-known visible frame, not the main display's")
+
+        // Replug re-resolves both canvases from their own restored displays.
+        current = [Self.right, Self.left]
+        screenChange()
+        XCTAssertEqual(
+            controller.canvas(for: Self.right.id).visibleFrame, Self.right.visibleFrame)
+        XCTAssertEqual(
+            controller.canvas(for: Self.left.id).visibleFrame, Self.left.visibleFrame)
+        XCTAssertEqual(controller.canvas(for: Self.right.id).state.occupant(of: .topLeft), rightHandle.id)
+    }
+
     /// A canvas established with the OS withholding the Space id keys
     /// `(screen, nil)`. Once its display is unplugged that canvas is
     /// invisible: a hotkey must defer rather than lay the window out

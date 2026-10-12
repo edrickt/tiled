@@ -403,6 +403,71 @@ final class SpaceIndependenceTests: XCTestCase {
             "the deferred placement lands when the Space becomes visible")
     }
 
+    /// A stale canvas whose visible frame is degenerate writes nothing on
+    /// the swipe back (the reassert early-returns), so its stale mark must
+    /// survive: clearing it here would drop the deferred reassert and the
+    /// placement would never land.
+    func testDegenerateVisibleFrameKeepsAStaleCanvasMarkedForRetry() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        // Move the window while its Space is hidden: the deferred write
+        // marks the canvas stale for the swipe back.
+        switchTo(Self.spaceB)
+        gateway.focused = a
+        controller.handle(slot: .topRight)
+
+        // The display reports a degenerate visible frame. Swiping back
+        // reasserts nothing and must leave the mark in place.
+        let degenerate = ScreenInfo(
+            id: Self.display.id,
+            frame: .zero,
+            visibleFrame: .zero,
+            name: Self.display.name,
+            displayID: Self.displayID)
+        currentScreens = [degenerate]
+        switchTo(Self.spaceA)
+
+        // Geometry returns with no screen-change notification, so nothing
+        // re-marks the canvas: only the retained mark can drive the retry.
+        currentScreens = [Self.display]
+        switchTo(Self.spaceB)
+        switchTo(Self.spaceA)
+
+        XCTAssertEqual(
+            gateway.frame(of: a),
+            GridLayout().rect(for: .topRight, in: Self.display.visibleFrame),
+            "the retained stale mark lands the deferred placement on the next swipe back")
+    }
+
+    /// A reassert with real geometry writes, and clearing the mark then is
+    /// correct: the canvas does not latch stale and reassert forever. The
+    /// app moving the window afterwards is left alone on the next swipe
+    /// back because no stale mark remains.
+    func testNormalSwipeBackReassertClearsTheStaleMark() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        switchTo(Self.spaceB)
+        gateway.focused = a
+        controller.handle(slot: .topRight)
+
+        // Swipe back with real geometry: the reassert writes and clears.
+        switchTo(Self.spaceA)
+        let target = GridLayout().rect(for: .topRight, in: Self.display.visibleFrame)
+        XCTAssertEqual(gateway.frame(of: a), target)
+
+        // The app moves the window off its tile. No stale mark remains, so
+        // a swipe away and back must not drag it back to the tile.
+        let movedByApp = target.offsetBy(dx: 40, dy: 30)
+        gateway.simulateSilentChange(a, to: movedByApp)
+        switchTo(Self.spaceB)
+        switchTo(Self.spaceA)
+        XCTAssertEqual(
+            gateway.frame(of: a), movedByApp,
+            "a cleared stale mark does not reassert an app-moved window")
+    }
+
     func testHiddenSpaceEvictionDefersTheRestoreAndReconcilesOnReturn() {
         // Three windows tiled on Space A, then the user swipes to B and
         // issues a request that evicts two of them. The restores must not
