@@ -224,6 +224,46 @@ final class UndoIntegrityTests: XCTestCase {
             "the forgotten window leaves no handle->id entry behind")
     }
 
+    /// The same failed restore must clear the pending-death clock, not
+    /// only the handle->id entry: a leftover `deadSince` entry is the
+    /// other half of the leak ticket 02 closed.
+    func testFailedUndoRestoreClearsThePendingDeathClock() {
+        var awake: TimeInterval = 0
+        let localGateway = FakeWindowGateway()
+        let localController = TilingController(
+            gateway: localGateway, pruneInterval: nil,
+            deathConfirmation: 3,
+            now: { Date(timeIntervalSince1970: 0) },
+            uptime: { awake })
+        let w = localGateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        localGateway.focused = w
+        localController.handle(slot: .topLeft)
+        let x = localGateway.addWindow(frame: CGRect(x: 40, y: 40, width: 500, height: 400))
+        localGateway.focused = x
+        localController.handle(slot: .leftHalf) // evicts w; chapter requester x
+        XCTAssertFalse(localCanvas(localController).undoStack.isEmpty)
+        let xID = localController.registeredID(for: x)
+
+        // x reads dead transiently: a pending death is recorded while it
+        // still holds its slot, so the clock is non-empty going in.
+        localGateway.probeDead.insert(x)
+        localController.pruneDeadWindows()
+        XCTAssertNotNil(xID)
+        XCTAssertTrue(
+            localController.hasPendingDeath(xID ?? 0),
+            "the death is pending, not yet confirmed")
+
+        // Undo refuses x's restore, so the canvas forgets it: the registry
+        // and the death clock must both let it go.
+        localGateway.refuseNextWrites(x)
+        localController.undoLastDisplacement()
+
+        XCTAssertNil(localController.registeredID(for: x))
+        XCTAssertFalse(
+            localController.hasPendingDeath(xID ?? 0),
+            "forgetting a window clears its pending-death clock, not only the handle table")
+    }
+
     func testUntileAllDropsAChapterItCouldNotRebuild() {
         let a = focusNewWindow()
         controller.handle(slot: .topLeft)

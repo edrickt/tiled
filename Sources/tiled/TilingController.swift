@@ -673,6 +673,17 @@ final class TilingController {
     /// canvas's id.
     func registeredID(for handle: WindowHandle) -> WindowID? { windowIDs[handle] }
 
+    /// Test seam for ticket 09's visibility guard: whether the canvas is
+    /// currently marked stale, i.e. still owes a reassert for when its
+    /// display or Space becomes visible. A deferred write marks the
+    /// canvas; a reassert with real geometry clears it.
+    func isMarkedStale(_ space: TilingSpaceKey) -> Bool { staleSpaces.contains(space) }
+
+    /// Test seam for the death-bookkeeping half of ticket 02: whether `id`
+    /// has an unconfirmed death pending. Forgetting a window must clear
+    /// this clock along with the handle table.
+    func hasPendingDeath(_ id: WindowID) -> Bool { deadSince[id] != nil }
+
     /// Issues an id for `handle` on the canvas that is about to own it,
     /// enforcing one canvas per handle: a record the handle still wears on
     /// another canvas is released first, so the handle table never points
@@ -684,7 +695,7 @@ final class TilingController {
         if let existing = windowIDs[handle],
             let owner = spaceOf(window: existing), owner != key
         {
-            releaseForeignRecord(existing, on: owner)
+            releaseRecordClaimedByAnotherCanvas(existing, on: owner)
         }
         let id = nextID
         nextID += 1
@@ -696,7 +707,7 @@ final class TilingController {
     /// claiming its handle: the freed cells reflow and the coordinator's
     /// bookkeeping drops the id, but no frame is written — the claiming
     /// canvas owns the window's next write.
-    private func releaseForeignRecord(_ id: WindowID, on owner: TilingSpaceKey) {
+    private func releaseRecordClaimedByAnotherCanvas(_ id: WindowID, on owner: TilingSpaceKey) {
         let outcome = mutateSpace(owner) {
             $0.release(window: id, context: placementContext(for: owner))
         }
@@ -1099,27 +1110,35 @@ final class TilingController {
         allTiledWindowsInfo()
     }
 
+    /// The provider's display name for a canvas's display, or nil when the
+    /// provider does not know that display (headless) or the key is
+    /// display-less. The raw lookup shared by the menu header and the
+    /// spoken display-name gate; `displayName(for:)` adds the
+    /// single-vs-multi-display rule on top.
+    private func screenName(for space: TilingSpaceKey) -> String? {
+        screens().first(where: { $0.id == space.screen })?.name
+    }
+
     /// The display name to speak for a canvas, or nil when naming it would
     /// distinguish nothing: with a single display attached the glyph's
     /// monitor is unambiguous and the VoiceOver line is left alone. With
     /// more than one display the name tells the user which monitor the
     /// glyph depicts, matching the menu headers.
     func displayName(for space: TilingSpaceKey) -> String? {
-        let infos = screens()
-        guard infos.count > 1 else { return nil }
-        return infos.first(where: { $0.id == space.screen })?.name
+        guard screens().count > 1 else { return nil }
+        return screenName(for: space)
     }
 
     /// Tiled windows on the focused canvas (tile submenu scope).
     var focusedTiledWindowsInfo: [TiledWindowInfo] {
         let key = focusedSpaceKey()
-        let screenName = screens().first(where: { $0.id == key.screen })?.name
+        let name = screenName(for: key)
         return (spaces[key]?.state.occupants ?? [:])
             .sorted { $0.key.rawValue < $1.key.rawValue }
             .map {
                 TiledWindowInfo(
                     id: $0.value, slot: $0.key, appName: appName(for: $0.value),
-                    screen: key.screen, screenName: screenName)
+                    screen: key.screen, screenName: name)
             }
     }
 

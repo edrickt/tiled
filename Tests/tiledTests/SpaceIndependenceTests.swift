@@ -437,6 +437,9 @@ final class SpaceIndependenceTests: XCTestCase {
         guard case .deferred = feedbacks.first else {
             return XCTFail("expected .deferred, got \(feedbacks)")
         }
+        XCTAssertTrue(
+            controller.isMarkedStale(keyA),
+            "the deferred write marks the hidden canvas stale for the swipe back")
 
         // Swiping back reconciles the retained placement, exactly like a
         // deferred reflow.
@@ -618,7 +621,7 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: d), dTiled)
 
         switchTo(Self.spaceA)
-        XCTAssertEqual(gateway.frame(of: a), aFrame, "the parked restore lands on return")
+        XCTAssertEqual(gateway.frame(of: a), aFrame, "the deferred restore lands on return")
         XCTAssertEqual(gateway.frame(of: d), dFrame)
     }
 

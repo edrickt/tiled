@@ -186,28 +186,84 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(presentation.tiledWindows.map(\.screen), [display, display])
     }
 
+    func testOneDisplaysTwoCanvasesListTheSameWindowOnce() {
+        // The same window can be emitted from both of a display's canvases
+        // (an identified and a withheld one). It is one window: the manage
+        // list lists it once and counts it once, never twice.
+        let display = ScreenID(rawValue: 0)
+        let rows = [
+            row(1, .topLeft, screen: display, screenName: "Built-in"),
+            row(1, .topLeft, screen: display, screenName: "Built-in"),
+        ]
+
+        let presentation = AppDelegate.monitorPresentation(
+            rows: rows, layoutForScreen: { _ in .quarters })
+
+        XCTAssertEqual(presentation.sections, [
+            .init(title: "Built-in · Quarters · 1 tiled", key: display)
+        ])
+        XCTAssertEqual(presentation.tiledWindows.map(\.id), [1])
+        XCTAssertEqual(
+            presentation.statusLine, "Built-in · Quarters · 1 tiled",
+            "the same window is counted once in the status line")
+    }
+
     // MARK: Icon pass (iconSnapshot)
 
-    func testIconPassResolvesTheFocusedCanvasOnce() {
-        // The glyph must resolve one canvas key per pass and derive both
-        // its occupancy map and its spoken display name from that single
-        // key: a second resolution could land after a focus move and
-        // describe a different canvas than the glyph. Counting the key
-        // reads catches a regression that resolves it twice.
+    func testIconPassDerivesItsReadsFromTheGivenKey() {
+        // The glyph takes an already-resolved key and derives both its
+        // occupancy map and its spoken display name from it, so a focus
+        // move can never pair one canvas's glyph with another canvas's
+        // name.
         let key = TilingSpaceKey(
             screen: ScreenID(rawValue: 1), space: SpaceID(rawValue: 7))
-        var keyReads = 0
         var canvasKeys: [TilingSpaceKey] = []
         var nameKeys: [TilingSpaceKey] = []
         let snapshot = AppDelegate.iconSnapshot(
-            canvasKey: { keyReads += 1; return key },
+            space: key,
             canvas: { canvasKeys.append($0); return TilingSpace() },
             displayName: { nameKeys.append($0); return "Built-in" })
 
-        XCTAssertEqual(keyReads, 1, "one canvas key resolution per icon pass")
         XCTAssertEqual(canvasKeys, [key])
         XCTAssertEqual(nameKeys, [key])
         XCTAssertEqual(snapshot.displayName, "Built-in")
+    }
+
+    func testRefreshPassResolvesTheFocusedCanvasOnce() {
+        // The menu-open path and the refresh path share one pass: the
+        // focused canvas key is resolved exactly once and handed to both
+        // the menu and the glyph, so a display change that lands mid-pass
+        // cannot leave them describing different canvases. Counting the
+        // resolver pins the call site, not just the pure icon helper.
+        let key = TilingSpaceKey(
+            screen: ScreenID(rawValue: 1), space: SpaceID(rawValue: 7))
+        var resolutions = 0
+        var menuKeys: [TilingSpaceKey] = []
+        var iconKeys: [TilingSpaceKey] = []
+        let pass = AppDelegate.refreshPass(
+            focusedSpace: { resolutions += 1; return key },
+            menu: { menuKeys.append($0); return self.emptySnapshot() },
+            icon: {
+                iconKeys.append($0)
+                return StatusIcon.snapshot(layout: .quarters, occupants: [:])
+            })
+
+        XCTAssertEqual(resolutions, 1, "one focused-canvas resolution per refresh pass")
+        XCTAssertEqual(menuKeys, [key])
+        XCTAssertEqual(iconKeys, [key])
+        XCTAssertEqual(pass.menu, emptySnapshot())
+        XCTAssertEqual(pass.icon, StatusIcon.snapshot(layout: .quarters, occupants: [:]))
+    }
+
+    /// A bare, valid menu snapshot for pass-plumbing tests that only care
+    /// which canvas key built the view.
+    private func emptySnapshot() -> MenuModel.Snapshot {
+        MenuModel.Snapshot(
+            isTrusted: true, warnings: [], notice: nil, layoutTitle: "Quarters",
+            activeLayout: .quarters, tileError: nil, hasHotkeyWarnings: false,
+            hasSplitterBackup: false, hasFocusedWindow: false, expandedSlot: nil,
+            tiledWindows: [], canUndoDisplacement: false, evictedCount: 0,
+            untileCount: 0)
     }
 
     // MARK: Refresh ordering (refreshPlan)

@@ -239,6 +239,9 @@ final class DisplayIdentityTests: XCTestCase {
         XCTAssertEqual(
             controller.canvas(for: withheld).state.slot(of: rightHandle.id), .topRight,
             "the deferred placement stands on the kept canvas")
+        XCTAssertTrue(
+            controller.isMarkedStale(withheld),
+            "the deferred write leaves the kept canvas marked stale for the reassert")
 
         // Replug: the kept canvas reasserts against the restored display.
         current = [Self.left, Self.right]
@@ -247,6 +250,9 @@ final class DisplayIdentityTests: XCTestCase {
             gateway.frame(of: rightHandle),
             GridLayout().rect(for: .topRight, in: Self.right.visibleFrame),
             "replug reasserts the kept canvas against the restored display")
+        XCTAssertFalse(
+            controller.isMarkedStale(withheld),
+            "the replug reassert clears the stale mark")
     }
 
     /// With no displays at all the canvas is genuinely display-less

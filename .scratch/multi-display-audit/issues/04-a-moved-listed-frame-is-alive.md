@@ -7,8 +7,8 @@ only refreshed on frame *reads* — so a window macOS relocated or rescaled duri
 transiently failing per-window probe, can yield `.dead`. Combined with the wall-clock clock
 (ticket 03), that prunes a live window on the first post-wake tick.
 
-Treat a window that the app lists as alive (a changed frame is membership, not death), and refresh
-the baseline on a successful probe/listing.
+Treat a window that the app lists as **not dead** (a changed frame is membership, not death), and
+refresh the baseline on a successful probe/listing.
 
 **Blocked by:** 03 (collision — both touch the death path).
 
@@ -21,5 +21,13 @@ the baseline on a successful probe/listing.
 - [ ] A successful liveness probe refreshes the cached baseline, so a subsequent comparison does
       not judge against a stale frame.
 - [ ] Genuine death is unaffected: a window absent from the app's list still reaches `.dead`.
-- [ ] Pinned by tests: listed-but-moved → alive; probe refreshes baseline; absent → dead.
+- [ ] Pinned by tests: listed-but-moved → not dead; probe refreshes baseline; absent → dead.
 - [ ] Gates green: warning-free build, full suite, every mutant CAUGHT.
+
+**Note (review-fix pass):** This ticket's title and first build draft said a moved listed window is
+"alive". The frozen liveness standard never returns `.alive` for a *failed* probe: a listed window
+at a moved frame sets `appWindowMatch == true`, so the standard settles on **`.unknown`** — not
+dead — and the prune (which releases a slot only on a confirmed `.dead`) retains it. The build text
+and the pin above are corrected to "not dead"; the acceptance wording ("not reported dead") was
+already right. The shipped behaviour is unchanged; the pin is
+`AXLivenessTests.testListedWindowAtAMovedFrameIsNotDead`, whose comment records the same contract.

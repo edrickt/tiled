@@ -205,7 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// user got there by focusing another display or swiping Spaces.
     private func iconSnapshot() -> StatusIcon.Snapshot {
         Self.iconSnapshot(
-            canvasKey: { controller.focusedTilingSpace },
+            space: controller.focusedTilingSpace,
             canvas: { controller.canvas(for: $0) },
             displayName: { controller.displayName(for: $0) })
     }
@@ -215,28 +215,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// can never describe different canvases when focus moves mid-pass.
     private func iconSnapshot(space: TilingSpaceKey) -> StatusIcon.Snapshot {
         Self.iconSnapshot(
-            canvasKey: { space },
+            space: space,
             canvas: { controller.canvas(for: $0) },
             displayName: { controller.displayName(for: $0) })
     }
 
-    /// Builds one icon pass from a single resolved canvas key. The key is
-    /// read exactly once, here, and both the occupancy map and the spoken
-    /// display name derive from it, so a focus move landing mid-pass can
-    /// never pair one canvas's glyph with another canvas's name. The three
-    /// lookups are parameters so a test can count the reads without a live
-    /// controller.
+    /// Builds one icon pass from an already-resolved canvas key. The key is
+    /// a direct parameter, not a resolver the caller might call twice, and
+    /// both the occupancy map and the spoken display name derive from that
+    /// one key, so a focus move landing mid-pass can never pair one
+    /// canvas's glyph with another canvas's name.
     static func iconSnapshot(
-        canvasKey: () -> TilingSpaceKey,
+        space: TilingSpaceKey,
         canvas: (TilingSpaceKey) -> TilingSpace,
         displayName: (TilingSpaceKey) -> String?
     ) -> StatusIcon.Snapshot {
-        let key = canvasKey()
-        let focused = canvas(key)
+        let focused = canvas(space)
         return StatusIcon.snapshot(
             layout: focused.state.activeLayout,
             occupants: focused.state.occupants,
-            displayName: displayName(key))
+            displayName: displayName(space))
+    }
+
+    /// One refresh pass over the focused canvas: resolves the key once and
+    /// builds both views from it, so a display or focus change landing
+    /// between the menu and the glyph can never leave them describing
+    /// different canvases. Pure, with the two builders injected, so the
+    /// single resolution is pinned without a live controller.
+    static func refreshPass(
+        focusedSpace: () -> TilingSpaceKey,
+        menu: (TilingSpaceKey) -> MenuModel.Snapshot,
+        icon: (TilingSpaceKey) -> StatusIcon.Snapshot
+    ) -> (menu: MenuModel.Snapshot, icon: StatusIcon.Snapshot) {
+        let space = focusedSpace()
+        return (menu(space), icon(space))
     }
 
     /// The menu-bar glyph states the product's core idea twice over: the
@@ -440,9 +452,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // One canvas key for the whole pass: the menu and the glyph are two
         // views of the same canvas, so a focus move landing between building
         // them can never leave them describing different canvases.
-        let space = controller.focusedTilingSpace
-        let snapshot = menuSnapshot(space: space)
-        let icon = iconSnapshot(space: space)
+        let pass = Self.refreshPass(
+            focusedSpace: { self.controller.focusedTilingSpace },
+            menu: { self.menuSnapshot(space: $0) },
+            icon: { self.iconSnapshot(space: $0) })
+        let snapshot = pass.menu
+        let icon = pass.icon
         let plan = Self.refreshPlan(
             menuChanged: force || snapshot != lastMenuSnapshot || statusItem?.menu == nil,
             iconChanged: lastIconSnapshot != icon || statusItem?.button?.image == nil,
@@ -536,6 +551,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> (sections: [MenuModel.Snapshot.MonitorSection],
           tiledWindows: [MenuModel.Snapshot.TiledWindow],
           statusLine: String) {
+        // One row per window: a display with both an identified and a
+        // withheld canvas can emit the same window from both canvases, and
+        // the manage list must never double-list it (nor count it twice).
+        var seen: Set<WindowID> = []
+        let rows = rows.filter { seen.insert($0.id).inserted }
         let grouped = Dictionary(grouping: rows, by: \.screen)
         let sections: [MenuModel.Snapshot.MonitorSection]
         let orderedRows: [MenuModel.Snapshot.TiledWindow]
@@ -956,11 +976,17 @@ extension AppDelegate: NSMenuDelegate {
     /// not depend on that order.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusItem?.menu else { return }
-        let snapshot = menuSnapshot()
-        populate(menu, from: snapshot)
-        lastMenuSnapshot = snapshot
-        let icon = iconSnapshot()
-        if lastIconSnapshot != icon { drawStatusIcon(icon) }
+        // One canvas key for the whole pass, exactly as `refreshMenu`:
+        // resolving it once and handing it to both the menu and the glyph
+        // is what keeps them from describing different canvases when a
+        // display or focus change lands mid-pass.
+        let pass = Self.refreshPass(
+            focusedSpace: { self.controller.focusedTilingSpace },
+            menu: { self.menuSnapshot(space: $0) },
+            icon: { self.iconSnapshot(space: $0) })
+        populate(menu, from: pass.menu)
+        lastMenuSnapshot = pass.menu
+        if lastIconSnapshot != pass.icon { drawStatusIcon(pass.icon) }
     }
 
     func menuDidClose(_ menu: NSMenu) {

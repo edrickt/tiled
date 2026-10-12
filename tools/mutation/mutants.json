@@ -458,13 +458,49 @@
  [
   "TilingController.swift",
   "spoken display name kept on a single display (glyph names a non-choice)",
-  "        guard infos.count > 1 else { return nil }",
-  "        guard infos.count > 0 else { return nil }"
+  "        guard screens().count > 1 else { return nil }",
+  "        guard screens().count > 0 else { return nil }"
  ],
  [
   "AppDelegate.swift",
-  "icon pass re-resolves the canvas key (glyph can mix two canvases)",
-  "        let key = canvasKey()\n        let focused = canvas(key)",
-  "        let key = canvasKey()\n        let focused = canvas(canvasKey())"
+  "refresh pass re-resolves the canvas key (menu and glyph can mix canvases)",
+  "        let space = focusedSpace()\n        return (menu(space), icon(space))",
+  "        let space = focusedSpace()\n        return (menu(focusedSpace()), icon(space))"
+ ],
+ [
+  "TilingSpace.swift",
+  "deferred placement/expand reconcile never runs (retained requests dropped)",
+  "        let pending = deferredRequests.filter { records[$0.key] != nil }\n        var failures = 0\n        deferredRequests = Self.reconcile(pending) { id, request in",
+  "        let pending: [WindowID: DeferredRequest] = [:]\n        var failures = 0\n        deferredRequests = Self.reconcile(pending) { id, request in"
+ ],
+ [
+  "TilingSpace.swift",
+  "deferred restore reconcile never runs (deferred restores dropped)",
+  "        let pending = deferredRestores\n        deferredRestores = Self.reconcile(pending) { handle, restore in",
+  "        let pending: [WindowHandle: DeferredRestore] = [:]\n        deferredRestores = Self.reconcile(pending) { handle, restore in"
+ ],
+ [
+  "TilingController.swift",
+  "claimed record not released on the old canvas (one handle, two records)",
+  "        if let existing = windowIDs[handle],\n            let owner = spaceOf(window: existing), owner != key\n        {\n            releaseRecordClaimedByAnotherCanvas(existing, on: owner)\n        }",
+  "        if let existing = windowIDs[handle],\n            let owner = spaceOf(window: existing), false\n        {\n            releaseRecordClaimedByAnotherCanvas(existing, on: owner)\n        }"
+ ],
+ [
+  "TilingSpace.swift",
+  "beginRecord keeps a stale deferred restore (swipe back yanks a re-tiled window)",
+  "        records[id] = WindowRecord(handle: handle, preTileFrame: frame)\n        deferredRestores[handle] = nil\n        deferredRequests[id] = nil",
+  "        records[id] = WindowRecord(handle: handle, preTileFrame: frame)\n        deferredRequests[id] = nil"
+ ],
+ [
+  "TilingController.swift",
+  "stale mark cleared without real geometry (deferred reassert dropped)",
+  "            if hasGeometry {\n                staleSpaces.remove(key)\n            }",
+  "            if true {\n                staleSpaces.remove(key)\n            }"
+ ],
+ [
+  "AppDelegate.swift",
+  "manage list double-lists a window emitted from two canvases",
+  "        var seen: Set<WindowID> = []\n        let rows = rows.filter { seen.insert($0.id).inserted }",
+  "        var seen: Set<WindowID> = []\n        let rows = rows.filter { _ in true }"
  ]
 ]

@@ -652,7 +652,7 @@ final class TilingSpaceTests: XCTestCase {
 
     /// A pre-tile restore on a hidden canvas defers too: the evicted
     /// window is not dragged through Mission Control, its slot is
-    /// released, and the parked restore lands on the swipe-back reassert —
+    /// released, and the deferred restore lands on the swipe-back reassert —
     /// the same off-Space contract every other write obeys.
     func testHiddenCanvasEvictionDefersTheRestoreAndReconcilesOnReturn() {
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
@@ -680,13 +680,13 @@ final class TilingSpaceTests: XCTestCase {
 
         XCTAssertEqual(
             harness.frame(of: a), original,
-            "the parked restore lands when the canvas becomes visible")
+            "the deferred restore lands when the canvas becomes visible")
     }
 
-    /// A hidden untile-all parks every restore (its re-observation of the
+    /// A hidden untile-all defers every restore (its re-observation of the
     /// windows for the undo chapter must not discard them) and lands them
     /// all on the swipe back.
-    func testHiddenCanvasUntileAllParksEveryRestoreAndReconcilesOnReturn() {
+    func testHiddenCanvasUntileAllDefersEveryRestoreAndReconcilesOnReturn() {
         let aFrame = CGRect(x: 10, y: 20, width: 300, height: 200)
         let bFrame = CGRect(x: 500, y: 40, width: 400, height: 300)
         let a = harness.addWindow(frame: aFrame)
@@ -699,7 +699,7 @@ final class TilingSpaceTests: XCTestCase {
         space.untileAll(context: context())
 
         XCTAssertTrue(harness.gateway.writes.isEmpty, "a hidden canvas is never written blind")
-        XCTAssertEqual(space.deferredRestores.count, 2, "both restores are parked")
+        XCTAssertEqual(space.deferredRestores.count, 2, "both restores are deferred")
 
         harness.canvasVisible = true
         space.reassert(.grid, context: context())
@@ -708,10 +708,10 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(harness.frame(of: b), bFrame)
     }
 
-    /// Re-tiling a parked window before the canvas returns discards its
-    /// stale restore, so the swipe-back cannot yank it out of the slot it
-    /// just took.
-    func testRetilingAParkedWindowDiscardsTheStaleRestore() {
+    /// Re-tiling a window with a deferred restore before the canvas
+    /// returns discards that stale restore, so the swipe-back cannot yank
+    /// it out of the slot it just took.
+    func testRetilingAWindowWithADeferredRestoreDiscardsIt() {
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
         let a = harness.addWindow(frame: original)
         harness.apply(slot: .topLeft, requester: a)
@@ -719,14 +719,14 @@ final class TilingSpaceTests: XCTestCase {
         harness.canvasVisible = false
         harness.apply(slot: .topLeft, requester: b)
         XCTAssertNil(space.state.slot(of: a))
-        XCTAssertFalse(space.deferredRestores.isEmpty, "the hidden restore is parked")
+        XCTAssertFalse(space.deferredRestores.isEmpty, "the hidden restore is deferred")
 
         // Before the canvas returns, the user tiles the window again.
         harness.apply(slot: .bottomRight, requester: a)
 
         XCTAssertTrue(
             space.deferredRestores.isEmpty,
-            "re-tiling the window discards its stale parked restore")
+            "re-tiling the window discards its stale deferred restore")
     }
 
     /// The restore takes the same no-op skip as every other write: a
@@ -753,7 +753,7 @@ final class TilingSpaceTests: XCTestCase {
     }
 
     /// A restore on a visible canvas is unchanged: the pre-tile frame is
-    /// written and the slot released, with nothing parked for later.
+    /// written and the slot released, with nothing deferred for later.
     func testVisibleRestoreWritesThePreTileFrameAndReleasesTheSlot() {
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
         let a = harness.addWindow(frame: original)
@@ -765,7 +765,7 @@ final class TilingSpaceTests: XCTestCase {
 
         XCTAssertEqual(harness.frame(of: a), original)
         XCTAssertNil(space.state.slot(of: a))
-        XCTAssertTrue(space.deferredRestores.isEmpty, "a visible restore is never parked")
+        XCTAssertTrue(space.deferredRestores.isEmpty, "a visible restore is never deferred")
         XCTAssertEqual(
             harness.expectedWrites, [a],
             "the restore arms its echo like every other write")
