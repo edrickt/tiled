@@ -14,7 +14,7 @@ prune *ticks* (a counter on `deadSince`) rather than elapsed time.
 
 **Findings:** report M2 (clock half) (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (7e4da22)
 
 - [ ] A window marked dead before a simulated sleep is not confirmed on the first post-wake tick;
       it needs its full confirmation interval *awake* (or its second real tick).

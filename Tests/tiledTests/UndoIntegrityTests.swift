@@ -291,10 +291,11 @@ final class UndoIntegrityTests: XCTestCase {
 
     func testTransientDeadReadingRecoversBeforeTheConfirmationWindow() {
         var clock = Date(timeIntervalSince1970: 0)
+        var awake: TimeInterval = 0
         let localGateway = FakeWindowGateway()
         let localController = TilingController(
             gateway: localGateway, pruneInterval: nil,
-            deathConfirmation: 3, now: { clock })
+            deathConfirmation: 3, now: { clock }, uptime: { awake })
         let a = localGateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         localGateway.focused = a
         localController.handle(slot: .topLeft)
@@ -310,6 +311,7 @@ final class UndoIntegrityTests: XCTestCase {
         // The probe answers again inside the confirmation window.
         localGateway.probeDead.remove(a)
         clock = clock.addingTimeInterval(1)
+        awake += 1
         localController.pruneDeadWindows()
         XCTAssertEqual(
             localCanvas(localController).state.occupant(of: .topLeft), 1,
@@ -320,6 +322,7 @@ final class UndoIntegrityTests: XCTestCase {
         localGateway.probeDead.insert(a)
         localController.pruneDeadWindows()
         clock = clock.addingTimeInterval(4)
+        awake += 4
         localController.pruneDeadWindows()
         XCTAssertNil(localCanvas(localController).state.occupant(of: .topLeft))
         XCTAssertEqual(localGateway.releaseCalls, [a])

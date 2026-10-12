@@ -146,5 +146,8 @@ final class MenuTextTests: XCTestCase {
         XCTAssertEqual(
             MenuText.nothingToEvictAnnouncement(),
             "That window isn't tiled: nothing to evict.")
+        XCTAssertEqual(
+            MenuText.deferredOffSpaceAnnouncement(),
+            "That Space isn't visible yet: the change will apply when you return to it.")
     }
 }

@@ -116,8 +116,8 @@
  [
   "TilingController.swift",
   "death needs 63s+ of dead probes to confirm",
-  "guard timestamp.timeIntervalSince(first) >= deathConfirmation else {",
-  "guard timestamp.timeIntervalSince(first) >= deathConfirmation + 60 else {"
+  "guard awake - first >= deathConfirmation else {",
+  "guard awake - first >= deathConfirmation + 60 else {"
  ],
  [
   "TilingSpace.swift",

@@ -99,6 +99,12 @@ struct TilingSpace {
             /// The request's write was refused. The name is for the
             /// announcement (nil when the app named nothing).
             case refused(windowName: String?)
+            /// The request's write was deferred: its canvas is on a
+            /// Mission Control Space the user cannot see, so nothing was
+            /// written. Not a failure: the intent stands and reconciles
+            /// when the Space becomes visible, and the announcement says
+            /// so rather than blaming the app.
+            case deferred
             /// The window already occupies the requested slot: strict no-op.
             case alreadyTiled
             /// The evict key found no slot to release.
@@ -217,7 +223,16 @@ struct TilingSpace {
         context: Context
     ) -> Outcome {
         var outcome = Outcome()
-        outcome.result = commit.refusal?.windowName.map { .refused(windowName: $0) } ?? .placed
+        switch (commit.refusal, commit.deferred) {
+        case (let refusal?, _):
+            // A restore failure carries no window name: the outcome stays
+            // `.placed` and the canvas's `error` speaks for it.
+            outcome.result = refusal.windowName.map { .refused(windowName: $0) } ?? .placed
+        case (nil, true):
+            outcome.result = .deferred
+        case (nil, false):
+            outcome.result = .placed
+        }
         // Restored-not-re-housed windows: untiled for good. A re-housed
         // window is the exception: it stayed tiled in the slot the
         // request left free, so its record and observation survive.
@@ -350,7 +365,9 @@ struct TilingSpace {
             {
                 context.log("undo SKIP-WRITE win\(id) already placed")
                 restored += 1
-            } else if applyLayout(for: id, context: context, on: entry.space) {
+            } else if applyLayout(for: id, context: context, on: entry.space).stands {
+                // A deferred off-Space write stands: the window keeps its
+                // slot and reconciles when the canvas becomes visible.
                 restored += 1
             } else {
                 forget(id, context: context)
@@ -386,7 +403,8 @@ struct TilingSpace {
         }
         let restoreFailures = restore(evicted, context: context)
         let placeResult = place(
-            window: id, into: slot, context: context, observed: &commit.observed)
+            window: id, into: slot, context: context, observed: &commit.observed,
+            deferred: &commit.deferred)
         if records[id] == nil {
             // `place` bailed (no record): nothing to snapshot.
             Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
@@ -441,7 +459,8 @@ struct TilingSpace {
         }
         state.commit(window: displaced, into: previous)
         commit.observed.append(displaced)
-        if !applyLayout(for: displaced, context: context, on: context.space) {
+        let displacedWrite = applyLayout(for: displaced, context: context, on: context.space)
+        if displacedWrite == .refused {
             // The refused write moved nothing on screen: the rollback
             // is state-only, restoring both occupancies.
             state.commit(window: displaced, into: displacedOriginal)
@@ -450,9 +469,11 @@ struct TilingSpace {
             commit.refusal = refusal(for: displaced, context: context)
             return commit
         }
+        if displacedWrite == .deferredOffSpace { commit.deferred = true }
         state.commit(window: id, into: slot)
         commit.observed.append(id)
-        if !applyLayout(for: id, context: context, on: context.space) {
+        let requesterWrite = applyLayout(for: id, context: context, on: context.space)
+        if requesterWrite == .refused {
             // Roll the whole swap back: the displaced window's frame
             // visibly moved, so it is written home; the requester was
             // never written, so only its occupancy restores.
@@ -463,6 +484,7 @@ struct TilingSpace {
             commit.refusal = refusal(for: id, context: context)
             return commit
         }
+        if requesterWrite == .deferredOffSpace { commit.deferred = true }
         // A swap untiles nobody, but it does move a window the user
         // didn't touch: the notice names it and its landing tile.
         let displacedName = appName(displaced, context: context) ?? "That window"
@@ -527,7 +549,8 @@ struct TilingSpace {
         let restoreFailures = restore(
             evicted.filter { $0 != rehouse?.window }, context: context)
         let placeResult = place(
-            window: id, into: slot, context: context, observed: &commit.observed)
+            window: id, into: slot, context: context, observed: &commit.observed,
+            deferred: &commit.deferred)
         commit.refusal = placeResult
         Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
         let clean = commit.clean
@@ -539,7 +562,11 @@ struct TilingSpace {
         // A refused re-house write falls back to the plain eviction.
         if let (wid, home) = rehouse, clean {
             state.commit(window: wid, into: home)
-            if applyLayout(for: wid, context: context, on: context.space) {
+            let write = applyLayout(for: wid, context: context, on: context.space)
+            if write.stands {
+                // A deferred off-Space write stands: the victim keeps the
+                // freed slot and reconciles when the canvas is visible.
+                if write == .deferredOffSpace { commit.deferred = true }
                 commit.rehoused = wid
                 let name = appName(wid, context: context) ?? "That window"
                 commit.notice =
@@ -597,6 +624,10 @@ struct TilingSpace {
         var reflowFreed: Set<TileCell>?
         var rehoused: WindowID?
         var observed: [WindowID] = []
+        /// A placement or re-house write was deferred off-Space: its
+        /// state stands, so the event narrates the deferral rather than
+        /// an app refusal.
+        var deferred = false
 
         /// True when nothing failed: neither the placement write nor any
         /// restore. A restore failure carries a message but no window
@@ -672,10 +703,11 @@ struct TilingSpace {
     // MARK: Placement helpers
 
     /// Places `id` into `slot`. Returns the refusal when the gateway write
-    /// fails; nil means placed.
+    /// fails; nil means placed (or deferred: a deferred off-Space write
+    /// stands, and `deferred` reports it so the event narrates it).
     private mutating func place(
         window id: WindowID, into slot: Slot,
-        context: Context, observed: inout [WindowID]
+        context: Context, observed: inout [WindowID], deferred: inout Bool
     ) -> Refusal? {
         guard var record = records[id] else { return nil }
         if state.slot(of: id) == nil {
@@ -687,7 +719,8 @@ struct TilingSpace {
         }
         state.commit(window: id, into: slot)
         observed.append(id)
-        if !applyLayout(for: id, context: context, on: context.space) {
+        let result = applyLayout(for: id, context: context, on: context.space)
+        if result == .refused {
             // The window refused the frame (some apps ignore AX resizes):
             // roll back occupancy so state and screen agree, and say so.
             state.remove(window: id)
@@ -695,6 +728,9 @@ struct TilingSpace {
             context.log("place FAILED win\(id) -> \(slot.rawValue)")
             return refusal(for: id, context: context)
         }
+        // A deferred off-Space write is not a failure: the occupancy
+        // stands and reconciles when the canvas becomes visible.
+        if result == .deferredOffSpace { deferred = true }
         context.log("place win\(id) -> \(slot.rawValue)")
         return nil
     }
@@ -744,35 +780,33 @@ struct TilingSpace {
     }
 
     /// Applies `id`'s slot rect on `space` (nil selects the display-less
-    /// fallback for legacy/headless snapshots). Returns whether the
-    /// gateway write succeeded (some windows refuse resizes). The tracker
-    /// bookkeeps the write for echo suppression.
+    /// fallback for legacy/headless snapshots). Returns the shared write
+    /// policy's result; the tracker bookkeeps the write for echo
+    /// suppression. Every caller reads it through `Result.stands`: only a
+    /// gateway refusal is a failure. A deferred off-Space write stands —
+    /// the canvas is not written blind, and the committed state reconciles
+    /// when the canvas becomes visible — exactly as `writeRects` treats a
+    /// deferred reflow.
     @discardableResult
     private func applyLayout(
         for id: WindowID, context: Context, on space: TilingSpaceKey?
-    ) -> Bool {
-        guard let record = records[id], let slot = state.slot(of: id) else { return false }
+    ) -> FrameWriter.Result {
+        guard let record = records[id], let slot = state.slot(of: id) else { return .refused }
         let bounds = visibleFrame
         let target = grid.rect(for: slot, in: bounds)
         // The shared write policy: a no-op target counts as success
-        // without a write, and a hidden canvas defers (false: the branch
-        // rolls back). The check is `.none`: settle schedules the plan's
-        // convergence check, so a per-write check would double-schedule.
-        // No canvas (legacy/headless snapshots) resolves to the
-        // display-less fallback, which the visibility policy treats as
-        // visible.
+        // without a write, and a hidden canvas defers. The check is
+        // `.none`: settle schedules the plan's convergence check, so a
+        // per-write check would double-schedule. No canvas
+        // (legacy/headless snapshots) resolves to the display-less
+        // fallback, which the visibility policy treats as visible.
         let canvas = space ?? .displayless
         let result = context.frameWriter.write(
             id, handle: record.handle, to: target, bounds: bounds, on: canvas, check: .none)
         context.log(
             "applyLayout win\(id) slot=\(slot.rawValue) bounds=\(bounds) "
                 + "target=\(target) result=\(result)")
-        // A transiently unresolvable Space (the window-server table can
-        // answer nil while the canvas key still carries an id) defers the
-        // write: writing blind could pull the window onto the visible
-        // Space. The branch rolls the placement back with its standard
-        // refusal, the only user-facing failure vocabulary this path has.
-        return result.isAccepted
+        return result
     }
 
     private func appName(_ id: WindowID, context: Context) -> String? {
@@ -843,9 +877,11 @@ struct TilingSpace {
 
     /// One push pass through the shared write policy: the pairs the
     /// gateway actually wrote, which the reassert reads back as achieved
-    /// frames, plus the refusal count reflow rolls back on. Deferred
-    /// (off-Space) writes are neither: the FrameWriter has already marked
-    /// the canvas stale and the pushed state stands.
+    /// frames, plus the refusal count reflow rolls back on. A deferred
+    /// (off-Space) write is not a failure: the FrameWriter has already
+    /// marked the canvas stale and the pushed state stands for
+    /// reconciliation when the canvas becomes visible — the placement
+    /// path's contract, read through the same `Result.stands`.
     private struct WritePass {
         var written: [(id: WindowID, target: CGRect)] = []
         var failed = 0
