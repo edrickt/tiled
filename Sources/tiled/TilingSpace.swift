@@ -63,8 +63,23 @@ struct TilingSpace {
     /// echoes of the expand write and hand drags of the covering window
     /// never mutate splitters or trigger drag-out untile.
     var expanded: [WindowID: CGRect] = [:]
+    /// Pre-tile restores whose frame write deferred off-Space: the window
+    /// is already untiled (record gone, slot released), but writing its
+    /// frame blind could pull it onto the visible Space. The parked
+    /// handle lands where it was by the swipe-back reassert, which drops
+    /// the entry. Keyed by handle, so re-tiling the window before
+    /// reconciliation discards the stale restore.
+    var deferredRestores: [WindowHandle: DeferredRestore] = [:]
     var notice: String?
     var error: String?
+
+    /// One parked off-Space pre-tile restore: the id the write policy
+    /// echoes under (the window's record is gone) plus the frame to land
+    /// on when the canvas becomes visible.
+    struct DeferredRestore: Equatable {
+        let id: WindowID
+        let frame: CGRect
+    }
 
     /// Depth cap for the per-canvas displacement undo: enough history to
     /// survive a tile-tile-realize rhythm without growing unbounded in a
@@ -144,8 +159,17 @@ struct TilingSpace {
     /// that needs its restore frame.
     mutating func attach(_ id: WindowID, handle: WindowHandle) {
         if records[id] == nil {
-            records[id] = WindowRecord(handle: handle, preTileFrame: .zero)
+            beginRecord(id, handle: handle, frame: .zero)
         }
+    }
+
+    /// Creates a window's record and drops any parked off-Space restore
+    /// for its handle: the window is being tiled again, so the stale
+    /// restore must never fire on the swipe back and yank it out of its
+    /// new slot.
+    private mutating func beginRecord(_ id: WindowID, handle: WindowHandle, frame: CGRect) {
+        records[id] = WindowRecord(handle: handle, preTileFrame: frame)
+        deferredRestores[handle] = nil
     }
 
     func record(of id: WindowID) -> WindowRecord? { records[id] }
@@ -345,7 +369,7 @@ struct TilingSpace {
                 id = existing
             } else {
                 id = context.allocateID(entry.handle)
-                records[id] = WindowRecord(handle: entry.handle, preTileFrame: .zero)
+                beginRecord(id, handle: entry.handle, frame: .zero)
             }
             guard var record = records[id] else { continue }
             record.preTileFrame = entry.preTileFrame
@@ -745,15 +769,27 @@ struct TilingSpace {
         state.remove(window: id)
     }
 
-    /// Restores the window's pre-tile frame and releases its slot.
-    /// Returns false when the restore was attempted and refused, so the
-    /// caller can say so instead of silently leaving a stray window behind.
-    /// The coordinator's undo reuses this for the chapter's requester.
+    /// Restores the window's pre-tile frame and releases its slot, going
+    /// through the one write policy every other push shares: a target the
+    /// window already holds is skipped, and a canvas the user cannot see
+    /// defers rather than writing blind. Returns false only when the
+    /// gateway refused the write, so the caller can say so instead of
+    /// silently leaving a stray window behind. The coordinator's undo
+    /// reuses this for the chapter's requester.
     @discardableResult
     mutating func restore(window id: WindowID, context: Context) -> Bool {
         var restored = true
         if let record = records[id], record.preTileFrame != .zero {
-            restored = context.gateway.setFrame(record.handle, to: record.preTileFrame)
+            let result = context.frameWriter.write(
+                id, handle: record.handle, to: record.preTileFrame,
+                bounds: visibleFrame, on: context.space, check: .none)
+            if result == .deferredOffSpace {
+                // Deferred: nothing was written. Park the restore so the
+                // swipe-back reassert lands it once the canvas is visible.
+                deferredRestores[record.handle] = DeferredRestore(
+                    id: id, frame: record.preTileFrame)
+            }
+            restored = result.stands
         }
         forget(id, context: context)
         return restored
@@ -777,6 +813,36 @@ struct TilingSpace {
     private static func reportRestoreFailures(_ failures: [String], refusal: inout Refusal?) {
         guard !failures.isEmpty, refusal == nil else { return }
         refusal = Refusal(message: MenuText.restoreFailureMessage(failures), windowName: nil)
+    }
+
+    /// Writes every parked off-Space pre-tile restore now that the canvas
+    /// is visible, then drops it: the restore's intent stands and lands
+    /// here, exactly as a deferred reflow lands on the reassert. A canvas
+    /// still hidden re-parks; a genuine refusal narrates the shared
+    /// restore-failure message. The window is already untiled, so its
+    /// tracker entry is cleared after the write (no phantom expectation).
+    private mutating func reconcileDeferredRestores(context: Context) {
+        guard !deferredRestores.isEmpty else { return }
+        var remaining: [WindowHandle: DeferredRestore] = [:]
+        var failures: [String] = []
+        for (handle, parked) in deferredRestores {
+            let result = context.frameWriter.write(
+                parked.id, handle: handle, to: parked.frame,
+                bounds: visibleFrame, on: context.space, check: .none)
+            context.tracker.forget(parked.id)
+            switch result {
+            case .written, .skippedNoOp:
+                break
+            case .deferredOffSpace:
+                remaining[handle] = parked
+            case .refused:
+                failures.append(context.gateway.appName(of: handle) ?? "A window")
+            }
+        }
+        deferredRestores = remaining
+        if !failures.isEmpty {
+            error = MenuText.restoreFailureMessage(failures)
+        }
     }
 
     /// Applies `id`'s slot rect on `space` (nil selects the display-less
@@ -1036,6 +1102,8 @@ struct TilingSpace {
                       let frame = context.gateway.frame(of: handle)
                 else { continue }
                 let fresh = context.allocateID(handle)
+                // Re-observed for the undo chapter, not re-tiled: keep any
+                // parked off-Space restore so the swipe back still lands it.
                 records[fresh] = WindowRecord(handle: handle, preTileFrame: frame)
                 outcome.observe.append(fresh)
                 snapshot.append(EvictedWindow(
@@ -1295,6 +1363,10 @@ struct TilingSpace {
             context.log("reassert skipped: degenerate visibleFrame \(visibleFrame)")
             return Outcome()
         }
+        // A deferred pre-tile restore lands here, on the swipe back that
+        // reasserts this canvas: the parked window was never written
+        // blind, and its frame is restored now that the canvas is visible.
+        reconcileDeferredRestores(context: context)
         var plan = reassertPlan(source)
         grid = plan.grid
         seedBaselines(plan.rects, context: context)

@@ -21,6 +21,10 @@ final class TilingSpaceHarness {
     /// placement, reflow, and expand derives its target from this rect,
     /// never a live `NSScreen`.
     var bounds = CGRect(x: 0, y: 0, width: 1600, height: 1200)
+    /// Ids the write policy armed an echo expectation for, in order: lets
+    /// a test pin that a restore participates in echo handling (and that
+    /// a deferred or no-op one arms nothing).
+    private(set) var expectedWrites: [WindowID] = []
     private(set) var tracker: DragTracker!
     private(set) var writer: FrameWriter!
 
@@ -40,6 +44,7 @@ final class TilingSpaceHarness {
             isVisible: { [weak self] _ in self?.canvasVisible ?? true },
             markStale: { _ in },
             markExpected: { [weak self] id, target in
+                self?.expectedWrites.append(id)
                 self?.tracker.markExpected(id, target)
             },
             scheduleCheck: { _, _ in },
@@ -75,6 +80,11 @@ final class TilingSpaceHarness {
     }
 
     func handle(of id: WindowID) -> WindowHandle? { handles[id] }
+
+    /// Clears the echo-arming log: a test asserts about writes from here on.
+    func clearExpectedWrites() {
+        expectedWrites.removeAll()
+    }
 
     func frame(of id: WindowID) -> CGRect? {
         handles[id].flatMap { gateway.frame(of: $0) }
