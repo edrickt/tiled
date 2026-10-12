@@ -312,7 +312,7 @@ final class MenuModelTests: XCTestCase {
             tiledWindows: [
                 .init(id: 1, slot: .topLeft, appName: nil),
                 .init(id: 2, slot: .topRight, appName: nil),
-                .init(id: 3, slot: .topLeft, appName: nil, screenName: "Display 2"),
+                .init(id: 3, slot: .topLeft, appName: nil, screen: ScreenID(rawValue: 1)),
             ],
             untileCount: 2))
         let row = model.first { $0.action == .untileAll }
@@ -337,13 +337,15 @@ final class MenuModelTests: XCTestCase {
     func testMultiMonitorWindowsGroupUnderDisplayHeaders() {
         // Two displays tiled: the manage list groups per display under
         // a disabled header per section, in controller order.
+        let left = ScreenID(rawValue: 0)
+        let right = ScreenID(rawValue: 1)
         var snap = snapshot(tiledWindows: [
-            .init(id: 1, slot: .topLeft, appName: "Safari", screenName: "Display 1"),
-            .init(id: 2, slot: .topLeft, appName: "Mail", screenName: "Display 2"),
+            .init(id: 1, slot: .topLeft, appName: "Safari", screen: left),
+            .init(id: 2, slot: .topLeft, appName: "Mail", screen: right),
         ])
         snap.monitorSections = [
-            .init(title: "Display 1 · Quarters · 1 tiled", key: "Display 1"),
-            .init(title: "Display 2 · Sixths · 1 tiled", key: "Display 2"),
+            .init(title: "Display 1 · Quarters · 1 tiled", key: left),
+            .init(title: "Display 2 · Sixths · 1 tiled", key: right),
         ]
         let model = items(snap)
         let headers = model.filter(\.isHeader).map(\.title)
@@ -358,6 +360,33 @@ final class MenuModelTests: XCTestCase {
         XCTAssertTrue(titles[second + 1].contains("Mail"))
     }
 
+    func testSectionsWithTheSameTitleMatchRowsByDisplayIdentity() {
+        // Two unlabeled displays both render a "Display" header. The rows
+        // must follow their own section's identity, never the first
+        // header whose text matches: matching by name would pile both
+        // windows under the first header and leave the second empty.
+        let left = ScreenID(rawValue: 0)
+        let right = ScreenID(rawValue: 1)
+        var snap = snapshot(tiledWindows: [
+            .init(id: 1, slot: .topLeft, appName: "Safari", screen: left),
+            .init(id: 2, slot: .topLeft, appName: "Mail", screen: right),
+        ])
+        snap.monitorSections = [
+            .init(title: "Display · Quarters · 1 tiled", key: left),
+            .init(title: "Display · Quarters · 1 tiled", key: right),
+        ]
+        let model = items(snap)
+        let titles = model.map(\.title)
+        let headerIndices = titles.indices.filter { titles[$0] == "Display · Quarters · 1 tiled" }
+        XCTAssertEqual(headerIndices.count, 2, "both identical Display headers render")
+        let safariIndex = titles.firstIndex { $0.contains("Safari") }!
+        let mailIndex = titles.firstIndex { $0.contains("Mail") }!
+        XCTAssertLessThan(safariIndex, headerIndices[1],
+                          "Safari belongs to the first display's section")
+        XCTAssertLessThan(headerIndices[1], mailIndex,
+                          "Mail belongs under the second display's own header")
+    }
+
     func testSingleMonitorKeepsTheFlatList() {
         // No sections (legacy snapshot): no display headers, just rows.
         let model = items(snapshot(tiledWindows: [
@@ -369,16 +398,17 @@ final class MenuModelTests: XCTestCase {
 
     func testOrphanRowWithMismatchedSectionKeyStillRenders() {
         // Defensive tail: a stale snapshot can carry a window whose
-        // screenName matches no section header. The row must still
-        // render (trailing, after the matched sections), silently
-        // dropping a user's window from the manage list is the one
-        // failure this branch exists to prevent.
+        // screen matches no section key. The row must still render
+        // (trailing, after the matched sections), silently dropping a
+        // user's window from the manage list is the one failure this
+        // branch exists to prevent.
+        let orphanScreen = ScreenID(rawValue: 1)
         var snap = snapshot(tiledWindows: [
-            .init(id: 1, slot: .topLeft, appName: "Safari", screenName: "Display 1"),
-            .init(id: 2, slot: .sixthTopLeft, appName: "Orphan", screenName: "Display 2"),
+            .init(id: 1, slot: .topLeft, appName: "Safari", screen: ScreenID(rawValue: 0)),
+            .init(id: 2, slot: .sixthTopLeft, appName: "Orphan", screen: orphanScreen),
         ])
         snap.monitorSections = [
-            .init(title: "Display 1 · Quarters · 1 tiled", key: "Display 1"),
+            .init(title: "Display 1 · Quarters · 1 tiled", key: ScreenID(rawValue: 0)),
         ]
         let model = items(snap)
 

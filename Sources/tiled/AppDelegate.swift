@@ -485,8 +485,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Pure multi-monitor grouping for the manage list, extracted from
     /// menuSnapshot so tests pin it without a live controller. The
-    /// grouping key is the display name (or positional fallback); one
-    /// section per display that has windows, in controller order. Single
+    /// grouping key is the display's `ScreenID` (identity); the display
+    /// name is used only for the header text. One section per display
+    /// that has windows, in controller order. Two same-named monitors
+    /// stay separate because identity, not the name, groups them. Single
     /// monitor (or no screen tags) renders the flat legacy list.
     static func monitorPresentation(
         rows: [TilingController.TiledWindowInfo],
@@ -494,25 +496,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> (sections: [MenuModel.Snapshot.MonitorSection],
           tiledWindows: [MenuModel.Snapshot.TiledWindow],
           statusLine: String) {
-        let grouped = Dictionary(grouping: rows, by: \.screenName)
+        let grouped = Dictionary(grouping: rows, by: \.screen)
         let sections: [MenuModel.Snapshot.MonitorSection]
         let orderedRows: [MenuModel.Snapshot.TiledWindow]
         if grouped.count > 1 || (grouped.count == 1 && grouped.keys.first != nil) {
             var built: [MenuModel.Snapshot.MonitorSection] = []
             var ordered: [MenuModel.Snapshot.TiledWindow] = []
             for row in rows {
-                if !built.contains(where: { $0.key == row.screenName }) {
-                    let count = rows.filter { $0.screenName == row.screenName }.count
+                if !built.contains(where: { $0.key == row.screen }) {
+                    let count = rows.filter { $0.screen == row.screen }.count
                     let layout = layoutForScreen(row.screen)
                     let display = row.screenName ?? "Display"
                     let noun = count == 1 ? "1 tiled" : "\(count) tiled"
                     built.append(.init(
                         title: "\(display) · \(layout.title) · \(noun)",
-                        key: row.screenName))
+                        key: row.screen))
                 }
                 ordered.append(.init(
                     id: row.id, slot: row.slot, appName: row.appName,
-                    screenName: row.screenName))
+                    screen: row.screen))
             }
             sections = built
             orderedRows = ordered
