@@ -81,6 +81,29 @@ struct TilingSpace {
         let frame: CGRect
     }
 
+    /// A placement or expand/collapse whose write deferred off-Space: the
+    /// user's request is retained and re-issued by the swipe-back
+    /// reassert, exactly as a deferred restore lands. Keyed by id (unlike
+    /// a deferred restore, whose record is gone): the window is still
+    /// owned by this canvas, so it can be reconciled by re-writing its
+    /// committed rect. A newer request for the same window replaces the
+    /// older one, so the user's last intent wins.
+    var deferredRequests: [WindowID: DeferredRequest] = [:]
+
+    /// One retained off-Space request. A placement re-issues its committed
+    /// slot rect on return; an expand/collapse re-issues the frame the
+    /// toggle would have written (the screen frame, or the saved one).
+    enum DeferredRequest: Equatable {
+        /// A placement deferred off-Space: the slot the user asked for.
+        case placement(slot: Slot)
+        /// An expansion deferred off-Space: the pre-expand frame to
+        /// remember (`expanded[id]`) once the expansion lands.
+        case expand(saved: CGRect)
+        /// A collapse of an untiled expanded window deferred off-Space:
+        /// the saved frame to land on.
+        case collapse(frame: CGRect)
+    }
+
     /// Depth cap for the per-canvas displacement undo: enough history to
     /// survive a tile-tile-realize rhythm without growing unbounded in a
     /// hotkey-heavy session. The chapters themselves live here, beside
@@ -175,6 +198,7 @@ struct TilingSpace {
     private mutating func beginRecord(_ id: WindowID, handle: WindowHandle, frame: CGRect) {
         records[id] = WindowRecord(handle: handle, preTileFrame: frame)
         deferredRestores[handle] = nil
+        deferredRequests[id] = nil
     }
 
     func record(of id: WindowID) -> WindowRecord? { records[id] }
@@ -200,6 +224,9 @@ struct TilingSpace {
     /// calling; a swap's expanded displaced window is collapsed here,
     /// between planning and committing, exactly where it always was.
     mutating func apply(slot: Slot, requester id: WindowID, context: Context) -> Outcome {
+        // A new placement request supersedes any retained expand/collapse
+        // for this window: the user's last intent is the slot.
+        deferredRequests[id] = nil
         let decision = state.plan(window: id, into: slot)
         guard decision != .noop else {
             return Outcome(result: .alreadyTiled)
@@ -505,6 +532,10 @@ struct TilingSpace {
             (entryID, formerSlot) in
             snapshotEntry(for: entryID, fallback: formerSlot, space: context.space)
         }
+        // Both windows move: any retained request each carried is
+        // superseded by the swap.
+        deferredRequests[displaced] = nil
+        deferredRequests[id] = nil
         state.commit(window: displaced, into: previous)
         commit.observed.append(displaced)
         let displacedWrite = applyLayout(for: displaced, context: context, on: context.space)
@@ -609,6 +640,7 @@ struct TilingSpace {
         // no destruction to undo, and promise an undo that cannot exist.
         // A refused re-house write falls back to the plain eviction.
         if let (wid, home) = rehouse, clean {
+            deferredRequests[wid] = nil
             state.commit(window: wid, into: home)
             let write = applyLayout(for: wid, context: context, on: context.space)
             if write.stands {
@@ -783,8 +815,13 @@ struct TilingSpace {
             return failed
         }
         // A deferred off-Space write is not a failure: the occupancy
-        // stands and reconciles when the canvas becomes visible.
-        if result == .deferredOffSpace { deferred = true }
+        // stands and reconciles when the canvas becomes visible. Retain
+        // the requested slot so the swipe-back reassert re-issues it,
+        // exactly as a deferred reflow reconciles.
+        if result == .deferredOffSpace {
+            deferred = true
+            deferredRequests[id] = .placement(slot: slot)
+        }
         context.log("place win\(id) -> \(slot.rawValue)")
         return nil
     }
@@ -795,6 +832,7 @@ struct TilingSpace {
     private mutating func forget(_ id: WindowID, context: Context) {
         records[id] = nil
         expanded[id] = nil
+        deferredRequests[id] = nil
         context.tracker.forget(id)
         state.remove(window: id)
     }
@@ -872,6 +910,51 @@ struct TilingSpace {
         deferredRestores = remaining
         if !failures.isEmpty {
             error = MenuText.restoreFailureMessage(failures)
+        }
+    }
+
+    /// Re-issues every retained placement/expand request now that the
+    /// canvas is visible, dropping each as it lands: the deferred-intent
+    /// half of the swipe-back reassert, mirroring
+    /// `reconcileDeferredRestores`. A canvas still hidden re-parks the
+    /// request; a genuine refusal narrates the shared message. An expand
+    /// lands by writing the screen frame and recording `expanded[id]`, so
+    /// the plan that follows leaves the covering window where it is.
+    private mutating func reconcileDeferredRequests(context: Context) {
+        guard !deferredRequests.isEmpty else { return }
+        var remaining: [WindowID: DeferredRequest] = [:]
+        var failures = 0
+        for (id, request) in deferredRequests {
+            // The record is the ownership primitive: a request whose
+            // window left this canvas is stale and simply dropped.
+            guard records[id] != nil else { continue }
+            switch request {
+            case .placement:
+                switch applyLayout(for: id, context: context, on: context.space) {
+                case .written, .skippedNoOp: break
+                case .deferredOffSpace: remaining[id] = request
+                case .refused: failures += 1
+                }
+            case .expand(let saved):
+                switch writeExpandedFrame(id, to: visibleFrame, context: context) {
+                case .accepted:
+                    expanded[id] = saved
+                case .deferred:
+                    remaining[id] = request
+                case .refused:
+                    failures += 1
+                }
+            case .collapse(let frame):
+                switch writeExpandedFrame(id, to: frame, context: context) {
+                case .accepted: break
+                case .deferred: remaining[id] = request
+                case .refused: failures += 1
+                }
+            }
+        }
+        deferredRequests = remaining
+        if failures > 0 {
+            error = Self.refusalMessage(count: failures)
         }
     }
 
@@ -1186,19 +1269,25 @@ struct TilingSpace {
         let target = visibleFrame
         error = nil
         notice = nil
+        // A fresh toggle supersedes any request already retained for this
+        // window.
+        deferredRequests[id] = nil
         let result = writeExpandedFrame(id, to: target, context: context)
-        if result.accepted {
+        switch result {
+        case .accepted:
             expanded[id] = current
             context.log("expand win\(id) -> \(target)")
             return Outcome()
-        }
-        // Every non-accepted expanded write answers `.expandRefused`,
-        // deferred included (the old feedback shape); only a genuine
-        // refusal records a message on the canvas.
-        if let message = result.refusal {
+        case .deferred:
+            // The canvas is not visible: retain the expansion so the
+            // swipe-back reassert issues it, and narrate the deferral —
+            // never an app refusal (the app did nothing wrong).
+            deferredRequests[id] = .expand(saved: current)
+            return Outcome(result: .deferred)
+        case .refused(let message):
             error = message
+            return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
         }
-        return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
     }
 
     /// Unexpands `id`, recording the refusal on this canvas and returning
@@ -1211,28 +1300,38 @@ struct TilingSpace {
         expanded[id] = nil
         error = nil
         notice = nil
-        var refusal: String?
-        var answered = false
-        if state.slot(of: id) != nil {
-            if let result = retileExpanded(id, context: context) {
-                refusal = result.refusal
-                answered = !result.accepted
-            }
+        // A fresh toggle supersedes any request already retained for this
+        // window.
+        deferredRequests[id] = nil
+        var result: ExpandedWrite?
+        let tiled = state.slot(of: id) != nil
+        if tiled {
+            result = retileExpanded(id, context: context)
         } else if records[id] != nil {
-            let result = writeExpandedFrame(id, to: saved, context: context)
-            refusal = result.refusal
-            answered = !result.accepted
-            if result.accepted {
+            result = writeExpandedFrame(id, to: saved, context: context)
+        }
+        guard let result else { return Outcome() }
+        switch result {
+        case .accepted:
+            if !tiled {
                 context.log("collapse win\(id) -> saved \(saved)")
             }
+            return Outcome()
+        case .deferred:
+            // The canvas is not visible: retain the collapse so the
+            // swipe-back reassert issues it. A tiled collapse re-tiles
+            // into its committed slot; an untiled one returns to the
+            // saved frame.
+            if let slot = state.slot(of: id) {
+                deferredRequests[id] = .placement(slot: slot)
+            } else {
+                deferredRequests[id] = .collapse(frame: saved)
+            }
+            return Outcome(result: .deferred)
+        case .refused(let message):
+            error = message
+            return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
         }
-        if let refusal {
-            error = refusal
-        }
-        // A deferred or refused retile answers `.expandRefused`; a
-        // collapse with no record (nothing to write) stays silent.
-        guard answered else { return Outcome() }
-        return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
     }
 
     /// Re-applies an expanded window's slot rect after collapse; the
@@ -1256,19 +1355,11 @@ struct TilingSpace {
     private enum ExpandedWrite: Equatable {
         /// The frame is where intended (written, or already correct).
         case accepted
-        /// The canvas is not the visible Space: nothing written, nothing
-        /// recorded; expansion stays out of state.
+        /// The canvas is not the visible Space: nothing written. The
+        /// caller retains the request for the swipe-back reassert.
         case deferred
         /// The gateway refused: message for the window's canvas.
         case refused(String)
-
-        var accepted: Bool { self == .accepted }
-
-        /// The refusal message to record, when the gateway refused.
-        var refusal: String? {
-            if case .refused(let message) = self { return message }
-            return nil
-        }
     }
 
     private func writeExpandedFrame(
@@ -1276,8 +1367,8 @@ struct TilingSpace {
     ) -> ExpandedWrite {
         guard let record = records[id] else { return .deferred }
         // The shared write policy: the off-Space guard defers a hidden
-        // canvas (the expansion stays out of state), and a no-op target
-        // counts as success without a write.
+        // canvas (the caller retains the toggle for the swipe-back
+        // reassert), and a no-op target counts as success without a write.
         let result = context.frameWriter.write(
             id, handle: record.handle, to: target, bounds: visibleFrame,
             on: context.space, check: .none)
@@ -1404,6 +1495,10 @@ struct TilingSpace {
         // reasserts this canvas: the parked window was never written
         // blind, and its frame is restored now that the canvas is visible.
         reconcileDeferredRestores(context: context)
+        // A deferred placement or expand/collapse lands here too: its
+        // intent was retained, and re-issuing it now that the canvas is
+        // visible is what makes the swipe back honour the request.
+        reconcileDeferredRequests(context: context)
         var plan = reassertPlan(source)
         grid = plan.grid
         seedBaselines(plan.rects, context: context)

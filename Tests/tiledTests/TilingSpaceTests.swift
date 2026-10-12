@@ -74,6 +74,25 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(outcome.result, .deferred)
     }
 
+    /// A deferred placement is retained and re-issued by the swipe-back
+    /// reassert: the window lands in its requested slot with no second
+    /// user action, matching the deferred reflow/restore reconciliation.
+    func testDeferredPlacementLandsOnReassertWhenVisible() {
+        let id = harness.addWindow()
+        harness.canvasVisible = false
+
+        let outcome = harness.apply(slot: .topLeft, requester: id)
+        XCTAssertEqual(outcome.result, .deferred)
+        XCTAssertTrue(harness.gateway.writes.isEmpty, "a hidden canvas is never written blind")
+
+        harness.canvasVisible = true
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(
+            harness.frame(of: id), harness.rect(.topLeft),
+            "the retained placement lands in its requested slot on return")
+    }
+
     func testSameSlotRequestIsAStrictNoopThatPreservesTheNotice() {
         let a = harness.addWindow()
         let b = harness.addWindow()
@@ -988,9 +1007,56 @@ final class TilingSpaceTests: XCTestCase {
 
         let outcome = space.expandToggle(window: id, context: context())
 
-        XCTAssertEqual(outcome.result, .expandRefused(windowName: "TestApp"))
-        XCTAssertFalse(space.isExpanded(id))
+        XCTAssertEqual(
+            outcome.result, .deferred,
+            "a deferral is narrated as a deferral, never an app refusal")
+        XCTAssertFalse(space.isExpanded(id), "the expansion lands only when the canvas is visible")
         XCTAssertTrue(harness.gateway.writes.isEmpty)
+    }
+
+    /// A deferred expand is retained: the toggle is re-issued by the
+    /// swipe-back reassert, so the window is expanded on return rather
+    /// than left merely tiled.
+    func testDeferredExpandLandsOnReassertWhenVisible() {
+        let id = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: id)
+        harness.gateway.clearWrites()
+        harness.canvasVisible = false
+
+        let outcome = space.expandToggle(window: id, context: context())
+        XCTAssertEqual(outcome.result, .deferred)
+        XCTAssertTrue(harness.gateway.writes.isEmpty, "a hidden canvas is never written blind")
+
+        harness.canvasVisible = true
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(harness.frame(of: id), bounds, "the retained expand lands on return")
+        XCTAssertTrue(space.isExpanded(id))
+        XCTAssertEqual(
+            space.state.slot(of: id), .topLeft,
+            "expanding acts like focusing: the slot survives")
+    }
+
+    /// A deferred collapse of an untiled expanded window is retained too:
+    /// the saved frame lands on return instead of the window keeping the
+    /// screen-covering frame.
+    func testDeferredCollapseOfAnUntiledWindowLandsOnReassert() {
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let id = harness.addWindow(frame: original)
+        _ = space.expandToggle(window: id, context: context())
+        XCTAssertTrue(space.isExpanded(id))
+
+        harness.gateway.clearWrites()
+        harness.canvasVisible = false
+        let outcome = space.expandToggle(window: id, context: context())
+        XCTAssertEqual(outcome.result, .deferred)
+        XCTAssertTrue(harness.gateway.writes.isEmpty)
+
+        harness.canvasVisible = true
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(harness.frame(of: id), original, "the retained collapse lands on return")
+        XCTAssertFalse(space.isExpanded(id))
     }
 
     func testExpandWithNoReadableFrameRefusesToGuess() {

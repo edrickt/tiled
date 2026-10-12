@@ -447,6 +447,45 @@ final class SpaceIndependenceTests: XCTestCase {
             "the deferred placement lands when the Space becomes visible")
     }
 
+    /// A retained request belongs to the canvas it was made on: while
+    /// another canvas is visible it is never written there, and it does
+    /// not leak across canvases.
+    func testDeferredRequestDoesNotLeakToAnotherCanvas() {
+        let keyB = TilingSpaceKey(screen: Self.display.id, space: Self.spaceB)
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let aTiled = gateway.frame(of: a)!
+
+        // Space B is visible and holds its own window.
+        switchTo(Self.spaceB)
+        let b = addFocusedWindow(frame: CGRect(x: 300, y: 300, width: 400, height: 300))
+        controller.handle(slot: .topRight)
+        let bTiled = gateway.frame(of: b)!
+
+        // Expanding A while its canvas is hidden defers and retains.
+        var feedbacks: [TilingController.Feedback] = []
+        controller.onFeedback = { feedbacks.append($0) }
+        gateway.focused = a
+        controller.handleExpandToggle()
+
+        XCTAssertEqual(gateway.frame(of: a), aTiled, "hidden A is never written")
+        guard case .deferred = feedbacks.first else {
+            return XCTFail("expected .deferred, got \(feedbacks)")
+        }
+        XCTAssertEqual(
+            gateway.frame(of: b), bTiled,
+            "the deferred request for A is never applied to the visible B")
+        XCTAssertNil(
+            controller.canvas(for: keyB).state.slot(of: a.id),
+            "A's window never leaks onto B's canvas")
+
+        // The request lands on its own canvas when A returns.
+        switchTo(Self.spaceA)
+        XCTAssertEqual(
+            gateway.frame(of: a), Self.display.visibleFrame,
+            "the retained expansion lands on A when it becomes visible")
+    }
+
     /// A stale canvas whose visible frame is degenerate writes nothing on
     /// the swipe back (the reassert early-returns), so its stale mark must
     /// survive: clearing it here would drop the deferred reassert and the
