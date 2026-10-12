@@ -80,3 +80,12 @@ _Avoid_: window id (that's the pure-state key), element
 Committing a decided plan (tile, swap, or switch): snapshot, restore, place, rollback, and notice logic. Owned by the tiling space's placement pipeline; the controller keeps focus, pruning, and dispatch.
 _Code_: `TilingSpace.execute(decision:)`
 _Avoid_: placement (which is only the place step), commit
+
+**Expected write**:
+One frame the canvas intends to put on a window, taken through the one shared write policy: expected (written), already correct (a no-op skip), refused by the app, or deferred off-Space.
+_Avoid_: push, setFrame (the gateway call, one policy outcome), placement (a whole plan)
+
+**Deferral (deferred off-Space write)**:
+A write the policy skipped because the window's canvas is on a Mission Control Space the user cannot see; writing blind could pull the window onto the visible Space. A deferral is **never a failure anywhere**: the write's intent stands — the canvas keeps the committed slot and reconciles it when the Space becomes visible (swipe back), exactly as a deferred reflow does — and it is narrated as a deferral ("That Space isn't visible yet"), never as an app refusal. Only a genuine refusal rolls a placement back.
+_Code_: `FrameWriter.Result.stands` (the one read every push path shares); `MenuText.deferredOffSpaceAnnouncement()`
+_Avoid_: refused, ignored write, hidden-canvas failure, rollback

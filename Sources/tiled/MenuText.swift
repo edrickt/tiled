@@ -121,6 +121,14 @@ enum MenuText {
         "That window isn't tiled: nothing to evict."
     }
 
+    /// A write was deferred because its canvas is on a Mission Control
+    /// Space the user cannot see. Not a refusal: the intent stands and
+    /// reconciles when the Space returns, so the wording promises that
+    /// rather than blaming the app.
+    static func deferredOffSpaceAnnouncement() -> String {
+        "That Space isn't visible yet: the change will apply when you return to it."
+    }
+
     // MARK: Restore failures
 
     /// A window's pre-tile frame could not be restored. Names the window

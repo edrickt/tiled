@@ -350,6 +350,9 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertEqual(
             controller.canvas(for: keyA).state.slot(of: b.id), .leftHalf,
             "the freed cells reflow in hidden-state logically")
+        XCTAssertNil(
+            controller.canvas(for: keyA).error,
+            "a deferred reflow is not narrated as an app refusal")
         XCTAssertEqual(
             gateway.frame(of: b), frameBefore,
             "the hidden canvas is not written: an off-Space resize can pull the window forward")
@@ -363,17 +366,19 @@ final class SpaceIndependenceTests: XCTestCase {
 
     // MARK: Display-change reassertion
 
-    func testTileOnAHiddenSpaceDefersTheWriteAndRollsBack() {
+    func testTileOnAHiddenSpaceDefersAndStandsForReconciliation() {
         // A tiled window's own canvas wins even while hidden: asking it
         // to move to another slot must not write the off-Space window
-        // (the write could pull it onto the visible Space), and the
-        // placement rolls back instead of diverging.
+        // (the write could pull it onto the visible Space). The deferred
+        // placement stands and reconciles when the Space returns, and it
+        // is narrated as a deferral — never as an app refusal.
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)
         let hiddenFrame = gateway.frame(of: a)!
 
         switchTo(Self.spaceB)
         gateway.focused = a
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
         var feedbacks: [TilingController.Feedback] = []
         controller.onFeedback = { feedbacks.append($0) }
 
@@ -382,12 +387,20 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertEqual(
             gateway.frame(of: a), hiddenFrame,
             "a hidden canvas is never written in the dark")
-        guard case .refused = feedbacks.first else {
-            return XCTFail("expected .refused, got \(feedbacks)")
+        XCTAssertEqual(
+            controller.canvas(for: keyA).state.slot(of: a.id), .topRight,
+            "the deferred placement stands rather than rolling back")
+        guard case .deferred = feedbacks.first else {
+            return XCTFail("expected .deferred, got \(feedbacks)")
         }
-        XCTAssertNil(
-            controller.canvas(for: Self.display.id).state.slot(of: a.id),
-            "the deferred placement rolls back rather than diverging")
+
+        // Swiping back reconciles the retained placement, exactly like a
+        // deferred reflow.
+        switchTo(Self.spaceA)
+        XCTAssertEqual(
+            gateway.frame(of: a),
+            GridLayout().rect(for: .topRight, in: Self.display.visibleFrame),
+            "the deferred placement lands when the Space becomes visible")
     }
 
     func testScreenChangeWhileHiddenReassertsWhenTheSpaceReturns() {

@@ -842,6 +842,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .nothingToEvict:
             text = MenuText.nothingToEvictAnnouncement()
             noticeFallback = "Window isn't tiled."
+        case .deferred:
+            text = MenuText.deferredOffSpaceAnnouncement()
+            noticeFallback = "Space isn't visible yet."
         }
         announce(text, fallback: noticeFallback)
         refreshMenu()
