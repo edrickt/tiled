@@ -103,15 +103,19 @@ enum MenuModel {
             var id: WindowID
             var slot: Slot
             var appName: String?
-            /// Display-line the window tiles on (menu grouping key).
-            var screenName: String? = nil
+            /// Display the window tiles on, matched against
+            /// `MonitorSection.key`: identity, never the display name, so
+            /// two monitors sharing a name still separate. Nil for the
+            /// legacy flat list.
+            var screen: ScreenID? = nil
         }
 
         struct MonitorSection: Equatable {
-            /// Header title, e.g. "Display 1 · Quarters · 2 tiled".
+            /// Header title, e.g. "Display 1 · Quarters · 2 tiled". The
+            /// human-readable display name lives only here, as text.
             var title: String
-            /// Grouping key matching `TiledWindow.screenName`.
-            var key: String?
+            /// Display identity matching `TiledWindow.screen`.
+            var key: ScreenID?
         }
     }
 
@@ -246,7 +250,7 @@ enum MenuModel {
                         items.append(Item(
                             title: section.title, isEnabled: false, isHeader: true))
                         while index < snapshot.tiledWindows.count,
-                              snapshot.tiledWindows[index].screenName == section.key
+                              snapshot.tiledWindows[index].screen == section.key
                         {
                             items.append(windowItem(snapshot.tiledWindows[index], binding))
                             index += 1
