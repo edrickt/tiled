@@ -17,7 +17,7 @@ visible, `TilingController.swift:1292`), or re-probe before deciding.
 
 **Findings:** report M3 (`.scratch/multi-display-audit/report.md`).
 
-**Status:** ready-for-agent
+**Status:** DONE (2e0637d)
 
 - [ ] A placement whose canvas's Space cannot be named (empty/parse-failed table) is not narrated
       as an app refusal, and does not claim the app refused anything.
