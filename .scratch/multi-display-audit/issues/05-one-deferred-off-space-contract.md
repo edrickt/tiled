@@ -5,8 +5,7 @@ as failure and rolls the placement back (`TilingSpace.swift:775`), while `writeR
 success and lets the reflow state stand for reconciliation on swipe-back (`:867,825-837`). One
 policy outcome, two contracts — ticket 06 and 07 both encode whatever this ticket settles.
 
-**Status:** needs-decision — the owner's call. The audit recommends the second reading (below);
-dependents 06 and 07 are written against it.
+**Status:** DONE (afa6e98) — the recommended stand-and-reconcile contract is settled.
 
 **Blocked by:** None (can start immediately).
 
