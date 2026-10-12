@@ -51,9 +51,9 @@ final class AppDelegateMenuTests: XCTestCase {
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
-            .init(title: "Built-in · Quarters · 2 tiled", key: "Built-in")
+            .init(title: "Built-in · Quarters · 2 tiled", key: display)
         ])
-        XCTAssertEqual(presentation.tiledWindows.map(\.screenName), ["Built-in", "Built-in"])
+        XCTAssertEqual(presentation.tiledWindows.map(\.screen), [display, display])
         XCTAssertEqual(presentation.statusLine, "Built-in · Quarters · 2 tiled")
     }
 
@@ -81,8 +81,8 @@ final class AppDelegateMenuTests: XCTestCase {
             rows: rows, layoutForScreen: { $0 == right ? .sixths : .quarters })
 
         XCTAssertEqual(presentation.sections, [
-            .init(title: "Display 1 · Quarters · 2 tiled", key: "Display 1"),
-            .init(title: "Display 2 · Sixths · 1 tiled", key: "Display 2"),
+            .init(title: "Display 1 · Quarters · 2 tiled", key: left),
+            .init(title: "Display 2 · Sixths · 1 tiled", key: right),
         ])
         XCTAssertEqual(presentation.tiledWindows.map(\.id), [1, 2, 3])
         XCTAssertEqual(presentation.statusLine,
@@ -118,8 +118,72 @@ final class AppDelegateMenuTests: XCTestCase {
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
-            .init(title: "Display · Quarters · 2 tiled", key: nil)
+            .init(title: "Display · Quarters · 2 tiled", key: display)
         ])
+    }
+
+    func testTwoDisplaysSharingANameRenderAsTwoSections() {
+        // Two monitors can report the same localizedName. Identity, not
+        // the shared name, decides the section: two sections, each with
+        // its own layout and count, both headed by the same words.
+        let left = ScreenID(rawValue: 0)
+        let right = ScreenID(rawValue: 1)
+        let rows = [
+            row(1, .topLeft, screen: left, screenName: "Studio Display"),
+            row(2, .sixthTopLeft, screen: right, screenName: "Studio Display"),
+        ]
+
+        let presentation = AppDelegate.monitorPresentation(
+            rows: rows, layoutForScreen: { $0 == right ? .sixths : .quarters })
+
+        XCTAssertEqual(presentation.sections, [
+            .init(title: "Studio Display · Quarters · 1 tiled", key: left),
+            .init(title: "Studio Display · Sixths · 1 tiled", key: right),
+        ])
+        XCTAssertEqual(presentation.tiledWindows.map(\.screen), [left, right])
+        XCTAssertEqual(presentation.statusLine,
+                       "Studio Display · Quarters · 1 tiled + Studio Display · Sixths · 1 tiled")
+    }
+
+    func testTwoUnlabeledDisplaysDoNotMergeIntoOneSection() {
+        // Both displays fall back to the literal "Display": their
+        // identities still keep them as two separate sections.
+        let left = ScreenID(rawValue: 0)
+        let right = ScreenID(rawValue: 1)
+        let rows = [
+            row(1, .topLeft, screen: left, screenName: nil),
+            row(2, .topRight, screen: right, screenName: nil),
+        ]
+
+        let presentation = AppDelegate.monitorPresentation(
+            rows: rows, layoutForScreen: { _ in .quarters })
+
+        XCTAssertEqual(presentation.sections, [
+            .init(title: "Display · Quarters · 1 tiled", key: left),
+            .init(title: "Display · Quarters · 1 tiled", key: right),
+        ])
+    }
+
+    func testOneDisplaysTwoCanvasesListEachWindowOnceUnderItsSection() {
+        // A display can hold both an identified and a withheld canvas at
+        // once, so `allTiledWindowsInfo` emits rows from both — same
+        // display, same name. They are one display: every window lists
+        // exactly once, under the one section keyed by that display's
+        // ScreenID (never split by canvas, never doubled).
+        let display = ScreenID(rawValue: 0)
+        let rows = [
+            row(1, .topLeft, screen: display, screenName: "Built-in"),
+            row(2, .sixthTopLeft, screen: display, screenName: "Built-in"),
+        ]
+
+        let presentation = AppDelegate.monitorPresentation(
+            rows: rows, layoutForScreen: { _ in .quarters })
+
+        XCTAssertEqual(presentation.sections, [
+            .init(title: "Built-in · Quarters · 2 tiled", key: display)
+        ])
+        XCTAssertEqual(presentation.tiledWindows.map(\.id), [1, 2])
+        XCTAssertEqual(presentation.tiledWindows.map(\.screen), [display, display])
     }
 
     // MARK: Refresh ordering (refreshPlan)
