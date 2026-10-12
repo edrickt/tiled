@@ -42,6 +42,16 @@ independently grabbable. The frontier = every ticket whose blockers are DONE.
 reflow contract — and is narrated as a deferral, never as an app refusal. Tickets 06 and 07 encode
 it.
 
+## Review and close-out
+
+A two-axis code review (Standards + Spec) ran over `master...HEAD`. Its findings were fixed in
+`e63f3b0` ("Close the multi-display review"): one canvas key threaded through the menu-open path,
+mutation coverage for the new deferred-reconcile / ownership-reclaim / stale-guard mechanisms,
+the three under-pinned acceptance criteria (ticket 09 stale mark, ticket 11 same-window
+double-list, ticket 02 pending-death clock), and the `CONTEXT.md` vocabulary corrections
+(*placement* → the request, *parked* → deferred, *foreign* → claimed-by-another-canvas).
+Final on the integration branch: **669 tests green, 84/84 mutants caught.**
+
 ## Gates (non-negotiable in every ticket)
 
 - `swift build 2>&1 | grep -E "warning:|error:"` -> empty
