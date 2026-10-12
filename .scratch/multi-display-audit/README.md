@@ -24,7 +24,7 @@ that merges, re-check family 3 (the write policy) against the `WriteExpectations
 | 03 | Death confirmation excludes sleep | – | M2 (clock) | DONE (`7e4da22`) |
 | 04 | A moved listed frame is alive | 03 | M2 (frame) | DONE (`b163b6d`) |
 | 05 | One deferred-off-Space contract | – | M9 | DONE (`afa6e98`) |
-| 06 | A deferred request is retained | 05 | M10, M12 | ready-for-agent |
+| 06 | A deferred request is retained | 05 | M10, M12 | DONE (`eeb07ee`) |
 | 07 | Unknown Space is not an app refusal | 05 | M3 | ready-for-agent |
 | 08 | The restore goes through the write policy | – | M4 | DONE (`2fcb3aa`) |
 | 09 | Visibility requires an attached display | – | M7 | DONE (`4101d37`) |
