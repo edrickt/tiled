@@ -194,8 +194,14 @@
  [
   "TilingController.swift",
   "hidden canvas treated as visible (reflow writes off-Space windows)",
-  "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen else { return true }\n        guard screens().contains(where: { $0.id == screen }) else { return false }\n        guard let id = space.space else { return true }\n        return activeSpaceID(on: screen) == id\n    }",
+  "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen else { return true }\n        guard screens().contains(where: { $0.id == screen }) else { return false }\n        guard let id = space.space else { return true }\n        // No answer names the visible Space: unknown, not different.\n        // Treat it like the withheld id above rather than a hidden canvas.\n        guard let active = activeSpaceID(on: screen) else { return true }\n        return active == id\n    }",
   "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        true\n    }"
+ ],
+ [
+  "TilingController.swift",
+  "unnameable active Space treated as hidden (visible canvas deferred)",
+  "        guard let active = activeSpaceID(on: screen) else { return true }",
+  "        guard let active = activeSpaceID(on: screen) else { return false }"
  ],
  [
   "TilingController.swift",

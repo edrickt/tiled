@@ -1390,13 +1390,19 @@ final class TilingController {
     /// withheld Space id is the per-display fallback the user is looking
     /// at, so it stays visible; an identified canvas is visible when it is
     /// the Space shown there. When the window server cannot name the
-    /// visible Space either, the write is deferred too: the next
-    /// successful lookup re-asserts it.
+    /// visible Space at all, the canvas is *unknown*, not hidden: the
+    /// unnameable answer is the same fallback a withheld id is, so the
+    /// canvas stays visible and the write proceeds. Deferring on it would
+    /// skip a placement on a canvas the user can see for no reason beyond
+    /// a transient Space-table hiccup, and no swipe back would land it.
     private func isVisible(_ space: TilingSpaceKey) -> Bool {
         guard let screen = space.screen else { return true }
         guard screens().contains(where: { $0.id == screen }) else { return false }
         guard let id = space.space else { return true }
-        return activeSpaceID(on: screen) == id
+        // No answer names the visible Space: unknown, not different.
+        // Treat it like the withheld id above rather than a hidden canvas.
+        guard let active = activeSpaceID(on: screen) else { return true }
+        return active == id
     }
 
     /// The focused canvas: the focused window's display plus the Space

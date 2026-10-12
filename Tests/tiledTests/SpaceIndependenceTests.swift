@@ -447,6 +447,41 @@ final class SpaceIndependenceTests: XCTestCase {
             "the deferred placement lands when the Space becomes visible")
     }
 
+    /// M3: "the window server cannot name the visible Space" is not the
+    /// same as "a different, known Space is visible". A Space-table
+    /// hiccup on the canvas's own display leaves the user looking at that
+    /// canvas, so the placement applies instead of being deferred
+    /// off-Space — no write skipped, no deferral narrated, nothing
+    /// retained for a swipe back that may never come. A known different
+    /// Space still defers (the hidden test above).
+    func testAnUnnameableActiveSpaceReadDoesNotDeferTheVisibleCanvas() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+
+        // The Space table hiccups: the display's active Space can no
+        // longer be named, though the canvas shown is still Space A.
+        gateway.activeSpaces = [:]
+        var feedbacks: [TilingController.Feedback] = []
+        controller.onFeedback = { feedbacks.append($0) }
+
+        controller.handle(slot: .topRight)
+
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        XCTAssertEqual(
+            gateway.frame(of: a),
+            GridLayout().rect(for: .topRight, in: Self.display.visibleFrame),
+            "an unknown Space read is not a hidden canvas: the placement is written")
+        XCTAssertTrue(
+            feedbacks.isEmpty,
+            "an unknown Space read is not a deferral: nothing is narrated")
+        XCTAssertEqual(
+            controller.canvas(for: keyA).state.slot(of: a.id), .topRight,
+            "the placement stands on its canvas")
+        XCTAssertTrue(
+            controller.canvas(for: keyA).deferredRequests.isEmpty,
+            "no deferral is retained for a canvas the user can see")
+    }
+
     /// A retained request belongs to the canvas it was made on: while
     /// another canvas is visible it is never written there, and it does
     /// not leak across canvases.
