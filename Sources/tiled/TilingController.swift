@@ -501,10 +501,19 @@ final class TilingController {
     private func applyAll(on space: TilingSpaceKey? = nil) {
         let keys: [TilingSpaceKey] =
             if let space { [space] } else { activeSpaceKeys() }
-        staleSpaces.subtract(keys)
         for key in keys {
+            // The mark means "this canvas still owes a reassert", so it may
+            // only be cleared by a reassert with real geometry to write
+            // against: `reassert` early-returns on a degenerate visible
+            // frame (and an absent display cannot be written), and clearing
+            // the mark then would drop the deferred reassert for good.
+            let hasGeometry = isDisplayAttached(key.screen)
+                && (spaces[key]?.visibleFrame).map { $0.width > 0 && $0.height > 0 } == true
             mutateSpace(key) {
                 $0.reassert(.grid, context: placementContext(for: key))
+            }
+            if hasGeometry {
+                staleSpaces.remove(key)
             }
         }
     }
@@ -584,11 +593,23 @@ final class TilingController {
         return canvas
     }
 
+    /// Whether a canvas's own display is currently attached. A key with no
+    /// screen is genuinely display-less (headless, withheld Space): it has
+    /// no display to be absent, so the main-screen fallback still applies.
+    private func isDisplayAttached(_ screen: ScreenID?) -> Bool {
+        guard let screen else { return true }
+        return screens().contains { $0.id == screen }
+    }
+
     /// Re-resolves the stored visible frame of the named canvases: the
     /// refresh half of a display change and a swipe back. Keys without a
-    /// canvas yet are left alone; they resolve on first use.
+    /// canvas yet are left alone; they resolve on first use. A canvas whose
+    /// display is absent keeps the geometry it had — it is re-resolved on
+    /// replug — so a kept-for-replug canvas never adopts the main display's
+    /// frame.
     private func refreshVisibleFrames(of keys: [TilingSpaceKey]) {
         for key in keys where spaces[key] != nil {
+            guard isDisplayAttached(key.screen) else { continue }
             spaces[key]?.visibleFrame = visibleFrame(for: key)
         }
     }
