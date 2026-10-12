@@ -28,7 +28,7 @@ that merges, re-check family 3 (the write policy) against the `WriteExpectations
 | 07 | Unknown Space is not an app refusal | 05 | M3 | ready-for-agent |
 | 08 | The restore goes through the write policy | – | M4 | DONE (`2fcb3aa`) |
 | 09 | Visibility requires an attached display | – | M7 | DONE (`4101d37`) |
-| 10 | An absent display keeps its frame | 09 | M8, L5 | ready-for-agent |
+| 10 | An absent display keeps its frame | 09 | M8, L5 | DONE (`90bed89`) |
 | 11 | Menu sections key on the display | – | M14, M16 | DONE (`5b8b1b3`) |
 | 12 | One canvas key per icon pass | – | L12 | DONE (`1b2b6a0`) |
 
