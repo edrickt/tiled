@@ -6,8 +6,30 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Drag-out untile distance halved: ~50pt of title-bar drag (was ~100pt)
+  releases the slot and leaves the window where dropped.
+
 ### Fixed
 
+- Dragging a tiled window by its title bar no longer expands the tile: apps
+  that silently absorb the placement write (rounding to their own grid)
+  made the first drag tick carry a slightly different size than the target,
+  which the tracker misread as an edge drag and yanked a splitter by the
+  full origin drag distance. Ticks now classify by what a hand can do:
+  windows do not resize during a title drag, so any size change beyond the
+  absorption-noise bound is an edge grab, and everything else tracks as a
+  move.
+- A fast drag out of a tile no longer snaps back: a fling coalesces in
+  Accessibility to a single far tick, which the drag-end's two-tick rule
+  read as a programmatic jump. A drag decided at the physical mouse-up is
+  a hand gesture by definition (the button was down; programmatic jumps do
+  not click) and untiles past the distance.
+- Dragging a tiled window out of its tile (including out of its Space) now
+  untiles at the drop: the title-bar drag ends at mouse-up like an edge drag,
+  instead of waiting out the 0.5s move-silence debounce that left the slot
+  marked occupied and the neighbours un-reflowed for a second or more.
 - Tiling a right-third window into the left third no longer leaves the right
   third empty: the left two-thirds window it displaced re-housed into the
   middle third and now also absorbs the requester's vacated right third,

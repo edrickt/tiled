@@ -310,7 +310,7 @@ final class DragTrackerTests: XCTestCase {
         tile(1, .topLeft, frame: tileRect)
         tracker.forget(1)
 
-        dragTicks(1, size: size, to: [(0, 400), (20, 420), (35, 435)])
+        dragTicks(1, size: size, to: [(0, 400), (20, 420), (30, 430)])
         dragEndFires.last?()
 
         XCTAssertEqual(decisions, [.snapback(1)], "a short title-bar drag snaps back")
@@ -327,6 +327,105 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertEqual(decisions, [.untile(1)], "drag distance ~141pt crosses the untile distance")
     }
 
+    func testMouseUpEndsAnInProgressTitleBarDragImmediately() {
+        // The reported lag: dragging a tiled window out of its tile (far
+        // enough to untile, even out of its Space) left the slot occupied
+        // and the neighbours un-reflowed for ~1s after the drop, because
+        // the untile waited for the 0.5s move-silence debounce. The
+        // mouse-up must end an in-progress title-bar drag the way it ends
+        // an edge drag.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 400), (40, 440), (100, 500)])
+        XCTAssertTrue(decisions.isEmpty, "streaming ticks decide nothing on their own")
+
+        tracker.mouseLifted()
+
+        XCTAssertEqual(
+            decisions, [.untile(1)],
+            "the mouse-up decides the title-bar drag immediately, no debounce")
+    }
+
+    func testMouseUpEndsAShortTitleBarDragWithSnapback() {
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 400), (20, 420), (30, 430)])
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.snapback(1)], "a short drag snaps back at mouse-up")
+    }
+
+    func testTrailingTickAfterTitleBarMouseUpWaitsForTheNextMouseUpOrDebounce() {
+        // AX can stream the drag's final frame after the mouse-up: the
+        // tracker re-tracks it and the next mouse-up (or the fallback
+        // debounce) decides, mirroring the resize path's documented
+        // residual.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 400), (40, 440), (100, 500)])
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [.untile(1)])
+
+        // The final frame trails the mouse-up, far from the drop: a new
+        // drag the tracker re-tracks, deciding nothing on its own.
+        tracker.handleChange(id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 400))
+        XCTAssertEqual(
+            decisions, [.untile(1)],
+            "a trailing tick after the mouse-up does not decide on its own")
+
+        tracker.mouseLifted()
+        XCTAssertEqual(
+            decisions, [.untile(1), .untile(1)],
+            "the next mouse-up decides the trailing tick; a single far tick "
+                + "is a hand gesture there, and the second untile is a no-op upstream")
+    }
+
+    func testAbsorbedSizeTickDuringTitleDragTracksAsAMove() {
+        // Captured live: the app absorbed the placement write (its true
+        // frame 559x505 vs the 560x509.5 target, no notification), then
+        // the user's first title-drag tick arrived as (82, 510, 559, 505).
+        // The 5.5pt size delta against the phantom baseline misread as an
+        // edge drag and yanked sixthsLeftSplit by the full 82pt origin
+        // delta — the reported "expand the tile". A hand on the title bar
+        // translates the window; an edge grab pins the opposite edge. The
+        // origin moved farther than the size: it is a move.
+        tile(1, .sixthTopLeft, frame: CGRect(x: 0, y: 509.5, width: 560, height: 509.5))
+        // The placement echo expires un-consumed: the app emitted nothing
+        // for it (silent absorption), as on live AX.
+        now += TimeInterval(4)
+
+        tracker.handleChange(id: 1, frame: CGRect(x: 82, y: 510, width: 559, height: 505))
+
+        XCTAssertEqual(
+            grid(), GridLayout(),
+            "an origin-dominant tick is a translation, never a splitter yank")
+
+        // The drag tracks: the drop untiles.
+        tracker.handleChange(id: 1, frame: CGRect(x: 200, y: 520, width: 559, height: 505))
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [.untile(1)])
+    }
+
+    func testSizeDominantTickStillResizes() {
+        // An edge grab pins the opposite edge: the size moves at least as
+        // far as the origin. That stays a resize.
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+
+        // Close tick first (a fresh echo entry swallows the first tick by
+        // design), then the grab: origin pinned, width grows 100.
+        var echo = CGRect(x: 0, y: 400, width: 500, height: 400)
+        echo.size.width += 8
+        tracker.handleChange(id: 1, frame: echo)
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 400, width: 600, height: 400))
+        XCTAssertEqual(grid().columnSplit, 0.6, accuracy: 0.001)
+    }
+
     func testSingleFarJumpEmitsSnapback() {
         let size = CGSize(width: 500, height: 400)
         tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
@@ -338,6 +437,23 @@ final class DragTrackerTests: XCTestCase {
         dragEndFires.last?()
 
         XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testSingleFarTickAtMouseUpUntiles() {
+        // A fast hand fling coalesces in AX: the whole drag can arrive as
+        // ONE far tick (observed live: ticks=1, distance=748). The
+        // single-tick rule exists to reject programmatic jumps, but a
+        // decision at the physical mouse-up has the signal the debounce
+        // never had: the button was down the whole time, and programmatic
+        // jumps do not click. The mouse-up must untile the fling.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 400), (400, 800)])
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.untile(1)])
     }
 
     func testResizeCancelsPendingDrag() {

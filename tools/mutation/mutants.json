@@ -139,8 +139,8 @@
  ],
  [
   "DragTracker.swift",
-  "untile drag distance 100 -> 10000",
-  "private static let untileDragDistance: CGFloat = 100",
+  "untile drag distance 50 -> 10000",
+  "private static let untileDragDistance: CGFloat = 50",
   "private static let untileDragDistance: CGFloat = 10000"
  ],
  [

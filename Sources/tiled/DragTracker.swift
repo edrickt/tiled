@@ -29,11 +29,12 @@ import Foundation
 /// it.
 ///
 /// Title-bar drags (origin-only changes) are tracked separately from
-/// edge drags: moved ticks stream in, and when they go silent the drag
-/// ended: past the untile distance the window untiles where dropped,
+/// edge drags: moved ticks stream in, and the drag ends at the mouse-up
+/// — past the untile distance the window untiles where dropped,
 /// otherwise it snaps back into its slot (the canvas reasserts with its
-/// existing splitters). A single far jump is never a hand drag, so it
-/// snaps back too.
+/// existing splitters). The move-silence debounce is the fallback for a
+/// mouse-up that never arrives (a missed monitor, a drag the OS cancels).
+/// A single far jump is never a hand drag, so it snaps back too.
 final class DragTracker {
     /// Reads and writes splitter fractions, and reads the canvas's one
     /// stored visible frame. The canvas owns them; the tracker only
@@ -141,9 +142,14 @@ final class DragTracker {
     private static let settleWindow: TimeInterval = 1
     /// Minimum edge travel that counts as a drag (below this is jitter).
     private static let edgeMoveThreshold: CGFloat = 1
+    /// Above this travel an edge counts as genuinely moved for the
+    /// grab/translation signatures; below it the edge reads as pinned.
+    private static let translationMargin: CGFloat = 8
     /// Origin drag distance past which a title-bar drag untiles the window.
-    private static let untileDragDistance: CGFloat = 100
-    /// Move silence after which a title-bar drag counts as finished.
+    private static let untileDragDistance: CGFloat = 50
+    /// Move silence after which a title-bar drag counts as finished: the
+    /// fallback end for a mouse-up that never fired (`mouseLifted` ends
+    /// an in-progress drag immediately).
     private static let dragEndDebounce: TimeInterval = 0.5
 
     /// Schedules the drag-end debounce; returns a canceller. Injectable
@@ -360,21 +366,75 @@ final class DragTracker {
         let previous = lastKnownFrames[id]
         lastKnownFrames[id] = frame
         guard let previous, previous != frame else { return }
-        guard previous.size == frame.size else {
+        // Classify the tick by what a hand can do. Windows do not resize
+        // during a title-bar drag — the size stays put while both edges of
+        // each axis travel together — so a size change beyond the
+        // absorption-noise bound is user intent: an edge or corner grab,
+        // whose opposite edges stay pinned. Apps DO absorb writes
+        // silently, rounding frames to their own grid, so the first live
+        // tick after a placement can carry a slightly different size than
+        // the target it was written against; judging size alone misreads
+        // that absorption as an edge grab and yanks a splitter by the full
+        // origin delta (observed: an 82pt title drag expanded the tile it
+        // was dragged out of). Residual: an app absorbing more than
+        // `translationMargin` still misroutes its first tick.
+        let sizeDelta = abs(frame.width - previous.width) + abs(frame.height - previous.height)
+        if sizeDelta > Self.translationMargin {
             clearDrag(id)
             processResize(windowID: id, from: previous, to: frame)
             return
         }
-        processMove(windowID: id, from: previous, to: frame)
+        let dMinX = frame.minX - previous.minX
+        let dMaxX = frame.maxX - previous.maxX
+        let dMinY = frame.minY - previous.minY
+        let dMaxY = frame.maxY - previous.maxY
+
+        // One edge travelled, the opposite stayed pinned: a grab too small
+        // to trip the size bound (per-axis, so a corner grab on one axis
+        // is not drowned out by noise on the other).
+        func clearGrab(_ a: CGFloat, _ b: CGFloat) -> Bool {
+            (abs(a) > Self.translationMargin && abs(b) <= Self.edgeMoveThreshold)
+                || (abs(b) > Self.translationMargin && abs(a) <= Self.edgeMoveThreshold)
+        }
+        // Both edges of the axis travelled together: a translation.
+        func clearTranslation(_ a: CGFloat, _ b: CGFloat) -> Bool {
+            abs(a) > Self.edgeMoveThreshold && abs(b) > Self.edgeMoveThreshold
+                && abs(a - b) <= Self.translationMargin
+        }
+
+        if clearGrab(dMinX, dMaxX) || clearGrab(dMinY, dMaxY) {
+            clearDrag(id)
+            processResize(windowID: id, from: previous, to: frame)
+            return
+        }
+        if clearTranslation(dMinX, dMaxX) || clearTranslation(dMinY, dMaxY)
+            || originMovedMoreThanSize(previous, frame)
+        {
+            processMove(windowID: id, from: previous, to: frame)
+            return
+        }
+        clearDrag(id)
+        processResize(windowID: id, from: previous, to: frame)
+    }
+
+    /// The sub-noise fallback: the origin outpaced the size, so the tick
+    /// reads as a move wearing a rounding error.
+    private func originMovedMoreThanSize(_ previous: CGRect, _ frame: CGRect) -> Bool {
+        let originDelta = abs(frame.minX - previous.minX) + abs(frame.minY - previous.minY)
+        let sizeDelta = abs(frame.width - previous.width) + abs(frame.height - previous.height)
+        return originDelta > sizeDelta
     }
 
     // MARK: Drag-out untile
 
     /// Tracks a title-bar drag: origin-only changes stream in as the user
-    /// moves the window. Each tick reschedules the drag-end debounce, so
-    /// a mid-drag pause longer than the debounce ends the drag early
-    /// (snapback or untile); continuing the drag re-tracks from the new
-    /// frame. Hand drags stream ticks, so this only bites on real pauses.
+    /// moves the window. The mouse-up ends the drag immediately (see
+    /// `mouseLifted`); each tick also reschedules the debounce fallback,
+    /// so a drag whose mouse-up was missed still ends when the ticks go
+    /// silent, and a mid-drag pause longer than the debounce ends it
+    /// early (snapback or untile); continuing the drag re-tracks from the
+    /// new frame. Hand drags stream ticks, so this only bites on real
+    /// pauses.
     private func processMove(windowID id: WindowID, from previous: CGRect, to frame: CGRect) {
         if drags[id] == nil {
             drags[id] = DragState(startFrame: previous, lastFrame: frame)
@@ -384,24 +444,26 @@ final class DragTracker {
         log("move win\(id) dragging tick=\(drags[id]?.ticks ?? 0) frame=\(frame)")
         drags[id]?.cancelDragEnd?()
         drags[id]?.cancelDragEnd = scheduleDragEnd { [weak self] in
-            self?.endDrag(id: id)
+            self?.endDrag(id: id, decidedAtMouseUp: false)
         }
     }
 
-    /// A drag just ended (moved ticks went silent): untile past the
-    /// untile distance, snap back otherwise. A single far tick snaps
-    /// back too: hand drags stream, one-shot programmatic jumps don't.
-    /// (Residual exposure: a programmatic move that arrives as several
-    /// ticks and travels far enough untiles; accepted, since such moves
-    /// are rare and the window ends up untiled where it was put.)
-    private func endDrag(id: WindowID) {
+    /// A drag just ended: untile past the untile distance, snap back
+    /// otherwise. A drag decided at the physical mouse-up is a hand drag
+    /// by definition (the button was down the whole time; programmatic
+    /// jumps do not click), so a single coalesced tick counts — a fast
+    /// fling can arrive as exactly one far AX tick. The silence-debounce
+    /// fallback has no such signal and keeps the two-tick rule: a single
+    /// far jump there is a programmatic move, and snaps back.
+    private func endDrag(id: WindowID, decidedAtMouseUp: Bool) {
         guard context.slotOf(id) != nil, let drag = drags[id] else { return }
         drags[id] = nil
         let distance = hypot(
             drag.lastFrame.origin.x - drag.startFrame.origin.x,
             drag.lastFrame.origin.y - drag.startFrame.origin.y)
-        log("dragend win\(id) ticks=\(drag.ticks) distance=\(distance)")
-        guard distance > Self.untileDragDistance, drag.ticks >= 2 else {
+        log("dragend win\(id) ticks=\(drag.ticks) distance=\(distance) mouseUp=\(decidedAtMouseUp)")
+        let handDrag = decidedAtMouseUp || drag.ticks >= 2
+        guard distance > Self.untileDragDistance, handDrag else {
             log("dragend win\(id) snapback")
             onDragEnd(.snapback(id))
             return
@@ -480,16 +542,23 @@ final class DragTracker {
     // MARK: Mouse-up commit
 
     /// The user released the mouse button: every deferred edge drag's
-    /// settle is now due. The tracker decides only; the coordinator reads
-    /// each dragged window's achieved frame and reasserts its canvas. A
-    /// trailing resize tick re-arms its canvas's entry; the next mouse-up
-    /// anywhere commits it.
+    /// settle is now due, and every in-progress title-bar drag ends now —
+    /// the drop decides (snapback or untile) instead of waiting out the
+    /// move-silence debounce, which reads as a second of occupied slot
+    /// and un-reflowed neighbours after a drag-out. A trailing AX frame
+    /// that arrives after this re-tracks its drag; the next mouse-up (or
+    /// the debounce fallback) decides it. The tracker decides only; the
+    /// coordinator reads each dragged window's achieved frame and
+    /// reasserts or untiles through the owning canvas.
     func mouseLifted() {
-        guard !pendingResizeApplies.isEmpty else { return }
         let pending = pendingResizeApplies
         pendingResizeApplies = [:]
         for id in pending.values {
             onDragEnd(.resize(id))
+        }
+        let inFlight = drags.keys.sorted()
+        for id in inFlight where drags[id] != nil {
+            endDrag(id: id, decidedAtMouseUp: true)
         }
     }
 

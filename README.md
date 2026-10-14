@@ -129,10 +129,11 @@ tell you which app took it.
 - Tiling a window into its own tile does nothing: no restore, no reassert.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.
-- **Drag a tiled window by its title bar**: past ~100pt of drag it untiles
+- **Drag a tiled window by its title bar**: past ~50pt of drag it untiles
   right where you dropped it (the drop is the placement; no pre-tile
   restore); a shorter drag snaps back into its tile. A single far jump
-  (a programmatic move, not a hand drag) always snaps back.
+  that arrives while nothing is pressed (a programmatic move, not a hand
+  drag) still snaps back.
 - Use **Untile All** in the menu to restore every tiled window, or open a
   tiled window's submenu to focus it, untile just that window, or tile the
   focused window into its slot.
