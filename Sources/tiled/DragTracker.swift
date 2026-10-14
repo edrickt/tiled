@@ -302,9 +302,19 @@ final class DragTracker {
                     // swallow it against the target rather than falling
                     // into the escape check below, whose stale
                     // lastDistance would misread any tail offset as a
-                    // takeover. The next tick processes fully live.
+                    // takeover. A pure-origin drift is still a hand on
+                    // the title bar (a tiny drag can arrive as exactly
+                    // one tick, so "the next tick goes live" never
+                    // comes): track it, or the mouse-up finds no drag
+                    // and the window is left offset from its tile.
                     expectedFrames[id] = nil
+                    let previous = lastKnownFrames[id]
                     lastKnownFrames[id] = frame
+                    if let previous, previous.size == frame.size,
+                        previous.origin != frame.origin
+                    {
+                        processMove(windowID: id, from: previous, to: frame)
+                    }
                     log("echo win\(id) settle-expired")
                     return
                 } else {

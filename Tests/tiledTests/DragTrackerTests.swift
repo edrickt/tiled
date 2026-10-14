@@ -623,6 +623,25 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertEqual(decisions, [.snapback(1)])
     }
 
+    func testTinyTitleBarDragAfterSettleExpiresSnapsBack() {
+        // The reported bug: a very small whole-window drag (a few points,
+        // one AX tick, still inside the 32pt echo tolerance) leaves the
+        // window offset from its tile until the next reflow. Every tiled
+        // window carries a settled echo entry after its placement write;
+        // past the settle window the first close tick hits the
+        // settle-expired branch, which swallows it without tracking a
+        // drag — so the mouse-up finds no drag and no snapback fires.
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 400, width: 500, height: 400)) // converges
+        now = now.addingTimeInterval(5) // the user returns later
+
+        // A tiny hand drag: one origin-only tick 6pt off the tile.
+        tracker.handleChange(id: 1, frame: CGRect(x: 6, y: 406, width: 500, height: 400))
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.snapback(1)], "a tiny drag must still snap back")
+    }
+
     func testExpiredSettleGoesLive() {
         // Past the settle window the entry is gone: the next tick diffs
         // live, so a slow follow-up resize still works.
