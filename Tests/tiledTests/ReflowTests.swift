@@ -588,6 +588,30 @@ extension ReflowTests {
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthBottomLeft, for: b))
     }
 
+    func testLeftTwoThirdsBlockerReHousesThenGrowsIntoVacatedRightThird() {
+        // Left two-thirds (a) and right third (b); the right third
+        // window tiles into the left third. The left two-thirds blocker
+        // re-houses into its leftover (the middle third), and the right
+        // third the requester vacated then reflows into it: the result
+        // is left third + right two-thirds with no empty third.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .sixthsLeftTwoThirds)
+        let b = gateway.addWindow(frame: CGRect(x: 1200, y: 100, width: 500, height: 400))
+        gateway.focused = b
+        controller.handle(slot: .sixthRight)
+
+        gateway.focused = b
+        controller.handle(slot: .sixthLeft)
+
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft)
+        XCTAssertEqual(
+            canvas.state.slot(of: 1), .sixthsRightTwoThirds,
+            "the re-housed window absorbs the requester's vacated right third")
+        XCTAssertEqual(gateway.frame(of: a), expectedRect(.sixthsRightTwoThirds, for: a))
+        XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthLeft, for: b))
+    }
+
     func testReHouseUndoRestoresTheVictimsOwnSlot() {
         let (b, m, r) = tileBottomLeftMiddleRight()
         gateway.focused = r

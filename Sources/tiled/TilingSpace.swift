@@ -312,7 +312,15 @@ struct TilingSpace {
         // windows never grow.
         var reflowSnapshot: [EvictedWindow] = []
         if commit.clean, let freed = commit.reflowFreed, !freed.isEmpty {
-            let skip = Set([id] + decision.windowsToRestore(requester: id))
+            // The re-housed window is the one "evictee" that stayed
+            // tiled, so it may grow: it re-houses into the slot the
+            // request left free, and the cells the requester vacated
+            // reflow into it (a left two-thirds blocker of a left-third
+            // request ends up as the right two-thirds, not the bare
+            // middle third).
+            let skip = Set(
+                ([id] + decision.windowsToRestore(requester: id))
+                    .filter { $0 != commit.rehoused })
             reflowSnapshot = reflow(freed, excluding: skip, context: context)
         }
         // Restored windows sit BELOW the arrangement they left: an
@@ -347,7 +355,12 @@ struct TilingSpace {
         // The reflow's survivors share the event's undo chapter: undo
         // restores the pre-event world in one ⌃⇧⌘Z (a move with no
         // eviction has no chapter of its own, so the reflow starts one).
-        let chapter = (commit.snapshot ?? []) + reflowSnapshot
+        // A re-housed window that then grew carries two entries: keep
+        // the first (its pre-event slot), or undo's last-write-wins
+        // would park it in the intermediate re-house slot.
+        var chapter = (commit.snapshot ?? []) + reflowSnapshot
+        var seenHandles = Set<WindowHandle>()
+        chapter.removeAll { !seenHandles.insert($0.handle).inserted }
         pushUndo(snapshot: chapter, requester: commit.requester)
         return outcome
     }

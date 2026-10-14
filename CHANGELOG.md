@@ -4,6 +4,15 @@ All notable changes to Tiled are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Tiling a right-third window into the left third no longer leaves the right
+  third empty: the left two-thirds window it displaced re-housed into the
+  middle third and now also absorbs the requester's vacated right third,
+  ending up as the right two-thirds.
+
 ## [0.2.0] - 2026-10-11
 
 ### Added
