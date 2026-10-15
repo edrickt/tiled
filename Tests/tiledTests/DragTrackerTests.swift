@@ -291,6 +291,80 @@ final class DragTrackerTests: XCTestCase {
             "the release names the window so the canvas can snap the fixed edge back")
     }
 
+    func testOverriddenSettleIsReissued() {
+        // The reassert write can lose a race with the app's own resize
+        // session: the session ends AFTER the write and re-posts the
+        // gesture's final frame over it (observed live: the write is not
+        // refused, the frame just reverts). The tracker sees that tick
+        // and must re-issue the settle — the session has now ended, so
+        // the second write sticks. One shot: the repair itself is not
+        // armed again.
+        let tiled = GridLayout().rect(for: .sixthsRightTwoThirds, in: visibleFrame)
+        tile(1, .sixthsRightTwoThirds, frame: tiled)
+
+        var resized = tiled
+        resized.size.height -= 100
+        drag(1, from: tiled, to: resized, tracker: tracker)
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [.resize(1)])
+
+        // The coordinator's write (FrameWriter marks every expected
+        // write), then the app's session-end frame re-reporting the
+        // gesture geometry. One sighting is not proof (a departing
+        // animation matches the gesture frame on its first step); a
+        // repeated sighting is.
+        tracker.markExpected(1, tiled)
+        tracker.handleChange(id: 1, frame: resized)
+        XCTAssertEqual(
+            decisions, [.resize(1)],
+            "one sighting is not yet an override")
+
+        tracker.handleChange(id: 1, frame: resized)
+        XCTAssertEqual(
+            decisions, [.resize(1), .snapback(1)],
+            "the overridden settle is re-issued as a grid re-write")
+
+        // The repair's own write, then repeated override ticks: nothing
+        // re-issues again (the arm is consumed).
+        tracker.markExpected(1, tiled)
+        tracker.handleChange(id: 1, frame: resized)
+        tracker.handleChange(id: 1, frame: resized)
+
+        XCTAssertEqual(
+            decisions, [.resize(1), .snapback(1)],
+            "the repair is one shot")
+    }
+
+    func testSettledWriteRevertedByTheSessionIsReissued() {
+        // The other order the race loses in, observed live: the write
+        // APPLIES (its echo settles) and the app's own resize session
+        // then reverts to the gesture frame a few ms later — a single
+        // tick escaping the settled trail. That tick is the override;
+        // the settle is re-issued.
+        let tiled = GridLayout().rect(for: .sixthsRightTwoThirds, in: visibleFrame)
+        tile(1, .sixthsRightTwoThirds, frame: tiled)
+
+        var resized = tiled
+        resized.size.height -= 100
+        drag(1, from: tiled, to: resized, tracker: tracker)
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [.resize(1)])
+
+        // The write, then its close echo: the tracker reads the settle
+        // as taken (consumed).
+        tracker.markExpected(1, tiled)
+        tracker.handleChange(id: 1, frame: tiled)
+        XCTAssertEqual(decisions, [.resize(1)])
+
+        // The app's finale reverts to the gesture frame: escape from the
+        // settled trail, straight back to where the drag left it.
+        tracker.handleChange(id: 1, frame: resized)
+
+        XCTAssertEqual(
+            decisions, [.resize(1), .snapback(1)],
+            "a settled write the session reverts is re-issued as a grid re-write")
+    }
+
     func testMouseUpWithoutPendingResizeDecidesNothing() {
         tile(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
 

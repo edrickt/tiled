@@ -7,7 +7,18 @@ pass running the same day. Everything below was verified against the code at
 Shipped 2026-10-15: the fix below landed as designed — `processResize` now
 marks the canvas pending on any edge movement (the field is `pendingReasserts`),
 the red test is `testScreenEdgeDragEmitsResizeOnMouseUp`, README/CONTEXT.md/
-CHANGELOG describe the shipped behavior, and 678 tests are green.
+CHANGELOG describe the shipped behavior, and 680 tests are green.
+
+Follow-up, same day: the release reassert can lose a race with the app's own
+live-resize session, two ways, both caught live — the session's finale lands
+over a write that never took (the gesture frame repeats while the echo trail
+never settles), or it reverts a write that applied (a single escape from the
+settled trail ~10 ms later). `DragTracker` now remembers the gesture frame at
+mouse-up and re-issues the settle once (a grid re-write) for either shape;
+`testOverriddenSettleIsReissued` and `testSettledWriteRevertedByTheSessionIsReissued`
+lock them. Live acceptance: `tools/repro/screen-edge-snapback-latency.swift`
+(pre-fix: one round never returned; post-fix: 3/3 rounds green, the repair
+firing live in both shapes).
 
 ## The behavior (agreed spec)
 

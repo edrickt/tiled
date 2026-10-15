@@ -61,9 +61,10 @@ final class DragTracker {
         /// An edge drag settled: reassert the window's canvas, with the
         /// splitters reconciled to the dragged window's achieved frame.
         case resize(WindowID)
-        /// A short title-bar drag ended: reassert the window's canvas
-        /// under its existing splitters, so the window snaps back into
-        /// its tile.
+        /// A short title-bar drag ended, or a settle write the app's own
+        /// resize session overrode: reassert the window's canvas under
+        /// its existing splitters, so the window snaps back into its
+        /// tile.
         case snapback(WindowID)
         /// A title-bar drag passed the untile distance: release the slot
         /// and leave the window where it was dropped.
@@ -127,6 +128,23 @@ final class DragTracker {
     /// marks: the release reassert is what pulls the edge back.
     private var pendingReasserts: [TilingSpaceKey?: WindowID] = [:]
 
+    /// A settle awaiting proof that the app accepted it, keyed by window:
+    /// the gesture's final frame, and how many consecutive ticks have
+    /// re-reported that frame since. A settle write can lose a race with
+    /// the app's own resize session, two ways, both observed live: the
+    /// session's finale lands over a write that never took (the gesture
+    /// frame repeats while the echo trail never settles), or it reverts a
+    /// write that applied (a single escape from the settled trail). A
+    /// departing animation matches the gesture frame once and moves on,
+    /// so the repeated-frame shape needs two sightings; the
+    /// settled-revert shape is proof by itself. Either way the settle is
+    /// re-issued once as a grid re-write (see `handleChange`).
+    private struct SettleOverride {
+        let gesture: CGRect
+        var sightings: Int
+    }
+    private var settleOverrides: [WindowID: SettleOverride] = [:]
+
     private static let echoTolerance: CGFloat = 32
     /// Writes within this distance of the window's current frame are
     /// no-ops: the app changes nothing and emits no AX notification, so
@@ -148,6 +166,10 @@ final class DragTracker {
     /// Above this travel an edge counts as genuinely moved for the
     /// grab/translation signatures; below it the edge reads as pinned.
     private static let translationMargin: CGFloat = 8
+    /// How close a tick must be to the settle's gesture frame to read as
+    /// the app's own resize-session override of the write: coalesced AX
+    /// ticks can lag the true final frame by a few points.
+    private static let settleOverrideTolerance: CGFloat = 8
     /// Origin drag distance past which a title-bar drag untiles the window.
     private static let untileDragDistance: CGFloat = 50
     /// Move silence after which a title-bar drag counts as finished: the
@@ -280,6 +302,7 @@ final class DragTracker {
     func forget(_ id: WindowID) {
         lastKnownFrames[id] = nil
         expectedFrames[id] = nil
+        settleOverrides[id] = nil
         clearDrag(id)
     }
 
@@ -291,6 +314,36 @@ final class DragTracker {
     func handleChange(id: WindowID, frame: CGRect) {
         guard context.slotOf(id) != nil else { return }
         log("notif win\(id) frame=\(frame)")
+
+        // A tick back at the frame the settle was decided at, right after
+        // that settle: the app's resize session's finale landing over our
+        // reassert write (the write is not refused; the frame just
+        // reverts). One sighting is not proof — a departing animation
+        // matches the gesture frame on its first step — so this shape
+        // waits for the second; then the session has demonstrably ended
+        // and the settle is re-issued as a plain grid re-write. One shot:
+        // the arm is consumed here.
+        if var arm = settleOverrides[id] {
+            if Self.framesClose(arm.gesture, frame, tolerance: Self.settleOverrideTolerance) {
+                arm.sightings += 1
+                if arm.sightings >= 2 {
+                    settleOverrides[id] = nil
+                    expectedFrames[id] = nil
+                    lastKnownFrames[id] = frame
+                    log("echo win\(id) settle OVERRIDDEN; re-issuing")
+                    onDragEnd(.snapback(id))
+                    return
+                }
+                // fall through to the echo trail: the first sighting is
+                // swallowed (or read live when the write has not
+                // registered yet)
+            } else {
+                // A match followed by a different frame is a departing
+                // animation, not a stuck session: start the count over.
+                arm.sightings = 0
+            }
+            settleOverrides[id] = arm
+        }
 
         // Echo suppression: our writes apply (often animated) as a stream of
         // notifications converging on the requested frame. Swallow them; a
@@ -359,6 +412,20 @@ final class DragTracker {
             if distance > entry.lastDistance + 1 {
                 expectedFrames[id] = nil // user took over
                 log("echo win\(id) ESCAPE dist=\(distance) last=\(entry.lastDistance)")
+                // A settled write whose frame then reverts to the
+                // settle's gesture frame is the app's own resize session
+                // overriding it (observed live: the revert lands ~10 ms
+                // after the applied write). The session has now ended;
+                // re-issue the settle once as a grid re-write.
+                if entry.settled, let arm = settleOverrides[id],
+                    Self.framesClose(arm.gesture, frame, tolerance: Self.settleOverrideTolerance)
+                {
+                    settleOverrides[id] = nil
+                    lastKnownFrames[id] = frame
+                    log("echo win\(id) settle OVERRIDDEN; re-issuing")
+                    onDragEnd(.snapback(id))
+                    return
+                }
             } else if context.now().timeIntervalSince(entry.date) > Self.staleWrite {
                 expectedFrames[id] = nil // write never applied; stop waiting
                 log("echo win\(id) stale")
@@ -498,6 +565,7 @@ final class DragTracker {
     /// screen edge — marks the canvas's resize pending, so mouse-up
     /// reasserts and a pulled-away screen edge snaps back.
     private func processResize(windowID id: WindowID, from old: CGRect, to new: CGRect) {
+        settleOverrides[id] = nil // a new edge movement supersedes a stale arm
         guard let slot = context.slotOf(id) else { return }
         let space = context.spaceOf(id)
         let bounds = gridProvider.visibleFrame(space)
@@ -571,6 +639,12 @@ final class DragTracker {
         let pending = pendingReasserts
         pendingReasserts = [:]
         for id in pending.values {
+            // The settle about to be committed can be overridden by the
+            // app's own resize session ending just after it; remember the
+            // gesture frame so `handleChange` can recognize the override.
+            if let gesture = lastKnownFrames[id] {
+                settleOverrides[id] = SettleOverride(gesture: gesture, sightings: 0)
+            }
             onDragEnd(.resize(id))
         }
         let inFlight = drags.keys.sorted()

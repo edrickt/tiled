@@ -416,8 +416,8 @@
  [
   "DragTracker.swift",
   "short title-bar drag untiles instead of snapping back",
-  "            onDragEnd(.snapback(id))",
-  "            onDragEnd(.untile(id))"
+  "            log(\"dragend win\\(id) snapback\")\n            onDragEnd(.snapback(id))",
+  "            log(\"dragend win\\(id) snapback\")\n            onDragEnd(.untile(id))"
  ],
  [
   "TilingController.swift",
@@ -508,5 +508,11 @@
   "release mark requires a movable splitter (screen-edge drags never reassert)",
   "            guard edgeMoved else { continue }\n            anyEdgeMoved = true",
   "            guard edgeMoved, GridLayout.boundary(edge: edge, slot: slot) != nil else { continue }\n            anyEdgeMoved = true"
+ ],
+ [
+  "DragTracker.swift",
+  "overridden settle never repaired (screen edge stays stretched)",
+  "                if arm.sightings >= 2 {",
+  "                if arm.sightings >= 999999 {"
  ]
 ]
