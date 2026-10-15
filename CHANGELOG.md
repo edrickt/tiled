@@ -13,6 +13,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Dragging an edge that sits on a screen edge snaps back on release: the
+  drag moved no splitter, so the mouse-up re-asserted nothing and the edge
+  stayed wherever it was released. Any edge movement now marks the canvas
+  pending, and the release re-assert returns the fixed edge to the visible
+  frame. In a corner drag mixing a screen edge with a real splitter, the
+  splitter's new position is kept and only the screen edge snaps back.
 - Dragging a tiled window by its title bar no longer expands the tile: apps
   that silently absorb the placement write (rounding to their own grid)
   made the first drag tick carry a slightly different size than the target,

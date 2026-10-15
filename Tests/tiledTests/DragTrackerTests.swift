@@ -266,6 +266,31 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertEqual(decisions, [.resize(2)])
     }
 
+    func testScreenEdgeDragEmitsResizeOnMouseUp() {
+        // Screen edges are fixed, not splitters: the drag commits no
+        // fraction, but the release still owes the canvas a reassert or
+        // the edge stays wherever the user let go. Regression: the
+        // pending mark rode on a splitter update alone, so a pure
+        // screen-edge drag decided nothing and never snapped back.
+        let tiled = GridLayout().rect(for: .sixthsRightTwoThirds, in: visibleFrame)
+        tile(1, .sixthsRightTwoThirds, frame: tiled)
+
+        // The top edge is the screen's top edge; dragging it down moves
+        // no movable edge.
+        var resized = tiled
+        resized.size.height -= 100
+        drag(1, from: tiled, to: resized, tracker: tracker)
+
+        XCTAssertEqual(grid(), GridLayout(), "a screen edge maps to no splitter")
+        XCTAssertTrue(decisions.isEmpty, "an edge drag decides nothing until mouse-up")
+
+        tracker.mouseLifted()
+
+        XCTAssertEqual(
+            decisions, [.resize(1)],
+            "the release names the window so the canvas can snap the fixed edge back")
+    }
+
     func testMouseUpWithoutPendingResizeDecidesNothing() {
         tile(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
 

@@ -196,11 +196,12 @@ stops shrinking at that size, pinned to the screen edge it already held:
 the window always stays inside the boundaries of the screen, never
 sliding off it. Dragging an edge that coincides with the screen edge
 itself (the top edge of a right two-thirds window, say) moves no
-splitter — screen edges are fixed — and today the dragged edge is left
-where you released it: a drag that moves no splitter emits no settle at
-mouse-up. A corner that mixes a screen edge with a real splitter (the
-top-left corner of a two-thirds window) still resizes the splitter edge
-and settles normally.
+splitter — screen edges are fixed — and the edge snaps back to the
+screen edge when you release: the drag is free while the button is
+down, and the mouse-up re-assert pulls the edge home. A corner that
+mixes a screen edge with a real splitter (the top-left corner of a
+two-thirds window) resizes the splitter live as usual and keeps the
+new splitter position; only the screen edge snaps back.
 **Reset Splitters** in the menu (or ⌥⇧R) snaps the focused canvas's
 splitters back to even splits. Once a reset has parked the pre-reset
 positions, the same row is titled **Restore Previous Splitters** and
@@ -226,7 +227,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (677 tests)
+swift test             # hermetic unit suite (678 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -260,7 +261,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (677 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (678 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |

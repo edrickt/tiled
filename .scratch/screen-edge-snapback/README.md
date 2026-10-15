@@ -4,6 +4,11 @@ Grilled and decided 2026-10-15; parked in favor of the documentation-accuracy
 pass running the same day. Everything below was verified against the code at
 `ab6ce65`.
 
+Shipped 2026-10-15: the fix below landed as designed — `processResize` now
+marks the canvas pending on any edge movement (the field is `pendingReasserts`),
+the red test is `testScreenEdgeDragEmitsResizeOnMouseUp`, README/CONTEXT.md/
+CHANGELOG describe the shipped behavior, and 678 tests are green.
+
 ## The behavior (agreed spec)
 
 Screen edges are rubber bands:

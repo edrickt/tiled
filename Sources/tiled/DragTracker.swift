@@ -23,7 +23,8 @@ import Foundation
 /// splitter fractions commit live, but the settle waits for mouse-up
 /// (`mouseLifted`, wired by the controller's global event monitor).
 /// Resizing the tiles under a held button fights the user's drag; on
-/// release the canvas reasserts the whole layout at once. A resize tick
+/// release the canvas reasserts the whole layout at once — a screen
+/// edge the drag pulled away included. A resize tick
 /// that trails the mouse-up (AX streams the drag's final frame) re-arms
 /// its canvas's pending resize, and the next mouse-up anywhere commits
 /// it.
@@ -119,10 +120,12 @@ final class DragTracker {
     }
     private var drags: [WindowID: DragState] = [:]
 
-    /// Edge drags with splitter moves awaiting mouse-up, keyed by canvas.
-    /// The splitter fractions already committed; only the reassert they
-    /// imply waits for the click to lift (see `mouseLifted`).
-    private var pendingResizeApplies: [TilingSpaceKey?: WindowID] = [:]
+    /// Edge drags awaiting mouse-up, keyed by canvas. The splitter
+    /// fractions (if any) already committed; the reassert the movement
+    /// implies waits for the click to lift (see `mouseLifted`). A drag
+    /// that moved only a fixed screen edge commits no fraction but still
+    /// marks: the release reassert is what pulls the edge back.
+    private var pendingReasserts: [TilingSpaceKey?: WindowID] = [:]
 
     private static let echoTolerance: CGFloat = 32
     /// Writes within this distance of the window's current frame are
@@ -491,7 +494,9 @@ final class DragTracker {
     /// Detects which edges moved, maps them to grid boundaries, and
     /// updates the splitters from the dragged window's *actual* frame,
     /// divided against the canvas's one stored visible frame. Commits the
-    /// fraction live and marks the canvas's resize pending for mouse-up.
+    /// fraction live; any edge movement — a movable splitter or a fixed
+    /// screen edge — marks the canvas's resize pending, so mouse-up
+    /// reasserts and a pulled-away screen edge snaps back.
     private func processResize(windowID id: WindowID, from old: CGRect, to new: CGRect) {
         guard let slot = context.slotOf(id) else { return }
         let space = context.spaceOf(id)
@@ -501,7 +506,7 @@ final class DragTracker {
 
         func moved(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) > threshold }
 
-        var changed = false
+        var anyEdgeMoved = false
         for edge in TileEdge.allCases {
             let edgeMoved: Bool
             let position: CGFloat
@@ -516,6 +521,7 @@ final class DragTracker {
                 edgeMoved = moved(new.minY, old.minY); position = new.minY
             }
             guard edgeMoved else { continue }
+            anyEdgeMoved = true
             // The dragged window's own edge is the source of truth; skip it
             // below so we never fight an in-progress native drag.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
@@ -527,15 +533,16 @@ final class DragTracker {
                 centeringTwoThirds: centered)
             {
                 gridProvider.setGrid(spaceGrid, space)
-                changed = true
                 log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(spaceGrid)")
             }
         }
-        if changed {
-            // The splitter moved now, but the settle it implies waits for
-            // mouse-up: reasserting tiles while the button is down fights
-            // the drag the user is still steering.
-            pendingResizeApplies[space] = id
+        if anyEdgeMoved {
+            // The movement is committed live where it can be (a splitter
+            // fraction, clamped; a fixed screen edge commits nothing),
+            // but the reassert it implies waits for mouse-up:
+            // reasserting tiles while the button is down fights the drag
+            // the user is still steering.
+            pendingReasserts[space] = id
         }
     }
 
@@ -561,8 +568,8 @@ final class DragTracker {
     /// coordinator reads each dragged window's achieved frame and
     /// reasserts or untiles through the owning canvas.
     func mouseLifted() {
-        let pending = pendingResizeApplies
-        pendingResizeApplies = [:]
+        let pending = pendingReasserts
+        pendingReasserts = [:]
         for id in pending.values {
             onDragEnd(.resize(id))
         }

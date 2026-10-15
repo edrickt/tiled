@@ -26,7 +26,7 @@ An atomic unit of the shared 4×2 refinement both layouts are built from; overla
 _Avoid_: sub-tile, block
 
 **Splitter**:
-A movable divider between tiles whose fraction the drag-resize loop updates; screen edges are fixed, not splitters. Dragging an edge that sits on a screen edge moves no splitter and, as built, leaves that edge where released — no settle runs when no splitter changed.
+A movable divider between tiles whose fraction the drag-resize loop updates; screen edges are fixed, not splitters. Dragging an edge that sits on a screen edge moves no splitter, yet the mouse-up still reasserts: the screen edge snaps back to the visible frame — free mid-drag, snapped back on release.
 _Avoid_: divider, separator, boundary (the code name is GridBoundary)
 
 **Visible frame**:
