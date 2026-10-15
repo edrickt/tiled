@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-15
+
 ### Fixed
 
 - Detaching a tab from a tiled Firefox window no longer untiles the
@@ -150,6 +152,7 @@ First release.
 - Universal release bundles (Apple Silicon and Intel), built and checksummed
   by the release workflow on a `v*` tag.
 
+[0.2.2]: https://github.com/edrickt/tiled/releases/tag/v0.2.2
 [0.2.1]: https://github.com/edrickt/tiled/releases/tag/v0.2.1
 [0.2.0]: https://github.com/edrickt/tiled/releases/tag/v0.2.0
 [0.1.0]: https://github.com/edrickt/tiled/releases/tag/v0.1.0
