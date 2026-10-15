@@ -8,8 +8,10 @@ neighbors sharing the edge resize when the mouse button is released.
 ## Hotkeys
 
 Tile the focused window. Tiling a window into its own tile is a no-op (it
-stays exactly where it is). Every shortcut also exists as a menu item
-under **Tile Focused Window** in the menu bar menu.
+stays exactly where it is). Every shortcut of the active layout exists as a
+menu item under **Tile Focused Window** in the menu bar menu (the inactive
+layout collapses to a single switch row), and the app actions have their
+own top-level menu rows.
 
 ### Quarters (hold ⌥⇧⌘)
 
@@ -40,7 +42,9 @@ under **Tile Focused Window** in the menu bar menu.
 
 ### App actions
 
-These don't share the ⌥⇧ modifier, but every one of them is remappable too:
+Expand, Evict, and Reset Splitters share the slots' ⌥⇧ modifier; Settings
+and Undo deliberately take all four modifiers (⌃⌥⇧⌘) so they can't collide
+with a slot combo. Every one of them is remappable:
 
 | Key    | Action |
 |--------|--------|
@@ -48,7 +52,7 @@ These don't share the ⌥⇧ modifier, but every one of them is remappable too:
 | ⌥⇧⌫    | Evict the focused window: untile it and restore its pre-tile frame |
 | ⌥⇧R    | Reset Splitters: snap the focused canvas's splitters back to even splits, keeping every window tiled |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
-| ⌃⌥⇧⌘Z   | Undo the last displacement (a layout switch, an eviction, a swap, or a reflow, from anywhere) |
+| ⌃⌥⇧⌘Z   | Undo the focused canvas's last displacement (a layout switch, an eviction, or a swap — any reflow it caused is undone with it) |
 
 ### Expand (⌥⇧⏎)
 
@@ -79,9 +83,11 @@ caused it. A hole no neighbor can merge into exactly stays empty.
 
 ### Reset Splitters (⌥⇧R)
 
-Press ⌥⇧R again and the previous splitter positions come back (the same
-row in the menu flips to **Restore Previous Splitters** for the same
-one-step restore). Windows stay in their slots either way; only the sizes
+⌥⇧R always snaps the focused canvas's splitters back to even splits;
+pressing it again resets again (and replaces the parked backup). The
+one-step restore lives in the menu: after a reset or a drag the same row
+is titled **Restore Previous Splitters**, and it brings the previous
+positions back. Windows stay in their slots either way; only the sizes
 change.
 
 First launch opens Settings on a Welcome tab: focus any window and press the
@@ -98,8 +104,9 @@ press a new combo. This covers every hotkey Tiled registers — the 17 slot
 shortcuts and the 5 app actions (Expand, Evict, Reset Splitters, Settings,
 Undo). Esc keeps the old one, ⌫ disables that action.
 Disable or re-enable a whole layout at once with the Enable/Disable all
-button beside each section header; your combos are parked aside and
-restored unchanged.
+button beside each layout section header (app actions disable one at a
+time); your combos are parked aside and restored unchanged (re-recording
+a disabled shortcut keeps the new combo and drops its park).
 
 If two shortcuts use the same combo, the Shortcuts tab names the conflict
 and keeps the old binding until you pick a free one. If a
@@ -134,7 +141,9 @@ tell you which app took it.
   restore); a shorter drag snaps back into its tile. A single far jump
   that arrives while nothing is pressed (a programmatic move, not a hand
   drag) still snaps back.
-- Use **Untile All** in the menu to restore every tiled window, or open a
+- Use the untile row in the menu (**Untile 1 Window** / **Untile N
+  Windows**, titled by count) to restore every tiled window on the focused
+  canvas, or open a
   tiled window's submenu to focus it, untile just that window, or tile the
   focused window into its slot.
 - Each canvas tiles independently, where a canvas is one display's one
@@ -153,8 +162,9 @@ tell you which app took it.
   action. Windows parked in hidden Spaces stay tiled and keep their
   history; they simply wait off-menu until you swipe back.
 - Quarters and sixths are mutually exclusive per canvas: requesting a slot
-  in the other layout untiles every tiled window on that canvas and
-  switches that canvas's layout. The menu names the switch and how to undo
+  in the other layout untiles every other tiled window on that canvas
+  (the requester lands in its slot) and switches that canvas's layout. The
+  menu names the switch and how to undo
   it ("Switched to Sixths · 3 windows untiled. Press ⌃⌥⇧⌘Z to undo.").
 - A display change (unplug, rearrange, resolution) re-asserts every visible
   canvas immediately. Canvas identity follows the physical monitor's
@@ -162,15 +172,19 @@ tell you which app took it.
   arrangement to another display. Hidden Spaces are marked stale instead:
   Tiled never writes an off-Space window, because an AX resize can pull it
   onto the visible Space. Swiping back re-asserts that Space against the new
-  bounds.
+  bounds. A display that disappears keeps its canvas: its last geometry,
+  splitters, and undo history survive unplugged, and nothing is written to
+  it until it returns and is re-asserted.
 - Some apps refuse programmatic resizing. When that happens the window is
   left alone and the menu says which app refused, so state and screen never
   silently disagree.
 
 ## Live resizing
 
-Drag any edge of a tiled window and the shared grid splitter moves with it;
-neighbors on the other side follow. Vertical and horizontal splitters are
+Drag any edge of a tiled window and the shared grid splitter's fraction
+updates as you drag; the neighbor windows on the other side — and the
+dragged window's own tile — are rewritten when the mouse button is
+released. Vertical and horizontal splitters are
 independent per column (quarters) or per third (sixths), so resizing one
 column never moves the other, and the same independence holds between
 monitors and Spaces, so dragging an edge on one canvas never moves tiles on
@@ -179,7 +193,13 @@ splitter inside it follows its outer edge, staying at the midpoint. A
 neighbor pushed narrower (or shorter) than its app's minimum size simply
 stops shrinking at that size, pinned to the screen edge it already held:
 the window always stays inside the boundaries of the screen, never
-sliding off it.
+sliding off it. Dragging an edge that coincides with the screen edge
+itself (the top edge of a right two-thirds window, say) moves no
+splitter — screen edges are fixed — and today the dragged edge is left
+where you released it: a drag that moves no splitter emits no settle at
+mouse-up. A corner that mixes a screen edge with a real splitter (the
+top-left corner of a two-thirds window) still resizes the splitter edge
+and settles normally.
 **Reset Splitters** in the menu (or ⌥⇧R) snaps the focused canvas's
 splitters back to even splits. After a drag the same row is titled
 **Restore Previous Splitters**, restoring the pre-drag splits instead.
@@ -204,7 +224,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (613 tests)
+swift test             # hermetic unit suite (677 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -238,7 +258,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (613 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (677 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |
@@ -247,12 +267,13 @@ The unit suite drives the pure engine through `FakeWindowGateway`, with
 clocks, schedulers, and the display set injected; only a few live-screen
 identity checks touch AppKit. The live adapter (`LiveWindowGateway`) is
 exercised by `scripts/run-repro.sh`, which launches the app plus a throwaway
-`host` app and drives real clicks, drags, and global hotkeys: 40 cases
+`host` app and drives real clicks, drags, and global hotkeys: 39 cases
 covering the quarters family end to end (tiling, edge drags with
 per-column row independence, clamping, screen edges, eviction, swap,
-re-house, undo, drag-out, closes) and the sixths family (the layout
+re-house, undo, closes) and the sixths family (the layout
 switch, sixths geometry, per-third row independence, and a two-thirds
-window's hidden divider). Sixths boards stay disjoint in the suite: it
+window's hidden divider). Drag-out has its own focused probes
+(`tools/repro/dragout-sixth-test.swift`, `tools/repro/evict-drag-test.swift`). Sixths boards stay disjoint in the suite: it
 models the quarters eviction algebra, not a second occupancy model. The multi-display
 suite checks same-slot coexistence, per-monitor moves, and splitter isolation
 on two attached displays; unplug/replug, rearrange, and Mission Control
@@ -287,7 +308,8 @@ swift tools/repro/destroy-notification-probe.swift <pid> [close|kill]
 `window-lifecycle-repro.swift` tiles two windows (middle third, right
 third) and then either closes one through AX (the reported gesture's
 shape: Firefox closes the window a dragged tab left) or kills the whole
-app. A closed window's slot must release inside a sub-second budget — the
+app. A closed window's slot must release inside a two-second budget
+(observed releases are milliseconds) — the
 adapter observes `AXUIElementDestroyed` and prunes on the spot — while a
 killed process has no notifications left to send and releases on the 5s
 tick plus 3s confirmation. The icon's cell count alone cannot tell a
@@ -295,7 +317,8 @@ reflowed survivor from a ghost (both light the same cells), so the suite
 asserts the survivor's frame and, for a killed app, an empty icon.
 
 `destroy-notification-probe.swift` measures that notification's latency
-for any app (host app: ~3ms; Firefox: ~29ms), which is what makes the
+for any app (observed on the development machine: host app ~3ms; Firefox
+~29ms), which is what makes the
 event-driven release safe to promise.
 
 See `tools/repro/multi-display-checklist.md` for the physical display-change

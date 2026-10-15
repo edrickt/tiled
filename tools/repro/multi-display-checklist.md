@@ -55,7 +55,9 @@ Control actions that need a person at the machine.
 - While both displays are tiled, disable one in System Settings or unplug it.
 - Expected: the remaining display's windows do not move; the app writes
   nothing to the removed display's canvas while no display shows it (its
-  rows leave the menu). macOS itself may relocate windows off the removed
+  rows leave the menu), and the absent canvas keeps its last-known frame —
+  it is never overwritten by another display's geometry while unplugged.
+  macOS itself may relocate windows off the removed
   display — that is not a failure; what must hold is that Tiled never
   writes in the dark.
 - Re-attach/re-enable the display.
@@ -122,8 +124,10 @@ Control actions that need a person at the machine.
   backup exists — same control; after a reset it reads **Reset Splitters**
   again.
 - Use the untile row (**Untile 1 Window** / **Untile N Windows** — titled
-  by count) **last**: it lives in the manage section, which disappears
-  once its canvas has nothing tiled, taking Reset Splitters with it.
+  by count) **last**: it lives in the manage section, which spans every
+  visible canvas and disappears only once no visible canvas has anything
+  tiled (the other display's tiled rows keep it alive), taking Reset
+  Splitters with it.
 - Expected: only the focused display's canvas is affected.
 - Failure symptom: the other display's splitters move, or its windows
   untile.
