@@ -85,10 +85,11 @@ caused it. A hole no neighbor can merge into exactly stays empty.
 
 ⌥⇧R always snaps the focused canvas's splitters back to even splits;
 pressing it again resets again (and replaces the parked backup). The
-one-step restore lives in the menu: after a reset or a drag the same row
-is titled **Restore Previous Splitters**, and it brings the previous
-positions back. Windows stay in their slots either way; only the sizes
-change.
+one-step restore lives in the menu: a reset parks the positions from
+before it, and the same row is then titled **Restore Previous
+Splitters** until clicked, bringing those positions back. A drag alone
+never arms the restore (and a drag after a reset doesn't clear it).
+Windows stay in their slots either way; only the sizes change.
 
 First launch opens Settings on a Welcome tab: focus any window and press the
 Top Left shortcut (⌥⇧⌘U by default), with a miniature preview showing what
@@ -184,12 +185,12 @@ tell you which app took it.
 Drag any edge of a tiled window and the shared grid splitter's fraction
 updates as you drag; the neighbor windows on the other side — and the
 dragged window's own tile — are rewritten when the mouse button is
-released. Vertical and horizontal splitters are
-independent per column (quarters) or per third (sixths), so resizing one
-column never moves the other, and the same independence holds between
-monitors and Spaces, so dragging an edge on one canvas never moves tiles on
-another. A two-thirds window resizes as two equal one-thirds: the hidden
-splitter inside it follows its outer edge, staying at the midpoint. A
+released. The row splitters are independent per column (quarters) or per
+third (sixths), so resizing one column's rows never moves the other, and
+the same independence holds between monitors and Spaces, so dragging an
+edge on one canvas never moves tiles on another. A two-thirds window
+resizes as two equal one-thirds: the hidden splitter inside it follows
+its outer edge, staying at the midpoint. A
 neighbor pushed narrower (or shorter) than its app's minimum size simply
 stops shrinking at that size, pinned to the screen edge it already held:
 the window always stays inside the boundaries of the screen, never
@@ -201,8 +202,9 @@ mouse-up. A corner that mixes a screen edge with a real splitter (the
 top-left corner of a two-thirds window) still resizes the splitter edge
 and settles normally.
 **Reset Splitters** in the menu (or ⌥⇧R) snaps the focused canvas's
-splitters back to even splits. After a drag the same row is titled
-**Restore Previous Splitters**, restoring the pre-drag splits instead.
+splitters back to even splits. Once a reset has parked the pre-reset
+positions, the same row is titled **Restore Previous Splitters** and
+brings them back.
 
 ## Installing a release build
 
@@ -302,7 +304,7 @@ managers answering one keystroke make every case lie):
 ```
 scripts/run-focus-loop.sh tools/repro/window-lifecycle-repro.swift  # MODE=kill-app (default)
 MODE=close-window scripts/run-focus-loop.sh tools/repro/window-lifecycle-repro.swift
-swift tools/repro/destroy-notification-probe.swift <pid> [close|kill]
+swift tools/repro/destroy-notification-probe.swift <pid> <close|kill>
 ```
 
 `window-lifecycle-repro.swift` tiles two windows (middle third, right

@@ -12,9 +12,14 @@ works, and it is worth being explicit about what Tiled does with it.
 - **No persistence of your windows.** Frames are kept in memory for the current
   session so a window can be restored when it is untiled; nothing is written to
   disk, and quitting leaves every window where it is.
-- **Two preferences**, in `dev.tiled.app`: `hideMenuBarIcon` and
-  `didDismissWelcome`. Launch-at-login is registered through `SMAppService`,
-  which is visible and removable in System Settings → General → Login Items.
+- **Preferences**, in `dev.tiled.app`: the two app toggles
+  (`hideMenuBarIcon`, `didDismissWelcome`); any shortcut override (one key
+  per action) plus the parked and reset-backup copies the Shortcuts tab
+  keeps (`hotkey.*`, `parkedHotkey.*`, `resetBackupHotkey.*`); the
+  Shortcuts tab's collapsed sections (`collapsedShortcutSections`); and
+  the Settings window position (`TiledSettings` frame autosave).
+  Launch-at-login is registered through `SMAppService`, which is visible
+  and removable in System Settings → General → Login Items.
 - **No bundled binaries, no helper daemons, no privileged components.** The
   app is one executable.
 - **Reads private window-server symbols** (`SkyLight`/CoreGraphics) through

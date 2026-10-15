@@ -8,8 +8,8 @@ import ApplicationServices
 // notification would let the slot release as soon as the OS says the
 // element is gone.
 //
-// Usage: swift tools/repro/destroy-notification-probe.swift <pid> [close|kill]
-//   close (default): press the first window's AX close button, then wait
+// Usage: swift tools/repro/destroy-notification-probe.swift <pid> <close|kill>
+//   close: press the first window's AX close button, then wait
 //   kill: SIGKILL the whole process, then wait
 //
 // Prints the latency from the close to the notification, and whether the

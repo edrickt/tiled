@@ -119,10 +119,11 @@ Control actions that need a person at the machine.
 
 - Focus a tiled window on the built-in display, then on the external one.
 - Expected: the status glyph shows that display's layout and occupancy.
-- Drag a splitter first (so a splitter backup exists), then use **Reset
-  Splitters**. It is titled **Restore Previous Splitters** whenever a
-  backup exists — same control; after a reset it reads **Reset Splitters**
-  again.
+- Drag a splitter first (so there are custom positions to displace), then
+  use **Reset Splitters**: the reset parks those positions and the same
+  control is then titled **Restore Previous Splitters** until clicked,
+  after which it reads **Reset Splitters** again. (A drag alone never
+  arms the restore; only a reset does.)
 - Use the untile row (**Untile 1 Window** / **Untile N Windows** — titled
   by count) **last**: it lives in the manage section, which spans every
   visible canvas and disappears only once no visible canvas has anything

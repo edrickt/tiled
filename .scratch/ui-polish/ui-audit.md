@@ -26,7 +26,8 @@ isolated preferences suite. It does not instantiate `AppDelegate`, register
 global shortcuts, or run the window manager. This is a Settings preview, not
 the installed app or an end-to-end tiling test.
 
-Window-only screenshots are saved in `docs/ui-audit-captures/`: Welcome,
+Window-only screenshots are saved in
+`.scratch/ui-polish/ui-audit-captures/`: Welcome,
 General, and Shortcuts, each in light/dark appearance at default and minimum
 window sizes. The minimum 400×300 window has a 400×268 content area on this
 system. Captures include native window chrome; the windows appear inactive.
@@ -156,7 +157,7 @@ task has the strongest source evidence; visual tasks remain conditional.
 
 **Classification:** confirmed visual mismatch; high priority.
 
-In `docs/ui-audit-captures/welcome-light-default.png`, the left diagram shows
+In `.scratch/ui-polish/ui-audit-captures/welcome-light-default.png`, the left diagram shows
 four columns of individually separated cells. Its caption says “Quarters:
 two columns,” and Top Left is drawn as two separate highlighted rectangles.
 `SettingsWelcomeTab.swift:109` uses the default four-column rendering from
