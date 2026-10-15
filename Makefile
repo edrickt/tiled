@@ -3,7 +3,7 @@
 # These wrap the scripts so there is one obvious spelling per task; the
 # scripts remain the source of truth and are what CI runs.
 
-.PHONY: help build release test app app-universal install run repro mutation clean
+.PHONY: help check-counts build release test app app-universal install run repro mutation clean
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 
@@ -13,6 +13,7 @@ help:
 	@echo "  make build      debug build (swift build)"
 	@echo "  make release    release build"
 	@echo "  make test       hermetic unit suite (~2s, the gate for every change)"
+	@echo "  make check-counts  README's published test count vs the suite"
 	@echo "  make app        release build bundled as build/Tiled.app"
 	@echo "  make app-universal  same, fat binary for Apple Silicon + Intel"
 	@echo "  make install    build, install to /Applications, launch"
@@ -29,6 +30,9 @@ release:
 
 test:
 	swift test
+
+check-counts:
+	./scripts/check-test-count.sh
 
 app:
 	./scripts/make-app.sh

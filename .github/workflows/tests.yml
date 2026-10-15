@@ -32,6 +32,10 @@ jobs:
       - name: Unit tests
         run: swift test
 
+      # README publishes the suite size; keep the number true.
+      - name: Test count
+        run: ./scripts/check-test-count.sh
+
       # The release configuration and the bundle are what users install;
       # a release-only compile error or a broken Info.plist must not wait
       # for a hand-run install to surface.
