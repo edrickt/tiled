@@ -126,7 +126,10 @@ enum Slot: String, CaseIterable {
     }
 }
 
-/// An edge of a window's frame.
+/// An edge of a window's frame. AppKit coordinates, y grows upward:
+/// `.top` is the maxY side — the line where the slot's row span begins
+/// (`rows.lowerBound`, the side row 0 is on) — and `.bottom` is the minY
+/// side (`rows.upperBound`).
 enum TileEdge: CaseIterable {
     case left, right, top, bottom
 }
