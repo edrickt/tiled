@@ -47,21 +47,41 @@ echo "==> Launching dev tiled (TILED_DEBUG log: $LOG)"
 script -q /dev/null env TILED_DEBUG=1 NSUnbufferedIO=YES .build/debug/tiled > "$LOG" 2>&1 &
 sleep 3
 
-# The host app only becomes frontmost if the app launching it is
-# frontmost (macOS refuses programmatic activation from background
-# processes). A probe earlier in the session can leave Finder or a
-# browser frontmost; put the terminal back so the host activates
-# naturally, exactly as it does when a human runs this script.
-TERM_APP="${TERM_PROGRAM:-Terminal}"
-[[ "$TERM_APP" == "Apple_Terminal" ]] && TERM_APP="Terminal"
-[[ "$TERM_APP" == "iTerm.app" ]] && TERM_APP="iTerm"
-open -a "$TERM_APP" 2>/dev/null || true
-sleep 1
-
+# The host launches as a minimal bundle via `open`: a plain CLI cannot
+# make itself frontmost on modern macOS (NSRunningApplication.activate
+# and the AX frontmost attribute are both refused), and an overlapped
+# host window swallows the suite's focus clicks — the suite then clicks
+# the covering window and the tile hotkey targets that instead. `open`
+# is a LaunchServices user-intent request, so the host's windows come up
+# above whatever else is on screen.
 echo "==> Launching host windows"
-build/host &
-HOST_PID=$!
+HOST_APP=build/Host.app
+rm -rf "$HOST_APP"
+mkdir -p "$HOST_APP/Contents/MacOS"
+cat > "$HOST_APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>host</string>
+	<key>CFBundleDisplayName</key>
+	<string>host</string>
+	<key>CFBundleExecutable</key>
+	<string>host</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.tiled.repro.host</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+</dict>
+</plist>
+PLIST
+cp build/host "$HOST_APP/Contents/MacOS/host"
+open "$HOST_APP"
 sleep 3
+HOST_PID=$(pgrep -x host | head -1)
 
 echo "==> Running $SUITE"
 status=0
