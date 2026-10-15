@@ -502,5 +502,11 @@
   "manage list double-lists a window emitted from two canvases",
   "        var seen: Set<WindowID> = []\n        let rows = rows.filter { seen.insert($0.id).inserted }",
   "        var seen: Set<WindowID> = []\n        let rows = rows.filter { _ in true }"
+ ],
+ [
+  "DragTracker.swift",
+  "release mark requires a movable splitter (screen-edge drags never reassert)",
+  "            guard edgeMoved else { continue }\n            anyEdgeMoved = true",
+  "            guard edgeMoved, GridLayout.boundary(edge: edge, slot: slot) != nil else { continue }\n            anyEdgeMoved = true"
  ]
 ]
