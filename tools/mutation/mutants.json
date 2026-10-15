@@ -445,6 +445,30 @@
  ],
  [
   "LiveWindowGateway.swift",
+  "a listed held element read as stale (a live window's handle given to a newcomer sharing its frame)",
+  "        if let listedByApp { return !listedByApp }",
+  "        if let listedByApp { return true }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "an unlisted held element read as live (churned identity never recovers)",
+  "        if let listedByApp { return !listedByApp }",
+  "        if let listedByApp { return false }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "an unreadable list treated as absence (a live window's identity handed away on a maybe)",
+  "        return !probeAnswers()",
+  "        return true"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a live candidate inherited (different window at the same frame takes the tiled window's handle)",
+  "        candidates.first(where: { $0.heldIsStale })?.handle",
+  "        candidates.first?.handle"
+ ],
+ [
+  "LiveWindowGateway.swift",
   "an absent listed window never confirms death",
   "        if listedFrames.isEmpty || readFrames.count == listedFrames.count {",
   "        if false {"

@@ -722,16 +722,49 @@ final class LiveWindowGateway: WindowGateway {
         // reference for the same window after a display teardown (the
         // death rule relies on the same fact). Fall back to geometry:
         // same pid, last-read frame within a point. Adopt the fresh
-        // element so CFEqual routing recovers with it.
+        // element so CFEqual routing recovers with it — but only when
+        // the held element is provably stale: geometry alone cannot
+        // tell the churned reference of the SAME window from a
+        // DIFFERENT window that happens to share its frame (Firefox's
+        // tab tear-out opens the detached window on the source
+        // window's frame; adopting it silently untiled the original).
+        // See `heldElementIsStale` and `inheritedHandle`.
         if let frame = Self.frame(of: element) {
+            var matching: [WindowHandle] = []
             for (handle, registeredPID) in pids where registeredPID == pid {
                 guard let cached = lastFrames[handle],
                       Self.framesClose(cached, frame)
                 else { continue }
-                elements[handle] = element
-                lastFrames[handle] = frame
-                Self.applyMessagingTimeout(element)
-                return handle
+                matching.append(handle)
+            }
+            if !matching.isEmpty {
+                // One list read serves every candidate; only a geometry
+                // match pays for it. Nil means the app would not answer:
+                // membership is undeterminable, never "absent".
+                let listed = Self.appWindowList(pid: pid)
+                let candidates = matching.map { handle -> HandleCandidate in
+                    let held = elements[handle]
+                    let listedByApp = listed.map { list in
+                        guard let held else { return false }
+                        return list.contains { CFEqual($0, held) }
+                    }
+                    let heldIsStale = Self.heldElementIsStale(
+                        listedByApp: listedByApp,
+                        probeAnswers: { held.map(Self.elementAnswers) ?? false })
+                    if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+                        NSLog(
+                            "Tiled: [DEBUG-obs] geometry match win%d listed=%@ stale=%d",
+                            handle.id, listedByApp.map { $0 ? "yes" : "no" } ?? "unknown",
+                            heldIsStale ? 1 : 0)
+                    }
+                    return HandleCandidate(handle: handle, heldIsStale: heldIsStale)
+                }
+                if let inherited = Self.inheritedHandle(candidates) {
+                    elements[inherited] = element
+                    lastFrames[inherited] = frame
+                    Self.applyMessagingTimeout(element)
+                    return inherited
+                }
             }
         }
         let handle = WindowHandle(id: nextHandleID)
@@ -740,6 +773,61 @@ final class LiveWindowGateway: WindowGateway {
         pids[handle] = pid
         Self.applyMessagingTimeout(element)
         return handle
+    }
+
+    /// One same-pid handle whose last-read frame matches the fresh
+    /// element's frame: the only handles geometry could hand over to.
+    /// Whether the held element is stale (see `heldElementIsStale`)
+    /// decides if it actually may be.
+    struct HandleCandidate: Equatable {
+        var handle: WindowHandle
+        var heldIsStale: Bool
+    }
+
+    /// The handle a fresh element may inherit, or nil for a fresh handle.
+    /// Only a provably stale candidate can be inherited: a live window
+    /// that merely shares the frame must never lose its identity to a
+    /// newcomer. Among several stale candidates (stacked churned
+    /// references) the first is as good as any.
+    static func inheritedHandle(_ candidates: [HandleCandidate]) -> WindowHandle? {
+        candidates.first(where: { $0.heldIsStale })?.handle
+    }
+
+    /// Whether a held element is provably stale, from what the owning app
+    /// answered. The fresh window list decides when it read: a listed
+    /// element is a live window (listed wins even if this probe fails),
+    /// and an absent one is a churned reference. Only an unreadable list
+    /// falls back to the element's own position probe — an element that
+    /// still answers is a live window, not a stale reference — so an
+    /// undeterminable membership never silently hands a live window's
+    /// identity away.
+    static func heldElementIsStale(
+        listedByApp: Bool?, probeAnswers: () -> Bool
+    ) -> Bool {
+        if let listedByApp { return !listedByApp }
+        return !probeAnswers()
+    }
+
+    /// The owning app's fresh window list, for CFEqual membership of held
+    /// elements. Nil when the app element does not answer; an app that
+    /// answers an empty list genuinely lists nothing.
+    private static func appWindowList(pid: pid_t) -> [AXUIElement]? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, messagingTimeout)
+        var value: CFTypeRef?
+        guard
+            AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+                == .success
+        else { return nil }
+        return value as? [AXUIElement] ?? []
+    }
+
+    /// Whether a held element still answers its own position probe: a
+    /// live reference, whatever any window list says.
+    private static func elementAnswers(_ element: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(
+            element, kAXPositionAttribute as CFString, &value) == .success
     }
 
     /// Bounds every future message to `element` (reads and writes alike)

@@ -6,6 +6,21 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Detaching a tab from a tiled Firefox window no longer untiles the
+  original window when the new window is tiled. Firefox opens the
+  detached window at (within a point of) the source window's frame, and
+  the live adapter's element-churn fallback adopted any same-app window
+  answering at a held window's last-read frame — so the newcomer
+  inherited the tiled window's handle, the canvas read it as the tiled
+  window moving, the original silently lost its slot, and the menu
+  stopped counting it. Adoption by frame now also requires the held
+  element to be provably stale (the app's fresh window list no longer
+  contains it, or it no longer answers its own probe) — the state a
+  display-teardown churn leaves behind — so a live window that merely
+  shares the frame always keeps its handle. (`tools/repro/handle-collision-repro.swift`)
+
 ## [0.2.1] - 2026-10-15
 
 ### Changed

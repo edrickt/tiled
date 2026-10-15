@@ -227,7 +227,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (680 tests)
+swift test             # hermetic unit suite (687 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -261,7 +261,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (680 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (687 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |
@@ -276,7 +276,11 @@ per-column row independence, clamping, screen edges, eviction, swap,
 re-house, undo, closes) and the sixths family (the layout
 switch, sixths geometry, per-third row independence, and a two-thirds
 window's hidden divider). Drag-out has its own focused probes
-(`tools/repro/dragout-sixth-test.swift`, `tools/repro/evict-drag-test.swift`). Sixths boards stay disjoint in the suite: it
+(`tools/repro/dragout-sixth-test.swift`, `tools/repro/evict-drag-test.swift`). Handle
+identity has one too (`tools/repro/handle-collision-repro.swift`): a
+freshly focused same-app window sitting on a tiled window's exact frame
+— the shape Firefox's tab tear-out produces — must not inherit its
+handle and untile the original. Sixths boards stay disjoint in the suite: it
 models the quarters eviction algebra, not a second occupancy model. The multi-display
 suite checks same-slot coexistence, per-monitor moves, and splitter isolation
 on two attached displays; unplug/replug, rearrange, and Mission Control
@@ -297,14 +301,16 @@ python3 tools/mutation/mutate.py --workers 2    # fewer workers on a loaded mach
 
 ### Focused loops
 
-Two focused harnesses cover bugs whose signal is the status icon's
-occupancy rather than a window frame, and they must stop any installed
+Focused harnesses cover bugs whose signal is the status icon's
+occupancy or the menu's rows rather than a window frame, and they must
+stop any installed
 `/Applications/Tiled.app` first (it owns the same global hotkeys; two
 managers answering one keystroke make every case lie):
 
 ```
 scripts/run-focus-loop.sh tools/repro/window-lifecycle-repro.swift  # MODE=kill-app (default)
 MODE=close-window scripts/run-focus-loop.sh tools/repro/window-lifecycle-repro.swift
+scripts/run-focus-loop.sh tools/repro/handle-collision-repro.swift  # identity across same-frame windows
 swift tools/repro/destroy-notification-probe.swift <pid> <close|kill>
 ```
 
@@ -323,6 +329,14 @@ asserts the survivor's frame and, for a killed app, an empty icon.
 for any app (observed on the development machine: host app ~3ms; Firefox
 ~29ms), which is what makes the
 event-driven release safe to promise.
+
+`handle-collision-repro.swift` parks a second host window on a tiled
+window's exact frame and tiles it: the tiled window's handle must
+survive the newcomer (the menu keeps both rows, both frames stay
+correct). Firefox's tab tear-out is the live gesture this models — the
+detached window opens on the source window's frame — and the original
+bug moved the tiled window's record to the newcomer's element, dropping
+the original from the menu mid-layout.
 
 See `tools/repro/multi-display-checklist.md` for the physical display-change
 checks the suite cannot drive.
