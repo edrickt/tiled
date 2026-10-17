@@ -63,6 +63,11 @@ final class ShortcutsTab: NSObject {
     var failedActionsProvider: (() -> [HotkeyAction])?
     /// Opens the Accessibility permission pane.
     var onOpenAccessibilitySettings: (() -> Void)?
+    /// The reset confirmation decision, receiving the dialog's promise and
+    /// answering whether to reset. Injectable so tests can run the whole
+    /// reset/restore lifecycle without a modal session; nil presents the
+    /// real alert.
+    var confirmReset: ((String) -> Bool)?
 
     private var recorderButtons: [HotkeyAction: RecorderButton] = [:]
     /// The per-section bulk buttons, so a binding change that does not
@@ -720,15 +725,25 @@ final class ShortcutsTab: NSObject {
     /// the dialog says so when a backup already exists, so the second
     /// reset never silently destroys the first snapshot).
     private func confirmAndReset(_ sender: NSButton) {
-        let alert = NSAlert()
-        alert.messageText = "Reset all \(HotkeyAction.allCases.count) shortcuts to defaults?"
-        alert.informativeText = anyResetBackup()
+        // The promise is the outcome's contract: with no backup it names
+        // the recovery ("kept … Restore Previous Shortcuts"); with one it
+        // warns that the snapshot is replaced wholesale.
+        let promise = anyResetBackup()
             ? "This replaces your previous backup; those combos will be gone. "
                 + "Your current combos become the new backup."
             : "Your current combos are kept; use Restore Previous Shortcuts to get them back."
-        alert.addButton(withTitle: "Reset Shortcuts")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let confirmed: Bool
+        if let confirmReset {
+            confirmed = confirmReset(promise)
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "Reset all \(HotkeyAction.allCases.count) shortcuts to defaults?"
+            alert.informativeText = promise
+            alert.addButton(withTitle: "Reset Shortcuts")
+            alert.addButton(withTitle: "Cancel")
+            confirmed = alert.runModal() == .alertFirstButtonReturn
+        }
+        guard confirmed else { return }
         for action in HotkeyAction.allCases {
             parkResetBackup(hotkeyStore.binding(for: action), for: action)
         }
@@ -739,29 +754,63 @@ final class ShortcutsTab: NSObject {
     }
 
     /// Restores the combos parked by the last reset: an exact snapshot,
-    /// including disabled actions. Each entry goes through the same
-    /// duplicate gate as a recording: a snapshot combo the user has
-    /// since (re)assigned elsewhere is reported, never stored past the
-    /// gate (which would leave an action that renders enabled but never
-    /// registers).
+    /// including disabled actions. The snapshot is one prior state, not a
+    /// sequence of independent recordings, so a pair that swapped their
+    /// combos must land as a pair; only a combo owned by an action
+    /// *outside* the snapshot is a clash. A clash-reported entry stays in
+    /// the backup (the Disable-all park's rule) so a later press, once the
+    /// combo is free, brings it back; only applied entries are cleared.
     private func restoreResetBackup(_ sender: NSButton) {
-        var skipped: [String] = []
+        var backups: [HotkeyAction: HotkeyBinding] = [:]
         for action in HotkeyAction.allCases {
-            guard let backup = resetBackupBinding(for: action) else { continue }
-            clearResetBackup(for: action)
-            switch hotkeyStore.apply(backup, for: action) {
-            case .applied:
-                break
-            case .duplicate(let owners):
-                let names = owners.map(\.title).joined(separator: ", ")
-                skipped.append("\(action.title) (taken by \(names))")
+            if let backup = resetBackupBinding(for: action) {
+                backups[action] = backup
             }
+        }
+        let snapshot = Set(backups.keys)
+        var accepted: [HotkeyAction: HotkeyBinding] = [:]
+        var skipped: [(action: HotkeyAction, owners: [HotkeyAction])] = []
+        for (action, candidate) in backups {
+            let owners = hotkeyStore.duplicates(of: candidate, ignoring: action)
+                .filter { !snapshot.contains($0) }
+            if owners.isEmpty {
+                accepted[action] = candidate
+            } else {
+                skipped.append((action, owners))
+            }
+        }
+        // A refused entry keeps its current binding, so an accepted entry
+        // must not take the combo that refused entry still visibly holds.
+        var changed = true
+        while changed {
+            changed = false
+            for (action, candidate) in Array(accepted) where candidate.keyCode != nil {
+                if let owner = HotkeyAction.allCases.first(where: { other in
+                    other != action && accepted[other] == nil
+                        && backups[other] != nil
+                        && hotkeyStore.binding(for: other) == candidate
+                }) {
+                    accepted[action] = nil
+                    skipped.append((action, [owner]))
+                    changed = true
+                }
+            }
+        }
+        for (action, binding) in accepted {
+            hotkeyStore.set(binding, for: action)
+            clearResetBackup(for: action)
         }
         onHotkeysChange?()
         reload()
-        sender.title = "Reset Shortcuts"
+        sender.title = anyResetBackup()
+            ? "Restore Previous Shortcuts" : "Reset Shortcuts"
         if !skipped.isEmpty {
-            showConflict("Not restored: \(skipped.joined(separator: ", ")).")
+            let names = skipped
+                .sorted { $0.action.title < $1.action.title }
+                .map {
+                    "\($0.action.title) (taken by \($0.owners.map(\.title).joined(separator: ", ")))"
+                }
+            showConflict("Not restored: \(names.joined(separator: ", ")).")
         }
     }
 
