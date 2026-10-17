@@ -14,7 +14,7 @@ store's one duplicate gate, with the rejected backup retained and reported.
 
 **Findings:** F3 (`.scratch/quality-audit/report.md`); also `robustness-audit` D4.
 
-**Status:** TODO
+**Status:** DONE (6324502)
 
 - [ ] Reset → swap Top Left and Top Right → Restore restores both and consumes both backups.
 - [ ] A backup whose combo is held by an action outside the snapshot is rejected, retained, and

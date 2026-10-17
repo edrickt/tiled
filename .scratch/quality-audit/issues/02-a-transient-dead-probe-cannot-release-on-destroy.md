@@ -22,7 +22,7 @@ whose app still lists the window. Then add the test seam the fake can drive
 
 **Findings:** F2 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** PARKED (needs live display-teardown evidence; the code path is reproduced, the production frequency is not)
 
 - [ ] The live collision is reproduced or ruled out on real AX; the evidence is recorded in the
       ticket's Comments.

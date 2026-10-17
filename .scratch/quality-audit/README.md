@@ -8,9 +8,10 @@ graph, the gates, and how to run one ticket in a fresh session.
 
 Batch 1 is the recommended starting order: **F1** (refused move loses the old slot), **F2**
 (destroy fast path bypasses the death clock), **F3** (Restore Previous Shortcuts destroys its
-backup). The rest of the functional findings and the test seams follow in the report's triage
-order. The architecture candidates are **not** implementation tickets yet: A1/A2 have a design
-phase, and A3–A6 are "worth exploring" only.
+backup). **F1 and F3 are DONE**; **F2 is parked on live display-teardown evidence**, as its
+ticket requires. The rest of the functional findings and the test seams follow in the report's
+triage order. The architecture candidates are **not** implementation tickets yet: A1/A2 have a
+design phase, and A3–A6 are "worth exploring" only.
 
 Base: `master` @ `2f07c03` (v0.2.2). The `robustness-audit` branch is unmerged; F3/F8/T4/F20
 overlap findings already recorded there and are marked in the report.
@@ -20,8 +21,8 @@ overlap findings already recorded there and are marked in the report.
 | # | Ticket | Blocked by | Findings | Status |
 |---|--------|-----------|----------|--------|
 | 01 | A refused move keeps the old slot | – | F1 | DONE (`bb3819d`) |
-| 02 | A transient dead probe cannot release on a destroy report | 01 | F2 | TODO |
-| 03 | Restore Previous Shortcuts restores atomically | – | F3 | TODO |
+| 02 | A transient dead probe cannot release on a destroy report | 01 | F2 | PARKED (live evidence) |
+| 03 | Restore Previous Shortcuts restores atomically | – | F3 | DONE (`6324502`) |
 | 04 | Undo tells the truth about a refused reveal | 01 | F4 | TODO |
 | 05 | A retile clears deferred restores across canvases | 04 | F5 | TODO |
 | 06 | The manage menu keys on the focused canvas | – | F6 | TODO |
