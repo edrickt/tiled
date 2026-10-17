@@ -14,7 +14,7 @@ old layout (the layout is derived from the occupants, so restoring the slot rest
 
 **Findings:** F1 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (bb3819d)
 
 - [ ] A tiled requester refused into a free slot keeps its previous slot, record, and pre-tile
       frame; the window's live frame is unchanged.

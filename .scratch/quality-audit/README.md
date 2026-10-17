@@ -19,7 +19,7 @@ overlap findings already recorded there and are marked in the report.
 
 | # | Ticket | Blocked by | Findings | Status |
 |---|--------|-----------|----------|--------|
-| 01 | A refused move keeps the old slot | – | F1 | TODO |
+| 01 | A refused move keeps the old slot | – | F1 | DONE (`bb3819d`) |
 | 02 | A transient dead probe cannot release on a destroy report | 01 | F2 | TODO |
 | 03 | Restore Previous Shortcuts restores atomically | – | F3 | TODO |
 | 04 | Undo tells the truth about a refused reveal | 01 | F4 | TODO |
