@@ -60,6 +60,42 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(outcome.result, .refused(windowName: "TestApp"))
     }
 
+    func testRefusedMoveOfTiledWindowKeepsItsOriginalSlot() {
+        let id = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: id)
+        let original = harness.frame(of: id)
+        harness.gateway.refuseNextWrites(harness.handle(of: id)!)
+
+        let outcome = harness.apply(slot: .bottomRight, requester: id)
+
+        XCTAssertEqual(outcome.result, .refused(windowName: "TestApp"))
+        XCTAssertEqual(
+            space.state.slot(of: id), .topLeft,
+            "a refused move keeps the slot the window still visibly holds")
+        XCTAssertEqual(harness.frame(of: id), original, "the app never moved the window")
+        XCTAssertNotNil(space.records[id], "the record survives with the occupancy")
+        XCTAssertNotNil(space.error)
+    }
+
+    func testRefusedMoveDuringLayoutSwitchKeepsTheOriginalSlotAndLayout() {
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topRight, requester: b)
+        XCTAssertEqual(space.state.activeLayout, .quarters)
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!)
+
+        let outcome = harness.apply(slot: .sixthTopLeft, requester: a)
+
+        XCTAssertEqual(outcome.result, .refused(windowName: "TestApp"))
+        XCTAssertEqual(space.state.slot(of: a), .topLeft)
+        XCTAssertNil(
+            space.state.slot(of: b),
+            "the switch already restored the other window before the refused placement")
+        XCTAssertEqual(space.state.activeLayout, .quarters)
+        XCTAssertNotNil(space.records[a])
+    }
+
     func testTileOnAHiddenCanvasDefersAndStands() {
         let id = harness.addWindow()
         harness.canvasVisible = false
@@ -423,7 +459,13 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .sixthsRightTwoThirds, requester: m)
 
         XCTAssertNotNil(space.error, "the requester's refusal is reported")
-        XCTAssertNil(space.state.slot(of: m))
+        XCTAssertEqual(
+            space.state.slot(of: m), .sixthMiddle,
+            "the refused requester keeps the slot it still visibly holds")
+        XCTAssertEqual(
+            harness.frame(of: m), harness.rect(.sixthMiddle),
+            "the app never moved the requester")
+        XCTAssertNotNil(space.records[m], "the record survives with the occupancy")
         XCTAssertNil(
             space.state.slot(of: r),
             "the victim untiles to its pre-tile frame, not into a new tile")

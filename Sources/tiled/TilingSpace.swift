@@ -805,7 +805,8 @@ struct TilingSpace {
         context: Context, observed: inout [WindowID], deferred: inout Bool
     ) -> Refusal? {
         guard var record = records[id] else { return nil }
-        if state.slot(of: id) == nil {
+        let previous = state.slot(of: id)
+        if previous == nil {
             // First tiling: remember where to restore when untiled.
             // A window moving between overlapping slots (e.g. Left -> BottomLeft)
             // keeps its original pre-tile frame.
@@ -816,17 +817,29 @@ struct TilingSpace {
         observed.append(id)
         let result = applyLayout(for: id, context: context, on: context.space)
         if result == .refused {
-            // The window refused the frame (some apps ignore AX resizes):
-            // roll back occupancy so state and screen agree, and say so.
-            // The record goes with the occupancy: a record exists only
-            // while the window is tiled, so a refused placement must not
-            // leave the window owned by this canvas. `settle` folds the
-            // release into `outcome.forget`, so the coordinator drops its
-            // handle-table entry too. Name the window before the record
-            // (the only source of its app name) goes.
+            // The window refused the frame (some apps ignore AX resizes).
+            // Name the window before the record (the only source of its
+            // app name) can go.
             let failed = refusal(for: id, context: context)
-            forget(id, context: context)
-            context.log("place FAILED win\(id) -> \(slot.rawValue)")
+            if let previous {
+                // The window was already tiled, so it never moved on
+                // screen: the app refused the write and it still occupies
+                // the slot it held. Restore that occupancy. Forgetting it
+                // would leave state and screen disagreeing, and the next
+                // request could claim the visible cells and write over it.
+                state.commit(window: id, into: previous)
+                context.log(
+                    "place FAILED win\(id) -> \(slot.rawValue); kept \(previous.rawValue)")
+            } else {
+                // A refused first tiling has no previous occupancy to
+                // return to. The record goes with the occupancy: a record
+                // exists only while the window is tiled, so a refused
+                // placement must not leave the window owned by this
+                // canvas. `settle` folds the release into `outcome.forget`,
+                // so the coordinator drops its handle-table entry too.
+                forget(id, context: context)
+                context.log("place FAILED win\(id) -> \(slot.rawValue)")
+            }
             return failed
         }
         // A deferred off-Space write is not a failure: the occupancy
