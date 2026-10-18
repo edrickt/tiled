@@ -107,7 +107,7 @@ final class HotkeyService {
     //
     // Reserved ids for the five app actions. Slot ids occupy
     // 1...allCases.count, so 995–999 can never collide with them (or each
-    // other); the table tests pin that.
+    // other); the id tests pin that.
 
     /// Expand toggle (default ⌥⇧⏎).
     static let expandHotkeyID: UInt32 = 998
@@ -155,33 +155,20 @@ final class HotkeyService {
     static let undoDefaultBinding = HotkeyBinding(
         modifiers: undoModifiers, keyCode: undoKeyCode)
 
-    /// Pure id → action mapping over the slot table the callback holds.
-    /// Extracted from carbonCallback so a table test pins it: a routing
-    /// typo here turns a global hotkey into a dead key while the menu
-    /// still advertises it. Unknown ids return nil (the callback answers
+    /// One routing declaration, consumed by the Carbon callback and its
+    /// tests: every action's stable id maps back to that action. Derived
+    /// from `allCases`, so an action cannot appear in one map and be
+    /// missing from another. Unknown ids return nil (the callback answers
     /// eventNotHandledErr, letting the event fall through to other apps).
-    static func route(
-        forHotKeyID id: UInt32, slotByID: [UInt32: Slot]
-    ) -> HotkeyAction? {
-        if let slot = slotByID[id] { return .slot(slot) }
-        switch id {
-        case expandHotkeyID: return .expand
-        case evictHotkeyID: return .evict
-        case settingsHotkeyID: return .settings
-        case undoHotkeyID: return .undo
-        case resetSplittersHotkeyID: return .resetSplitters
-        default: return nil
-        }
+    static let actionByID: [UInt32: HotkeyAction] = Dictionary(
+        uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID, $0) })
+
+    static func route(forHotKeyID id: UInt32) -> HotkeyAction? {
+        actionByID[id]
     }
 
     private final class Context {
         var handler: ((HotkeyAction) -> Void)?
-        let actionByID: [UInt32: HotkeyAction]
-
-        init() {
-            actionByID = Dictionary(
-                uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID, $0) })
-        }
     }
 
     private static let signature = OSType(0x54_49_4C_44) // 'TILD'
@@ -303,7 +290,7 @@ final class HotkeyService {
             &hotKeyID)
         guard status == noErr else { return status }
         let context = Unmanaged<Context>.fromOpaque(userData!).takeUnretainedValue()
-        guard let action = context.actionByID[hotKeyID.id] else {
+        guard let action = HotkeyService.route(forHotKeyID: hotKeyID.id) else {
             return OSStatus(eventNotHandledErr)
         }
         DispatchQueue.main.async { context.handler?(action) }

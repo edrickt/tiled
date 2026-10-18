@@ -826,5 +826,17 @@
   "adoption keeps the stale observation key (fresh notifications fall through)",
   "        registry.forget(key: oldKey, pid: pid)\n        observedKeys[handle] = token",
   "        registry.forget(key: oldKey, pid: pid)"
+ ],
+ [
+  "HotkeyService.swift",
+  "the route table drops its last action (a hotkey goes dead)",
+  "        uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID, $0) })",
+  "        uniqueKeysWithValues: HotkeyAction.allCases.dropLast().map { ($0.hotkeyID, $0) })"
+ ],
+ [
+  "HotkeyService.swift",
+  "unknown Carbon ids route to the first action instead of falling through",
+  "        actionByID[id]",
+  "        actionByID[id] ?? HotkeyAction.allCases[0]"
  ]
 ]

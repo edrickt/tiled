@@ -132,39 +132,29 @@ final class HotkeyServiceTests: XCTestCase {
         }
     }
 
-    func testRouteTableMapsEverySlotAndAppActionID() {
-        // The pure id→action table: every slot id maps to its slot, each
-        // fixed combo to its own route, and unknown ids to nil. The
-        // production callback still resolves through its Context map
-        // until the two routes are unified.
-        let slotByID = Dictionary(
-            uniqueKeysWithValues: Slot.allCases.map { ($0.hotkeyID, $0) })
-        XCTAssertEqual(slotByID.count, Slot.allCases.count)
-
-        for slot in Slot.allCases {
+    func testRouteTableMapsEveryActionAndRejectsUnknownIDs() {
+        // The production callback consumes this exact table. Every action
+        // id maps to its own action, and unknown ids fall through.
+        for action in HotkeyAction.allCases {
             XCTAssertEqual(
-                HotkeyService.route(forHotKeyID: slot.hotkeyID, slotByID: slotByID),
-                .slot(slot), "\(slot.rawValue)")
+                HotkeyService.route(forHotKeyID: action.hotkeyID), action,
+                "wrong route for \(action)")
         }
-        XCTAssertEqual(
-            HotkeyService.route(forHotKeyID: HotkeyService.expandHotkeyID, slotByID: slotByID),
-            .expand)
-        XCTAssertEqual(
-            HotkeyService.route(forHotKeyID: HotkeyService.evictHotkeyID, slotByID: slotByID),
-            .evict)
-        XCTAssertEqual(
-            HotkeyService.route(forHotKeyID: HotkeyService.settingsHotkeyID, slotByID: slotByID),
-            .settings)
-        XCTAssertEqual(
-            HotkeyService.route(forHotKeyID: HotkeyService.undoHotkeyID, slotByID: slotByID),
-            .undo)
-        XCTAssertEqual(
-            HotkeyService.route(forHotKeyID: HotkeyService.resetSplittersHotkeyID, slotByID: slotByID),
-            .resetSplitters)
-        for unknown: UInt32 in [0, 500, 994, 1000] {
+        // Known-good ids from the outside: slot ids are field order,
+        // app-action ids are the reserved 995–999 range.
+        XCTAssertEqual(HotkeyService.route(forHotKeyID: 1), .slot(.topLeft))
+        XCTAssertEqual(HotkeyService.route(forHotKeyID: 998), .expand)
+        XCTAssertEqual(HotkeyService.route(forHotKeyID: 996), .evict)
+        XCTAssertEqual(HotkeyService.route(forHotKeyID: 999), .settings)
+        XCTAssertEqual(HotkeyService.route(forHotKeyID: 997), .undo)
+        XCTAssertEqual(HotkeyService.route(forHotKeyID: 995), .resetSplitters)
+        for unknown: UInt32 in [0, 500, 994, 1000, 10_000] {
             XCTAssertNil(
-                HotkeyService.route(forHotKeyID: unknown, slotByID: slotByID),
+                HotkeyService.route(forHotKeyID: unknown),
                 "unknown id \(unknown) must fall through")
         }
+        XCTAssertEqual(
+            HotkeyService.actionByID.count, HotkeyAction.allCases.count,
+            "one id per action, no aliases")
     }
 }
