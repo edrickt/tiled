@@ -12,7 +12,7 @@
 
 **Findings:** F13, F15, F16, F17 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (6210427)
 
 - [ ] A re-housed window that then grows into a reflowed slot is named at its final slot.
 - [ ] Menu and Shortcuts labels use displacement language; swap chapters do not say "evicted".
