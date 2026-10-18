@@ -517,6 +517,18 @@
  ],
  [
   "TilingController.swift",
+  "handle claim keeps a deferred restore on the old canvas (swipe back yanks a retiled window)",
+  "        discardDeferredRestores(for: handle)\n",
+  "        _ = handle\n"
+ ],
+ [
+  "TilingSpace.swift",
+  "undo re-place keeps another canvas's deferred restore (swipe back yanks the retiled window)",
+  "            context.discardDeferredRestores(entry.handle)\n",
+  "            _ = entry.handle\n"
+ ],
+ [
+  "TilingController.swift",
   "stale mark cleared without real geometry (deferred reassert dropped)",
   "            if hasGeometry {\n                staleSpaces.remove(key)\n            }",
   "            if true {\n                staleSpaces.remove(key)\n            }"

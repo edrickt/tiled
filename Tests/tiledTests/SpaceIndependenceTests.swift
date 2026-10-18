@@ -62,6 +62,22 @@ final class SpaceIndependenceTests: XCTestCase {
         gateway.simulateSpaceChange()
     }
 
+    /// Asserts a swipe back to `space` writes nothing for `handle` and
+    /// leaves it on `frame`: a stale deferred restore would write the old
+    /// frame and yank the window off its new slot.
+    private func assertSwipeBackLeavesTheNewSlot(
+        _ handle: WindowHandle, to space: SpaceID, keeping frame: CGRect
+    ) {
+        gateway.clearWrites()
+        switchTo(space)
+        XCTAssertFalse(
+            gateway.writes.contains { $0.handle == handle },
+            "the swipe back never writes the discarded pre-tile restore")
+        XCTAssertEqual(
+            gateway.frame(of: handle), frame,
+            "the window stays on its new slot instead of being yanked back to the old frame")
+    }
+
     // MARK: Independent canvases
 
     func testSameSlotCoexistsInTwoSpacesOnOneDisplay() {
@@ -318,6 +334,47 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertEqual(
             controller.allTiledWindowsInfo().count, 1,
             "the window is counted once across the visible canvases")
+    }
+
+    /// F5 through the undo claim: undo retiles a window onto the canvas
+    /// it left, so the re-place must discard any deferred restore the
+    /// window left behind on the canvas it was just untiled from.
+    func testUndoRetileDiscardsTheOtherCanvasDeferredRestore() {
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let keyB = TilingSpaceKey(screen: Self.display.id, space: Self.spaceB)
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let w = addFocusedWindow(frame: original)
+        controller.handle(slot: .topLeft)
+        addFocusedWindow(frame: CGRect(x: 200, y: 200, width: 500, height: 400))
+        controller.handle(slot: .topLeft) // evicts w; A holds the undo chapter
+        XCTAssertFalse(controller.canvas(for: keyA).undoStack.isEmpty)
+
+        // Retile w on B, then evict it there while B is hidden: B holds
+        // the deferred pre-tile restore.
+        switchTo(Self.spaceB)
+        gateway.focused = w
+        controller.handle(slot: .bottomRight)
+        switchTo(Self.spaceA)
+        gateway.focused = w
+        controller.handleEvict()
+        XCTAssertNotNil(
+            controller.canvas(for: keyB).deferredRestores[w],
+            "the eviction on hidden B deferred w's pre-tile restore")
+
+        // A's undo re-observes and retiles w; the re-place claims the
+        // handle and must discard B's deferred restore.
+        controller.undoLastDisplacement(on: Self.display.id)
+        let aSlot = GridLayout().rect(for: .topLeft, in: Self.display.visibleFrame)
+        XCTAssertEqual(
+            controller.canvas(for: keyA).state.occupant(of: .topLeft),
+            controller.registeredID(for: w),
+            "undo retiles the window on A")
+        XCTAssertNil(
+            controller.canvas(for: keyB).deferredRestores[w],
+            "the re-place claim cleared the other canvas's deferred restore")
+        XCTAssertEqual(gateway.frame(of: w), aSlot)
+
+        assertSwipeBackLeavesTheNewSlot(w, to: Self.spaceB, keeping: aSlot)
     }
 
     func testSplittersAreIndependentPerSpace() {
@@ -623,6 +680,57 @@ final class SpaceIndependenceTests: XCTestCase {
         switchTo(Self.spaceA)
         XCTAssertEqual(gateway.frame(of: a), aFrame, "the deferred restore lands on return")
         XCTAssertEqual(gateway.frame(of: d), dFrame)
+    }
+
+    /// F5: untiling on a hidden canvas defers the window's pre-tile
+    /// restore there. If the same window is retiled on another canvas
+    /// before the first returns, claiming the handle must discard the
+    /// stale restore everywhere; otherwise the swipe back writes the old
+    /// frame and pulls the window off its new slot.
+    func testRetileOnAnotherCanvasDiscardsTheOldCanvasDeferredRestore() {
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let keyB = TilingSpaceKey(screen: Self.display.id, space: Self.spaceB)
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let a = addFocusedWindow(frame: original)
+        controller.handle(slot: .topLeft)
+        let b = addFocusedWindow(frame: CGRect(x: 200, y: 200, width: 500, height: 400))
+        controller.handle(slot: .bottomLeft)
+        let requester = addFocusedWindow(frame: CGRect(x: 300, y: 300, width: 400, height: 300))
+        controller.handle(slot: .bottomRight)
+
+        // On the hidden canvas, the requester's left-half request evicts
+        // both left-side windows. Their pre-tile restores defer because A
+        // is not visible.
+        switchTo(Self.spaceB)
+        gateway.focused = requester
+        controller.handle(slot: .leftHalf)
+        XCTAssertNotNil(
+            controller.canvas(for: keyA).deferredRestores[a],
+            "the eviction on hidden A deferred a's pre-tile restore")
+        XCTAssertNotNil(
+            controller.canvas(for: keyA).deferredRestores[b],
+            "the unrelated eviction's restore stays deferred")
+
+        // Retile the same handle on the visible B before A returns.
+        gateway.focused = a
+        controller.handle(slot: .bottomRight)
+        guard let retiledID = controller.registeredID(for: a) else {
+            return XCTFail("the retile on B registered the handle")
+        }
+        let bSlot = GridLayout().rect(for: .bottomRight, in: Self.display.visibleFrame)
+        XCTAssertEqual(controller.canvas(for: keyB).state.slot(of: retiledID), .bottomRight)
+        XCTAssertEqual(gateway.frame(of: a), bSlot)
+        XCTAssertNil(
+            controller.canvas(for: keyA).deferredRestores[a],
+            "claiming the handle cleared the old canvas's deferred restore")
+        XCTAssertNotNil(
+            controller.canvas(for: keyA).deferredRestores[b],
+            "only the claimed handle's restore is discarded")
+
+        // Returning to A must not write the stale pre-tile frame: the
+        // window belongs to B's slot now.
+        assertSwipeBackLeavesTheNewSlot(a, to: Self.spaceA, keeping: bSlot)
+        XCTAssertEqual(controller.canvas(for: keyB).state.slot(of: retiledID), .bottomRight)
     }
 
     func testScreenChangeWhileHiddenReassertsWhenTheSpaceReturns() {

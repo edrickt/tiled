@@ -65,6 +65,7 @@ final class TilingSpaceHarness {
                 self.nextID += 1
                 return id
             },
+            discardDeferredRestores: { _ in },
             log: { _ in })
     }
 

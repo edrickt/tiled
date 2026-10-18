@@ -73,7 +73,8 @@ struct TilingSpace {
     /// frame blind could pull it onto the visible Space. The deferred
     /// handle lands where it was by the swipe-back reassert, which drops
     /// the entry. Keyed by handle, so re-tiling the window before
-    /// reconciliation discards the stale restore.
+    /// reconciliation discards the stale restore; the coordinator clears
+    /// it on every canvas, so a retile elsewhere discards this one too.
     var deferredRestores: [WindowHandle: DeferredRestore] = [:]
     var notice: String?
     var error: String?
@@ -131,6 +132,8 @@ struct TilingSpace {
         /// handle->id table. Called when a record must be rebuilt from a
         /// handle alone (a pruned undo entry, an untile-all re-observation).
         let allocateID: (WindowHandle) -> WindowID
+        /// Drops `handle`'s deferred pre-tile restore on every canvas.
+        let discardDeferredRestores: (WindowHandle) -> Void
         let log: (String) -> Void
     }
 
@@ -211,6 +214,11 @@ struct TilingSpace {
         records[id] = WindowRecord(handle: handle, preTileFrame: frame)
         deferredRestores[handle] = nil
         deferredRequests[id] = nil
+    }
+
+    /// Drops any deferred pre-tile restore for `handle` on this canvas.
+    mutating func discardDeferredRestore(for handle: WindowHandle) {
+        deferredRestores[handle] = nil
     }
 
     func record(of id: WindowID) -> WindowRecord? { records[id] }
@@ -432,6 +440,10 @@ struct TilingSpace {
             // still attempts the restore: the write re-probes, and a
             // failed attempt is reported, not silently skipped.
             guard context.gateway.liveness(of: entry.handle) != .dead else { continue }
+            // Claim the handle locally too: the coordinator cannot see
+            // this inout copy.
+            discardDeferredRestore(for: entry.handle)
+            context.discardDeferredRestores(entry.handle)
             // Handles whose records were pruned need fresh ids, issued
             // through the coordinator's table so the window stays
             // resolvable by handle.

@@ -335,6 +335,9 @@ final class TilingController {
 
     func handle(slot: Slot) {
         guard let (id, handle, key) = requesterAndCanvas(for: slot) else { return }
+        // A slot request claims the handle: the request is the window's
+        // new intent, so any older deferred restore is stale.
+        discardDeferredRestores(for: handle)
         let context = placementContext(for: key)
         // An expanded window getting a slot hotkey comes back to earth
         // first: its own slot becomes the strict no-op below; a different
@@ -426,6 +429,9 @@ final class TilingController {
             allocateID: { [weak self] handle in
                 guard let self else { return 0 }
                 return self.allocateID(for: handle, on: key)
+            },
+            discardDeferredRestores: { [weak self] handle in
+                self?.discardDeferredRestores(for: handle)
             },
             log: { [weak self] message in self?.dbg(message) })
     }
@@ -658,6 +664,16 @@ final class TilingController {
         nextID += 1
         windowIDs[handle] = id
         return id
+    }
+
+    /// Drops `handle`'s deferred pre-tile restore on every canvas. Call
+    /// this at a tiling claim (a slot request or an undo re-place): the
+    /// window is being tiled again, so the canvas it left must never
+    /// write the old frame over its new slot on the swipe back.
+    private func discardDeferredRestores(for handle: WindowHandle) {
+        for key in Array(spaces.keys) {
+            spaces[key]?.discardDeferredRestore(for: handle)
+        }
     }
 
     /// Existing id for a live handle whose record still lives on a
