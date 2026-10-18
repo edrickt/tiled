@@ -34,6 +34,78 @@ final class SettingsPermissionButtonTests: XCTestCase {
         UserDefaults(suiteName: suiteName)!
     }
 
+    /// The selected tab's own view: other tabs hold identically titled
+    /// buttons, so searching the whole window could assert on the wrong
+    /// tab's row.
+    private func selectedTabView(in view: NSView) -> NSTabView? {
+        if let tabs = view as? NSTabView, tabs.selectedTabViewItem != nil { return tabs }
+        for subview in view.subviews {
+            if let hit = selectedTabView(in: subview) { return hit }
+        }
+        return nil
+    }
+
+    private func openWelcome(
+        trusted: @escaping () -> Bool
+    ) throws -> (controller: SettingsWindowController, view: NSView, button: NSButton) {
+        let controller = SettingsWindowController(
+            settings: AppSettings(defaults: temporaryDefaults()),
+            hotkeyStore: HotkeyStore(defaults: temporaryDefaults()))
+        // AppDelegate assigns trust after init; Welcome was already built
+        // with no provider, so only show()'s refresh can reveal the row.
+        controller.isTrustedProvider = trusted
+        controller.show(selecting: .welcome)
+        let content = try XCTUnwrap(controller.window?.contentView)
+        let tabs = try XCTUnwrap(selectedTabView(in: content))
+        XCTAssertEqual(tabs.selectedTabViewItem?.identifier as? String, "welcome")
+        let view = try XCTUnwrap(tabs.selectedTabViewItem?.view)
+        let button = try XCTUnwrap(
+            findButton(titled: "Open Accessibility Settings", in: view))
+        return (controller, view, button)
+    }
+
+    func testWelcomeTabShowsTheAccessibilityButtonWhenOpenedUntrusted() throws {
+        let (controller, _, button) = try openWelcome { false }
+        defer { controller.close() }
+
+        XCTAssertFalse(
+            button.isHiddenOrHasHiddenAncestor,
+            "Opening Welcome while untrusted must show the warning and the grant button.")
+    }
+
+    func testWelcomeTabHidesThePermissionRowWhenTrustFlipsWhileOpen() throws {
+        var trusted = false
+        let (controller, _, button) = try openWelcome { trusted }
+        defer { controller.close() }
+        XCTAssertFalse(button.isHiddenOrHasHiddenAncestor)
+
+        trusted = true
+        controller.permissionStateDidChange()
+
+        XCTAssertTrue(
+            button.isHiddenOrHasHiddenAncestor,
+            "Granting permission while Welcome is open hides the warning without reopening.")
+    }
+
+    func testWelcomeForwardsFailedTopLeftRegistration() throws {
+        let (controller, view, _) = try openWelcome { false }
+        defer { controller.close() }
+        var failed: [HotkeyAction] = []
+        controller.failedActionsProvider = { failed }
+        controller.showWelcomeAgain()
+        var instructions = try XCTUnwrap(textLabels(in: view).first { $0.hasPrefix("1.") })
+        XCTAssertTrue(instructions.contains("Press ⌥⇧⌘U"))
+
+        failed = [.slot(.topLeft)]
+        controller.showWelcomeAgain()
+        instructions = try XCTUnwrap(textLabels(in: view).first { $0.hasPrefix("1.") })
+
+        XCTAssertTrue(instructions.contains("Menu bar → Tile Focused Window → Top Left"))
+        XCTAssertFalse(
+            instructions.contains("Press ⌥⇧⌘U"),
+            "The controller must forward failed registrations into the guide.")
+    }
+
     func testGeneralTabLeadsWithTheAccessibilityButtonWhenUntrusted() {
         let tab = GeneralTab(settings: AppSettings(defaults: temporaryDefaults()))
         var opened = false

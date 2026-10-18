@@ -8,6 +8,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The Welcome guide shows its Accessibility warning and grant button whenever
+  the install is untrusted, including the first open after the Settings window
+  was built, and hides them when permission arrives while the guide is open.
+  It also stops teaching a Top Left or Expand combo that lost global
+  registration, naming the menu row instead of a key that does nothing.
 - Hiding the menu bar icon names the user's live Settings shortcut as the
   recovery, and only when that shortcut is enabled and registered. A
   disabled or failed Settings action now takes the relaunch-only path

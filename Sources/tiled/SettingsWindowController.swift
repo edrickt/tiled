@@ -42,10 +42,13 @@ final class SettingsWindowController: NSWindowController {
     var onHotkeysChange: (() -> Void)?
     /// Actions whose global hotkey lost registration (owned by another
     /// app), forwarded to the Shortcuts tab so a cross-app failure
-    /// surfaces beside the recorder that accepted the combo, not only in
-    /// the menu.
+    /// surfaces beside the recorder that accepted the combo, and to
+    /// Welcome so the guide never teaches a dead combo.
     var failedActionsProvider: (() -> [HotkeyAction])? {
-        didSet { shortcutsTab.failedActionsProvider = failedActionsProvider }
+        didSet {
+            shortcutsTab.failedActionsProvider = failedActionsProvider
+            welcomeTab.failedActionsProvider = failedActionsProvider
+        }
     }
     /// Live label of the Settings fallback hotkey (nil when disabled,
     /// unregistered, or hotkeys are not running), forwarded to General so
@@ -75,8 +78,11 @@ final class SettingsWindowController: NSWindowController {
             self?.onOpenAccessibilitySettings?()
         }
         shortcutsTab.onHotkeysChange = { [weak self] in
-            self?.welcomeTab.refreshShortcutInstructions()
+            // The delegate reloads the hotkey service here, recomputing
+            // failedActions; refresh the guide only after that, so it
+            // reads the registration result of the combo just recorded.
             self?.onHotkeysChange?()
+            self?.welcomeTab.refreshShortcutInstructions()
         }
         shortcutsTab.onContentRebuilt = { [weak self] view in
             self?.replaceShortcutsView(view)
@@ -203,7 +209,6 @@ final class SettingsWindowController: NSWindowController {
     /// Welcome item exists before selection (selectTab is identifier-safe
     /// and no-ops on a missing tab, never a wrong tab).
     func showWelcomeAgain() {
-        welcomeTab.refreshShortcutInstructions()
         if window?.isVisible != true {
             rebuildTabView(includingWelcome: true)
             loadValues()
@@ -214,6 +219,7 @@ final class SettingsWindowController: NSWindowController {
             focusInitialControl(for: .welcome)
             return
         }
+        refreshWelcome()
         if tabView.tabViewItems.contains(where: { ($0.identifier as? String) == "welcome" }) {
             selectTab(.welcome)
             focusInitialControl(for: .welcome)
@@ -262,7 +268,16 @@ final class SettingsWindowController: NSWindowController {
 
     private func loadValues() {
         generalTab.loadValues()
+        refreshWelcome()
+    }
+
+    /// Re-reads the guide's two live facts: the bindings it teaches and
+    /// the permission warning. Every show path goes through here, so a
+    /// provider assigned after the tab was built can never leave either
+    /// half stale.
+    private func refreshWelcome() {
         welcomeTab.refreshShortcutInstructions()
+        welcomeTab.refreshPermissionState()
     }
 
     /// The delegate's permission poll calls this when Accessibility

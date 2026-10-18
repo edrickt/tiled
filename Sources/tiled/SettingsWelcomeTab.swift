@@ -12,6 +12,10 @@ final class WelcomeTab: NSObject {
     /// Live Accessibility trust probe: the three steps below are exactly
     /// what an untrusted install cannot do, so the warning leads the tab.
     var isTrustedProvider: (() -> Bool)?
+    /// Actions whose global hotkey lost registration. The guide must
+    /// teach the menu path instead of a stored combo that does nothing;
+    /// nil means no hotkey service ran (treat as no failures).
+    var failedActionsProvider: (() -> [HotkeyAction])?
     /// Opens the Accessibility permission pane.
     var onOpenAccessibilitySettings: (() -> Void)?
 
@@ -88,6 +92,7 @@ final class WelcomeTab: NSObject {
         refreshShortcutInstructions()
         steps.font = .systemFont(ofSize: NSFont.systemFontSize)
         stack.addArrangedSubview(steps)
+
 
         // Spatial previews, side by side: quarters beside sixths, so
         // "three columns instead of two" is a comparison the eye makes
@@ -169,7 +174,7 @@ final class WelcomeTab: NSObject {
         // is read live: a remapped binding teaches itself, never ⌥⇧⏎.
         behaviorNoteField = NSTextField(wrappingLabelWithString: "")
         let behaviorNote = behaviorNoteField!
-        refreshBehaviorNote()
+        refreshBehaviorNote(failedActions: failedActions)
         behaviorNote.textColor = .secondaryLabelColor
         behaviorNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stack.addArrangedSubview(behaviorNote)
@@ -199,31 +204,65 @@ final class WelcomeTab: NSObject {
     /// The guide may already be built when Shortcuts changes a binding.
     /// Re-read it instead of keeping first-launch instructions indefinitely.
     func refreshShortcutInstructions() {
-        if let topLeft = hotkeyStore.binding(for: .topLeft).label {
+        let failed = failedActions
+        let topLeft = hotkeyStore.registeredLabel(
+            for: .slot(.topLeft), failedActions: failed)
+        if let topLeft {
             stepsField?.stringValue =
                 "1. Click any window to focus it.\n" +
                 "2. Press \(topLeft) to tile it Top Left.\n" +
                 "3. Press it again; the window stays in its slot.\n" +
                 "Every slot is also in the menu bar → Tile Focused Window."
+        } else if failed.contains(.slot(.topLeft)) {
+            // The stored label is not a promise: another app can own the
+            // combo, so the keypress does nothing. Teach the menu path and
+            // name the failure instead of printing the dead combo.
+            stepsField?.stringValue = topLeftInstructions(step3:
+                "3. Choose it again; the window stays in its slot.\n" +
+                "Top Left's shortcut couldn't be registered; use the menu bar instead.")
         } else {
-            stepsField?.stringValue =
-                "1. Click any window to focus it.\n" +
-                "2. Menu bar → Tile Focused Window → Top Left.\n" +
-                "   In Sixths, choose Switch to Quarters instead.\n" +
+            stepsField?.stringValue = topLeftInstructions(step3:
                 "3. Set a shortcut in Settings → Shortcuts.\n" +
-                "Top Left's shortcut is disabled."
+                "Top Left's shortcut is disabled.")
         }
-        refreshBehaviorNote()
+        refreshBehaviorNote(failedActions: failed)
+    }
+
+    /// The menu route to Top Left, shared by the disabled and failed
+    /// registration paths: both must teach the live row, never a combo.
+    private func topLeftInstructions(step3: String) -> String {
+        "1. Click any window to focus it.\n" +
+        "2. Menu bar → Tile Focused Window → Top Left.\n" +
+        "   In Sixths, choose Switch to Quarters instead.\n" +
+        step3
     }
 
     /// Rewrites the behavior note from the store, so a remapped expand
-    /// combo teaches itself instead of the stale ⌥⇧⏎ default.
-    private func refreshBehaviorNote() {
-        let expand = hotkeyStore.binding(for: .expand).label ?? "the Expand shortcut"
+    /// combo teaches itself instead of the stale ⌥⇧⏎ default. A disabled
+    /// or unregistered combo is not a shortcut the user can press; the
+    /// menu row is the live path, so the note teaches that instead.
+    private func refreshBehaviorNote(failedActions: [HotkeyAction]) {
+        let expand = hotkeyStore.registeredLabel(
+            for: .expand, failedActions: failedActions)
+        let expandSentence: String
+        if let expand {
+            expandSentence =
+                "\(expand) expands a window without releasing its slot; press it again to return."
+        } else {
+            expandSentence =
+                "Menu bar → Expand to Fill Screen expands a window without releasing its slot; " +
+                "the same row returns it."
+        }
         behaviorNoteField?.stringValue =
             "Drag a tiled window far and it comes untiled where you drop it; " +
-            "a short drag snaps back into its tile. \(expand) expands a window " +
-            "without releasing its slot; press it again to return."
+            "a short drag snaps back into its tile. " + expandSentence
+    }
+
+    /// Actions whose global hotkey lost registration. A nil provider means
+    /// no hotkey service ran, so no failure is known; the stored binding is
+    /// still taught until the service reports otherwise.
+    private var failedActions: [HotkeyAction] {
+        failedActionsProvider?() ?? []
     }
 
     /// Re-probes trust for an already-built Welcome view; the shell's

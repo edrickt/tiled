@@ -24,17 +24,12 @@ final class WelcomeInstructionsTests: XCTestCase {
         super.tearDown()
     }
 
-    private func labels(in view: NSView) -> [String] {
-        let own = (view as? NSTextField).map { [$0.stringValue] } ?? []
-        return own + view.subviews.flatMap { labels(in: $0) }
-    }
-
     func testDisabledTopLeftTeachesTheMenuInsteadOfAnotherSlotsShortcut() throws {
         let disabled = HotkeyBinding(modifiers: 0, keyCode: nil)
         store.set(disabled, for: .topLeft)
         let tab = WelcomeTab(hotkeyStore: store)
         let view = tab.build(size: NSSize(width: 440, height: 480))
-        let instructions = try XCTUnwrap(labels(in: view).first { $0.hasPrefix("1.") })
+        let instructions = try XCTUnwrap(textLabels(in: view).first { $0.hasPrefix("1.") })
 
         XCTAssertTrue(instructions.contains("Tile Focused Window → Top Left"))
         XCTAssertTrue(instructions.contains("Settings → Shortcuts"))
@@ -48,7 +43,7 @@ final class WelcomeInstructionsTests: XCTestCase {
         store.set(HotkeyBinding(modifiers: UInt32(cmdKey), keyCode: UInt32(kVK_ANSI_B)),
                   for: .sixthMiddle)
         let view = WelcomeTab(hotkeyStore: store).build(size: NSSize(width: 440, height: 480))
-        let text = labels(in: view)
+        let text = textLabels(in: view)
         let instructions = try XCTUnwrap(text.first { $0.hasPrefix("1.") })
 
         XCTAssertTrue(instructions.contains("Press ⌃⌥A"))
@@ -59,11 +54,53 @@ final class WelcomeInstructionsTests: XCTestCase {
     func testDisabledTopLeftNamesTheMenuSwitchNeededWhenSixthsIsActive() throws {
         store.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: .topLeft)
         let view = WelcomeTab(hotkeyStore: store).build(size: NSSize(width: 440, height: 480))
-        let instructions = try XCTUnwrap(labels(in: view).first { $0.hasPrefix("1.") })
+        let instructions = try XCTUnwrap(textLabels(in: view).first { $0.hasPrefix("1.") })
 
         XCTAssertTrue(instructions.contains("Sixths"))
         XCTAssertTrue(instructions.contains("Switch to Quarters"),
                       "The menu only lists active-layout slots; Top Left is absent in Sixths.")
+    }
+
+    func testFailedTopLeftRegistrationTeachesTheMenuInsteadOfTheDeadCombo() throws {
+        let tab = WelcomeTab(hotkeyStore: store)
+        tab.failedActionsProvider = { [.slot(.topLeft)] }
+        let view = tab.build(size: NSSize(width: 440, height: 480))
+        let instructions = try XCTUnwrap(textLabels(in: view).first { $0.hasPrefix("1.") })
+
+        XCTAssertTrue(instructions.contains("Menu bar → Tile Focused Window → Top Left"))
+        XCTAssertTrue(instructions.contains("couldn't be registered"))
+        XCTAssertFalse(
+            instructions.contains("Press ⌥⇧⌘U"),
+            "A combo that lost global registration still has a label; the guide must not teach it.")
+    }
+
+    func testFailedExpandRegistrationTeachesTheMenuInsteadOfTheDeadCombo() throws {
+        let tab = WelcomeTab(hotkeyStore: store)
+        tab.failedActionsProvider = { [.expand] }
+        let view = tab.build(size: NSSize(width: 440, height: 480))
+        let behavior = try XCTUnwrap(
+            textLabels(in: view).first { $0.hasPrefix("Drag a tiled window far") })
+
+        XCTAssertTrue(behavior.contains("Menu bar → Expand to Fill Screen"))
+        XCTAssertFalse(
+            behavior.contains("⌥⇧⏎"),
+            "A failed Expand combo must never be printed as if it works.")
+    }
+
+    func testRegistrationFailureArrivingAfterBuildReplacesTheComboInstructions() throws {
+        var failed: [HotkeyAction] = []
+        let tab = WelcomeTab(hotkeyStore: store)
+        tab.failedActionsProvider = { failed }
+        let view = tab.build(size: NSSize(width: 440, height: 480))
+        var instructions = try XCTUnwrap(textLabels(in: view).first { $0.hasPrefix("1.") })
+        XCTAssertTrue(instructions.contains("Press ⌥⇧⌘U"))
+
+        failed = [.slot(.topLeft)]
+        tab.refreshShortcutInstructions()
+        instructions = try XCTUnwrap(textLabels(in: view).first { $0.hasPrefix("1.") })
+
+        XCTAssertFalse(instructions.contains("Press ⌥⇧⌘U"))
+        XCTAssertTrue(instructions.contains("couldn't be registered"))
     }
 
     func testReopeningTheVisibleGuideRefreshesItsShortcutInstructions() throws {
@@ -71,12 +108,12 @@ final class WelcomeInstructionsTests: XCTestCase {
         defer { controller.close() }
         controller.show(selecting: .welcome)
         let view = try XCTUnwrap(controller.window?.contentView)
-        XCTAssertTrue(labels(in: view).contains { $0.contains("Press ⌥⇧⌘U") })
+        XCTAssertTrue(textLabels(in: view).contains { $0.contains("Press ⌥⇧⌘U") })
 
         store.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: .topLeft)
         controller.showWelcomeAgain()
 
-        XCTAssertTrue(labels(in: view).contains { $0.contains("Top Left's shortcut is disabled") })
-        XCTAssertFalse(labels(in: view).contains { $0.contains("Press ⌥⇧⌘U") })
+        XCTAssertTrue(textLabels(in: view).contains { $0.contains("Top Left's shortcut is disabled") })
+        XCTAssertFalse(textLabels(in: view).contains { $0.contains("Press ⌥⇧⌘U") })
     }
 }

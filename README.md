@@ -93,9 +93,10 @@ Windows stay in their slots either way; only the sizes change.
 
 First launch opens Settings on a Welcome tab: focus any window and press the
 Top Left shortcut (⌥⇧⌘U by default), with a miniature preview showing what
-Top Left covers. The guide shows your current binding; if it's disabled,
-it teaches menu bar → Tile Focused Window → Top Left instead (or Switch to
-Quarters if Sixths is active).
+Top Left covers. The guide shows your current binding; if it's disabled or
+couldn't be registered (another app owns the combo), it teaches menu bar →
+Tile Focused Window → Top Left instead (or Switch to Quarters if Sixths is
+active), and the Expand note names the menu row when that combo is not live.
 Dismiss the guide once; reopen it anytime from the menu bar menu → Tiled Guide.
 
 The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
@@ -242,7 +243,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (740 tests)
+swift test             # hermetic unit suite (746 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -276,7 +277,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (740 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (746 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |
