@@ -8,7 +8,7 @@ graph, the gates, and how to run one ticket in a fresh session.
 
 Batch 1 is the recommended starting order: **F1** (refused move loses the old slot), **F2**
 (destroy fast path bypasses the death clock), **F3** (Restore Previous Shortcuts destroys its
-backup). **F1, F3, F4, F5, F6, F7, F8, and F9 are DONE**; **F2 is parked on live display-teardown evidence**, as its
+backup). **F1 and F3–F12 are DONE**; **F2 is parked on live display-teardown evidence**, as its
 ticket requires. The rest of the functional findings and the test seams follow in the report's
 triage order. The architecture candidates are **not** implementation tickets yet: A1/A2 have a
 design phase, and A3–A6 are "worth exploring" only.
@@ -29,7 +29,7 @@ overlap findings already recorded there and are marked in the report.
 | 07 | One action receipt for menu and announcement | 06 | F7, A5 | DONE (`0b8c54b`) |
 | 08 | Hide-icon recovery names a live combo | – | F8 | DONE (`ede868c`) |
 | 09 | Welcome tells the truth about permission and registration | – | F9, F10 | DONE (`cf59eb2`) |
-| 10 | Expand row and pending reassert follow the expanded state | – | F11, F12 | TODO |
+| 10 | Expand row and pending reassert follow the expanded state | – | F11, F12 | DONE (`4509e2e`) |
 | 11 | Presentation copy matches the undo model | – | F13, F15, F16, F17 | TODO |
 | 12 | Drag edges: programmatic jump and skipped-write baseline | – | F14, F18 | TODO |
 | 13 | Hotkey registration is testable | – | T1 | TODO |
@@ -45,10 +45,10 @@ overlap findings already recorded there and are marked in the report.
 | A3 | Explore: canvas directory | – | A3 | TODO (design) |
 | A6 | Explore: parked shortcuts module | 03 | A6 | TODO (design) |
 
-F10 is the remaining functional ticket; the test-seam tickets (13–20) are the prerequisite
-for trusting the live-only features. A1/A2 come after the functional queue, per the
-audit's triage order. A3/A6 are exploratory and should not be cut into implementation until
-their design is approved.
+Tickets 11–12 (F13–F18) are the remaining functional work; the test-seam tickets (13–20)
+are the prerequisite for trusting the live-only features. A1/A2 come after the functional
+queue, per the audit's triage order. A3/A6 are exploratory and should not be cut into
+implementation until their design is approved.
 
 ## Gates (non-negotiable in every ticket)
 

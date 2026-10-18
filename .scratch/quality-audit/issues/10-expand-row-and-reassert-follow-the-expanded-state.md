@@ -11,7 +11,7 @@ does not exclude expanded windows even though `reassertPlan` does.
 
 **Findings:** F11 and F12 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (4509e2e)
 
 - [ ] An expanded untiled window's menu row says it will return to the previous frame.
 - [ ] An expanded tiled window's row still names its slot.
