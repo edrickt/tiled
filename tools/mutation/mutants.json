@@ -658,5 +658,35 @@
   "skipped write seeds no drag baseline (first short drag dropped)",
   "            seedBaseline(id, target)\n            log(\"write win\\(id) no-op skip target=\\(target)\")",
   "            log(\"write win\\(id) no-op skip target=\\(target)\")"
+ ],
+ [
+  "HotkeyService.swift",
+  "disabled hotkey registers with keycode 0 (skip ignored)",
+  "            // A disabled action registers nothing and warns about nothing.\n            guard let keyCode = binding.keyCode else { continue }",
+  "            // A disabled action registers nothing and warns about nothing.\n            let keyCode = binding.keyCode ?? 0"
+ ],
+ [
+  "HotkeyService.swift",
+  "failed registration logged but not recorded (menu promises a dead combo)",
+  "            } else {\n                failedActions.append(action)\n                NSLog(",
+  "            } else {\n                NSLog("
+ ],
+ [
+  "HotkeyService.swift",
+  "failedActions never reset on reload (stale failure survives a fix)",
+  "        // Reload must recompute failures, never retain a stale set.\n        failedActions = []\n        for action in HotkeyAction.allCases {",
+  "        // Reload must recompute failures, never retain a stale set.\n        for action in HotkeyAction.allCases {"
+ ],
+ [
+  "HotkeyService.swift",
+  "reload drops tokens without unregistering (old combos stay live)",
+  "    func reload() {\n        retireRegistrations()\n        registerHotkeys()\n    }",
+  "    func reload() {\n        registrations.removeAll()\n        registerHotkeys()\n    }"
+ ],
+ [
+  "HotkeyService.swift",
+  "deinit drops tokens without unregistering (hotkeys outlive the service)",
+  "    deinit {\n        retireRegistrations()\n    }",
+  "    deinit {\n        registrations.removeAll()\n    }"
  ]
 ]

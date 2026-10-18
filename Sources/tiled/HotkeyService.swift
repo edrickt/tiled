@@ -1,6 +1,67 @@
 import Carbon.HIToolbox
 import Foundation
 
+/// One hotkey registration request: the live binding plus the Carbon
+/// identity it must be registered under.
+struct HotkeyRequest: Equatable {
+    let keyCode: UInt32
+    let modifiers: UInt32
+    let hotKeyID: UInt32
+    let signature: OSType
+}
+
+/// A live global-hotkey registration. The service keeps tokens opaque so
+/// a fake can stand in for Carbon's `EventHotKeyRef`; only the production
+/// adapter needs to know what the token represents.
+protocol HotkeyRegistration: AnyObject {}
+
+/// The Carbon boundary for global-hotkey registration. Injecting it lets
+/// the suite pin disabled-skip, failure reporting, reload, and teardown
+/// without a live process or the application event target.
+protocol HotkeyRegistrar {
+    func register(
+        _ request: HotkeyRequest
+    ) -> (status: OSStatus, registration: HotkeyRegistration?)
+    func unregister(_ registration: HotkeyRegistration)
+}
+
+/// Production adapter over Carbon's `RegisterEventHotKey`. Its tokens are
+/// `EventHotKeyRef`s; a token of any other type belongs to a test fake and
+/// is left alone, so only a real registration reaches
+/// `UnregisterEventHotKey`.
+final class CarbonHotkeyRegistrar: HotkeyRegistrar {
+    private final class CarbonHotkeyRegistration: HotkeyRegistration {
+        let ref: EventHotKeyRef
+
+        init(ref: EventHotKeyRef) {
+            self.ref = ref
+        }
+    }
+
+    func register(
+        _ request: HotkeyRequest
+    ) -> (status: OSStatus, registration: HotkeyRegistration?) {
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            request.keyCode,
+            request.modifiers,
+            EventHotKeyID(signature: request.signature, id: request.hotKeyID),
+            GetApplicationEventTarget(),
+            0,
+            &ref)
+        guard status == noErr, let ref else { return (status, nil) }
+        return (status, CarbonHotkeyRegistration(ref: ref))
+    }
+
+    func unregister(_ registration: HotkeyRegistration) {
+        guard let registration = registration as? CarbonHotkeyRegistration else {
+            NSLog("Tiled: ignoring a foreign hotkey registration token")
+            return
+        }
+        UnregisterEventHotKey(registration.ref)
+    }
+}
+
 extension Slot {
     /// Modifier set for this slot's hotkey: quarters add ⌘, sixths use ⌥⇧.
     var modifiers: UInt32 {
@@ -33,10 +94,14 @@ extension Slot {
     }
 }
 
-/// Registers the global hotkeys via Carbon's RegisterEventHotKey (still
-/// the most reliable global hotkey mechanism on macOS). Every action —
-/// slots and app actions alike — registers from the store, so a user
-/// rebinds ⌥⇧R or ⌃⌥⇧⌘Z exactly like ⌥⇧U.
+/// Registers the global hotkeys through a `HotkeyRegistrar`; the
+/// production adapter wraps Carbon's RegisterEventHotKey (still the most
+/// reliable global hotkey mechanism on macOS). Every action — slots and
+/// app actions alike — registers from the store, so a user rebinds ⌥⇧R or
+/// ⌃⌥⇧⌘Z exactly like ⌥⇧U.
+///
+/// One service owns the process-wide Carbon handler at a time; the shared
+/// context keeps its callback valid across service replacement.
 final class HotkeyService {
     // MARK: App-action Carbon ids
     //
@@ -124,8 +189,15 @@ final class HotkeyService {
         eventClass: OSType(kEventClassKeyboard),
         eventKind: UInt32(kEventHotKeyPressed))
 
-    private var hotKeyRefs: [EventHotKeyRef?] = []
-    private let context = Context()
+    /// Tokens to retire on reload and deinit. The service never touches a
+    /// Carbon ref directly; the registrar owns the token's meaning.
+    private var registrations: [HotkeyRegistration] = []
+    private let registrar: HotkeyRegistrar
+    /// The Carbon callback's context is process-wide, like the once-only
+    /// event handler that points at it. A per-service context would dangle
+    /// as soon as a service deinits; a new service updates this shared
+    /// handler instead of leaving Carbon aimed at freed memory.
+    private static let sharedContext = Context()
     private static var handlerInstalled = false
     private let store: HotkeyStore
 
@@ -139,14 +211,29 @@ final class HotkeyService {
     /// so adding an action can never forget a dispatch branch (the
     /// switch is exhaustive).
     var handler: ((HotkeyAction) -> Void)? {
-        get { context.handler }
-        set { context.handler = newValue }
+        get { Self.sharedContext.handler }
+        set { Self.sharedContext.handler = newValue }
     }
 
-    init(store: HotkeyStore = HotkeyStore()) {
+    init(
+        store: HotkeyStore = HotkeyStore(),
+        registrar: HotkeyRegistrar = CarbonHotkeyRegistrar(),
+        eventHandlerInstaller: (() -> Void)? = nil
+    ) {
         self.store = store
-        Self.installEventHandler(with: context)
+        self.registrar = registrar
+        if let eventHandlerInstaller {
+            eventHandlerInstaller()
+        } else {
+            Self.installEventHandler(with: Self.sharedContext)
+        }
         registerHotkeys()
+    }
+
+    /// No registration may outlive the service: retire every token the
+    /// registrar still considers live.
+    deinit {
+        retireRegistrations()
     }
 
     /// Unregisters everything and registers from the store again.
@@ -154,34 +241,37 @@ final class HotkeyService {
     /// recomputed, so newly freed (or newly conflicted) actions surface
     /// in the menu without a relaunch.
     func reload() {
-        for ref in hotKeyRefs {
-            if let ref { UnregisterEventHotKey(ref) }
-        }
-        hotKeyRefs = []
+        retireRegistrations()
         registerHotkeys()
     }
 
+    private func retireRegistrations() {
+        for registration in registrations {
+            registrar.unregister(registration)
+        }
+        registrations.removeAll()
+    }
+
     private func registerHotkeys() {
+        // Reload must recompute failures, never retain a stale set.
         failedActions = []
         for action in HotkeyAction.allCases {
             let binding = store.binding(for: action)
             // A disabled action registers nothing and warns about nothing.
             guard let keyCode = binding.keyCode else { continue }
-            var ref: EventHotKeyRef?
-            let status = RegisterEventHotKey(
-                keyCode,
-                binding.modifiers,
-                EventHotKeyID(signature: Self.signature, id: action.hotkeyID),
-                GetApplicationEventTarget(),
-                0,
-                &ref)
-            if status == noErr {
-                hotKeyRefs.append(ref)
+            let request = HotkeyRequest(
+                keyCode: keyCode,
+                modifiers: binding.modifiers,
+                hotKeyID: action.hotkeyID,
+                signature: Self.signature)
+            let result = registrar.register(request)
+            if result.status == noErr, let registration = result.registration {
+                registrations.append(registration)
             } else {
                 failedActions.append(action)
                 NSLog(
                     "Tiled: failed to register hotkey for %@ (osstatus %d)",
-                    action.title, status)
+                    action.title, result.status)
             }
         }
     }

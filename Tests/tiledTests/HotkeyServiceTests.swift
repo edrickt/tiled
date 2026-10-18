@@ -3,8 +3,9 @@ import XCTest
 @testable import tiled
 
 /// HotkeyService's pure constants and the slot identifier scheme. The
-/// Carbon registration calls themselves need a live process and are not
-/// unit-testable; the invariants they depend on are pinned here.
+/// registration behavior itself is pinned through the registrar seam in
+/// `HotkeyRegistrationTests`; the invariants Carbon depends on are pinned
+/// here.
 final class HotkeyServiceTests: XCTestCase {
     func testSettingsFallbackComboIsAllFourModifiersPlusComma() {
         // Deliberately over-modified so it collides with nothing.
@@ -131,11 +132,11 @@ final class HotkeyServiceTests: XCTestCase {
         }
     }
 
-    func testCarbonEventIDRoutesToTheRightHandler() {
-        // The callback's only routing logic, pinned as a table: every
-        // slot id routes to its slot, each fixed combo to its own route,
-        // and unknown ids route nowhere (eventNotHandledErr; the event
-        // falls through to other apps instead of being swallowed).
+    func testRouteTableMapsEverySlotAndAppActionID() {
+        // The pure id→action table: every slot id maps to its slot, each
+        // fixed combo to its own route, and unknown ids to nil. The
+        // production callback still resolves through its Context map
+        // until the two routes are unified.
         let slotByID = Dictionary(
             uniqueKeysWithValues: Slot.allCases.map { ($0.hotkeyID, $0) })
         XCTAssertEqual(slotByID.count, Slot.allCases.count)
