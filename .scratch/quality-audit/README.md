@@ -8,7 +8,7 @@ graph, the gates, and how to run one ticket in a fresh session.
 
 Batch 1 is the recommended starting order: **F1** (refused move loses the old slot), **F2**
 (destroy fast path bypasses the death clock), **F3** (Restore Previous Shortcuts destroys its
-backup). **F1 and F3–F18 are DONE**; **F2 is parked on live display-teardown evidence**, as its
+backup). **F1 and F3–F20 are DONE**; **F2 is parked on live display-teardown evidence**, as its
 ticket requires. The rest of the functional findings and the test seams follow in the report's
 triage order. The architecture candidates are **not** implementation tickets yet: A1/A2 have a
 design phase, and A3–A6 are "worth exploring" only.
@@ -45,9 +45,8 @@ overlap findings already recorded there and are marked in the report.
 | A3 | Explore: canvas directory | – | A3 | TODO (design) |
 | A6 | Explore: parked shortcuts module | 03 | A6 | TODO (design) |
 
-The functional queue and ticket 13 are complete; F19–F20 are the remaining test-hygiene
-items, and the test-seam tickets are complete. The final full mutation run remains.
-A1/A2 come after the functional queue, per the audit's triage order. A3/A6 are exploratory
+All functional and test-seam tickets (05–20) are complete. Final gates: 824 tests and
+140/140 mutants caught. A1/A2 are the next design explorations; A3/A6 remain exploratory
 and should not be cut into implementation until their design is approved.
 
 ## Gates (non-negotiable in every ticket)
