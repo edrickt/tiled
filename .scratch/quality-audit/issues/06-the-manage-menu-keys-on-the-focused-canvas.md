@@ -9,7 +9,7 @@ Untile All even though the focused canvas still has a live chapter.
 
 **Findings:** F6 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (b9e0eb3)
 
 - [ ] With windows on another display and an empty focused canvas, the menu omits the Untile row
       (or disables it with a reason) instead of saying "Untile 0 Windows".
