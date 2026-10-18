@@ -9,7 +9,7 @@ refusal must be reported, and the count must be the successful restores, not the
 
 **Findings:** F4 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (748722d)
 
 - [ ] A refused requester restore leaves the window's visible state consistent and is narrated
       as a failure, not hidden behind a success notice.
