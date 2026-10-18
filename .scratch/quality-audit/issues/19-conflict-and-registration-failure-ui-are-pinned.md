@@ -8,7 +8,7 @@ reads the tab's labels after a rejected duplicate or a failed action.
 
 **Findings:** T7 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (66df049)
 
 - [ ] Recording a duplicate keeps the old binding and shows a conflict label naming the owner.
 - [ ] A failed registration surfaces beside the recorder that accepted the combo.
