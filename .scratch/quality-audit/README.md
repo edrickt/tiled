@@ -35,7 +35,7 @@ overlap findings already recorded there and are marked in the report.
 | 13 | Hotkey registration is testable | – | T1 | DONE (`572de00`) |
 | 14 | App launch and action routing are testable | 13 | T2 | DONE (`702f938`) |
 | 15 | The live AX adapter has a testable seam | – | T3 | TODO |
-| 16 | One hotkey route, not a dead table | 13 | T4, A4 | TODO |
+| 16 | One hotkey route, not a dead table | 13 | T4, A4 | DONE (`9856939`) |
 | 17 | Literal expectations for end-to-end tests | – | T5 | TODO |
 | 18 | Splitter-backup drag semantics are pinned | – | T6 | TODO |
 | 19 | Conflict and registration-failure UI are pinned | 09 | T7 | TODO |
@@ -46,7 +46,7 @@ overlap findings already recorded there and are marked in the report.
 | A6 | Explore: parked shortcuts module | 03 | A6 | TODO (design) |
 
 The functional queue and ticket 13 are complete; F19–F20 are the remaining test-hygiene
-items, and test-seam tickets 16–20 are the prerequisite for trusting the live-only features.
+items, and test-seam tickets 17–20 are the prerequisite for trusting the live-only features.
 A1/A2 come after the functional queue, per the audit's triage order. A3/A6 are exploratory
 and should not be cut into implementation until their design is approved.
 

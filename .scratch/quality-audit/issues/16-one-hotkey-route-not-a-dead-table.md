@@ -8,7 +8,7 @@ second table. Delete the dead table or make the callback use it, and pin the pro
 
 **Findings:** T4 and A4 (`.scratch/quality-audit/report.md`); robustness-audit D20.
 
-**Status:** TODO
+**Status:** DONE (9856939)
 
 - [ ] One routing declaration is consumed by production and its test.
 - [ ] Every action's Carbon id routes to that action; unknown ids fall through unhandled.
