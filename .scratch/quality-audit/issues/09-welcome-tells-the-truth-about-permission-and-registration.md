@@ -9,7 +9,7 @@ only the stored binding, never `failedActions`.
 
 **Findings:** F9 and F10 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (cf59eb2)
 
 - [ ] Opening Settings → Welcome while untrusted shows the warning and the grant button.
 - [ ] Granting permission while Welcome is open hides the warning without reopening.
