@@ -1223,19 +1223,6 @@ final class TilingController {
         return screenName(for: space)
     }
 
-    /// Tiled windows on the focused canvas (tile submenu scope).
-    var focusedTiledWindowsInfo: [TiledWindowInfo] {
-        let key = focusedSpaceKey()
-        let name = screenName(for: key)
-        return (spaces[key]?.state.occupants ?? [:])
-            .sorted { $0.key.rawValue < $1.key.rawValue }
-            .map {
-                TiledWindowInfo(
-                    id: $0.value, slot: $0.key, appName: appName(for: $0.value),
-                    screen: key.screen, screenName: name)
-            }
-    }
-
     /// Every tiled window on every currently shown canvas, grouped by
     /// display (manage list scope). Windows parked in Spaces that are
     /// hidden right now stay managed, but are absent from the menu: the

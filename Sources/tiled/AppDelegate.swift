@@ -534,7 +534,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             tiledWindows: presentation.tiledWindows,
             canUndoDisplacement: !canvas.undoStack.isEmpty,
             evictedCount: canvas.evictedCount,
-            untileCount: controller.focusedTiledWindowsInfo.count,
+            // Read from the same canvas as every other unscoped field:
+            // re-resolving focus here could title the row with one
+            // canvas's count while the menu describes another.
+            untileCount: canvas.tiledCount,
             monitorSections: presentation.sections)
     }
 

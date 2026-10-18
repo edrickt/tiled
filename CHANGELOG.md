@@ -8,6 +8,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The manage menu follows the focused canvas: with no tiled windows there
+  it omits Untile All (never "Untile 0 Windows") and the Reset Splitters
+  row, while a parked Restore Previous Splitters receipt stays reachable,
+  the window list still names windows on every visible display, and a
+  live undo chapter survives Untile All.
 - Undo reports a refused restore instead of claiming success, keeps a
   window that cannot be moved back in the slot it visibly holds, and
   counts only the windows that actually landed.

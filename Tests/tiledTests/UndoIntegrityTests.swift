@@ -623,7 +623,7 @@ final class UndoIntegrityTests: XCTestCase {
             controller.tiledWindowsInfo.contains { $0.id == 1 },
             "the manage list still reaches the withheld canvas")
         XCTAssertEqual(
-            controller.focusedTiledWindowsInfo.count, 1,
+            controller.canvas(for: controller.focusedTilingSpace).tiledCount, 1,
             "the focused canvas stays the withheld one")
         controller.untileAll()
         XCTAssertNil(

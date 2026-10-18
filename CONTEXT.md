@@ -17,7 +17,7 @@ A macOS Mission Control desktop, identified by its window-server id. A window be
 _Avoid_: desktop, workspace, virtual desktop
 
 **Tiling space (canvas)**:
-One display's one Mission Control Space: its occupancy, layout, splitters, undo chapters, and notices. Tiling acts on the requesting window's canvas; menus aggregate the visible canvases (the manage list groups per display). A canvas whose Space id the OS withholds falls back to per-display state, and is treated as visible, not hidden.
+One display's one Mission Control Space: its occupancy, layout, splitters, undo chapters, and notices. Tiling acts on the requesting window's canvas; menus aggregate the visible canvases (the manage list groups per display), while the undo, untile-all, and splitter rows and their counts follow the focused canvas. A canvas whose Space id the OS withholds falls back to per-display state, and is treated as visible, not hidden.
 _Avoid_: monitor space (prose for the display dimension only), screen (AppKit type), desktop
 _Code_: `TilingSpace` (one canvas's occupancy, records, splitters, expansion, visible frame, placement pipeline, and undo chapters), `TilingSpaceKey` (display + Space identity); `TilingController` restores chapters across canvases and owns the success/refusal narration.
 

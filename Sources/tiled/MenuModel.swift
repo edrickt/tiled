@@ -232,11 +232,20 @@ enum MenuModel {
             items.append(Item(
                 title: MenuText.evictItemTitle(label: binding(.evict).label),
                 action: .evictFocusedWindow))
-            items.append(.separator())
-
-            // Empty state needs no row: the status line already
-            // reports "0 tiled".
-            if !snapshot.tiledWindows.isEmpty {
+            // The window list stays aggregate across every visible canvas
+            // (grouped per display). The focused-canvas rows follow the
+            // focused canvas instead: undo, untile all, and splitters act
+            // on it alone. Undo and a parked splitter restore are live
+            // receipts, so they survive Untile All even when the focused
+            // canvas has no tiled windows.
+            let hasWindowRows = !snapshot.tiledWindows.isEmpty
+            let hasFocusedCanvasRows =
+                snapshot.canUndoDisplacement || snapshot.untileCount > 0
+                || snapshot.hasSplitterBackup
+            if hasWindowRows || hasFocusedCanvasRows {
+                items.append(.separator())
+            }
+            if hasWindowRows {
                 // Multi-monitor: group the manage list per display with a
                 // disabled header per section ("Display 1 · Quarters · 2
                 // tiled"). Single-monitor setups render the flat list.
@@ -263,20 +272,31 @@ enum MenuModel {
                         index += 1
                     }
                 }
+            }
+            if hasWindowRows && hasFocusedCanvasRows {
                 items.append(.separator())
-                if snapshot.canUndoDisplacement {
-                    // The combo lives in the title, not a key equivalent: the
-                    // global undo is a global hotkey, and a ⌘Z glyph here
-                    // would teach a combo that only works with this menu open
-                    // (and undoes in the wrong app everywhere else).
-                    items.append(Item(
-                        title: MenuText.undoDisplacementTitle(evictedCount: snapshot.evictedCount)
-                            + (binding(.undo).label.map { " · \($0)" } ?? ""),
-                        action: .undoSwitch))
-                }
+            }
+            if snapshot.canUndoDisplacement {
+                // The combo lives in the title, not a key equivalent: the
+                // global undo is a global hotkey, and a ⌘Z glyph here
+                // would teach a combo that only works with this menu open
+                // (and undoes in the wrong app everywhere else).
+                items.append(Item(
+                    title: MenuText.undoDisplacementTitle(evictedCount: snapshot.evictedCount)
+                        + (binding(.undo).label.map { " · \($0)" } ?? ""),
+                    action: .undoSwitch))
+            }
+            if snapshot.untileCount > 0 {
+                // With no windows on the focused canvas, "Untile 0
+                // Windows" would promise a click that does nothing.
                 items.append(Item(
                     title: MenuText.untileAllTitle(count: snapshot.untileCount),
                     action: .untileAll))
+            }
+            if snapshot.untileCount > 0 || snapshot.hasSplitterBackup {
+                // A reset needs a tiled edge to move; a parked backup is a
+                // live one-step receipt, so its restore row survives
+                // Untile All exactly as the undo row does.
                 items.append(Item(
                     title: (snapshot.hasSplitterBackup
                         ? "Restore Previous Splitters" : "Reset Splitters")

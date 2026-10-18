@@ -285,7 +285,8 @@ final class MenuModelTests: XCTestCase {
 
         let withoutUndo = items(snapshot(
             tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)],
-            canUndoDisplacement: false))
+            canUndoDisplacement: false,
+            untileCount: 1))
         XCTAssertFalse(withoutUndo.contains { $0.action == .undoSwitch })
         // Bulk actions still exist without undo.
         XCTAssertTrue(withoutUndo.contains { $0.action == .untileAll })
@@ -294,13 +295,50 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(reset?.title, "Reset Splitters · ⌥⇧R")
     }
 
+    func testEmptyFocusedCanvasOmitsUntileAndResetRows() {
+        // The manage list spans every visible canvas, but the focused
+        // canvas's rows act on it alone. With the focused canvas empty and
+        // another display tiled, the other display's window row still
+        // renders while Untile and Reset Splitters stay out of the menu:
+        // "Untile 0 Windows" would promise an action the click cannot take.
+        let other = ScreenID(rawValue: 1)
+        let model = items(snapshot(
+            tiledWindows: [
+                .init(id: 1, slot: .topLeft, appName: "Safari", screen: other),
+            ],
+            canUndoDisplacement: false,
+            untileCount: 0))
+        XCTAssertTrue(
+            model.contains { $0.title.contains("Top Left · Safari") },
+            "the aggregate window list still names windows on another display")
+        XCTAssertFalse(model.contains { $0.action == .untileAll })
+        XCTAssertFalse(model.contains { $0.action == .resetDividers })
+        XCTAssertFalse(model.contains { $0.title.contains("Untile 0 Windows") })
+    }
+
+    func testUndoRowRendersWithoutTiledWindowsWhenTheChapterIsLive() {
+        // Untile All leaves the focused canvas with no tiled windows but a
+        // live undo chapter. The undo row is the menu's promise that the
+        // hotkey still works; it must survive the empty window list.
+        let model = items(snapshot(
+            tiledWindows: [],
+            canUndoDisplacement: true,
+            evictedCount: 2,
+            untileCount: 0))
+        let undo = model.first { $0.action == .undoSwitch }
+        XCTAssertEqual(
+            undo?.title, "Restore 2 Evicted Windows · \u{2303}\u{2325}\u{21E7}\u{2318}Z")
+        XCTAssertFalse(model.contains { $0.action == .untileAll })
+        XCTAssertFalse(model.contains { $0.action == .resetDividers })
+    }
+
     func testResetSplittersRowAdvertisesTheGlobalCombo() {
         // ⌥⇧R is a global hotkey: like the undo row, the combo lives in
         // the title text, not a key equivalent that only works with the
         // menu open.
-        let row = items(snapshot(tiledWindows: [
-            .init(id: 1, slot: .topLeft, appName: nil),
-        ])).first { $0.action == .resetDividers }
+        let row = items(snapshot(
+            tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)],
+            untileCount: 1)).first { $0.action == .resetDividers }
         XCTAssertEqual(row?.title, "Reset Splitters · ⌥⇧R")
         XCTAssertEqual(row?.keyEquivalent, "")
     }
@@ -317,21 +355,42 @@ final class MenuModelTests: XCTestCase {
             untileCount: 2))
         let row = model.first { $0.action == .untileAll }
         XCTAssertEqual(row?.title, "Untile 2 Windows")
+        // The focused canvas has windows, so its splitter row stays too.
+        XCTAssertNotNil(model.first { $0.action == .resetDividers })
     }
 
     func testSplitterBackupFlipsTheManageRow() {
-        let plain = items(snapshot(tiledWindows: [
-            .init(id: 1, slot: .topLeft, appName: nil),
-        ]))
+        let plain = items(snapshot(
+            tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)],
+            untileCount: 1))
         XCTAssertEqual(
             plain.first { $0.action == .resetDividers }?.title, "Reset Splitters · ⌥⇧R")
         let backedUp = items(snapshot(
             hasSplitterBackup: true,
-            tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)]))
+            tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)],
+            untileCount: 1))
         // One destructive action, one receipt: the row becomes its own undo.
         XCTAssertEqual(
             backedUp.first { $0.action == .resetDividers }?.title,
             "Restore Previous Splitters · ⌥⇧R")
+    }
+
+    func testRestoreSplittersRowSurvivesAnEmptyFocusedCanvas() {
+        // A parked backup describes the focused canvas's splitters and is
+        // a live one-step receipt: Untile All leaves it parked, so the
+        // restore row stays reachable even with no tiled windows, exactly
+        // as the undo row does. The Reset form still needs a tiled edge,
+        // so it is absent on an empty canvas (see the test above).
+        let model = items(snapshot(
+            hasSplitterBackup: true,
+            tiledWindows: [
+                .init(id: 1, slot: .topLeft, appName: nil, screen: ScreenID(rawValue: 1)),
+            ],
+            untileCount: 0))
+        XCTAssertEqual(
+            model.first { $0.action == .resetDividers }?.title,
+            "Restore Previous Splitters · ⌥⇧R")
+        XCTAssertFalse(model.contains { $0.action == .untileAll })
     }
 
     func testMultiMonitorWindowsGroupUnderDisplayHeaders() {
@@ -425,13 +484,46 @@ final class MenuModelTests: XCTestCase {
         XCTAssertGreaterThan(orphanIndex, safariIndex)
     }
 
-    func testEmptySpaceHasNoWindowListOrBulkActions() {
+    func testEmptySpaceHasNoWindowListOrFocusedCanvasActions() {
         let model = items(snapshot())
         XCTAssertFalse(model.contains { $0.action == .untileAll })
         XCTAssertFalse(model.contains { $0.action == .undoSwitch })
         XCTAssertFalse(model.contains { $0.action == .resetDividers })
         // But the tile submenu stays: hotkeys still work on an empty space.
         XCTAssertNotNil(tileSubmenu(model))
+    }
+
+    func testManageSeparatorsNeverDoubleUp() {
+        // Each manage shape ends cleanly: no separator at the menu's edges
+        // and no adjacent pair, whether the block holds window rows,
+        // focused-canvas rows, both, or neither. The app section supplies
+        // its own separator, so an empty manage block must not add a second.
+        let shapes = [
+            snapshot(),
+            snapshot(canUndoDisplacement: true, evictedCount: 1),
+            snapshot(hasSplitterBackup: true),
+            snapshot(
+                tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)],
+                untileCount: 1),
+            snapshot(
+                tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)],
+                canUndoDisplacement: true,
+                evictedCount: 1,
+                untileCount: 1),
+        ]
+        for shape in shapes {
+            let model = items(shape)
+            for (index, item) in model.enumerated() where item.isSeparator {
+                XCTAssertNotEqual(index, 0, "a separator never leads the menu")
+                XCTAssertLessThan(
+                    index, model.count - 1,
+                    "a separator always separates two items")
+                guard index + 1 < model.count else { continue }
+                XCTAssertFalse(
+                    model[index + 1].isSeparator,
+                    "adjacent separators collapse into noise")
+            }
+        }
     }
 
     // MARK: Untrusted + app section

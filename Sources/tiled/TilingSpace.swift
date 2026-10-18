@@ -1460,6 +1460,10 @@ struct TilingSpace {
         return reassert(.grid, context: context)
     }
 
+    /// The number of tiled windows on this canvas: the scope the
+    /// focused-canvas menu rows act on.
+    var tiledCount: Int { state.occupants.count }
+
     /// Whether a splitter backup is parked: drives the menu row title
     /// ("Reset Splitters" vs "Restore Previous Splitters").
     var hasSplitterBackup: Bool { splitterBackup != nil }

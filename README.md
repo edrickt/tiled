@@ -150,7 +150,9 @@ tell you which app took it.
   Windows**, titled by count) to restore every tiled window on the focused
   canvas, or open a
   tiled window's submenu to focus it, untile just that window, or tile the
-  focused window into its slot.
+  focused window into its slot. The untile row is omitted when the focused
+  canvas has no tiled windows; the window list still names windows on every
+  visible display.
 - Each canvas tiles independently, where a canvas is one display's one
   Mission Control Space. Every Space you reach by swiping up with three
   fingers has its own layout, occupancy, splitters, undo history, and
@@ -160,8 +162,9 @@ tell you which app took it.
   All and Reset Splitters act on the focused canvas only. (Where the
   window server withholds a Space id, Tiled falls back to one canvas per
   display rather than guessing.)
-- The menu-bar glyph and the menu's rows follow the focused window's
-  display and Space. Swiping to another Space (or focusing a window on
+- The menu-bar glyph and the focused-canvas rows follow the focused
+  window's display and Space; the window list still groups every visible
+  display's windows. Swiping to another Space (or focusing a window on
   another display) redraws the glyph (2×2 or 3×2) and its occupancy for
   the canvas that just became visible, even though there was no tiling
   action. Windows parked in hidden Spaces stay tiled and keep their
@@ -209,7 +212,10 @@ new splitter position; only the screen edge snaps back.
 **Reset Splitters** in the menu (or ⌥⇧R) snaps the focused canvas's
 splitters back to even splits. Once a reset has parked the pre-reset
 positions, the same row is titled **Restore Previous Splitters** and
-brings them back.
+brings them back; that restore row stays until the backup is used, even
+if Untile All empties the canvas. The plain **Reset Splitters** row needs
+a tiled edge, so it is omitted when the focused canvas has no tiled
+windows and no parked backup.
 
 ## Installing a release build
 
@@ -231,7 +237,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (700 tests)
+swift test             # hermetic unit suite (704 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -265,7 +271,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (700 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (704 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |
