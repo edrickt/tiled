@@ -6,6 +6,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Undo reports a refused restore instead of claiming success, keeps a
+  window that cannot be moved back in the slot it visibly holds, and
+  counts only the windows that actually landed.
+
 ## [0.2.2] - 2026-10-15
 
 ### Fixed

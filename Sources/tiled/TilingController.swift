@@ -874,85 +874,136 @@ final class TilingController {
     /// vacated tile, swapping back). Consumes the entry it restores, so
     /// repeated ⌃⌥⇧⌘Z walks back through history up to `undoDepth`: the
     /// stack, not amnesia, bounds the past.
-    func undoLastDisplacement() {
+    @discardableResult
+    func undoLastDisplacement() -> Bool {
         undoLastDisplacement(in: focusedSpaceKey())
     }
 
     /// Undoes one display's currently shown canvas's freshest destructive
     /// action (the screen-based form menus and tests use). Other canvases,
     /// including other Spaces on the same display, keep their history.
-    func undoLastDisplacement(on screen: ScreenID?) {
+    @discardableResult
+    func undoLastDisplacement(on screen: ScreenID?) -> Bool {
         undoLastDisplacement(in: tilingKey(for: screen))
     }
 
-    private func undoLastDisplacement(in space: TilingSpaceKey) {
-        guard let entry = mutateSpace(space, { $0.undoStack.popLast() }) else {
+    @discardableResult
+    private func undoLastDisplacement(in space: TilingSpaceKey) -> Bool {
+        guard let chapter = mutateSpace(space, { $0.undoStack.popLast() }) else {
             // Expired or empty: the promise needs an answer, not silence
             // (see the undo-expiry feedback below).
             onFeedback?(.nothingToUndo)
-            return
+            return false
         }
+        return restoreChapter(chapter, on: space)
+    }
+
+    /// Chapter restoration, owned here because the controller is the only
+    /// holder of the canvas table. The canvas supplies the primitive:
+    /// `TilingSpace.restoreEvictees` re-places a group's evictees and
+    /// `TilingSpace.restore` returns the requester, while this one named
+    /// behaviour owns the cross-canvas rules — step-aside admission,
+    /// per-canvas grouping, and the notice/error precedence that lets a
+    /// partial failure surface ahead of the success sentence. Returns
+    /// whether the chapter restored everything it owed.
+    @discardableResult
+    private func restoreChapter(
+        _ chapter: TilingSpace.UndoChapter, on space: TilingSpaceKey
+    ) -> Bool {
         pruneDeadWindows()
         mutateSpace(space) { $0.error = nil; $0.notice = nil }
-        // A slot may have been re-tiled, and the canvas may have moved to
-        // the other layout, since the chapter was pushed (the undo stack
-        // survives new actions by design). Both are honored like any
-        // tile: every current occupant the restoration would land on
-        // (overlapping cells) or contradict (the other layout) is untiled
-        // to its pre-tile frame first. Undo can therefore never
-        // double-book a cell or leave two layouts on one canvas. Chapter
-        // members are exempt: each has an entry of its own that re-places
-        // it (a swap or step-aside chapter's destinations may overlap one
-        // another), so untiling one would only churn its identity — its
-        // entry restores it in place. A chapter's own requester without
-        // an entry still steps aside where it would block a restore,
-        // exactly as before.
-        let chapterHandles = Set(entry.snapshot.map(\.handle))
-        var blockers: Set<WindowID> = []
-        for evicted in entry.snapshot {
-            let destination = evicted.space ?? space
-            for (slot, current) in spaceState(for: destination).occupants
-            where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {
-                guard let handle = spaces[destination]?.handle(of: current),
-                      handle != evicted.handle,
-                      !chapterHandles.contains(handle)
-                else { continue }
-                blockers.insert(current)
+        var failures: [String] = []
+        var failedWindows: Set<WindowHandle> = []
+        // One window can be refused on both its pre-tile restore and its
+        // chapter entry; the handle is stable across the id reissue, so
+        // the undo story names that window once, not twice.
+        func recordFailure(_ handle: WindowHandle, name: String) {
+            guard failedWindows.insert(handle).inserted else { return }
+            failures.append(name)
+        }
+        var restored = 0
+        // Restore the requester first, in the canvas owning its record:
+        // its pre-tile frame wherever it sits — frames, not spaces,
+        // decide that. (Its record may already be gone; the restore is a
+        // no-op then.) Doing this before step-aside admission means a
+        // fresh requester is restored by the requester path, not untiled
+        // as a blocker, so its refusal is narrated rather than absorbed.
+        var retainedRequester: (space: TilingSpaceKey, slot: Slot)?
+        let requesterHandle = chapter.requester.flatMap { handle(of: $0) }
+        if let requester = chapter.requester {
+            let requesterSpace = spaceOf(window: requester) ?? space
+            let handle = requesterHandle
+            let name = appName(for: requester) ?? "A window"
+            let hasChapterEntry = handle.map { handle in
+                chapter.snapshot.contains { $0.handle == handle }
+            } ?? false
+            // A live requester that refuses to leave keeps the slot it
+            // visibly holds (mirroring a refused move). A confirmed-dead
+            // one is forgotten: it has no state left to own.
+            let isDead = handle.map { gateway.liveness(of: $0) == .dead } ?? false
+            let refused = mutateSpace(requesterSpace) { canvas -> Bool in
+                !canvas.restore(
+                    window: requester, context: placementContext(for: requesterSpace),
+                    keepingOccupancyOnRefusal: !isDead)
+            }
+            if refused, let handle { recordFailure(handle, name: name) }
+            // A retained requester owns its slot again; every other
+            // outcome released the record. Without a chapter entry this
+            // slot is a final barrier for the evictees below. With one,
+            // the entry is re-placed first and decides the barrier.
+            if spaceOf(window: requester) == nil {
+                forgetBookkeeping(requester)
+            } else if !hasChapterEntry {
+                retainedRequester = spaceOf(window: requester).flatMap { key in
+                    spaceState(for: key).slot(of: requester).map { (space: key, slot: $0) }
+                }
             }
         }
-        for current in blockers.sorted() {
-            untile(window: current, reflowing: false)
+        // Step-aside admission: every remaining occupant the restoration
+        // would land on (overlapping cells) or contradict (the other
+        // layout) is untiled to its pre-tile frame first, so undo can
+        // never double-book a cell or leave two layouts on one canvas.
+        // The requester is already handled above and stays exempt.
+        let handled: Set<WindowID> = chapter.requester.map { [$0] } ?? []
+        for blocker in blockers(of: chapter, on: space, excluding: handled).sorted() {
+            let handle = handle(of: blocker)
+            let name = appName(for: blocker) ?? "A window"
+            if untile(window: blocker, reflowing: false), let handle {
+                recordFailure(handle, name: name)
+            }
         }
         // Group the chapter by destination canvas: each window returns
         // to the canvas it left (legacy untagged entries restore into
-        // the undone canvas). The requester restores to its pre-tile
-        // frame wherever it sits: frames, not spaces, decide that.
+        // the undone canvas). The requester's entry goes first, so a
+        // refused move back becomes the barrier the rest respect.
+        var orderedSnapshot = chapter.snapshot
+        if let requesterHandle,
+            let index = orderedSnapshot.firstIndex(where: { $0.handle == requesterHandle })
+        {
+            orderedSnapshot.insert(orderedSnapshot.remove(at: index), at: 0)
+        }
         var bySpace: [TilingSpaceKey: [EvictedWindow]] = [:]
-        for evicted in entry.snapshot {
+        for evicted in orderedSnapshot {
             bySpace[evicted.space ?? space, default: []].append(evicted)
         }
-        var restored = 0
-        var errors: [String] = []
-        // Restore the requester once, in the canvas owning its record.
-        // (Its record may already be gone; the restore is a no-op then,
-        // but the per-canvas unwinding below still needs its id looked up
-        // in the same state.)
-        if let requester = entry.requester {
-            let requesterSpace = spaceOf(window: requester) ?? space
-            mutateSpace(requesterSpace) {
-                $0.restore(
-                    window: requester, context: placementContext(for: requesterSpace))
-            }
-            forgetBookkeeping(requester)
-        }
         for (destination, group) in bySpace {
+            let retainedSlots: [Slot]
+            if let retainedRequester, retainedRequester.space == destination {
+                retainedSlots = [retainedRequester.slot]
+            } else {
+                retainedSlots = []
+            }
             let result = mutateSpace(destination) {
-                $0.undo(
-                    snapshot: group, requester: nil,
+                $0.restoreEvictees(
+                    group, retained: retainedSlots,
                     context: placementContext(for: destination))
             }
-            for window in result.observe {
+            for window in result.restored {
                 observe(window: window)
+            }
+            restored += result.restored.count
+            for failure in result.failures {
+                recordFailure(failure.handle, name: failure.name)
             }
             // A restore the canvas refused left no record: clear the
             // handle table (and death clock) for every id it forgot, not
@@ -960,30 +1011,57 @@ final class TilingController {
             for window in result.forget {
                 forgetBookkeeping(window)
             }
-            if result.notice != nil {
-                restored += group.count
-            }
-            if let error = result.error { errors.append(error) }
         }
-        if restored > 0 {
-            let total = entry.snapshot.count
-            let noun = total == 1 ? "1 window" : "\(total) windows"
+        // The chapter's story, told once here: any refused frame surfaces
+        // ahead of the success sentence, so a partial failure can never
+        // hide behind "N windows restored".
+        if !failures.isEmpty {
+            mutateSpace(space) {
+                $0.error = MenuText.restoreFailureMessage(failures)
+            }
+        } else if restored > 0 {
+            let noun = restored == 1 ? "1 window" : "\(restored) windows"
             mutateSpace(space) {
                 $0.notice = "Undid displacement \u{00B7} \(noun) restored."
             }
-        } else if let error = errors.first {
-            mutateSpace(space) { $0.error = error }
-        } else if entry.snapshot.isEmpty {
-            // Untile-all chapter with no surviving windows: the requester
-            // restore above already ran; report the standard empty result.
-            mutateSpace(space) { $0.error = MenuText.restoreEvictedWindowsFailure }
-        } else if errors.isEmpty {
+        } else {
+            // Nothing restored and nothing refused (a chapter whose
+            // windows all died): report the standard failure. The entry
+            // is consumed either way.
             mutateSpace(space) { $0.error = MenuText.restoreEvictedWindowsFailure }
         }
-        // A nil requester with an empty snapshot (untile-all chapter
-        // whose windows all died) still consumes the entry: nothing to
-        // restore, standard error above.
         onChange?()
+        // A refused frame means the chapter did not fully restore: report
+        // not-performed so a caller cannot speak a success sentence over
+        // the canvas's refusal.
+        return restored > 0 && failures.isEmpty
+    }
+
+    /// The current occupants that must step aside before `chapter`
+    /// returns: those whose cells a restored window would land on, or
+    /// whose layout the chapter contradicts. Chapter members are exempt —
+    /// each has an entry of its own that re-places it (a swap or
+    /// step-aside chapter's destinations may overlap one another) — and
+    /// so is the window being restored.
+    private func blockers(
+        of chapter: TilingSpace.UndoChapter, on space: TilingSpaceKey,
+        excluding handled: Set<WindowID>
+    ) -> Set<WindowID> {
+        let chapterHandles = Set(chapter.snapshot.map(\.handle))
+        var blockers: Set<WindowID> = []
+        for evicted in chapter.snapshot {
+            let destination = evicted.space ?? space
+            for (slot, current) in spaceState(for: destination).occupants
+            where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {
+                guard let handle = spaces[destination]?.handle(of: current),
+                      handle != evicted.handle,
+                      !chapterHandles.contains(handle),
+                      !handled.contains(current)
+                else { continue }
+                blockers.insert(current)
+            }
+        }
+        return blockers
     }
 
     // MARK: Live resize (observe & decide)
@@ -1238,17 +1316,24 @@ final class TilingController {
         untile(window: id, reflowing: true)
     }
 
-    func untile(window id: WindowID, reflowing: Bool) {
+    /// Returns whether the pre-tile restore was refused. Undo's
+    /// preparatory untiles use this to fold a blocker's refusal into the
+    /// chapter's story instead of letting a later success notice cover it.
+    @discardableResult
+    func untile(window id: WindowID, reflowing: Bool) -> Bool {
         pruneDeadWindows()
         // The window's own canvas clears (not the focused one): menu
         // untile rows act on background displays and Spaces.
         let key = spaceOf(window: id) ?? focusedSpaceKey()
-        let outcome = mutateSpace(key) {
-            $0.untile(
+        let (outcome, refused) = mutateSpace(key) {
+            canvas -> (TilingSpace.Outcome, Bool) in
+            let outcome = canvas.untile(
                 window: id, reflowing: reflowing, context: placementContext(for: key))
+            return (outcome, canvas.error != nil)
         }
         apply(outcome, on: key)
         onChange?()
+        return refused
     }
 
     // MARK: Expand toggle (⌥⇧⏎)

@@ -120,8 +120,9 @@ final class TilingSpaceHarness {
         return space.apply(slot: slot, requester: requester, context: context())
     }
 
-    /// One undo chapter through the canvas.
-    func undo(snapshot: [EvictedWindow], requester: WindowID?) -> TilingSpace.UndoOutcome {
-        space.undo(snapshot: snapshot, requester: requester, context: context())
+    /// One chapter group through the primitive the controller drives:
+    /// the canvas restores and reports, narration stays controller-side.
+    func restoreEvictees(_ group: [EvictedWindow]) -> TilingSpace.ChapterRestore {
+        space.restoreEvictees(group, context: context())
     }
 }

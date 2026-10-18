@@ -921,8 +921,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// frontmost, so the undo works from anywhere, not only with the
     /// status menu open.
     private func performUndoSwitch() {
-        controller.undoLastDisplacement()
-        announce("Evicted windows restored.", fallback: "Evicted windows restored.")
+        // A refused frame means the chapter did not fully restore: the
+        // canvas states the failure, so do not speak success over it.
+        if controller.undoLastDisplacement() {
+            announce("Evicted windows restored.", fallback: "Evicted windows restored.")
+        }
     }
 
     @objc private func untileTiledWindow(_ sender: NSMenuItem) {

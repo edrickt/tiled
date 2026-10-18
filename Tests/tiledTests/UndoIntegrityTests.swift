@@ -47,6 +47,34 @@ final class UndoIntegrityTests: XCTestCase {
         return handle
     }
 
+    /// A swap chapter with one evictee: the requester holds topLeft, the
+    /// evictee holds rightHalf, and the requester requests rightHalf.
+    private func makeSwapChapter() -> (requester: WindowHandle, evictee: WindowHandle) {
+        let requester = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+        controller.handle(slot: .bottomLeft)
+        let evictee = focusNewWindow(CGRect(x: 900, y: 0, width: 800, height: 600))
+        controller.handle(slot: .rightHalf)
+        gateway.focused = requester
+        controller.handle(slot: .rightHalf)
+        return (requester, evictee)
+    }
+
+    /// A layout switch from quarters to sixths that evicts both quads.
+    /// Returns the first evictee (topLeft), the one a restore test can
+    /// refuse or kill.
+    @discardableResult
+    private func makeSwitchEvictingTwoQuads() -> WindowHandle {
+        let first = focusNewWindow()
+        controller.handle(slot: .topLeft)
+        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+        controller.handle(slot: .topRight)
+        focusNewWindow(CGRect(x: 1200, y: 80, width: 500, height: 400))
+        controller.handle(slot: .sixthLeft)
+        return first
+    }
+
     /// The union of all tiled cells on the focused canvas: undo may never
     /// make one cell belong to two windows.
     private var doubledCells: [TileCell] {
@@ -168,6 +196,143 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "undo re-tiles w")
     }
 
+    // MARK: Partial undo restoration
+
+    func testRefusedRequesterRestoreIsNarratedAsFailure() {
+        // A chapter with one evictee and one requester: the evictee goes
+        // home, but the requester's app refuses its pre-tile frame. The
+        // refusal is the chapter's story; a success notice must not hide
+        // it, and the evictee that did land stays restored.
+        let (requester, evictee) = makeSwapChapter()
+
+        gateway.refuseNextWrites(requester)
+        XCTAssertFalse(
+            controller.undoLastDisplacement(),
+            "a refused frame means the chapter did not fully restore")
+
+        XCTAssertNil(canvas.notice, "a refused requester is never narrated as success")
+        XCTAssertEqual(
+            canvas.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.",
+            "the refused requester is named as the failure")
+        XCTAssertEqual(
+            canvas.state.occupant(of: .rightHalf).map { canvas.handle(of: $0) }, evictee,
+            "the evictee that accepted its write still goes home")
+        XCTAssertEqual(
+            canvas.state.occupant(of: .topLeft).map { canvas.handle(of: $0) }, requester,
+            "the requester's chapter entry still returns it to its vacated slot")
+    }
+
+    func testRepeatedRequesterRefusalIsNamedOnce() {
+        // The requester's pre-tile restore and its chapter entry can both
+        // refuse. They are one window, so the undo names it once rather
+        // than reporting a plural failure.
+        let requester = makeSwapChapter().requester
+
+        gateway.refuseNextWrites(requester, count: 2)
+        XCTAssertFalse(controller.undoLastDisplacement())
+
+        XCTAssertEqual(
+            canvas.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.",
+            "two refused writes for one window are one failure")
+        XCTAssertEqual(
+            canvas.state.occupant(of: .rightHalf).map { canvas.handle(of: $0) }, requester,
+            "the requester keeps the slot it visibly holds after the second refusal")
+        XCTAssertNil(
+            canvas.state.occupant(of: .topLeft),
+            "the vacated-slot entry did not leave a phantom occupancy behind")
+    }
+
+    func testRefusedFreshRequesterKeepsItsVisibleSlot() {
+        // A fresh requester has no chapter entry, so a refused pre-tile
+        // restore leaves it owning the slot it visibly holds. No evictee
+        // may return into that slot or an abandoned layout: the undo is
+        // partial, reported as a failure, never as success.
+        focusNewWindow()
+        controller.handle(slot: .topLeft)
+        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+        controller.handle(slot: .topRight)
+        let requester = focusNewWindow(CGRect(x: 1200, y: 80, width: 500, height: 400))
+        controller.handle(slot: .sixthLeft) // switch evicts both quarters windows
+
+        gateway.refuseNextWrites(requester)
+        XCTAssertFalse(
+            controller.undoLastDisplacement(),
+            "a refused frame means the chapter did not fully restore")
+
+        XCTAssertNil(canvas.notice, "a refused requester is never narrated as success")
+        XCTAssertEqual(
+            canvas.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+        XCTAssertEqual(
+            canvas.state.occupant(of: .sixthLeft).map { canvas.handle(of: $0) }, requester,
+            "the refused requester keeps the slot it visibly holds")
+        XCTAssertNil(
+            canvas.state.occupant(of: .topLeft),
+            "the overlapping evictee cannot return into the requester's retained slot")
+        XCTAssertNil(
+            canvas.state.occupant(of: .topRight),
+            "the other-layout evictee cannot return beside the sixths requester")
+        XCTAssertEqual(
+            canvas.state.activeLayout, .sixths,
+            "the retained requester's layout remains the only one on the canvas")
+        XCTAssertNotNil(
+            controller.registeredID(for: requester),
+            "the retained requester keeps its ownership record")
+    }
+
+    func testPartialUndoFailureIsNarratedAsFailure() {
+        // Two evictees, one refuses its restore. The window that landed
+        // stays restored, but the refusal reaches the user ahead of any
+        // count of the success.
+        let refused = makeSwitchEvictingTwoQuads()
+
+        gateway.refuseNextWrites(refused)
+        XCTAssertFalse(
+            controller.undoLastDisplacement(),
+            "a partial failure means the chapter did not fully restore")
+
+        XCTAssertNil(canvas.notice, "a partial failure must not be narrated as success")
+        XCTAssertEqual(
+            canvas.error,
+            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+    }
+
+    func testUndoNoticeCountsOnlyRestoredWindows() {
+        // A chapter of two whose first evictee died before the undo: the
+        // notice reports the one window that actually returned, not the
+        // chapter's original size.
+        let dead = makeSwitchEvictingTwoQuads()
+        gateway.kill(dead)
+
+        XCTAssertTrue(controller.undoLastDisplacement())
+
+        XCTAssertEqual(canvas.notice, "Undid displacement \u{00B7} 1 window restored.")
+        XCTAssertNil(canvas.error)
+    }
+
+    func testRefusedRequesterUndoConsumesItsChapterOnce() {
+        // The refusal does not leave the chapter on the stack for an
+        // implicit retry: the next press reports the empty history and
+        // writes nothing, even though the app would now accept.
+        let requester = makeSwapChapter().requester
+
+        gateway.refuseNextWrites(requester)
+        XCTAssertFalse(controller.undoLastDisplacement())
+        XCTAssertTrue(canvas.undoStack.isEmpty, "the refused chapter is consumed once")
+        gateway.clearWrites()
+        feedbacks.removeAll()
+
+        XCTAssertFalse(controller.undoLastDisplacement())
+
+        XCTAssertTrue(gateway.writes.isEmpty, "the consumed chapter is never retried")
+        XCTAssertEqual(feedbacks.count, 1)
+        guard case .nothingToUndo = feedbacks[0] else {
+            return XCTFail("expected .nothingToUndo, got \(feedbacks[0])")
+        }
+    }
+
     // MARK: Re-house region and empty chapters
 
     func testReHouseUsesTheRegionTheRequestActuallyLeavesFree() {
@@ -208,14 +373,12 @@ final class UndoIntegrityTests: XCTestCase {
     /// pending-death clock) for the forgotten id — not just the
     /// requester's. A leftover entry is the leak the audit found.
     func testFailedUndoRestoreClearsTheRegistryEntryForTheForgottenWindow() {
-        let w = focusNewWindow()
-        controller.handle(slot: .topLeft)
-        let x = focusNewWindow(CGRect(x: 40, y: 40, width: 500, height: 400))
-        controller.handle(slot: .leftHalf) // evicts w; chapter on w
+        // A switch untiles both quads; the first evictee's re-tile is
+        // refused. It had no slot before the undo, so it is forgotten and
+        // the registry must let it go too.
+        let w = makeSwitchEvictingTwoQuads()
         XCTAssertFalse(canvas.undoStack.isEmpty, "the eviction is undoable")
 
-        // Undo's re-tile of the evicted window is refused: the canvas
-        // forgets its fresh record, so the registry must let it go too.
         gateway.refuseNextWrites(w)
         controller.undoLastDisplacement()
 
@@ -226,7 +389,9 @@ final class UndoIntegrityTests: XCTestCase {
 
     /// The same failed restore must clear the pending-death clock, not
     /// only the handle->id entry: a leftover `deadSince` entry is the
-    /// other half of the leak ticket 02 closed.
+    /// other half of the leak ticket 02 closed. A requester reading dead
+    /// does not retain its record, and its chapter entry is skipped, so
+    /// nothing re-adopts the old id.
     func testFailedUndoRestoreClearsThePendingDeathClock() {
         var awake: TimeInterval = 0
         let localGateway = FakeWindowGateway()
@@ -238,9 +403,14 @@ final class UndoIntegrityTests: XCTestCase {
         let w = localGateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         localGateway.focused = w
         localController.handle(slot: .topLeft)
-        let x = localGateway.addWindow(frame: CGRect(x: 40, y: 40, width: 500, height: 400))
+        let x = localGateway.addWindow(frame: CGRect(x: 900, y: 50, width: 500, height: 400))
         localGateway.focused = x
-        localController.handle(slot: .leftHalf) // evicts w; chapter requester x
+        localController.handle(slot: .topRight)
+        let c = localGateway.addWindow(frame: CGRect(x: 1200, y: 80, width: 500, height: 400))
+        localGateway.focused = c
+        localController.handle(slot: .rightHalf)
+        localGateway.focused = x
+        localController.handle(slot: .rightHalf) // swap; x's vacated tile joins the chapter
         XCTAssertFalse(localCanvas(localController).undoStack.isEmpty)
         let xID = localController.registeredID(for: x)
 
@@ -253,8 +423,9 @@ final class UndoIntegrityTests: XCTestCase {
             localController.hasPendingDeath(xID ?? 0),
             "the death is pending, not yet confirmed")
 
-        // Undo refuses x's restore, so the canvas forgets it: the registry
-        // and the death clock must both let it go.
+        // Undo refuses x's pre-tile restore. Because x reads dead, the
+        // record is not retained, and its chapter entry is skipped too:
+        // the registry and the death clock must both let the old id go.
         localGateway.refuseNextWrites(x)
         localController.undoLastDisplacement()
 

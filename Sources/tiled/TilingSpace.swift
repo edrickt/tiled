@@ -36,8 +36,13 @@ struct EvictedWindow {
 /// `notice`/`error` stay readable on the canvas: the placement writes
 /// them as it settles, so the menu surface reads the canvas that acted.
 struct TilingSpace {
+    /// One eviction's undo chapter: the windows to re-place (each tagged
+    /// with the canvas it returns to) and the action's requester, whose
+    /// pre-tile frame the controller restores.
+    typealias UndoChapter = (snapshot: [EvictedWindow], requester: WindowID?)
+
     var state = TilingState()
-    var undoStack: [(snapshot: [EvictedWindow], requester: WindowID?)] = []
+    var undoStack: [UndoChapter] = []
     var splitterBackup: GridLayout?
     /// Splitter fractions for this canvas. The tracker moves them through
     /// its `GridProvider`, which reads and writes here.
@@ -167,18 +172,23 @@ struct TilingSpace {
         var verify: [WindowID] = []
     }
 
-    /// What one undo returns: narration plus observation requests. Kept
-    /// out of `Outcome` because one undo chapter can span several
-    /// canvases and the notice lands on the canvas the chapter belonged
-    /// to, not on every destination it restores windows to.
-    struct UndoOutcome {
-        var notice: String?
-        var error: String?
-        var observe: [WindowID] = []
-        /// Windows the undo released: a restore whose re-tile was refused
-        /// forgets the record, so the coordinator clears its handle table,
-        /// death clock, and pending verification for them, exactly as it
-        /// does for a tiling request's `forget`.
+    /// What restoring one chapter group onto a canvas did: the windows
+    /// now tiled here (the coordinator must observe them), the names of
+    /// windows whose frame write was refused, and the windows the canvas
+    /// released. No narration: the controller owns the chapter's story,
+    /// and the canvas only supplies this primitive.
+    struct ChapterRestore {
+        struct Failure: Equatable {
+            let handle: WindowHandle
+            let name: String
+        }
+
+        var restored: [WindowID] = []
+        var failures: [Failure] = []
+        /// Windows the restore released: a refused re-tile forgets the
+        /// record, so the coordinator clears its handle table, death
+        /// clock, and pending verification for them, exactly as it does
+        /// for a tiling request's `forget`.
         var forget: [WindowID] = []
     }
 
@@ -398,24 +408,26 @@ struct TilingSpace {
 
     // MARK: Undo
 
-    /// Undoes a chapter on this canvas: restores the requester to its
-    /// pre-tile frame and returns every surviving evicted window to its
-    /// slot. Returns the notice or error for the coordinator, which
-    /// aggregates multi-canvas chapters and narrates on the chapter's
-    /// own canvas.
-    mutating func undo(
-        snapshot: [EvictedWindow], requester: WindowID?, context: Context
-    ) -> UndoOutcome {
-        var result = UndoOutcome()
-        if let requester {
-            _ = restore(window: requester, context: context)
-            // The requester's record is released whether its restore
-            // succeeded or was refused: report it so the coordinator drops
-            // the handle-table entry with the record.
-            result.forget.append(requester)
-        }
-        var restored = 0
-        for entry in snapshot {
+    /// One chapter group's evictees return to this canvas: each survivor
+    /// is committed into its slot and its frame written. The controller
+    /// owns chapter restoration (it is the only holder of the canvas
+    /// table), so this primitive narrates nothing and restores no
+    /// requester. A refused re-tile keeps the slot the window visibly
+    /// held before the undo (mirroring `place`); a window that was
+    /// already untiled is forgotten. Every refusal is named in
+    /// `failures`, so a partial failure can surface instead of hiding
+    /// behind a success sentence. `retained` names slots a requester
+    /// visibly kept after refusing to leave: entries overlapping one, or
+    /// contradicting its layout, stay untiled rather than double-book it.
+    mutating func restoreEvictees(
+        _ group: [EvictedWindow], retained: [Slot] = [], context: Context
+    ) -> ChapterRestore {
+        var result = ChapterRestore()
+        var retained = retained
+        for entry in group {
+            guard !retained.contains(where: {
+                $0.overlaps(entry.slot) || $0.layout != entry.slot.layout
+            }) else { continue }
             // Skip confirmed deaths only: an unknown liveness (busy app)
             // still attempts the restore: the write re-probes, and a
             // failed attempt is reported, not silently skipped.
@@ -431,6 +443,8 @@ struct TilingSpace {
                 beginRecord(id, handle: entry.handle, frame: .zero)
             }
             guard var record = records[id] else { continue }
+            let previous = state.slot(of: id)
+            let previousRecord = record
             record.preTileFrame = entry.preTileFrame
             records[id] = record
             state.commit(window: id, into: entry.slot)
@@ -446,28 +460,30 @@ struct TilingSpace {
                 current == grid.rect(for: slot, in: visibleFrame)
             {
                 context.log("undo SKIP-WRITE win\(id) already placed")
-                restored += 1
-                result.observe.append(id)
+                result.restored.append(id)
             } else if applyLayout(for: id, context: context, on: entry.space).stands {
                 // A deferred off-Space write stands: the window keeps its
                 // slot and reconciles when the canvas becomes visible.
-                restored += 1
-                result.observe.append(id)
+                result.restored.append(id)
             } else {
-                // The re-tile was refused: the window is not tiled, so its
-                // record goes and the coordinator must clear the matching
-                // handle-table entry (not only the requester's).
-                forget(id, context: context)
-                result.forget.append(id)
+                // The re-tile was refused: name the window before any
+                // record goes. A window that held a slot keeps it, like a
+                // refused move; only an already-untiled window is
+                // forgotten, so the coordinator clears its handle-table
+                // entry (not only the requester's).
+                let name = appName(id, context: context) ?? "A window"
+                let handle = record.handle
+                if let previous {
+                    state.commit(window: id, into: previous)
+                    records[id] = previousRecord
+                    retained.append(previous)
+                } else {
+                    forget(id, context: context)
+                    result.forget.append(id)
+                }
+                result.failures.append(
+                    ChapterRestore.Failure(handle: handle, name: name))
             }
-        }
-        if restored > 0 {
-            let noun = restored == 1 ? "1 window" : "\(restored) windows"
-            // The undo itself must not push a new chapter: restoration is
-            // the consumption of history, not a new destruction.
-            result.notice = "Undid displacement \u{00B7} \(noun) restored."
-        } else {
-            result.error = MenuText.restoreEvictedWindowsFailure
         }
         return result
     }
@@ -870,11 +886,17 @@ struct TilingSpace {
     /// window already holds is skipped, and a canvas the user cannot see
     /// defers rather than writing blind. Returns false only when the
     /// gateway refused the write, so the caller can say so instead of
-    /// silently leaving a stray window behind. The coordinator's undo
-    /// reuses this for the chapter's requester.
+    /// silently leaving a stray window behind. A refused write normally
+    /// releases the slot too; undo's fresh requester passes
+    /// `keepingOccupancyOnRefusal` so the window stays the owner of the
+    /// slot it visibly holds, mirroring `place`'s rollback. The
+    /// coordinator's undo reuses this for the chapter's requester.
     @discardableResult
-    mutating func restore(window id: WindowID, context: Context) -> Bool {
+    mutating func restore(
+        window id: WindowID, context: Context, keepingOccupancyOnRefusal: Bool = false
+    ) -> Bool {
         var restored = true
+        var refused = false
         if let record = records[id], record.preTileFrame != .zero {
             let result = context.frameWriter.write(
                 id, handle: record.handle, to: record.preTileFrame,
@@ -886,7 +908,9 @@ struct TilingSpace {
                     id: id, frame: record.preTileFrame)
             }
             restored = result.stands
+            refused = result == .refused
         }
+        if refused, keepingOccupancyOnRefusal { return false }
         forget(id, context: context)
         return restored
     }

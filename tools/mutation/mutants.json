@@ -538,5 +538,65 @@
   "overridden settle never repaired (screen edge stays stretched)",
   "                if arm.sightings >= 2 {",
   "                if arm.sightings >= 999999 {"
+ ],
+ [
+  "TilingController.swift",
+  "partial undo failure swallowed (success narrated when one window refused)",
+  "        if !failures.isEmpty {",
+  "        if !failures.isEmpty && restored == 0 {"
+ ],
+ [
+  "TilingController.swift",
+  "undo notice counts the chapter, not the windows restored",
+  "            restored += result.restored.count",
+  "            restored += group.count"
+ ],
+ [
+  "TilingController.swift",
+  "refused requester restore swallowed (undo claims success)",
+  "            if refused, let handle { recordFailure(handle, name: name) }",
+  "            if refused, let handle { _ = (handle, name) }"
+ ],
+ [
+  "TilingController.swift",
+  "chapter restoration ignores the other layout when admitting blockers",
+  "            where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {",
+  "            where slot.overlaps(evicted.slot) {"
+ ],
+ [
+  "TilingController.swift",
+  "undo reports fully restored despite a refused frame",
+  "        return restored > 0 && failures.isEmpty",
+  "        return restored > 0"
+ ],
+ [
+  "TilingController.swift",
+  "one window's repeated refusal counted twice (plural failure for one window)",
+  "            guard failedWindows.insert(handle).inserted else { return }",
+  "            guard failedWindows.insert(handle).inserted || true else { return }"
+ ],
+ [
+  "TilingController.swift",
+  "refused fresh requester forgotten while still visibly tiled",
+  "                    keepingOccupancyOnRefusal: !isDead)",
+  "                    keepingOccupancyOnRefusal: false)"
+ ],
+ [
+  "TilingSpace.swift",
+  "restore ignores the requester's retained layout (two layouts on one canvas)",
+  "            guard !retained.contains(where: {\n                $0.overlaps(entry.slot) || $0.layout != entry.slot.layout\n            }) else { continue }",
+  "            guard !retained.contains(where: { $0.overlaps(entry.slot) }) else { continue }"
+ ],
+ [
+  "TilingSpace.swift",
+  "refused requester's previous slot not retained (evictee overwrites it)",
+  "                    state.commit(window: id, into: previous)\n                    records[id] = previousRecord\n                    retained.append(previous)",
+  "                    state.commit(window: id, into: previous)\n                    records[id] = previousRecord\n                    _ = previous"
+ ],
+ [
+  "TilingController.swift",
+  "retained requester slot not passed to evictee restoration",
+  "                $0.restoreEvictees(\n                    group, retained: retainedSlots,",
+  "                $0.restoreEvictees(\n                    group, retained: [],"
  ]
 ]
