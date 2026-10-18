@@ -8,7 +8,7 @@ current tests cover only the already-visible refresh path.
 
 **Findings:** T8 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (31542b8)
 
 - [ ] First build with `didDismissWelcome == false` includes Welcome and selects it.
 - [ ] Dismissal persists, removes the tab, and selects General.
