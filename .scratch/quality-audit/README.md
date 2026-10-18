@@ -37,7 +37,7 @@ overlap findings already recorded there and are marked in the report.
 | 15 | The live AX adapter has a testable seam | – | T3 | TODO |
 | 16 | One hotkey route, not a dead table | 13 | T4, A4 | DONE (`9856939`) |
 | 17 | Literal expectations for end-to-end tests | – | T5 | DONE (`e7e8b8a`) |
-| 18 | Splitter-backup drag semantics are pinned | – | T6 | TODO |
+| 18 | Splitter-backup drag semantics are pinned | – | T6 | DONE (`d8d4359`) |
 | 19 | Conflict and registration-failure UI are pinned | 09 | T7 | TODO |
 | 20 | Welcome lifecycle is pinned | 09 | T8 | TODO |
 | A1 | Explore: expected-write ledger | – | A1 | TODO (design) |
@@ -46,7 +46,7 @@ overlap findings already recorded there and are marked in the report.
 | A6 | Explore: parked shortcuts module | 03 | A6 | TODO (design) |
 
 The functional queue and ticket 13 are complete; F19–F20 are the remaining test-hygiene
-items, and test-seam tickets 18–20 are the prerequisite for trusting the live-only features.
+items, and test-seam tickets 19–20 are the prerequisite for trusting the live-only features.
 A1/A2 come after the functional queue, per the audit's triage order. A3/A6 are exploratory
 and should not be cut into implementation until their design is approved.
 

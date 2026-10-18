@@ -8,7 +8,7 @@ replaces the parked snapshot. The current tests cover reset/restore but not the 
 
 **Findings:** T6 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (d8d4359)
 
 - [ ] Drag a splitter without resetting: `hasSplitterBackup` stays false.
 - [ ] Reset, then drag: the parked backup survives and restores the pre-reset positions.
