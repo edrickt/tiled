@@ -207,7 +207,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         // and drops the two oldest — exactly five chapters survive, not
         // fewer. Walking back five times consumes all of them; the sixth
         // undo answers instead of reaching further, and a stack that kept
-        // a sixth chapter would answer it instead of `.nothingToUndo`.
+        // a sixth chapter would answer it instead of a no-op receipt.
         var handles: [WindowHandle] = []
         for i in 0..<7 {
             let handle = gateway.addWindow(
@@ -222,32 +222,25 @@ final class ControllerBulkOperationTests: XCTestCase {
         // empty) also passed with a depth-2 stack, where three of these
         // five calls were silent no-ops.
         for index in 1...5 {
-            feedbacks.removeAll()
-            controller.undoLastDisplacement()
+            let receipt = controller.undoAction()
             XCTAssertTrue(
-                feedbacks.isEmpty,
-                "undo #\(index) answered .nothingToUndo: the depth-5 history lost a chapter")
+                receipt.performed,
+                "undo #\(index) answered a no-op: the depth-5 history lost a chapter")
         }
         XCTAssertFalse(
             !canvas.undoStack.isEmpty,
             "five undos exhaust the depth-5 history")
-        feedbacks.removeAll()
-        controller.undoLastDisplacement()
-        XCTAssertEqual(feedbacks.count, 1, "the sixth undo answers, not silence")
-        guard case .nothingToUndo = feedbacks[0] else {
-            return XCTFail("expected .nothingToUndo, got \(feedbacks[0])")
-        }
+        let sixth = controller.undoAction()
+        XCTAssertFalse(sixth.performed, "the sixth undo answers, not silence")
+        XCTAssertEqual(sixth.announcement, "Nothing to undo: a later change replaced it.")
     }
 
     func testEmptyUndoStackAnswersInsteadOfSilence() {
         addFocusedWindow()
         XCTAssertTrue(canvas.undoStack.isEmpty)
-        feedbacks.removeAll()
-        controller.undoLastDisplacement()
-        XCTAssertEqual(feedbacks.count, 1, "an empty undo still answers")
-        guard case .nothingToUndo = feedbacks[0] else {
-            return XCTFail("expected .nothingToUndo, got \(feedbacks[0])")
-        }
+        let receipt = controller.undoAction()
+        XCTAssertFalse(receipt.performed, "an empty undo still answers")
+        XCTAssertEqual(receipt.announcement, "Nothing to undo: a later change replaced it.")
     }
 
     func testSwitchingAloneOffersNoUndo() {

@@ -19,7 +19,12 @@ _Avoid_: desktop, workspace, virtual desktop
 **Tiling space (canvas)**:
 One display's one Mission Control Space: its occupancy, layout, splitters, undo chapters, and notices. Tiling acts on the requesting window's canvas; menus aggregate the visible canvases (the manage list groups per display), while the undo, untile-all, and splitter rows and their counts follow the focused canvas. A canvas whose Space id the OS withholds falls back to per-display state, and is treated as visible, not hidden.
 _Avoid_: monitor space (prose for the display dimension only), screen (AppKit type), desktop
-_Code_: `TilingSpace` (one canvas's occupancy, records, splitters, expansion, visible frame, placement pipeline, and undo chapters), `TilingSpaceKey` (display + Space identity); `TilingController` restores chapters across canvases and owns the success/refusal narration.
+_Code_: `TilingSpace` (one canvas's occupancy, records, splitters, expansion, visible frame, placement pipeline, and undo chapters), `TilingSpaceKey` (display + Space identity); `TilingController` restores chapters across canvases.
+
+**Receipt**:
+The user-visible truth of one app action: whether it performed, the canvas that owns the outcome, the menu's sticky notice, and exactly one spoken sentence. The controller builds it at the action's commit point; the delegate only presents it.
+_Avoid_: result, feedback, notification (one channel, not the whole truth)
+_Code_: `ActionReceipt`
 
 **Cell**:
 An atomic unit of the shared 4×2 refinement both layouts are built from; overlap is cell-set intersection.

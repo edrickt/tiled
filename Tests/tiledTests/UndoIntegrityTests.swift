@@ -324,13 +324,11 @@ final class UndoIntegrityTests: XCTestCase {
         gateway.clearWrites()
         feedbacks.removeAll()
 
-        XCTAssertFalse(controller.undoLastDisplacement())
+        let receipt = controller.undoAction()
 
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "Nothing to undo: a later change replaced it.")
         XCTAssertTrue(gateway.writes.isEmpty, "the consumed chapter is never retried")
-        XCTAssertEqual(feedbacks.count, 1)
-        guard case .nothingToUndo = feedbacks[0] else {
-            return XCTFail("expected .nothingToUndo, got \(feedbacks[0])")
-        }
     }
 
     // MARK: Re-house region and empty chapters

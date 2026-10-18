@@ -209,15 +209,12 @@ final class PerMonitorTests: XCTestCase {
         // Focus the untouched right monitor: nothing destructive happened
         // there, so undo answers instead of reaching into the left
         // monitor's history.
-        var feedbacks: [TilingController.Feedback] = []
-        controller.onFeedback = { feedbacks.append($0) }
         let probe = gateway.addWindow(frame: CGRect(x: 2100, y: 100, width: 500, height: 400))
         gateway.focused = probe
-        controller.undoLastDisplacement()
+        let receipt = controller.undoAction()
 
-        guard case .nothingToUndo = feedbacks.first else {
-            return XCTFail("expected .nothingToUndo, got \(feedbacks)")
-        }
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "Nothing to undo: a later change replaced it.")
         // The left monitor's history survives for its own undo: the
         // evicted window returns (under a fresh id) and the challenger
         // untiles.

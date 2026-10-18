@@ -17,6 +17,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Snapshot the current status menu was built from. Diffed on every
     /// refresh so the menu is rebuilt only when something it reads moved.
     private var lastMenuSnapshot: MenuModel.Snapshot?
+    /// The latest action receipt. The menu carries its notice even when the
+    /// action touched a background canvas, so a refusal there is not
+    /// spoken once and then absent from the menu. The focus and action
+    /// generation at presentation bound the overlay: a later state change
+    /// or focus move supersedes it instead of hiding the new outcome.
+    private var lastActionReceipt: ActionReceipt?
+    private var lastReceiptFocusedSpace: TilingSpaceKey?
+    private var lastReceiptGeneration: Int?
+    /// Bumped by every controller change. It makes "a later action
+    /// supersedes the receipt" exact even when the new notice is nil or
+    /// happens to repeat the old text.
+    private var actionGeneration = 0
     /// What the status icon currently depicts (layout plus fill), so it
     /// redraws when windows come and go within one layout, not just when
     /// the layout itself flips 2×2 ↔ 3×2.
@@ -36,7 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
-        controller.onChange = { [weak self] in self?.refreshMenu() }
+        controller.onChange = { [weak self] in
+            self?.actionGeneration += 1
+            self?.refreshMenu()
+        }
         controller.onFocusedSpaceChange = { [weak self] in self?.refreshFocusedDisplay() }
         controller.onFeedback = { [weak self] feedback in
             DispatchQueue.main.async { self?.signalFeedback(feedback) }
@@ -144,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch action {
             case .slot(let slot): controller.handle(slot: slot)
             case .expand: controller.handleExpandToggle()
-            case .evict: controller.handleEvict()
+            case .evict: self.present(controller.handleEvict())
             case .settings: self.showSettings(nil)
             case .undo: self.performUndoSwitch()
             case .resetSplitters: controller.resetDividers()
@@ -523,7 +538,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return MenuModel.Snapshot(
             isTrusted: controller.isTrusted,
             warnings: warnings.hotkeyWarnings,
-            notice: canvas.notice,
+            notice: Self.menuNotice(
+                canvasNotice: canvas.notice,
+                canvasError: canvas.error,
+                receipt: lastActionReceipt,
+                receiptFocusedSpace: lastReceiptFocusedSpace,
+                receiptGeneration: lastReceiptGeneration,
+                currentGeneration: actionGeneration,
+                focusedSpace: space),
             layoutTitle: presentation.statusLine,
             activeLayout: canvas.state.activeLayout,
             tileError: warnings.tileError,
@@ -539,6 +561,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // canvas's count while the menu describes another.
             untileCount: canvas.tiledCount,
             monitorSections: presentation.sections)
+    }
+
+    /// The menu's notice row. A receipt from another canvas is the latest
+    /// user-visible outcome and must not vanish just because the menu reads
+    /// the focused canvas; a receipt on this canvas is already carried by
+    /// `canvasNotice`. The overlay is bounded to the focus and action
+    /// generation the receipt was presented against, so a later state
+    /// change or focus move supersedes it even when the new notice is nil
+    /// or repeats the old text.
+    static func menuNotice(
+        canvasNotice: String?,
+        canvasError: String?,
+        receipt: ActionReceipt?,
+        receiptFocusedSpace: TilingSpaceKey?,
+        receiptGeneration: Int?,
+        currentGeneration: Int,
+        focusedSpace: TilingSpaceKey
+    ) -> String? {
+        guard let receipt,
+              receipt.canvas != focusedSpace,
+              receiptFocusedSpace == focusedSpace,
+              receiptGeneration == currentGeneration
+        else { return canvasNotice }
+        return receipt.notice ?? canvasError ?? canvasNotice
     }
 
     /// Pure multi-monitor grouping for the manage list, extracted from
@@ -806,8 +852,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func evictFocusedWindow(_ sender: Any?) {
-        controller.handleEvict()
-        announce("Focused window evicted.", fallback: "Focused window evicted.")
+        present(controller.handleEvict())
     }
 
     @objc private func untileAll(_ sender: NSMenuItem) {
@@ -816,8 +861,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // whole operation one ⌃⌥⇧⌘Z from reversal. The sticky notice +
         // undo row ARE the safety: a modal here would tax the daily
         // user for protection the design already provides structurally.
-        controller.untileAll()
-        announce("All tiled windows restored.", fallback: "All tiled windows restored.")
+        present(controller.untileAll())
     }
 
     @objc private func resetDividers(_ sender: NSMenuItem) {
@@ -849,6 +893,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: button)
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// Presents one action's user-visible truth: the controller has already
+    /// decided whether the action performed, which canvas owns it, what the
+    /// menu carries, and the one sentence to speak. The delegate never
+    /// reconstructs success from the keypress, so an empty undo or a refused
+    /// restore cannot be announced as a win and then contradicted. A no-op
+    /// or refusal gets the subtle haptic; success speaks without it.
+    private func present(_ receipt: ActionReceipt) {
+        lastActionReceipt = receipt
+        lastReceiptFocusedSpace = controller.focusedTilingSpace
+        lastReceiptGeneration = actionGeneration
+        if !receipt.performed {
+            NSHapticFeedbackManager.defaultPerformer.perform(
+                .generic, performanceTime: .default)
+        }
+        if let announcement = receipt.announcement {
+            announce(announcement, fallback: receipt.notice)
+        }
+        refreshMenu()
     }
 
     /// VoiceOver announcement for actions whose feedback is otherwise
@@ -886,9 +950,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .noFocusedWindow:
             text = MenuText.noFocusedWindowAnnouncement()
             noticeFallback = "No focused window."
-        case .nothingToUndo:
-            text = MenuText.nothingToUndoAnnouncement()
-            noticeFallback = "Nothing to undo."
         case .alreadyTiled(let slot):
             text = MenuText.alreadyTiledAnnouncement(slot: slot)
             noticeFallback = "Already in \(SlotPresentation.title(of: slot))."
@@ -904,9 +965,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             announce(text, fallback: noticeFallback)
             refreshMenu()
             return
-        case .nothingToEvict:
-            text = MenuText.nothingToEvictAnnouncement()
-            noticeFallback = "Window isn't tiled."
         case .deferred:
             text = MenuText.deferredOffSpaceAnnouncement()
             noticeFallback = "Space isn't visible yet."
@@ -922,20 +980,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The global ⌃⌥⇧⌘Z combo and the menu's ⌘Z row share one path: the
     /// switch is triggered by global hotkeys while other apps are
     /// frontmost, so the undo works from anywhere, not only with the
-    /// status menu open.
+    /// status menu open. Both present the controller's receipt: a refused
+    /// chapter speaks its error, never a success sentence.
     private func performUndoSwitch() {
-        // A refused frame means the chapter did not fully restore: the
-        // canvas states the failure, so do not speak success over it.
-        if controller.undoLastDisplacement() {
-            announce("Evicted windows restored.", fallback: "Evicted windows restored.")
-        }
+        present(controller.undoAction())
     }
 
     @objc private func untileTiledWindow(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? WindowID else { return }
-        let name = controller.tiledWindowsInfo.first { $0.id == id }?.appName
-        controller.untile(window: id)
-        announce("\(name ?? "Window") untiled.", fallback: "Window untiled.")
+        present(controller.untile(window: id))
     }
 
     @objc private func focusTiledWindow(_ sender: NSMenuItem) {

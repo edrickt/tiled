@@ -149,11 +149,6 @@ final class TilingController {
     enum Feedback {
         case noFocusedWindow
         case alreadyTiled(slot: Slot)
-        /// The undo key was pressed with an empty stack: no destruction
-        /// to reverse. Say so on every channel: a silent no-op from the
-        /// surface whose promise is "never silently disagree" would be
-        /// the one lie the app tells.
-        case nothingToUndo
         /// A tiling write was refused. The delegate announces it; there
         /// is no on-screen panel; tiling feedback stays out of the way.
         case refused(windowName: String?)
@@ -164,10 +159,6 @@ final class TilingController {
         /// cannot see, so the intent stands and reconciles on return.
         /// Never an app refusal: the app did nothing wrong.
         case deferred
-        /// The ⌥⇧⌫ evict key was pressed on an untiled window: nothing
-        /// holds a slot, so there is nothing to release. Answers instead
-        /// of staying silent: the hotkey path never no-ops quietly.
-        case nothingToEvict
     }
 
     var onFeedback: ((Feedback) -> Void)?
@@ -795,31 +786,44 @@ final class TilingController {
 
     // MARK: Bulk operations
 
-    func untileAll() {
+    /// Dissolves the focused canvas's arrangement. Returns the one receipt
+    /// the menu and hotkey paths present: performed only when windows were
+    /// actually restored without a refusal.
+    @discardableResult
+    func untileAll() -> ActionReceipt {
         pruneDeadWindows()
         // Untile-all dissolves only the focused canvas: other displays
         // and Spaces keep their arrangements, so the legacy zero-arg
         // form resolves the focused canvas.
-        untileAll(in: focusedSpaceKey())
+        return untileAll(in: focusedSpaceKey())
     }
 
     /// Dissolves one display's currently shown canvas (the screen-based
     /// form menus and tests use). Other canvases, including other Spaces
     /// on the same display, are untouched.
-    func untileAll(on screen: ScreenID?) {
+    @discardableResult
+    func untileAll(on screen: ScreenID?) -> ActionReceipt {
         untileAll(in: tilingKey(for: screen))
     }
 
     /// Dissolves one tiling canvas, leaving every other canvas alone.
     /// The undo chapter tags each window with its canvas so the recovery
     /// retiles per display and per Space.
-    private func untileAll(in space: TilingSpaceKey) {
+    @discardableResult
+    private func untileAll(in space: TilingSpaceKey) -> ActionReceipt {
         pruneDeadWindows()
+        let hadWindows = spaces[space]?.state.tiledWindows.isEmpty == false
         let outcome = mutateSpace(space) {
             $0.untileAll(context: placementContext(for: space))
         }
         apply(outcome, on: space)
         onChange?()
+        let error = spaces[space]?.error
+        let performed = hadWindows && error == nil
+        return receipt(
+            canvas: space, performed: performed,
+            failure: error, success: MenuText.untileAllAnnouncement(),
+            noOp: MenuText.nothingToUntileAnnouncement())
     }
 
     /// Snaps all splitters back to defaults and re-tiles everyone. The
@@ -890,9 +894,12 @@ final class TilingController {
     /// vacated tile, swapping back). Consumes the entry it restores, so
     /// repeated ⌃⌥⇧⌘Z walks back through history up to `undoDepth`: the
     /// stack, not amnesia, bounds the past.
+    ///
+    /// This Bool seam exists for tests and callers that only need the
+    /// verdict; the menu and hotkey paths present `undoAction()`'s receipt.
     @discardableResult
     func undoLastDisplacement() -> Bool {
-        undoLastDisplacement(in: focusedSpaceKey())
+        undoReceipt(in: focusedSpaceKey()).performed
     }
 
     /// Undoes one display's currently shown canvas's freshest destructive
@@ -900,18 +907,31 @@ final class TilingController {
     /// including other Spaces on the same display, keep their history.
     @discardableResult
     func undoLastDisplacement(on screen: ScreenID?) -> Bool {
-        undoLastDisplacement(in: tilingKey(for: screen))
+        undoReceipt(in: tilingKey(for: screen)).performed
+    }
+
+    /// The menu and hotkey Undo path: one receipt carrying whether the
+    /// chapter restored, its canvas and notice, and exactly one sentence.
+    @discardableResult
+    func undoAction() -> ActionReceipt {
+        undoReceipt(in: focusedSpaceKey())
     }
 
     @discardableResult
-    private func undoLastDisplacement(in space: TilingSpaceKey) -> Bool {
+    private func undoReceipt(in space: TilingSpaceKey) -> ActionReceipt {
         guard let chapter = mutateSpace(space, { $0.undoStack.popLast() }) else {
-            // Expired or empty: the promise needs an answer, not silence
-            // (see the undo-expiry feedback below).
-            onFeedback?(.nothingToUndo)
-            return false
+            // Expired or empty: the one announcement is the answer.
+            return receipt(
+                canvas: space, performed: false,
+                failure: nil, success: MenuText.undoAnnouncement(),
+                noOp: MenuText.nothingToUndoAnnouncement())
         }
-        return restoreChapter(chapter, on: space)
+        let performed = restoreChapter(chapter, on: space)
+        let error = spaces[space]?.error
+        return receipt(
+            canvas: space, performed: performed,
+            failure: error, success: MenuText.undoAnnouncement(),
+            noOp: MenuText.nothingToUndoAnnouncement())
     }
 
     /// Chapter restoration, owned here because the controller is the only
@@ -1282,16 +1302,20 @@ final class TilingController {
 
     /// Evicts the focused window (⌥⇧⌫): restores its pre-tile frame and
     /// releases the slot. Untiled focused windows and failed focuses are
-    /// safe no-ops with the standard feedback; like `untile`, eviction
+    /// safe no-ops whose receipt answers once, instead of emitting
+    /// feedback the delegate could duplicate; like `untile`, eviction
     /// keeps no undo chapter (the restoration IS the frame) — unless the
     /// reflow moved a survivor into the freed cells, which is its own
     /// chapter.
-    func handleEvict() {
+    @discardableResult
+    func handleEvict() -> ActionReceipt {
         pruneDeadWindows()
         guard let handle = gateway.focusedWindow() else {
             dbg("no focused window for evict")
-            onFeedback?(.noFocusedWindow)
-            return
+            return receipt(
+                canvas: focusedSpaceKey(), performed: false,
+                failure: nil, success: MenuText.evictedAnnouncement(),
+                noOp: MenuText.noFocusedWindowAnnouncement())
         }
         let id = windowID(for: handle)
         let key = spaceOf(window: id) ?? focusedSpaceKey()
@@ -1305,18 +1329,61 @@ final class TilingController {
         }
         apply(outcome, on: key)
         if case .nothingToEvict = outcome.result {
-            onFeedback?(.nothingToEvict)
-            return
+            return receipt(
+                canvas: key, performed: false,
+                failure: nil, success: MenuText.evictedAnnouncement(),
+                noOp: MenuText.nothingToEvictAnnouncement())
         }
         onChange?()
+        let error = spaces[key]?.error
+        return receipt(
+            canvas: key, performed: error == nil,
+            failure: error, success: MenuText.evictedAnnouncement(),
+            noOp: MenuText.nothingToEvictAnnouncement())
     }
 
     /// Untiles one window, restoring its pre-tile frame. The freed cells
     /// reflow to the mergeable survivor; undo's preparatory untiles pass
     /// `reflowing: false` (they make room for a restoration that follows
     /// immediately, and must not churn the layout nor push a chapter).
-    func untile(window id: WindowID) {
-        untile(window: id, reflowing: true)
+    ///
+    /// Returns the menu's receipt: the window's own canvas (a background
+    /// display or Space, not necessarily the focused one), whether a slot
+    /// was actually released without a refusal, and one sentence. A
+    /// refusal on another display names that display, so the spoken answer
+    /// identifies the canvas the menu row acted on.
+    @discardableResult
+    func untile(window id: WindowID) -> ActionReceipt {
+        // Prune before resolving the window and focus: a confirmed dead
+        // handle is already untiled by the prune, so the receipt must not
+        // call that release a fresh success.
+        pruneDeadWindows()
+        // Resolve focus before the action: an untile on another display or
+        // Space must still know whether the canvas it touched was the
+        // focused one when its refusal is spoken.
+        let focusedBefore = focusedSpaceKey()
+        let key = spaceOf(window: id) ?? focusedBefore
+        let name = appName(for: id)
+        guard spaces[key]?.state.slot(of: id) != nil else {
+            // A true no-op leaves the canvas's notice and error alone: the
+            // menu must not lose a live receipt just because a stale row
+            // was clicked after its window left.
+            return receipt(
+                canvas: key, performed: false,
+                failure: nil, success: MenuText.untileWindowAnnouncement(windowName: name),
+                noOp: MenuText.nothingToUntileWindowAnnouncement())
+        }
+        let refused = untile(window: id, reflowing: true)
+        let error = spaces[key]?.error
+        let display = key.screen == focusedBefore.screen ? nil : displayName(for: key)
+        let failure = error.map {
+            MenuText.untileWindowRefusalAnnouncement(displayName: display, error: $0)
+        }
+        return receipt(
+            canvas: key, performed: !refused,
+            failure: failure, success: MenuText.untileWindowAnnouncement(windowName: name),
+            noOp: MenuText.nothingToUntileWindowAnnouncement(),
+            noticeOverride: failure)
     }
 
     /// Returns whether the pre-tile restore was refused. Undo's
@@ -1442,6 +1509,25 @@ final class TilingController {
         let result = body(&value)
         spaces[space] = value
         return result
+    }
+
+    /// One action receipt, built after the action so the canvas's notice or
+    /// error and the restore verdict are final. The controller chooses the
+    /// one announcement: a failure names the error, a performed action the
+    /// success sentence, a no-op the no-op sentence. The notice prefers the
+    /// error over a stale success notice, so the menu and the spoken answer
+    /// cannot tell different stories. `noticeOverride` lets a background
+    /// refusal put its display-qualified sentence in the menu too.
+    private func receipt(
+        canvas space: TilingSpaceKey,
+        performed: Bool, failure: String?, success: String, noOp: String,
+        noticeOverride: String? = nil
+    ) -> ActionReceipt {
+        let canvas = spaces[space]
+        return ActionReceipt(
+            canvas: space, performed: performed,
+            notice: noticeOverride ?? canvas?.error ?? canvas?.notice,
+            announcement: failure ?? (performed ? success : noOp))
     }
 
     private func spaceState(for space: TilingSpaceKey) -> TilingState {

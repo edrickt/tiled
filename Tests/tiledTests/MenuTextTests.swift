@@ -150,4 +150,41 @@ final class MenuTextTests: XCTestCase {
             MenuText.deferredOffSpaceAnnouncement(),
             "That Space isn't visible yet: the change will apply when you return to it.")
     }
+
+    // MARK: Action receipt announcements
+
+    func testEvictAnnouncement() {
+        XCTAssertEqual(MenuText.evictedAnnouncement(), "Focused window evicted.")
+    }
+
+    func testUntileAllAnnouncements() {
+        XCTAssertEqual(MenuText.untileAllAnnouncement(), "All tiled windows restored.")
+        XCTAssertEqual(
+            MenuText.nothingToUntileAnnouncement(), "No tiled windows on this canvas.")
+    }
+
+    func testUntileWindowAnnouncements() {
+        XCTAssertEqual(
+            MenuText.untileWindowAnnouncement(windowName: "Safari"), "Safari untiled.")
+        XCTAssertEqual(MenuText.untileWindowAnnouncement(windowName: nil), "Window untiled.")
+        XCTAssertEqual(
+            MenuText.nothingToUntileWindowAnnouncement(),
+            "That window isn't tiled: nothing to untile.")
+    }
+
+    func testUndoAnnouncement() {
+        XCTAssertEqual(MenuText.undoAnnouncement(), "Evicted windows restored.")
+    }
+
+    func testUntileWindowRefusalAnnouncementNamesTheBackgroundDisplay() {
+        let error = "Couldn't restore “Safari”: it may still be sitting in its old tile."
+        XCTAssertEqual(
+            MenuText.untileWindowRefusalAnnouncement(
+                displayName: "Display 2", error: error),
+            "Display 2: " + error)
+        XCTAssertEqual(
+            MenuText.untileWindowRefusalAnnouncement(displayName: nil, error: error),
+            error,
+            "a single display adds no name: it would distinguish nothing")
+    }
 }

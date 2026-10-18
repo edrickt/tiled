@@ -129,6 +129,50 @@ enum MenuText {
         "That Space isn't visible yet: the change will apply when you return to it."
     }
 
+    // MARK: Action receipt announcements (one sentence per action)
+
+    /// Evict succeeded: the focused window released its slot.
+    static func evictedAnnouncement() -> String {
+        "Focused window evicted."
+    }
+
+    /// Untile All succeeded on the focused canvas.
+    static func untileAllAnnouncement() -> String {
+        "All tiled windows restored."
+    }
+
+    /// Untile All found no tiled window on the canvas it acts on.
+    static func nothingToUntileAnnouncement() -> String {
+        "No tiled windows on this canvas."
+    }
+
+    /// One window's untile row succeeded; `nil` names the anonymous
+    /// fallback rather than an empty sentence.
+    static func untileWindowAnnouncement(windowName: String?) -> String {
+        "\(windowName ?? "Window") untiled."
+    }
+
+    /// One window's untile row found no slot to release.
+    static func nothingToUntileWindowAnnouncement() -> String {
+        "That window isn't tiled: nothing to untile."
+    }
+
+    /// Undo restored the chapter.
+    static func undoAnnouncement() -> String {
+        "Evicted windows restored."
+    }
+
+    /// A background display's canvas refused an untile. The display name
+    /// tells the user which display the menu row acted on; the focused
+    /// display (or a single display) adds no name because it would
+    /// distinguish nothing.
+    static func untileWindowRefusalAnnouncement(
+        displayName: String?, error: String
+    ) -> String {
+        guard let displayName else { return error }
+        return "\(displayName): \(error)"
+    }
+
     // MARK: Restore failures
 
     /// A window's pre-tile frame could not be restored. Names the window

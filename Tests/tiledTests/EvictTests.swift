@@ -130,19 +130,18 @@ final class EvictTests: XCTestCase {
 
     func testEvictWithNoFocusedWindowAnswers() {
         gateway.focused = nil
-        controller.handleEvict()
-        guard case .noFocusedWindow = feedbacks[0] else {
-            return XCTFail("expected .noFocusedWindow, got \(feedbacks)")
-        }
+        let receipt = controller.handleEvict()
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "No focused window: click a window first.")
+        XCTAssertTrue(feedbacks.isEmpty, "the receipt replaces the old .noFocusedWindow feedback")
     }
 
     func testEvictUntiledWindowAnswers() {
         addFocusedWindow()
-        controller.handleEvict()
-        XCTAssertEqual(feedbacks.count, 1)
-        guard case .nothingToEvict = feedbacks[0] else {
-            return XCTFail("expected .nothingToEvict, got \(feedbacks[0])")
-        }
+        let receipt = controller.handleEvict()
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "That window isn't tiled: nothing to evict.")
+        XCTAssertTrue(feedbacks.isEmpty, "the receipt replaces the old .nothingToEvict feedback")
         XCTAssertTrue(canvas.state.occupants.isEmpty)
     }
 

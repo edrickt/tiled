@@ -271,17 +271,14 @@ final class SpaceIndependenceTests: XCTestCase {
         controller.handle(slot: .topLeft)
         XCTAssertFalse(controller.canvas(for: keyA).undoStack.isEmpty)
 
-        var feedbacks: [TilingController.Feedback] = []
-        controller.onFeedback = { feedbacks.append($0) }
         switchTo(Self.spaceB)
 
         XCTAssertTrue(
             controller.canvas(for: keyB).undoStack.isEmpty,
             "a fresh Space has no history")
-        controller.undoLastDisplacement()
-        guard case .nothingToUndo = feedbacks.first else {
-            return XCTFail("expected .nothingToUndo in the fresh Space, got \(feedbacks)")
-        }
+        let receipt = controller.undoAction()
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "Nothing to undo: a later change replaced it.")
 
         switchTo(Self.spaceA)
         XCTAssertFalse(

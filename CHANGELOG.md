@@ -8,6 +8,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Evict, Untile All, a single window's untile, and Undo announce success
+  only when the controller performed the action. An empty undo stack, an
+  untiled window, or a refused restore now answers once instead of
+  speaking success and then contradicting it; a refusal on a background
+  canvas names that display.
 - The manage menu follows the focused canvas: with no tiled windows there
   it omits Untile All (never "Untile 0 Windows") and the Reset Splitters
   row, while a parked Restore Previous Splitters receipt stays reachable,

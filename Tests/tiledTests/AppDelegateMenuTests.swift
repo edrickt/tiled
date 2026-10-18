@@ -255,6 +255,66 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(pass.icon, StatusIcon.snapshot(layout: .quarters, occupants: [:]))
     }
 
+    func testMenuNoticeCarriesABackgroundReceipt() {
+        let focused = TilingSpaceKey(
+            screen: ScreenID(rawValue: 1), space: SpaceID(rawValue: 7))
+        let background = TilingSpaceKey(
+            screen: ScreenID(rawValue: 2), space: SpaceID(rawValue: 8))
+        let error = "Display 2: Couldn't restore “Safari”: it may still be sitting in its old tile."
+        let receipt = ActionReceipt(
+            canvas: background, performed: false, notice: error, announcement: error)
+
+        // A background action's receipt is the latest outcome: the menu
+        // must carry it even though every other row reads the focused
+        // canvas.
+        XCTAssertEqual(
+            AppDelegate.menuNotice(
+                canvasNotice: "Focused notice", canvasError: nil,
+                receipt: receipt, receiptFocusedSpace: focused,
+                receiptGeneration: 4, currentGeneration: 4, focusedSpace: focused),
+            error)
+        // A later action on the focused canvas supersedes the receipt
+        // instead of hiding the newer notice, even when that notice is nil
+        // or repeats the old text.
+        XCTAssertEqual(
+            AppDelegate.menuNotice(
+                canvasNotice: "Fresh outcome", canvasError: nil,
+                receipt: receipt, receiptFocusedSpace: focused,
+                receiptGeneration: 4, currentGeneration: 5, focusedSpace: focused),
+            "Fresh outcome")
+        XCTAssertEqual(
+            AppDelegate.menuNotice(
+                canvasNotice: "Focused notice", canvasError: nil,
+                receipt: receipt, receiptFocusedSpace: focused,
+                receiptGeneration: 4, currentGeneration: 5, focusedSpace: focused),
+            "Focused notice")
+        // Moving focus must not carry a background receipt to a third
+        // canvas.
+        XCTAssertEqual(
+            AppDelegate.menuNotice(
+                canvasNotice: "Third notice", canvasError: nil,
+                receipt: receipt, receiptFocusedSpace: focused,
+                receiptGeneration: 4, currentGeneration: 4, focusedSpace: background),
+            "Third notice")
+        // A receipt on the menu's own canvas is already in the canvas
+        // notice; do not duplicate or override it.
+        let sameCanvas = ActionReceipt(
+            canvas: focused, performed: false,
+            notice: "Same-canvas error", announcement: "Same-canvas error")
+        XCTAssertEqual(
+            AppDelegate.menuNotice(
+                canvasNotice: "Focused notice", canvasError: nil,
+                receipt: sameCanvas, receiptFocusedSpace: focused,
+                receiptGeneration: 4, currentGeneration: 4, focusedSpace: focused),
+            "Focused notice")
+        XCTAssertEqual(
+            AppDelegate.menuNotice(
+                canvasNotice: "Focused notice", canvasError: nil,
+                receipt: nil, receiptFocusedSpace: nil,
+                receiptGeneration: nil, currentGeneration: 4, focusedSpace: focused),
+            "Focused notice")
+    }
+
     /// A bare, valid menu snapshot for pass-plumbing tests that only care
     /// which canvas key built the view.
     private func emptySnapshot() -> MenuModel.Snapshot {
