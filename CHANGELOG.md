@@ -8,6 +8,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The re-house notice names the slot a window finally holds after reflow,
+  not the intermediate slot it passed through. Undo now says “last
+  displacement” and “Restore N Displaced Windows” instead of describing a
+  switch or evictions, modified arrow keys and forward delete render as keycaps
+  in the menu and VoiceOver instead of hex, and the Disable-all tooltip says
+  the current combos are parked for Enable all to restore.
 - The menu's Expand row says “Return to Previous Frame” for an expanded
   untiled window instead of “Expand to Fill Screen”, and still names the slot
   an expanded tiled window returns to. Expanding a window also supersedes an

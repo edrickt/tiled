@@ -146,7 +146,7 @@ final class SwapTests: XCTestCase {
         gateway.focused = a
         controller.handle(slot: .sixthMiddle)
         XCTAssertEqual(
-            canvas.evictedCount, 3,
+            canvas.displacedCount, 3,
             "the stepped-aside window, the requester, and the reflow are recoverable")
 
         controller.undoLastDisplacement()

@@ -61,7 +61,7 @@ final class ActionReceiptTests: XCTestCase {
         controller.handle(slot: .topRight)
         addFocusedWindow(appName: "Mail")
         controller.handle(slot: .topLeft)
-        XCTAssertEqual(canvas.evictedCount, 1, "the chapter holds one evictee")
+        XCTAssertEqual(canvas.displacedCount, 1, "the chapter holds one evictee")
     }
 
     // MARK: Evict
@@ -289,7 +289,7 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertTrue(receipt.performed)
         XCTAssertEqual(receipt.notice, "Undid displacement \u{00B7} 1 window restored.")
         XCTAssertEqual(receipt.notice, canvas.notice)
-        XCTAssertEqual(receipt.announcement, "Evicted windows restored.")
+        XCTAssertEqual(receipt.announcement, "Displaced windows restored.")
         XCTAssertTrue(feedbacks.isEmpty, "the receipt path emits no duplicate feedback")
     }
 
@@ -303,7 +303,7 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertFalse(receipt.performed)
         XCTAssertEqual(
             receipt.announcement, "Nothing to undo: a later change replaced it.")
-        XCTAssertNotEqual(receipt.announcement, "Evicted windows restored.")
+        XCTAssertNotEqual(receipt.announcement, "Displaced windows restored.")
         XCTAssertTrue(feedbacks.isEmpty, "the receipt path answers once, without duplicate feedback")
     }
 
@@ -329,7 +329,7 @@ final class ActionReceiptTests: XCTestCase {
         let receipt = controller.undoAction()
 
         XCTAssertFalse(receipt.performed)
-        XCTAssertEqual(receipt.announcement, "Couldn't restore the evicted windows.")
+        XCTAssertEqual(receipt.announcement, "Couldn't restore the displaced windows.")
         XCTAssertEqual(receipt.notice, receipt.announcement)
         XCTAssertTrue(feedbacks.isEmpty, "the receipt path emits no feedback")
     }

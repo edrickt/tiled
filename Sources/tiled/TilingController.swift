@@ -1062,7 +1062,7 @@ final class TilingController {
             // Nothing restored and nothing refused (a chapter whose
             // windows all died): report the standard failure. The entry
             // is consumed either way.
-            mutateSpace(space) { $0.error = MenuText.restoreEvictedWindowsFailure }
+            mutateSpace(space) { $0.error = MenuText.restoreDisplacedWindowsFailure }
         }
         onChange?()
         // A refused frame means the chapter did not fully restore: report

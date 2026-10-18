@@ -8,8 +8,12 @@ final class MenuTextTests: XCTestCase {
     // MARK: Titles
 
     func testUndoDisplacementTitleSingularAndPlural() {
-        XCTAssertEqual(MenuText.undoDisplacementTitle(evictedCount: 1), "Restore 1 Evicted Window")
-        XCTAssertEqual(MenuText.undoDisplacementTitle(evictedCount: 2), "Restore 2 Evicted Windows")
+        XCTAssertEqual(
+            MenuText.undoDisplacementTitle(displacedCount: 1),
+            "Restore 1 Displaced Window")
+        XCTAssertEqual(
+            MenuText.undoDisplacementTitle(displacedCount: 2),
+            "Restore 2 Displaced Windows")
     }
 
     func testUntileAllTitleSingularAndPlural() {
@@ -67,9 +71,9 @@ final class MenuTextTests: XCTestCase {
                 + "quit and reopen Tiled to get back to Settings while hidden.")
         XCTAssertEqual(
             MenuText.hotkeyFailureWarning(
-                label: "⌃⌥⇧⌘Z", title: "Undo Last Switch",
+                label: "⌃⌥⇧⌘Z", title: "Undo Last Displacement",
                 recovery: "undo the last displacement from the Tiled menu instead."),
-            "The Undo Last Switch shortcut (⌃⌥⇧⌘Z) could not be registered; "
+            "The Undo Last Displacement shortcut (⌃⌥⇧⌘Z) could not be registered; "
                 + "undo the last displacement from the Tiled menu instead.")
         XCTAssertEqual(
             MenuText.hotkeyFailureWarning(
@@ -185,7 +189,7 @@ final class MenuTextTests: XCTestCase {
     }
 
     func testUndoAnnouncement() {
-        XCTAssertEqual(MenuText.undoAnnouncement(), "Evicted windows restored.")
+        XCTAssertEqual(MenuText.undoAnnouncement(), "Displaced windows restored.")
     }
 
     func testUntileWindowRefusalAnnouncementNamesTheBackgroundDisplay() {

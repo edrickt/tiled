@@ -610,6 +610,11 @@ extension ReflowTests {
             "the re-housed window absorbs the requester's vacated right third")
         XCTAssertEqual(gateway.frame(of: a), expectedRect(.sixthsRightTwoThirds, for: a))
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthLeft, for: b))
+        // The notice names where the victim finally landed after reflow,
+        // not the intermediate re-house slot it passed through.
+        XCTAssertEqual(
+            canvas.notice,
+            "TestApp moved to Right Two-Thirds to make room. Press ⌃⌥⇧⌘Z to undo.")
     }
 
     func testReHouseUndoRestoresTheVictimsOwnSlot() {

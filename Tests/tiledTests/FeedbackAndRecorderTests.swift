@@ -24,6 +24,15 @@ final class RecorderButtonAccessibilityTests: XCTestCase {
         XCTAssertEqual(button.accessibilityValue() as? String, "disabled")
     }
 
+    func testValueCarriesAModifiedArrowKeycap() {
+        // VoiceOver reads the same rendered label the menu shows: a
+        // modified arrow must not become "⌥0x7C".
+        let button = RecorderButton(action: .slot(.topLeft))
+        button.showBinding(
+            HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_RightArrow)))
+        XCTAssertEqual(button.accessibilityValue() as? String, "⌥→")
+    }
+
     func testBeginRecordingMarksTheValueAsRecording() {
         let button = RecorderButton(action: .slot(.leftHalf))
         button.beginRecording { _ in }
@@ -348,6 +357,6 @@ final class ShortcutsBulkEnableTests: XCTestCase {
             "no disabled slot remains, so the installed button must offer Disable, got \(bulk.title)")
         XCTAssertEqual(
             bulk.toolTip,
-            "Disable every Quarters shortcut (keeps defaults for re-enable)")
+            "Disable every Quarters shortcut (parks the current combos; Enable all restores them)")
     }
 }

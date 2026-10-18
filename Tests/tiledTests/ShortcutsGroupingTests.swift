@@ -47,7 +47,7 @@ final class ShortcutsGroupingTests: XCTestCase {
 
         XCTAssertEqual(sequence, [
             "Expand to Fill Screen", "Evict Focused Window", "Reset Splitters",
-            "Open Settings", "Undo Last Switch",
+            "Open Settings", "Undo Last Displacement",
             "Quads", "topLeft", "topRight", "bottomLeft", "bottomRight",
             "Halves", "leftHalf", "rightHalf",
             "Corners", "sixthTopLeft", "sixthTopMiddle", "sixthTopRight",
@@ -96,7 +96,7 @@ final class ShortcutsGroupingTests: XCTestCase {
 
         let labels = descendants(of: view).compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertFalse(labels.contains("Expand to Fill Screen"))
-        XCTAssertFalse(labels.contains("Undo Last Switch"))
+        XCTAssertFalse(labels.contains("Undo Last Displacement"))
         XCTAssertTrue(labels.contains("Quads"))
         // Quarters is expanded and starts right after the collapsed
         // section, so its first recorder leads.

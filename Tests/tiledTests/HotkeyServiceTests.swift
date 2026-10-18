@@ -33,7 +33,7 @@ final class HotkeyServiceTests: XCTestCase {
         XCTAssertEqual(HotkeyAction.evict.title, "Evict Focused Window")
         XCTAssertEqual(HotkeyAction.resetSplitters.title, "Reset Splitters")
         XCTAssertEqual(HotkeyAction.settings.title, "Open Settings")
-        XCTAssertEqual(HotkeyAction.undo.title, "Undo Last Switch")
+        XCTAssertEqual(HotkeyAction.undo.title, "Undo Last Displacement")
         XCTAssertEqual(HotkeyAction.expand.storageKey, "action.expand")
         for slot in Slot.allCases {
             XCTAssertEqual(

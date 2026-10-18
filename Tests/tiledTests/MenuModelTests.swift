@@ -21,7 +21,7 @@ final class MenuModelTests: XCTestCase {
         expandState: ExpandToggleState = .expands,
         tiledWindows: [MenuModel.Snapshot.TiledWindow] = [],
         canUndoDisplacement: Bool = false,
-        evictedCount: Int = 0,
+        displacedCount: Int = 0,
         untileCount: Int = 0
     ) -> MenuModel.Snapshot {
         MenuModel.Snapshot(
@@ -37,7 +37,7 @@ final class MenuModelTests: XCTestCase {
             expandState: expandState,
             tiledWindows: tiledWindows,
             canUndoDisplacement: canUndoDisplacement,
-            evictedCount: evictedCount,
+            displacedCount: displacedCount,
             untileCount: untileCount)
     }
 
@@ -285,9 +285,10 @@ final class MenuModelTests: XCTestCase {
                 .init(id: 1, slot: .topLeft, appName: nil),
                 .init(id: 2, slot: .topRight, appName: nil),
             ],
-            canUndoDisplacement: true, evictedCount: 2))
+            canUndoDisplacement: true, displacedCount: 2))
         let undo = withUndo.first { $0.action == .undoSwitch }
-        XCTAssertEqual(undo?.title, "Restore 2 Evicted Windows · \u{2303}\u{2325}\u{21E7}\u{2318}Z")
+        XCTAssertEqual(
+            undo?.title, "Restore 2 Displaced Windows · \u{2303}\u{2325}\u{21E7}\u{2318}Z")
         XCTAssertEqual(undo?.keyEquivalent, "", "the true combo lives in the title, not a ⌘Z glyph")
 
         let withoutUndo = items(snapshot(
@@ -330,11 +331,11 @@ final class MenuModelTests: XCTestCase {
         let model = items(snapshot(
             tiledWindows: [],
             canUndoDisplacement: true,
-            evictedCount: 2,
+            displacedCount: 2,
             untileCount: 0))
         let undo = model.first { $0.action == .undoSwitch }
         XCTAssertEqual(
-            undo?.title, "Restore 2 Evicted Windows · \u{2303}\u{2325}\u{21E7}\u{2318}Z")
+            undo?.title, "Restore 2 Displaced Windows · \u{2303}\u{2325}\u{21E7}\u{2318}Z")
         XCTAssertFalse(model.contains { $0.action == .untileAll })
         XCTAssertFalse(model.contains { $0.action == .resetDividers })
     }
@@ -507,7 +508,7 @@ final class MenuModelTests: XCTestCase {
         // its own separator, so an empty manage block must not add a second.
         let shapes = [
             snapshot(),
-            snapshot(canUndoDisplacement: true, evictedCount: 1),
+            snapshot(canUndoDisplacement: true, displacedCount: 1),
             snapshot(hasSplitterBackup: true),
             snapshot(
                 tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)],
@@ -515,7 +516,7 @@ final class MenuModelTests: XCTestCase {
             snapshot(
                 tiledWindows: [.init(id: 1, slot: .topLeft, appName: nil)],
                 canUndoDisplacement: true,
-                evictedCount: 1,
+                displacedCount: 1,
                 untileCount: 1),
         ]
         for shape in shapes {

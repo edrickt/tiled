@@ -60,6 +60,27 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertEqual(HotkeyBinding(modifiers: 0, keyCode: UInt32(kVK_Delete)).label, "⌫")
     }
 
+    func testLabelForArrowKeysAndForwardDelete() {
+        // Modified arrows are bindable, so they must read as keycaps
+        // rather than Carbon's raw virtual keycode.
+        let cases: [(UInt32, String)] = [
+            (UInt32(kVK_LeftArrow), "←"),
+            (UInt32(kVK_RightArrow), "→"),
+            (UInt32(kVK_UpArrow), "↑"),
+            (UInt32(kVK_DownArrow), "↓"),
+            (UInt32(kVK_ForwardDelete), "⌦"),
+        ]
+        for (code, expected) in cases {
+            XCTAssertEqual(
+                HotkeyBinding(modifiers: 0, keyCode: code).label, expected,
+                "keyCode \(code)")
+        }
+        XCTAssertEqual(
+            HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_RightArrow))
+                .label, "⌥→",
+            "a modified arrow keeps its modifiers and keycap")
+    }
+
     func testLabelForRemainingPunctuation() {
         let cases: [(UInt32, String)] = [
             (UInt32(kVK_ANSI_Minus), "-"), (UInt32(kVK_ANSI_Equal), "="),

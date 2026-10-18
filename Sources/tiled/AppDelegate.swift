@@ -555,7 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             expandState: controller.focusedExpandState,
             tiledWindows: presentation.tiledWindows,
             canUndoDisplacement: !canvas.undoStack.isEmpty,
-            evictedCount: canvas.evictedCount,
+            displacedCount: canvas.displacedCount,
             // Read from the same canvas as every other unscoped field:
             // re-resolving focus here could title the row with one
             // canvas's count while the menu describes another.
@@ -726,11 +726,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    /// Undo title names what returns: the evicted windows.
+    /// Undo title names what returns: the displaced windows.
     private var undoDisplacementTitle: String {
         let canvas = controller.canvas(for: controller.focusedTilingSpace)
         return MenuText.undoDisplacementTitle(
-            evictedCount: canvas.evictedCount)
+            displacedCount: canvas.displacedCount)
     }
 
     /// Bulk-action title names the consequence: restoring every window.

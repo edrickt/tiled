@@ -135,7 +135,7 @@ tell you which app took it.
   into the tile it landed in. (With more than one window in the way, or
   from an untiled window, the request evicts as above, and focus stays
   put.) Undo swaps back.
-- Undo restores the evicted windows and returns the requester. If an
+- Undo restores the displaced windows and returns the requester. If an
   app refuses a restore, undo reports that window instead of claiming
   success; a window that cannot be moved back keeps the slot it visibly
   holds, and the notice counts only the windows that landed.
@@ -243,7 +243,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (753 tests)
+swift test             # hermetic unit suite (755 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -277,7 +277,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (753 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (755 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |

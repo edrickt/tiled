@@ -15,6 +15,9 @@ struct WindowRecord {
 /// per display and per Space, so a restored window lands on the canvas
 /// it left. Nil = legacy snapshots (pre-per-monitor), restored into the
 /// requester's canvas.
+/// One window in an undo chapter: it was evicted, moved by a re-house or
+/// swap, or grew by reflow. The chapter is a displacement, not necessarily
+/// an eviction.
 struct EvictedWindow {
     let handle: WindowHandle
     let slot: Slot
@@ -306,6 +309,7 @@ struct TilingSpace {
         _ decision: TilePlan, commit: Commit, requester id: WindowID,
         context: Context
     ) -> Outcome {
+        var commit = commit
         var outcome = Outcome()
         switch (commit.refusal, commit.deferred) {
         case (let refusal?, _):
@@ -348,6 +352,15 @@ struct TilingSpace {
                 ([id] + decision.windowsToRestore(requester: id))
                     .filter { $0 != commit.rehoused })
             reflowSnapshot = reflow(freed, excluding: skip, context: context)
+        }
+        // Reflow can grow the re-housed window into a larger slot (the
+        // left two-thirds blocker of a left-third request ends up as the
+        // right two-thirds), so narrate only after it runs, with the slot
+        // the window actually holds now.
+        if let rehoused = commit.rehoused, let finalSlot = state.slot(of: rehoused) {
+            commit.notice = Self.rehouseNotice(
+                name: appName(rehoused, context: context) ?? "That window",
+                slot: finalSlot)
         }
         // Restored windows sit BELOW the arrangement they left: an
         // evictee returns to its pre-tile frame and must never cover the
@@ -699,10 +712,6 @@ struct TilingSpace {
                 // freed slot and reconciles when the canvas is visible.
                 if write == .deferredOffSpace { commit.deferred = true }
                 commit.rehoused = wid
-                let name = appName(wid, context: context) ?? "That window"
-                commit.notice =
-                    "\(name) moved to \(SlotPresentation.title(of: home)) to make room. "
-                        + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
             } else {
                 _ = restore(window: wid, context: context)
                 context.log("rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
@@ -728,15 +737,15 @@ struct TilingSpace {
             // switch: a notice naming the displaced app plus the shared
             // one-step undo. The switch was never special; it was
             // just the first destruction anyone bothered to narrate.
-            // A re-house already narrated itself (the victim moved,
-            // nobody went back). The chapter is pushed even when the
+            // A re-house narrates itself in settle, after reflow can move
+            // the victim again. The chapter is pushed even when the
             // requester's own write was refused: the evictees really did
             // go home, and without it that destruction would be silent
             // and unrecoverable. The requester joins the chapter only
             // when it actually landed.
             commit.snapshot = snapshot
             commit.requester = clean ? id : nil
-            if commit.notice == nil {
+            if commit.notice == nil, commit.rehoused == nil {
                 commit.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
             }
         }
@@ -775,6 +784,14 @@ struct TilingSpace {
     }
 
     // MARK: Eviction narrative
+
+    /// The re-house notice: the victim stayed tiled, so the notice names
+    /// where it moved. Composed in `settle` after reflow, when the final
+    /// slot is known.
+    private static func rehouseNotice(name: String, slot: Slot) -> String {
+        "\(name) moved to \(SlotPresentation.title(of: slot)) to make room. "
+            + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+    }
 
     /// One snapshot entry per displaced window, captured before the
     /// restore deletes its record: the handle to find it again, the slot
@@ -1307,9 +1324,9 @@ struct TilingSpace {
             if snapshot.isEmpty {
                 // Every frame read failed (the AX-unreadable
                 // transient): nothing can be restored, so the
-                // placeholder chapter goes. A "Restore 0 Evicted
-                // Windows" row would offer an undo that can only
-                // report failure.
+                // placeholder chapter goes. A "Restore 0 Windows"
+                // row would offer an undo that can only report
+                // failure.
                 _ = undoStack.popLast()
                 // The sticky notice must not offer a key that no
                 // longer has a chapter behind it.
@@ -1483,9 +1500,10 @@ struct TilingSpace {
     /// ("Reset Splitters" vs "Restore Previous Splitters").
     var hasSplitterBackup: Bool { splitterBackup != nil }
 
-    /// Count for the undo menu title: the freshest chapter's windows, or
-    /// 0 when no chapter is parked.
-    var evictedCount: Int { undoStack.last?.snapshot.count ?? 0 }
+    /// Count for the undo menu title: the freshest chapter's displaced
+    /// windows, or 0 when no chapter is parked. Named for the undo model,
+    /// not eviction: a swap chapter displaces without untiling anyone.
+    var displacedCount: Int { undoStack.last?.snapshot.count ?? 0 }
 
     // MARK: Reassert
 

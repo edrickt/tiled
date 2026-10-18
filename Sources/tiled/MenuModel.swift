@@ -87,7 +87,10 @@ enum MenuModel {
         var expandState: ExpandToggleState
         var tiledWindows: [TiledWindow]
         var canUndoDisplacement: Bool
-        var evictedCount: Int
+        /// The freshest chapter's displaced windows: evictees, a moved
+        /// requester, and any reflow survivors share one chapter. Named
+        /// for displacement because a swap chapter evicts nobody.
+        var displacedCount: Int
         /// Windows on the focused canvas: the scope Untile All acts on.
         /// Distinct from `tiledWindows`, which spans every visible canvas
         /// for the manage list, because the row's count must match the
@@ -281,7 +284,8 @@ enum MenuModel {
                 // would teach a combo that only works with this menu open
                 // (and undoes in the wrong app everywhere else).
                 items.append(Item(
-                    title: MenuText.undoDisplacementTitle(evictedCount: snapshot.evictedCount)
+                    title: MenuText.undoDisplacementTitle(
+                        displacedCount: snapshot.displacedCount)
                         + (binding(.undo).label.map { " · \($0)" } ?? ""),
                     action: .undoSwitch))
             }

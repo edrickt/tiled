@@ -117,7 +117,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
         XCTAssertFalse(canvas.undoStack.isEmpty)
-        XCTAssertEqual(canvas.evictedCount, 1)
+        XCTAssertEqual(canvas.displacedCount, 1)
         XCTAssertNotNil(canvas.notice)
         XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft)
         XCTAssertEqual(
@@ -139,7 +139,7 @@ final class ControllerBulkOperationTests: XCTestCase {
             gateway.frame(of: b), bOriginal,
             "undo restores the requester's pre-tile frame")
         XCTAssertTrue(canvas.undoStack.isEmpty)
-        XCTAssertEqual(canvas.evictedCount, 0)
+        XCTAssertEqual(canvas.displacedCount, 0)
     }
 
     func testUndoIsSingleStep() {
@@ -172,7 +172,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.focused = b
         controller.handle(slot: .sixthLeft)
         XCTAssertFalse(canvas.undoStack.isEmpty)
-        XCTAssertEqual(canvas.evictedCount, 1)
+        XCTAssertEqual(canvas.displacedCount, 1)
 
         // Switch #2 back to quarters: b is evicted. The old undo is NOT
         // gone; history stacks, newest last.
@@ -180,7 +180,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.focused = c
         controller.handle(slot: .bottomRight)
         XCTAssertFalse(canvas.undoStack.isEmpty, "the new switch offers its own undo")
-        XCTAssertEqual(canvas.evictedCount, 1)
+        XCTAssertEqual(canvas.displacedCount, 1)
         XCTAssertEqual(
             canvas.notice,
             "Switched to Quarters \u{00B7} 1 window untiled. "
@@ -255,7 +255,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(canvas.state.slot(of: 1), .sixthLeft)
         XCTAssertNil(canvas.notice)
         XCTAssertTrue(canvas.undoStack.isEmpty)
-        XCTAssertEqual(canvas.evictedCount, 0)
+        XCTAssertEqual(canvas.displacedCount, 0)
     }
 
     func testUndoAfterRequesterDied() {
@@ -291,7 +291,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.undoLastDisplacement()
 
         XCTAssertEqual(
-            canvas.error, "Couldn't restore the evicted windows.")
+            canvas.error, "Couldn't restore the displaced windows.")
         XCTAssertTrue(canvas.state.occupants.isEmpty,
             "requester untiled by undo; dead evictee skipped")
         XCTAssertTrue(canvas.undoStack.isEmpty)
@@ -329,7 +329,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         // tiled, so the chapter covers both.
         controller.untileAll()
         XCTAssertFalse(canvas.undoStack.isEmpty, "untile-all is itself undoable")
-        XCTAssertEqual(canvas.evictedCount, 2)
+        XCTAssertEqual(canvas.displacedCount, 2)
         XCTAssertEqual(canvas.notice, "Untiled 2 windows. Press ⌃⌥⇧⌘Z to undo.")
         controller.undoLastDisplacement()
         // Undo re-tiles each dissolved window into its slot (under fresh

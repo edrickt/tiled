@@ -272,7 +272,7 @@ final class ShortcutsTab: NSObject {
             ? ("Enable all \(count)",
                "Restores parked combos; slots edited while disabled keep their edits")
             : ("Disable all \(count)",
-               "Disable every \(name) shortcut (keeps defaults for re-enable)")
+               "Disable every \(name) shortcut (parks the current combos; Enable all restores them)")
     }
 
     /// Surfaces cross-app registration failures beside the recorder rows.

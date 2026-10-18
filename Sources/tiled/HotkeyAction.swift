@@ -37,7 +37,7 @@ extension HotkeyAction {
         case .evict: "Evict Focused Window"
         case .resetSplitters: "Reset Splitters"
         case .settings: "Open Settings"
-        case .undo: "Undo Last Switch"
+        case .undo: "Undo Last Displacement"
         }
     }
 

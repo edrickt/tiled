@@ -5,10 +5,10 @@
 enum MenuText {
     // MARK: Menu titles
 
-    /// Undo title names what returns: the evicted windows.
-    static func undoDisplacementTitle(evictedCount: Int) -> String {
-        evictedCount == 1
-            ? "Restore 1 Evicted Window" : "Restore \(evictedCount) Evicted Windows"
+    /// Undo title names what returns: the windows the chapter displaced.
+    static func undoDisplacementTitle(displacedCount: Int) -> String {
+        displacedCount == 1
+            ? "Restore 1 Displaced Window" : "Restore \(displacedCount) Displaced Windows"
     }
 
     /// Bulk-action title names the consequence: restoring every window.
@@ -164,9 +164,9 @@ enum MenuText {
         "That window isn't tiled: nothing to untile."
     }
 
-    /// Undo restored the chapter.
+    /// Undo restored the chapter's displaced windows.
     static func undoAnnouncement() -> String {
-        "Evicted windows restored."
+        "Displaced windows restored."
     }
 
     /// A background display's canvas refused an untile. The display name
@@ -194,5 +194,5 @@ enum MenuText {
 
     /// Undo found nothing restorable: the chapter's windows all closed
     /// before it ran, so there is no window left to write.
-    static let restoreEvictedWindowsFailure = "Couldn't restore the evicted windows."
+    static let restoreDisplacedWindowsFailure = "Couldn't restore the displaced windows."
 }

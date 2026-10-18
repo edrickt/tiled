@@ -322,7 +322,7 @@ final class AppDelegateMenuTests: XCTestCase {
             isTrusted: true, warnings: [], notice: nil, layoutTitle: "Quarters",
             activeLayout: .quarters, tileError: nil, hasHotkeyWarnings: false,
             hasSplitterBackup: false, hasFocusedWindow: false, expandState: .expands,
-            tiledWindows: [], canUndoDisplacement: false, evictedCount: 0,
+            tiledWindows: [], canUndoDisplacement: false, displacedCount: 0,
             untileCount: 0)
     }
 
