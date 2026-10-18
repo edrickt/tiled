@@ -383,13 +383,13 @@ extension ReflowTests {
             for: slot, in: Self.screen.visibleFrame)
     }
 
-    func testEvictHotkeyGrowsColumnSurvivorDown() {
+    func testEvictHotkeyGrowsColumnSurvivorUp() {
         let (a, b, _) = tileLeftColumnAndRightThird()
 
         gateway.focused = a
         controller.handleEvict()
 
-        XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft, "the survivor expands down")
+        XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft, "the survivor expands up")
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthLeft, for: b))
         XCTAssertTrue(canvas.state.slot(of: 1) == nil, "the evicted window is untiled")
         XCTAssertEqual(gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 600))

@@ -35,7 +35,7 @@ final class TilingSpaceTests: XCTestCase {
     func testTilePlacesAndWritesFrame() {
         let id = harness.addWindow()
         let initialFrame = harness.frame(of: id)!
-        let expected = harness.rect(.topLeft)
+        let expected = CGRect(x: 0, y: 600, width: 800, height: 600)
 
         harness.apply(slot: .topLeft, requester: id)
 
@@ -47,6 +47,19 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(
             harness.frame(of: id), expected,
             "the tile writes the slot rect in the injected bounds")
+    }
+
+    func testSixthTileWritesTheLiteralSixthsRect() {
+        let id = harness.addWindow()
+
+        harness.apply(slot: .sixthTopLeft, requester: id)
+
+        let frame = harness.frame(of: id)!
+        XCTAssertEqual(frame.origin, CGPoint(x: 0, y: 600))
+        XCTAssertEqual(
+            frame.width, 1600.0 / 3.0, accuracy: 0.0001,
+            "sixths divide the canvas into three literal columns")
+        XCTAssertEqual(frame.height, 600)
     }
 
     func testSkippedPlacementWriteSeedsTheDragBaseline() {

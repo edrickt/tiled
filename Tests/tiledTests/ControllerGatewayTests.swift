@@ -187,7 +187,7 @@ final class ControllerGatewayTests: XCTestCase {
         }
         wait(for: [expectation], timeout: 1.0)
         // The grid runs in the injected screen's visible-frame
-        // coordinates: the dragged top edge ended 70pt above its pre-drag
+        // coordinates: the dragged top edge moved down 70pt from its pre-drag
         // position (a swallowed 10pt echo, then a 60pt escape), so the row
         // split must equal (final top edge - bounds.minY) / height.
         // Pure splitter math belongs to GridLayoutTests.
@@ -624,7 +624,7 @@ final class ControllerGatewayTests: XCTestCase {
         controller.mouseLifted()
 
         XCTAssertEqual(
-            canvas.error, TilingSpace.refusalMessage(count: 1),
+            canvas.error, "Couldn't move that window: the app refused to resize it.",
             "a refused reassert write lands the standard message on the canvas")
     }
 
