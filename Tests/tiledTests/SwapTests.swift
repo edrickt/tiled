@@ -184,8 +184,8 @@ final class SwapTests: XCTestCase {
 
         XCTAssertNil(canvas.state.slot(of: 3))
         gateway.focused = c
-        XCTAssertNil(
-            controller.expandedFocusedSlot,
+        XCTAssertEqual(
+            controller.focusedExpandState, .expands,
             "the expanded window's expansion died with the eviction")
         XCTAssertEqual(
             gateway.frame(of: c), CGRect(x: 1200, y: 100, width: 500, height: 400),

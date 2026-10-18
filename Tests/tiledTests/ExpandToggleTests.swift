@@ -127,6 +127,35 @@ final class ExpandToggleTests: XCTestCase {
         XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
     }
 
+    // MARK: Menu state
+
+    func testFocusedExpandStateNamesTheSlotOfAnExpandedTiledWindow() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(controller.focusedExpandState, .expands)
+
+        controller.handleExpandToggle()
+
+        XCTAssertEqual(
+            controller.focusedExpandState, .returnsToSlot(.topLeft),
+            "the menu names the slot the next press retiles into")
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft, "expanding keeps the slot")
+    }
+
+    func testFocusedExpandStateReturnsToThePreviousFrameOfAnExpandedUntiledWindow() {
+        let handle = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+        gateway.focused = handle
+        XCTAssertEqual(controller.focusedExpandState, .expands)
+
+        controller.handleExpandToggle()
+
+        XCTAssertEqual(
+            controller.focusedExpandState, .returnsToPreviousFrame,
+            "an expanded untiled window has a frame to return to, not a slot")
+        XCTAssertNil(canvas.state.slot(of: 1))
+    }
+
     func testExpandingDoesNotMoveOtherTiledWindows() {
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = a
@@ -282,6 +311,80 @@ final class ExpandToggleTests: XCTestCase {
         // The window never expanded: the next press retries the expand.
         controller.handleExpandToggle()
         XCTAssertEqual(gateway.frame(of: handle), bounds(for: original))
+    }
+
+    /// Expanding while an edge drag is still in flight supersedes that
+    /// drag: the expand's programmatic write is newer than the gesture,
+    /// so the delayed mouse-up must not reassert the window's full-screen
+    /// frame onto the shared splitters or move the neighbour.
+    func testExpandingDuringAnEdgeDragCancelsThePendingReassert() {
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .sixthTopLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .sixthBottomLeft)
+
+        // B's top edge drags the shared row splitter down from half to
+        // 0.44: the close tick is the echo, the far tick is the drag.
+        let bTiled = gateway.frame(of: b)!
+        var echo = bTiled
+        echo.size.height -= 10
+        gateway.simulateChange(b, to: echo)
+        var dragged = bTiled
+        dragged.size.height -= 60
+        gateway.simulateChange(b, to: dragged)
+        let gridAfterDrag = canvas.grid
+        XCTAssertEqual(
+            gridAfterDrag.sixthsLeftRowSplit, 0.44, accuracy: 0.001,
+            "the live drag moved the shared row splitter")
+        let neighbourFrame = gateway.frame(of: a)!
+
+        gateway.focused = b
+        controller.handleExpandToggle()
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            canvas.grid, gridAfterDrag,
+            "the expand supersedes the drag: mouse-up must not reconcile the full-screen frame")
+        XCTAssertEqual(
+            gateway.frame(of: a), neighbourFrame,
+            "the neighbour is not re-laid-out by the stale edge drag")
+    }
+
+    func testRefusedExpandKeepsThePendingEdgeReassert() {
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .sixthTopLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .sixthBottomLeft)
+
+        // B's top edge drags the shared row splitter down to 0.44; A is
+        // still at the old 0.5 height until the release reasserts.
+        let bTiled = gateway.frame(of: b)!
+        var echo = bTiled
+        echo.size.height -= 10
+        gateway.simulateChange(b, to: echo)
+        var dragged = bTiled
+        dragged.size.height -= 60
+        gateway.simulateChange(b, to: dragged)
+        let gridAfterDrag = canvas.grid
+        XCTAssertEqual(gridAfterDrag.sixthsLeftRowSplit, 0.44, accuracy: 0.001)
+
+        // The expand is refused: nothing moved, so the pending edge drag
+        // still owes the release its reassert.
+        gateway.refuseNextWrites(b)
+        controller.handleExpandToggle()
+        controller.mouseLifted()
+
+        XCTAssertEqual(canvas.grid, gridAfterDrag)
+        XCTAssertEqual(
+            gateway.frame(of: a)?.height ?? 0, 560, accuracy: 0.5,
+            "the release reasserts the neighbour to the dragged edge")
+        XCTAssertEqual(
+            gateway.frame(of: b)?.height ?? 0, 440, accuracy: 0.5,
+            "the refused expand left B at its dragged frame")
     }
 
     /// A drag-resize coalesces a re-push of the dragged monitor's

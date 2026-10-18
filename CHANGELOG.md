@@ -8,6 +8,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The menu's Expand row says “Return to Previous Frame” for an expanded
+  untiled window instead of “Expand to Fill Screen”, and still names the slot
+  an expanded tiled window returns to. Expanding a window also supersedes an
+  edge drag that never reached mouse-up, so the next mouse-up can no longer
+  rewrite the splitters or move neighbours from the expanded window's
+  screen-sized frame.
 - The Welcome guide shows its Accessibility warning and grant button whenever
   the install is untrusted, including the first open after the Settings window
   was built, and hides them when permission arrives while the guide is open.

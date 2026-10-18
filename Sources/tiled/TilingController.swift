@@ -875,16 +875,14 @@ final class TilingController {
         return true
     }
 
-    /// The slot the focused window would return to if it is currently
-    /// expanded; nil otherwise. Drives the expand row's stateful title:
-    /// the toggle must show its state, not just its combo.
-    var expandedFocusedSlot: Slot? {
+    /// What the focused window's expand toggle does right now: drives the
+    /// menu row's stateful title.
+    var focusedExpandState: ExpandToggleState {
         guard let handle = gateway.focusedWindow(),
             let id = recordID(for: handle),
-            let key = spaceOf(window: id),
-            spaces[key]?.isExpanded(id) == true
-        else { return nil }
-        return spaces[key]?.state.slot(of: id)
+            let key = spaceOf(window: id)
+        else { return .expands }
+        return spaces[key]?.expandToggleState(of: id) ?? .expands
     }
 
     /// Undoes the freshest destructive tiling action: a layout switch, an

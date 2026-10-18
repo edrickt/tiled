@@ -18,14 +18,21 @@ enum MenuText {
     }
 
     /// The expand toggle's menu row; the combo is user-configurable, so
-    /// the label comes from the store. `expandedSlot` names the slot an
-    /// expanded focused window returns to: when a window is expanded the
-    /// row says where the toggle goes back: a stateless toggle would
-    /// leave the user guessing what "expand" means right now.
-    static func expandItemTitle(label: String?, expandedSlot: Slot? = nil) -> String {
+    /// the label comes from the store. `expandState` names where an
+    /// expanded focused window returns: a slot, its pre-expand frame, or
+    /// nothing yet.
+    static func expandItemTitle(
+        label: String?, expandState: ExpandToggleState
+    ) -> String {
         let combo = label.map { " · \($0)" } ?? ""
-        guard let expandedSlot else { return "Expand to Fill Screen\(combo)" }
-        return "Return to \(SlotPresentation.title(of: expandedSlot))\(combo)"
+        switch expandState {
+        case .expands:
+            return "Expand to Fill Screen\(combo)"
+        case .returnsToSlot(let slot):
+            return "Return to \(SlotPresentation.title(of: slot))\(combo)"
+        case .returnsToPreviousFrame:
+            return "Return to Previous Frame\(combo)"
+        }
     }
 
     /// The evict row; the combo is user-configurable, so the label comes

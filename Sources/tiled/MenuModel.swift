@@ -82,10 +82,9 @@ enum MenuModel {
         /// rows need one to tile: disabled (with their reason stated)
         /// when nothing is focused, never a silent no-op.
         var hasFocusedWindow: Bool
-        /// The slot an expanded focused window would return to, if any.
-        /// Drives the expand row's stateful title: a toggle with no
-        /// visible state leaves the user guessing what it does right now.
-        var expandedSlot: Slot?
+        /// What the focused window's expand toggle does right now,
+        /// driving the expand row's stateful title.
+        var expandState: ExpandToggleState
         var tiledWindows: [TiledWindow]
         var canUndoDisplacement: Bool
         var evictedCount: Int
@@ -227,7 +226,7 @@ enum MenuModel {
             items.append(Item(
                 title: MenuText.expandItemTitle(
                     label: binding(.expand).label,
-                    expandedSlot: snapshot.expandedSlot),
+                    expandState: snapshot.expandState),
                 action: .toggleExpand))
             items.append(Item(
                 title: MenuText.evictItemTitle(label: binding(.evict).label),

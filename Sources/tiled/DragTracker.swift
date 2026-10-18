@@ -247,6 +247,14 @@ final class DragTracker {
         clearDrag(id)
     }
 
+    /// Drops a pending edge reassert for `id`: a landed expand or collapse
+    /// supersedes the gesture that never reached mouse-up, so the next
+    /// release must not reconcile the splitters from the frame that action
+    /// imposed. Other windows' pending reasserts stand.
+    func clearPendingReassert(_ id: WindowID) {
+        pendingReasserts = pendingReasserts.filter { $0.value != id }
+    }
+
     /// Seeds only the diff baseline for `id`, without arming an echo
     /// expectation. The canvas's reassert stores the frame it is about
     /// to write, and must seed the baseline even for occupants whose

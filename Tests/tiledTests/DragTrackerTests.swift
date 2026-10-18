@@ -266,6 +266,46 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertEqual(decisions, [.resize(2)])
     }
 
+    func testMarkingAnExpectedWriteKeepsThePendingEdgeReassert() {
+        // Marking an expected write happens before the gateway answers.
+        // The write may be refused, so the mark alone must not discard
+        // the edge drag the user is still owed on mouse-up.
+        let tiled = GridLayout().rect(for: .sixthsRightTwoThirds, in: visibleFrame)
+        tile(1, .sixthsRightTwoThirds, frame: tiled)
+
+        var resized = tiled
+        resized.size.height -= 100
+        drag(1, from: tiled, to: resized, tracker: tracker)
+        XCTAssertTrue(decisions.isEmpty, "the edge drag is pending until mouse-up")
+
+        tracker.markExpected(1, visibleFrame)
+        tracker.mouseLifted()
+
+        XCTAssertEqual(
+            decisions, [.resize(1)],
+            "marking a write is not proof it landed: the edge drag stays pending")
+    }
+
+    func testClearingAPendingReassertDiscardsTheEdgeDrag() {
+        // A landed expand or collapse supersedes the edge drag that never
+        // reached mouse-up: the next release must not reconcile the
+        // splitters from the frame that action replaced.
+        let tiled = GridLayout().rect(for: .sixthsRightTwoThirds, in: visibleFrame)
+        tile(1, .sixthsRightTwoThirds, frame: tiled)
+
+        var resized = tiled
+        resized.size.height -= 100
+        drag(1, from: tiled, to: resized, tracker: tracker)
+        XCTAssertTrue(decisions.isEmpty, "the edge drag is pending until mouse-up")
+
+        tracker.clearPendingReassert(1)
+        tracker.mouseLifted()
+
+        XCTAssertTrue(
+            decisions.isEmpty,
+            "a landed expand or collapse supersedes the edge drag")
+    }
+
     func testScreenEdgeDragEmitsResizeOnMouseUp() {
         // Screen edges are fixed, not splitters: the drag commits no
         // fraction, but the release still owes the canvas a reassert or

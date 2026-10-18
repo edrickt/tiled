@@ -192,6 +192,29 @@ final class ReassertPlanTests: XCTestCase {
         XCTAssertEqual(plan.rects[1], canvas.grid.rect(for: .topLeft, in: bounds))
     }
 
+    func testResizeReassertFromAnExpandedWindowLeavesTheSplittersAlone() {
+        // An expanded window covers the layout but keeps its slot. A
+        // `.resize` source naming it is a stale edge drag that survived
+        // the expand; its screen-sized achieved frame must never move
+        // the splitters or re-lay-out the neighbours.
+        var grid = GridLayout()
+        grid.columnSplit = 0.42
+        grid.leftRowSplit = 0.31
+        let canvas = canvas(
+            [(.topLeft, 1), (.bottomRight, 2)], expanded: [1], grid: grid)
+
+        let plan = canvas.reassertPlan(
+            .resize(dragged: 1, achieved: bounds))
+
+        XCTAssertEqual(
+            plan.grid, grid,
+            "an expanded window's screen frame never reconciles a splitter")
+        XCTAssertNil(plan.rects[1], "the expanded window is still skipped")
+        XCTAssertEqual(
+            plan.rects[2], grid.rect(for: .bottomRight, in: bounds),
+            "non-expanded occupants still map under the untouched grid")
+    }
+
     // MARK: Neighbour achieved edge
 
     /// A harness whose written windows keep their top edge and round

@@ -18,7 +18,7 @@ final class MenuModelTests: XCTestCase {
         hasHotkeyWarnings: Bool = false,
         hasFocusedWindow: Bool = true,
         hasSplitterBackup: Bool = false,
-        expandedSlot: Slot? = nil,
+        expandState: ExpandToggleState = .expands,
         tiledWindows: [MenuModel.Snapshot.TiledWindow] = [],
         canUndoDisplacement: Bool = false,
         evictedCount: Int = 0,
@@ -34,7 +34,7 @@ final class MenuModelTests: XCTestCase {
             hasHotkeyWarnings: hasHotkeyWarnings,
             hasSplitterBackup: hasSplitterBackup,
             hasFocusedWindow: hasFocusedWindow,
-            expandedSlot: expandedSlot,
+            expandState: expandState,
             tiledWindows: tiledWindows,
             canUndoDisplacement: canUndoDisplacement,
             evictedCount: evictedCount,
@@ -103,17 +103,24 @@ final class MenuModelTests: XCTestCase {
     }
 
     func testExpandRowReflectsExpandedState() {
-        // Stateless toggle: the row reads the same expanded or not.
+        // Not expanded: the row promises the expand.
         let plain = items(snapshot())
         XCTAssertEqual(
             plain.first { $0.action == .toggleExpand }?.title,
             "Expand to Fill Screen · ⌥⇧⏎")
-        // Stateful toggle: with an expanded focused window the row says
-        // where the toggle goes back: no guessing what it does now.
-        let expanded = items(snapshot(expandedSlot: .leftHalf))
+        // Expanded and still tiled: the row says where the toggle goes
+        // back: no guessing what it does now.
+        let tiled = items(snapshot(expandState: .returnsToSlot(.leftHalf)))
         XCTAssertEqual(
-            expanded.first { $0.action == .toggleExpand }?.title,
+            tiled.first { $0.action == .toggleExpand }?.title,
             "Return to Left Half · ⌥⇧⏎")
+        // Expanded and untiled: there is no slot to name, so the row
+        // names the previous frame instead of "Expand to Fill Screen"
+        // (which would promise the press expands again).
+        let untiled = items(snapshot(expandState: .returnsToPreviousFrame))
+        XCTAssertEqual(
+            untiled.first { $0.action == .toggleExpand }?.title,
+            "Return to Previous Frame · ⌥⇧⏎")
     }
 
     func testHotkeyWarningsGrowAnOpenShortcutsRow() {

@@ -552,7 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hasHotkeyWarnings: hasHotkeyWarnings,
             hasSplitterBackup: canvas.hasSplitterBackup,
             hasFocusedWindow: gateway.isTrusted && gateway.focusedWindow() != nil,
-            expandedSlot: controller.expandedFocusedSlot,
+            expandState: controller.focusedExpandState,
             tiledWindows: presentation.tiledWindows,
             canUndoDisplacement: !canvas.undoStack.isEmpty,
             evictedCount: canvas.evictedCount,

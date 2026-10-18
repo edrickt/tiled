@@ -40,7 +40,7 @@ _Avoid_: screen bounds, monitor frame, working area (one step of the screen-reso
 _Code_: `TilingSpace.visibleFrame` (replaces the per-window `Context.boundsOf`)
 
 **Reassert**:
-Putting the screen back on the grid after a drag: the canvas reconciles any app-clamped edge back to the dragged window's achieved frame, re-derives every non-expanded tiled occupant's rect under its one visible frame, and writes them — the dragged window included, unlike a resize mid-drag. One reassert covers an edge drag's mouse-up, a title-bar snapback, a display change, a swipe back, and a splitter reset.
+Putting the screen back on the grid after a drag: the canvas reconciles any app-clamped edge back to the dragged window's achieved frame, re-derives every non-expanded tiled occupant's rect under its one visible frame, and writes them — the dragged window included, unlike a resize mid-drag. One reassert covers an edge drag's mouse-up, a title-bar snapback, a display change, a swipe back, and a splitter reset. Expanding supersedes a pending edge drag, and an expanded dragged window's screen-sized frame never reconciles a splitter.
 _Avoid_: settle (the placement pipeline's own step), reflow (reflow merges freed cells into a survivor; reassert changes no slot), refresh
 _Code_: `TilingSpace.reassert(_:context:)`, over the pure core `TilingSpace.reassertPlan(_:)`
 
@@ -66,7 +66,7 @@ Keeping an evictee tiled instead of untangling it. Two rules, step-aside checked
 _Avoid_: relocation, re-assignment, re-seat, displacement (an eviction untiles; a re-house moves, and never the reverse)
 
 **Expand**:
-Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it. An expanded window never grows (see Reflow) and never re-houses or steps aside (see Re-house); on eviction it untangles.
+Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it into that slot, or restores its pre-expand frame when it had none. An expanded window never grows (see Reflow) and never re-houses or steps aside (see Re-house); on eviction it untangles.
 _Avoid_: maximize, zoom, fullscreen
 
 **Drag-out**:

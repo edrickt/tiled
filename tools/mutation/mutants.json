@@ -361,6 +361,12 @@
  ],
  [
   "TilingSpace.swift",
+  "resize reconcile trusts an expanded window's screen frame (stale drag moves splitters)",
+  "        guard case .resize(let dragged, let achieved) = source,\n            expanded[dragged] == nil,\n            let slot = state.slot(of: dragged)",
+  "        guard case .resize(let dragged, let achieved) = source,\n            let slot = state.slot(of: dragged)"
+ ],
+ [
+  "TilingSpace.swift",
   "reassert seeds no diff baseline (first drag after it is dropped)",
   "        for (id, rect) in rects {\n            context.tracker.seedBaseline(id, rect)\n        }",
   "        for (id, rect) in rects {\n            _ = rect\n        }"
@@ -544,6 +550,12 @@
   "release mark requires a movable splitter (screen-edge drags never reassert)",
   "            guard edgeMoved else { continue }\n            anyEdgeMoved = true",
   "            guard edgeMoved, GridLayout.boundary(edge: edge, slot: slot) != nil else { continue }\n            anyEdgeMoved = true"
+ ],
+ [
+  "TilingSpace.swift",
+  "successful expand keeps a pending edge reassert (mouse-up reconciles the stale drag)",
+  "            context.tracker.clearPendingReassert(id)\n            expanded[id] = current",
+  "            _ = id\n            expanded[id] = current"
  ],
  [
   "DragTracker.swift",

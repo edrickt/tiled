@@ -228,6 +228,14 @@ struct TilingSpace {
     /// Whether `id` is currently expanded over the layout.
     func isExpanded(_ id: WindowID) -> Bool { expanded[id] != nil }
 
+    /// What the expand toggle would do for `id` on this canvas: expand,
+    /// retile into the slot it still holds, or return to its saved frame.
+    func expandToggleState(of id: WindowID) -> ExpandToggleState {
+        guard expanded[id] != nil else { return .expands }
+        return state.slot(of: id).map(ExpandToggleState.returnsToSlot)
+            ?? .returnsToPreviousFrame
+    }
+
     /// Drops a window the convergence check judged silently ignored:
     /// occupancy and record go, nothing is written. The coordinator owns
     /// the narration and the death/verification bookkeeping.
@@ -1342,6 +1350,10 @@ struct TilingSpace {
         let result = writeExpandedFrame(id, to: target, context: context)
         switch result {
         case .written, .skippedNoOp:
+            // The expansion landed: an edge drag that never reached
+            // mouse-up is stale, and its release must not reconcile the
+            // splitters from the screen-sized frame.
+            context.tracker.clearPendingReassert(id)
             expanded[id] = current
             context.log("expand win\(id) -> \(target)")
             return Outcome()
@@ -1380,6 +1392,9 @@ struct TilingSpace {
         guard let result else { return Outcome() }
         switch result {
         case .written, .skippedNoOp:
+            // A landed collapse supersedes a stale edge drag exactly as an
+            // expansion does.
+            context.tracker.clearPendingReassert(id)
             if !tiled {
                 context.log("collapse win\(id) -> saved \(saved)")
             }
@@ -1517,10 +1532,15 @@ struct TilingSpace {
     /// The grid a reassert maps against. `.grid` leaves the splitters
     /// alone; `.resize` moves each of the dragged window's movable edges
     /// back to the achieved frame's edge, so the splitter sits where the
-    /// window actually landed. The two-thirds hidden-divider rule is the
-    /// grid's own, shared with the live drag loop.
+    /// window actually landed. An expanded dragged window is excluded:
+    /// its achieved frame covers the screen by definition, and a stale
+    /// edge drag that survived an Expand must never reconcile the
+    /// splitters (or the neighbours) from that frame. The two-thirds
+    /// hidden-divider rule is the grid's own, shared with the live drag
+    /// loop.
     private func reconciledGrid(_ source: ReassertSource) -> GridLayout {
         guard case .resize(let dragged, let achieved) = source,
+            expanded[dragged] == nil,
             let slot = state.slot(of: dragged)
         else { return grid }
         let occupied = Set(state.occupants.keys)

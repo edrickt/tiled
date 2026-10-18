@@ -18,18 +18,30 @@ final class MenuTextTests: XCTestCase {
     }
 
     func testExpandItemTitleWithAndWithoutLabel() {
-        XCTAssertEqual(MenuText.expandItemTitle(label: "⌥⇧⏎"), "Expand to Fill Screen · ⌥⇧⏎")
-        XCTAssertEqual(MenuText.expandItemTitle(label: nil), "Expand to Fill Screen")
+        XCTAssertEqual(
+            MenuText.expandItemTitle(label: "⌥⇧⏎", expandState: .expands),
+            "Expand to Fill Screen · ⌥⇧⏎")
+        XCTAssertEqual(
+            MenuText.expandItemTitle(label: nil, expandState: .expands),
+            "Expand to Fill Screen")
     }
 
-    func testExpandItemTitleNamesTheReturnSlotWhenExpanded() {
+    func testExpandItemTitleNamesWhereAnExpandedWindowReturns() {
         // A toggle with no visible state leaves the user guessing: when a
         // window is expanded the row says where the toggle goes back.
         XCTAssertEqual(
-            MenuText.expandItemTitle(label: "⌥⇧⏎", expandedSlot: .topLeft),
+            MenuText.expandItemTitle(label: "⌥⇧⏎", expandState: .returnsToSlot(.topLeft)),
             "Return to Top Left · ⌥⇧⏎")
+        // An expanded untiled window has no slot to name: the row names
+        // its previous frame instead of pretending the next press expands.
         XCTAssertEqual(
-            MenuText.expandItemTitle(label: "⌥⇧⏎", expandedSlot: nil),
+            MenuText.expandItemTitle(label: "⌥⇧⏎", expandState: .returnsToPreviousFrame),
+            "Return to Previous Frame · ⌥⇧⏎")
+        XCTAssertEqual(
+            MenuText.expandItemTitle(label: nil, expandState: .returnsToPreviousFrame),
+            "Return to Previous Frame")
+        XCTAssertEqual(
+            MenuText.expandItemTitle(label: "⌥⇧⏎", expandState: .expands),
             "Expand to Fill Screen · ⌥⇧⏎")
     }
 

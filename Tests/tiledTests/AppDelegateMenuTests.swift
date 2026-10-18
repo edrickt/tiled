@@ -321,7 +321,7 @@ final class AppDelegateMenuTests: XCTestCase {
         MenuModel.Snapshot(
             isTrusted: true, warnings: [], notice: nil, layoutTitle: "Quarters",
             activeLayout: .quarters, tileError: nil, hasHotkeyWarnings: false,
-            hasSplitterBackup: false, hasFocusedWindow: false, expandedSlot: nil,
+            hasSplitterBackup: false, hasFocusedWindow: false, expandState: .expands,
             tiledWindows: [], canUndoDisplacement: false, evictedCount: 0,
             untileCount: 0)
     }
