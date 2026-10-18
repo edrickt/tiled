@@ -13,10 +13,13 @@ final class GeneralTab: NSObject {
     /// Reopens the Welcome tab (the General tab's "Show Tiled Guide"
     /// button). The shell owns tab switching.
     var onShowGuide: (() -> Void)?
-    /// Live probe of the Settings fallback hotkey, so the hide-icon
-    /// confirm can name a recovery that is actually registered, never a
-    /// dead combo while removing the last visible handle to the app.
-    var isSettingsHotkeyRegisteredProvider: (() -> Bool)?
+    /// Live display label of the Settings fallback hotkey, so the
+    /// hide-icon confirm can name the user's current binding and only
+    /// when it is registered. nil means there is no live recovery combo:
+    /// the action is disabled, its registration failed, or hotkeys have
+    /// not started, so the dialog must offer relaunch only while
+    /// removing the last visible handle to the app.
+    var settingsHotkeyLabelProvider: (() -> String?)?
     /// Live Accessibility trust probe, injected by the shell: with the
     /// menu-bar icon hidden this tab is the app's only visible surface,
     /// so permission loss must be legible here.
@@ -119,16 +122,18 @@ final class GeneralTab: NSObject {
         hideIconCheckbox = NSButton(
             checkboxWithTitle: "Hide menu bar icon",
             target: self, action: #selector(hideIconToggled(_:)))
-        hideIconCheckbox.toolTip = "The icon disappears immediately; press \u{2303}\u{2325}\u{21E7}\u{2318}, to get back."
+        hideIconCheckbox.toolTip =
+            "The icon disappears immediately; use the Open Settings shortcut "
+            + "(when enabled and registered) or quit and reopen Tiled to get back."
         stack.addArrangedSubview(hideIconCheckbox)
 
         // Recovery consequence sits with its checkbox, not below the
         // guide: proximity groups it with the control it explains,
         // instead of orphaning it a divider and a section away.
         let hint = NSTextField(wrappingLabelWithString:
-            "When the icon is hidden, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere " +
-            "or quit and reopen Tiled to get back here; Settings opens automatically. " +
-            "Hiding asks first, so this never happens by accident.")
+            "When the icon is hidden, use the Open Settings shortcut "
+            + "(when enabled and registered) or quit and reopen Tiled to get back here; "
+            + "Settings opens automatically. Hiding asks first, so this never happens by accident.")
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stack.addArrangedSubview(hint)
@@ -226,21 +231,33 @@ final class GeneralTab: NSObject {
         }
     }
 
+    /// The hide-icon confirm's recovery sentence. A live shortcut is named
+    /// exactly; without one the dialog offers only the relaunch path, so
+    /// hiding the icon never promises a keypress that does nothing.
+    static func hideIconRecoverySentence(settingsLabel: String?) -> String {
+        if let settingsLabel {
+            return "To get back, press \(settingsLabel) anywhere or quit and reopen Tiled; "
+                + "Settings opens automatically."
+        }
+        return "To get back, quit and reopen Tiled; Settings opens automatically. "
+            + "(The Open Settings shortcut is disabled or unavailable.)"
+    }
+
+    /// The sentence the hide-icon confirm will show, read through the
+    /// live provider now. Internal so the wiring is testable without
+    /// presenting the modal alert or hiding the real icon.
+    var hideIconRecoveryText: String {
+        Self.hideIconRecoverySentence(settingsLabel: settingsHotkeyLabelProvider?())
+    }
+
     @objc private func hideIconToggled(_ sender: NSButton) {
         let hidden = sender.state == .on
         if hidden {
             // Hiding removes the only visible handle to the app (including
-            // Quit), so confirm with a recovery path that is actually
-            // registered: if the Settings fallback hotkey lost to another
-            // app, the dialog must not promise ⌃⌥⇧⌘, combo; it names the
-            // relaunch path instead.
-            let settingsHotkeyAlive = isSettingsHotkeyRegisteredProvider?() ?? true
-            let recovery = settingsHotkeyAlive
-                ? "To get back, press \u{2303}\u{2325}\u{21E7}\u{2318}, anywhere "
-                    + "or quit and reopen Tiled; Settings opens automatically."
-                : "To get back, quit and reopen Tiled; Settings opens automatically. "
-                    + "(The \u{2303}\u{2325}\u{21E7}\u{2318}, fallback is "
-                    + "already used by another app.)"
+            // Quit), so the recovery sentence names the Settings combo
+            // only when it is actually registered; otherwise it offers the
+            // relaunch path alone.
+            let recovery = hideIconRecoveryText
             let alert = NSAlert()
             alert.messageText = "Hide the menu bar icon?"
             alert.informativeText =

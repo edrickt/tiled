@@ -51,7 +51,7 @@ with a slot combo. Every one of them is remappable:
 | ⌥⇧⏎    | Expand the focused window to fill the screen (not fullscreen mode) |
 | ⌥⇧⌫    | Evict the focused window: untile it and restore its pre-tile frame |
 | ⌥⇧R    | Reset Splitters: snap the focused canvas's splitters back to even splits, keeping every window tiled |
-| ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden) |
+| ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden, as long as this shortcut is enabled and registered; otherwise quit and reopen Tiled) |
 | ⌃⌥⇧⌘Z   | Undo the focused canvas's last displacement (a layout switch, an eviction, or a swap — any reflow it caused is undone with it) |
 
 ### Expand (⌥⇧⏎)
@@ -242,7 +242,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (728 tests)
+swift test             # hermetic unit suite (740 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -276,7 +276,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (728 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (740 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |

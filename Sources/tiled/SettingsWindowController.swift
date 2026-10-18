@@ -47,15 +47,20 @@ final class SettingsWindowController: NSWindowController {
     var failedActionsProvider: (() -> [HotkeyAction])? {
         didSet { shortcutsTab.failedActionsProvider = failedActionsProvider }
     }
-    /// Whether the Settings fallback hotkey (⌃⌥⇧⌘,) is currently
-    /// registered, forwarded to General so the hide-icon confirm never
-    /// promises a dead recovery combo.
-    var isSettingsHotkeyRegisteredProvider: (() -> Bool)? {
+    /// Live label of the Settings fallback hotkey (nil when disabled,
+    /// unregistered, or hotkeys are not running), forwarded to General so
+    /// the hide-icon confirm names the user's actual recovery combo and
+    /// never promises a dead one.
+    var settingsHotkeyLabelProvider: (() -> String?)? {
         didSet {
-            generalTab.isSettingsHotkeyRegisteredProvider =
-                isSettingsHotkeyRegisteredProvider
+            generalTab.settingsHotkeyLabelProvider =
+                settingsHotkeyLabelProvider
         }
     }
+
+    /// The hide-icon confirm's recovery sentence, exposed so the provider
+    /// forwarding is testable without presenting the modal alert.
+    var hideIconRecoveryText: String { generalTab.hideIconRecoveryText }
 
     init(settings: AppSettings, hotkeyStore: HotkeyStore = HotkeyStore()) {
         self.settings = settings

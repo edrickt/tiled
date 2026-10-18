@@ -804,12 +804,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.failedActionsProvider = { [weak self] in
                 self?.hotkeys?.failedActions ?? []
             }
-            // General's hide-icon confirm names a recovery combo only when
-            // it is actually registered: never a dead promise while
-            // removing the last visible handle to the app.
-            controller.isSettingsHotkeyRegisteredProvider = { [weak self] in
-                guard let hotkeys = self?.hotkeys else { return false }
-                return !hotkeys.failedActions.contains(.settings)
+            // General's hide-icon confirm names the user's live Settings
+            // binding, and only when it is registered; without a running
+            // hotkey service it names no combo at all.
+            controller.settingsHotkeyLabelProvider = { [weak self] in
+                guard let self, let hotkeys = self.hotkeys else { return nil }
+                return self.hotkeyStore.registeredLabel(
+                    for: .settings, failedActions: hotkeys.failedActions)
             }
             settingsController = controller
         }

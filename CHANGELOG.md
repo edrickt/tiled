@@ -8,6 +8,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Hiding the menu bar icon names the user's live Settings shortcut as the
+  recovery, and only when that shortcut is enabled and registered. A
+  disabled or failed Settings action now takes the relaunch-only path
+  instead of promising a default combo that does nothing.
 - Evict, Untile All, a single window's untile, and Undo announce success
   only when the controller performed the action. An empty undo stack, an
   untiled window, or a refused restore now answers once instead of

@@ -211,6 +211,17 @@ final class HotkeyStore {
         binding(for: HotkeyAction.slot(slot))
     }
 
+    /// The display label to advertise for `action`, or nil when the action
+    /// is disabled or its registration failed. One rule for every surface
+    /// that promises a live recovery shortcut, so a disabled or failed
+    /// action can never be named as one.
+    func registeredLabel(
+        for action: HotkeyAction, failedActions: [HotkeyAction]
+    ) -> String? {
+        guard !failedActions.contains(action) else { return nil }
+        return binding(for: action).label
+    }
+
     func set(_ binding: HotkeyBinding, for action: HotkeyAction) {
         defaults.set(
             ["modifiers": Int(binding.modifiers), "keyCode": binding.keyCode.map(Int.init) ?? -1],
