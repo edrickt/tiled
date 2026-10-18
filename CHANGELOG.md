@@ -70,6 +70,14 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   write the old frame and pull the window off its new slot or expanded
   frame.
 
+### Tooling
+
+- The mutation gate can resume from its last run: `--resume` rechecks only
+  the mutants it did not catch, and a test or `Package.swift` change now puts
+  the whole table in scope instead of selecting nothing. Verdicts merge into
+  `build/mutation-results.json`, so the add-tests-to-kill-survivors loop no
+  longer pays for the already-caught table.
+
 ## [0.2.2] - 2026-10-15
 
 ### Fixed

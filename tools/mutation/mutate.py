@@ -14,6 +14,7 @@ Usage:
     python3 tools/mutation/mutate.py              # all mutants
     python3 tools/mutation/mutate.py reflow       # only labels/paths matching
     python3 tools/mutation/mutate.py --since HEAD~2  # only files changed since a ref
+    python3 tools/mutation/mutate.py --resume     # only mutants the last run did not catch
     python3 tools/mutation/mutate.py --list       # show the mutant table
     python3 tools/mutation/mutate.py --workers 2  # fewer workers (default 4)
     python3 tools/mutation/test_mutate.py         # the tool's own tests
@@ -27,12 +28,19 @@ Each worker rebuilds the mutated module (`swift build --build-tests`)
 and then runs the suite (`swift test --skip-build`).
 
 While a stage is in flight, `--since <its base commit>` (optionally with a
-positional filter) keeps the run to the mutants the stage can affect; run
-the full table once before committing.
+positional filter) keeps the run to the mutants the stage can affect. A
+source change selects that file's mutants; a test or Package.swift change
+puts every mutant in scope, because the suite itself moved. Add --resume
+to recheck only the mutants the last run did not catch, which makes the
+add-tests-to-kill-survivors loop skip the already-caught table. Resume
+trusts a prior CAUGHT verdict unless its source file is in the `--since`
+scope, so it is for adding tests: after changing or deleting an existing
+test, run the full table so a weakened assertion cannot hide. Run the
+full table once before committing.
 
 Exits non-zero if any mutant survives or is unresolved, so it can gate
 a release branch. This is a development tool, not part of CI: a full
-84-mutant table takes ~3-4 minutes on the 8 GB M1 Air.
+143-mutant table takes several minutes on the 8 GB M1 Air.
 """
 import argparse
 import json
@@ -47,6 +55,10 @@ import threading
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MUTANTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mutants.json")
 RESULTS_FILE = os.path.join(ROOT, "build", "mutation-results.json")
+
+SOURCE_PREFIX = "Sources/tiled/"
+SUITE_PREFIX = "Tests/"
+SUITE_FILES = ("Package.swift",)
 
 DEFAULT_WORKERS = 4
 STEP_TIMEOUT = 900
@@ -66,8 +78,25 @@ def error_status(error):
     return f"ERROR({type(error).__name__})"
 
 
+def classify_changes(paths):
+    """Split git-reported paths into mutation sources and suite changes.
+
+    A source change selects that file's mutants. A test or Package.swift
+    change can move every verdict, so the caller puts the whole table in
+    scope (resume may narrow it back to the mutants not yet caught).
+    """
+    sources = set()
+    suite_changed = False
+    for path in paths:
+        if path.startswith(SOURCE_PREFIX):
+            sources.add(path[len(SOURCE_PREFIX):])
+        elif path.startswith(SUITE_PREFIX) or path in SUITE_FILES:
+            suite_changed = True
+    return sources, suite_changed
+
+
 def changed_since(ref):
-    """Mutation-table paths (relative to Sources/tiled) changed since ref.
+    """Changed mutation sources, plus whether the test suite moved.
 
     Covers tracked edits (staged or not) plus untracked files, because the
     tool runs mid-work, before the stage's commit exists.
@@ -79,9 +108,7 @@ def changed_since(ref):
 
     paths = git("diff", "--name-only", ref)
     paths += git("ls-files", "--others", "--exclude-standard")
-    prefix = os.path.join("Sources", "tiled") + "/"
-    return {path[len(prefix):] for path in paths.splitlines()
-            if path.startswith(prefix)}
+    return classify_changes(paths.splitlines())
 
 
 def select_mutants(mutants, changed=None, filter=""):
@@ -90,6 +117,63 @@ def select_mutants(mutants, changed=None, filter=""):
     if filter:
         mutants = [m for m in mutants if filter in m[0] or filter in m[1]]
     return mutants
+
+
+def resume_selection(mutants, previous, changed=()):
+    """Drop mutants the previous run caught, unless their file changed."""
+    caught = {(result.get("path"), result.get("label"))
+              for result in previous
+              if result.get("status") == "CAUGHT"}
+    changed = set(changed)
+    return [mutant for mutant in mutants
+            if (mutant[0], mutant[1]) not in caught or mutant[0] in changed]
+
+
+def select_for_run(mutants, filter="", changed=None, suite_changed=False,
+                   resume=False, previous=()):
+    """The mutants this invocation should judge.
+
+    `changed` is the set of mutation source files changed since the caller's
+    ref, or None when there is no ref. A suite change puts every mutant in
+    scope because the tests themselves moved. Resume then drops the mutants
+    the last run already caught, except those whose source file changed.
+    """
+    selected = select_mutants(mutants, filter=filter)
+    if changed is not None and not suite_changed and not resume:
+        selected = select_mutants(selected, changed=changed)
+    if resume:
+        selected = resume_selection(selected, previous, changed or set())
+    return selected
+
+
+def load_results(path=RESULTS_FILE):
+    """Read the last run's verdicts; anything malformed is no cache at all."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    required = ("path", "label", "status")
+    return [result for result in data
+            if isinstance(result, dict)
+            and all(key in result for key in required)]
+
+
+def merge_results(previous, current, table):
+    """Keep prior verdicts for mutants this run did not judge.
+
+    `table` is the full mutant table, so removed entrants drop out and the
+    merged file stays in table order.
+    """
+    merged = {(result["path"], result["label"]): result
+              for result in previous}
+    for result in current:
+        merged[(result["path"], result["label"])] = result
+    return [merged[(mutant[0], mutant[1])]
+            for mutant in table
+            if (mutant[0], mutant[1]) in merged]
 
 
 def classify(test):
@@ -146,11 +230,13 @@ def patch_sandbox(sandbox, mutant):
     """
     path, label, old, new = mutant
     target = os.path.join(sandbox, "Sources", "tiled", path)
-    source = open(target, encoding="utf-8").read()
+    with open(target, encoding="utf-8") as handle:
+        source = handle.read()
     count = source.count(old)
     if count != 1:
         return f"STALE(find x{count})"
-    open(target, "w", encoding="utf-8").write(source.replace(old, new, 1))
+    with open(target, "w", encoding="utf-8") as handle:
+        handle.write(source.replace(old, new, 1))
     return None
 
 
@@ -248,7 +334,12 @@ def main():
     parser.add_argument("filter", nargs="?", default="",
                         help="only run mutants whose path or label contains this")
     parser.add_argument("--since", metavar="REF", default="",
-                        help="only run mutants whose source file changed since this git ref")
+                        help="only run mutants whose source file changed since this git ref; "
+                             "test or Package.swift changes put every mutant in scope")
+    parser.add_argument("--resume", action="store_true",
+                        help="only rerun mutants the last run did not catch; pair with "
+                             "--since for changed sources, and run the full table after "
+                             "weakening tests")
     parser.add_argument("--list", action="store_true", help="list mutants and exit")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
                         help=f"parallel worker count (default {DEFAULT_WORKERS})")
@@ -257,25 +348,47 @@ def main():
         parser.error("--workers must be at least 1")
 
     with open(MUTANTS_FILE) as handle:
-        mutants = [tuple(m) for m in json.load(handle)]
+        table = [tuple(m) for m in json.load(handle)]
+    previous = load_results()
     changed = None
+    suite_changed = False
     if args.since:
         try:
-            changed = changed_since(args.since)
+            changed, suite_changed = changed_since(args.since)
         except subprocess.CalledProcessError as error:
             print(error.stderr.strip() or f"git could not diff {args.since}", file=sys.stderr)
             return 1
-    mutants = select_mutants(mutants, changed, args.filter)
-    if args.since and not mutants and not args.filter:
-        print(f"no mutants to run: no mutation-table source changed since {args.since}")
-        return 0
+    candidates = select_mutants(table, filter=args.filter)
+    mutants = select_for_run(
+        table, filter=args.filter, changed=changed,
+        suite_changed=suite_changed, resume=args.resume, previous=previous,
+    )
     if args.list:
         for path, label, _old, _new in mutants:
             print(f"{path:24} {label}")
         return 0
     if not mutants:
+        if not candidates:
+            print("no mutants matched", file=sys.stderr)
+            return 1
+        if args.resume:
+            print("nothing to resume: every mutant in scope was already caught")
+            return 0
+        if args.since:
+            print(f"no mutants to run: no mutation-table source or test changed "
+                  f"since {args.since}")
+            return 0
         print("no mutants matched", file=sys.stderr)
         return 1
+    if suite_changed:
+        print(f"tests or Package.swift changed since {args.since}: "
+              "every mutant is in scope", flush=True)
+    if args.resume:
+        skipped = len(candidates) - len(mutants)
+        if previous:
+            print(f"resume: {skipped} previously caught mutant(s) skipped", flush=True)
+        else:
+            print("resume: no previous results; nothing skipped", flush=True)
 
     ok, detail = preflight()
     if not ok:
@@ -300,9 +413,19 @@ def main():
 
     text, exit_code = summarize(results)
     print(text)
+    partial = bool(args.resume or args.since or args.filter)
+    stored = merge_results(previous, results, table) if partial else results
+    if partial:
+        caught = sum(1 for result in stored if result["status"] == "CAUGHT")
+        unresolved = sum(1 for result in stored
+                         if result["status"] not in JUDGED_STATUSES)
+        line = f"Overall (last known): {caught}/{len(stored)} mutants caught"
+        if unresolved:
+            line += f", {unresolved} unresolved"
+        print(line)
     os.makedirs(os.path.dirname(RESULTS_FILE), exist_ok=True)
     with open(RESULTS_FILE, "w") as handle:
-        json.dump(results, handle, indent=2)
+        json.dump(stored, handle, indent=2)
     print(f"Results: {os.path.relpath(RESULTS_FILE, ROOT)}")
     return exit_code
 

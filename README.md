@@ -280,7 +280,7 @@ Three layers, from hermetic to physical:
 | Unit suite (832 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
-| Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |
+| Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; a few minutes for the full table (parallel workers) |
 
 The unit suite drives the pure engine through `FakeWindowGateway`, with
 clocks, schedulers, and the display set injected; only a few live-screen
@@ -309,8 +309,9 @@ swift tools/repro/probe-spaces.swift     # what the live suites can cover here
 ./scripts/run-repro.sh                  # pre-release live check
 ./scripts/run-repro.sh tools/repro/multi-display-suite.swift  # two displays
 ./scripts/run-repro.sh tools/repro/driver.swift   # smaller focused driver
-python3 tools/mutation/mutate.py        # verify the suite still catches bugs (~3-4 min)
-python3 tools/mutation/mutate.py --since HEAD~3  # only mutants whose file changed since a ref
+python3 tools/mutation/mutate.py        # verify the suite still catches bugs (a few minutes)
+python3 tools/mutation/mutate.py --since HEAD~3  # only mutants whose source changed since a ref
+python3 tools/mutation/mutate.py --resume       # only mutants the last run did not catch
 python3 tools/mutation/mutate.py --list # show the injected-bug table
 python3 tools/mutation/mutate.py --workers 2    # fewer workers on a loaded machine
 ```
@@ -367,8 +368,15 @@ workers free up. Before fanning out, the tool runs the unmutated suite once —
 a red baseline aborts instead of scoring mutants. It exits non-zero on any
 survivor or unresolved mutant, so it can gate a release branch. While a stage
 is in flight, `--since <its base commit>` keeps the run to the mutants the
-stage can affect; run the full table before committing. Four workers by
-default (`--workers N` to tune); the tool's own tests run with
+stage can affect: a source change selects that file's mutants, and a test or
+`Package.swift` change puts every mutant in scope. Add `--resume` to recheck
+only the mutants the last run did not catch, so adding tests to kill survivors
+skips the already-caught table; the verdicts merge into
+`build/mutation-results.json`. Resume trusts a prior caught verdict unless its
+source file is in `--since` scope, so it is for adding tests: after changing
+or deleting an existing test, run the full table so a weakened assertion
+cannot hide. Run the full table before committing.
+Four workers by default (`--workers N` to tune); the tool's own tests run with
 `python3 tools/mutation/test_mutate.py`.
 
 CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.

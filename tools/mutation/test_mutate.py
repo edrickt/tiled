@@ -44,6 +44,141 @@ class SelectMutantsTests(unittest.TestCase):
         )
 
 
+class ClassifyChangesTests(unittest.TestCase):
+    def test_a_source_change_selects_that_file(self):
+        sources, suite_changed = mutate.classify_changes([
+            "Sources/tiled/TilingSpace.swift",
+            "README.md",
+        ])
+        self.assertEqual(sources, {"TilingSpace.swift"})
+        self.assertFalse(suite_changed)
+
+    def test_a_test_change_puts_every_mutant_in_scope(self):
+        sources, suite_changed = mutate.classify_changes([
+            "Tests/tiledTests/LayoutTests.swift",
+        ])
+        self.assertEqual(sources, set())
+        self.assertTrue(suite_changed)
+
+    def test_a_package_change_puts_every_mutant_in_scope(self):
+        _sources, suite_changed = mutate.classify_changes(["Package.swift"])
+        self.assertTrue(suite_changed)
+
+    def test_nested_source_paths_are_kept_relative_to_the_module(self):
+        sources, _suite_changed = mutate.classify_changes([
+            "Sources/tiled/Sub/Thing.swift",
+            "Sources/tiled/Other.swift",
+        ])
+        self.assertEqual(sources, {"Sub/Thing.swift", "Other.swift"})
+
+
+def mutant(path, label, status):
+    return dict(path=path, label=label, status=status)
+
+
+PREVIOUS = [
+    mutant("TilingSpace.swift", "swap write-home deleted", "CAUGHT"),
+    mutant("Layout.swift", "grid rounds down", "SURVIVED"),
+]
+
+
+class SelectForRunTests(unittest.TestCase):
+    def test_a_source_change_selects_only_that_file(self):
+        self.assertEqual(
+            mutate.select_for_run(MUTANTS, changed={"Layout.swift"}),
+            [MUTANTS[1]],
+        )
+
+    def test_a_test_change_puts_every_mutant_in_scope(self):
+        self.assertEqual(
+            mutate.select_for_run(MUTANTS, changed=set(), suite_changed=True),
+            MUTANTS,
+        )
+
+    def test_resume_skips_mutants_the_last_run_caught(self):
+        self.assertEqual(
+            mutate.select_for_run(MUTANTS, resume=True, previous=PREVIOUS),
+            [MUTANTS[1], MUTANTS[2]],
+        )
+
+    def test_resume_reruns_a_caught_mutant_in_a_changed_file(self):
+        self.assertEqual(
+            mutate.select_for_run(
+                MUTANTS, changed={"TilingSpace.swift"}, resume=True,
+                previous=PREVIOUS,
+            ),
+            MUTANTS,
+        )
+
+    def test_resume_after_a_test_change_rechecks_only_the_uncaught(self):
+        self.assertEqual(
+            mutate.select_for_run(
+                MUTANTS, changed=set(), suite_changed=True, resume=True,
+                previous=PREVIOUS,
+            ),
+            [MUTANTS[1], MUTANTS[2]],
+        )
+
+    def test_a_filter_still_applies_before_resume(self):
+        self.assertEqual(
+            mutate.select_for_run(
+                MUTANTS, filter="TilingSpace", resume=True,
+                previous=PREVIOUS,
+            ),
+            [],
+        )
+
+
+class MergeResultsTests(unittest.TestCase):
+    def test_skipped_mutants_keep_their_previous_verdicts(self):
+        current = [mutant("Layout.swift", "grid rounds down", "CAUGHT")]
+        merged = mutate.merge_results(PREVIOUS, current, MUTANTS)
+        self.assertEqual(
+            [(result["path"], result["status"]) for result in merged],
+            [("TilingSpace.swift", "CAUGHT"), ("Layout.swift", "CAUGHT")],
+        )
+
+    def test_a_new_verdict_replaces_the_previous_one(self):
+        current = [mutant("Layout.swift", "grid rounds down", "CAUGHT")]
+        merged = mutate.merge_results(PREVIOUS, current, MUTANTS)
+        self.assertEqual(
+            [result["status"] for result in merged if result["path"] == "Layout.swift"],
+            ["CAUGHT"],
+        )
+
+    def test_entries_no_longer_in_the_table_are_dropped(self):
+        previous = [mutant("Gone.swift", "removed", "CAUGHT")]
+        self.assertEqual(mutate.merge_results(previous, [], MUTANTS), [])
+
+
+class LoadResultsTests(unittest.TestCase):
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="mutate-test-")
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+
+    def test_a_missing_file_is_empty(self):
+        self.assertEqual(
+            mutate.load_results(os.path.join(self.base, "missing.json")),
+            [],
+        )
+
+    def test_a_malformed_file_is_empty(self):
+        path = os.path.join(self.base, "bad.json")
+        with open(path, "w") as handle:
+            handle.write("{not json")
+        self.assertEqual(mutate.load_results(path), [])
+
+    def test_a_verdict_without_its_fields_is_dropped(self):
+        path = os.path.join(self.base, "partial.json")
+        with open(path, "w") as handle:
+            handle.write('[{"path": "A.swift"}, {"path": "B.swift", '
+                         '"label": "two", "status": "CAUGHT"}]')
+        self.assertEqual(
+            mutate.load_results(path),
+            [mutant("B.swift", "two", "CAUGHT")],
+        )
+
+
 def completed(returncode=0, output=""):
     return subprocess.CompletedProcess([], returncode, output, "")
 
@@ -68,10 +203,6 @@ class ClassifyTests(unittest.TestCase):
                 mutate.classify(completed(1, output)),
                 "INVALID(no-summary)",
             )
-
-
-def mutant(path, label, status):
-    return dict(path=path, label=label, status=status)
 
 
 class SummarizeTests(unittest.TestCase):
@@ -150,11 +281,13 @@ class PatchSandboxTests(unittest.TestCase):
 
     def write(self, base, name, text):
         path = os.path.join(base, "Sources", "tiled", name)
-        open(path, "w").write(text)
+        with open(path, "w") as handle:
+            handle.write(text)
 
     def read(self, base, name):
         path = os.path.join(base, "Sources", "tiled", name)
-        return open(path).read()
+        with open(path) as handle:
+            return handle.read()
 
     def test_applies_the_mutation_to_the_sandbox_only(self):
         status = mutate.patch_sandbox(
