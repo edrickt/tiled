@@ -93,14 +93,16 @@ final class AppLaunchPlanTests: XCTestCase {
         ).execute(
             startNow: { started += 1 },
             waitForPermission: { waited += 1 })
+        XCTAssertEqual(started, 1, "a trusted plan starts now")
+        XCTAssertEqual(waited, 0)
+
         AppLaunchPlan.make(
             isTrusted: false, didDismissWelcome: false, hideMenuBarIcon: false
         ).execute(
             startNow: { started += 1 },
             waitForPermission: { waited += 1 })
-
         XCTAssertEqual(started, 1)
-        XCTAssertEqual(waited, 1)
+        XCTAssertEqual(waited, 1, "an untrusted plan waits for the permission")
     }
 
     // MARK: Start completion
