@@ -11,7 +11,7 @@ comments that describe the opposite motion ("grows down" / "70pt above").
 **Findings:** T5, F19 (`.scratch/quality-audit/report.md`); CODING_STANDARDS "Tests read as
 behavior specs".
 
-**Status:** TODO
+**Status:** DONE (e7e8b8a)
 
 - [ ] One literal rect per layout is asserted end to end without the canvas grid helper.
 - [ ] One refusal message is asserted as a literal.
