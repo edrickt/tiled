@@ -11,7 +11,7 @@
 
 **Findings:** F14 and F18 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (a931559)
 
 - [ ] A far AX tick followed by an unrelated mouse-up/click is a snapback, not a drag-out.
 - [ ] A real single-tick fling decided at its own mouse-up still untiles.
