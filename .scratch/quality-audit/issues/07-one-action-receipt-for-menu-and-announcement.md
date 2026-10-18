@@ -9,7 +9,7 @@ to undo". The canvas's notice/Outcome and `MenuText` are also reassembled in the
 
 **Findings:** F7 and A5 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (0b8c54b)
 
 - [ ] Evict, Untile All, single-window untile, and Undo announce success only when the controller
       actually performed the action.
