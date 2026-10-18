@@ -46,7 +46,7 @@ overlap findings already recorded there and are marked in the report.
 | A6 | Explore: parked shortcuts module | 03 | A6 | TODO (design) |
 
 The functional queue and ticket 13 are complete; F19–F20 are the remaining test-hygiene
-items, and test-seam tickets 15–20 are the prerequisite for trusting the live-only features.
+items, and test-seam tickets 16–20 are the prerequisite for trusting the live-only features.
 A1/A2 come after the functional queue, per the audit's triage order. A3/A6 are exploratory
 and should not be cut into implementation until their design is approved.
 

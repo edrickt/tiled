@@ -13,7 +13,7 @@ pure mapping tests.
 
 **Findings:** T3, F20 (`.scratch/quality-audit/report.md`); robustness-audit G6.
 
-**Status:** TODO
+**Status:** DONE (3078538)
 
 - [ ] The adapter is constructible with injected Space/observer/write collaborators.
 - [ ] Tests pin Space lookup and cache refresh, observer registration/routing, and destroy
