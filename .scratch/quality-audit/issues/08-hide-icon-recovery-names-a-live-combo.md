@@ -9,7 +9,7 @@ remapped Settings action still renders `⌃⌥⇧⌘,`.
 
 **Findings:** F8 (`.scratch/quality-audit/report.md`); robustness-audit D19.
 
-**Status:** TODO
+**Status:** DONE (ede868c)
 
 - [ ] Disabling the Settings action makes the hide-icon confirm take the relaunch-only path.
 - [ ] Remapping Settings makes the confirm name the live binding.
