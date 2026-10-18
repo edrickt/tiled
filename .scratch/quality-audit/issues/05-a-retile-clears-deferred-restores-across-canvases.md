@@ -10,7 +10,7 @@ window off its new slot.
 
 **Findings:** F5 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (bbeebe5)
 
 - [ ] Untile on canvas A (deferred), retile the same handle on canvas B, then return to A: the
       old restore never fires and the window stays on B.
