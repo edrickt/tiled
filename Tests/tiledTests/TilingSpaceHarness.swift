@@ -51,6 +51,9 @@ final class TilingSpaceHarness {
                 self?.expectedWrites.append(id)
                 self?.tracker.markExpected(id, target)
             },
+            cancelExpected: { [weak self] id in
+                self?.tracker.cancelExpected(id)
+            },
             seedBaseline: { [weak self] id, target in
                 self?.tracker.seedBaseline(id, target)
             },

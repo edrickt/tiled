@@ -513,6 +513,9 @@ final class TilingSpaceTests: XCTestCase {
             space.notice?.contains("to make room") ?? false,
             "no re-house notice for a request that never landed")
         XCTAssertNotNil(space.undoStack.last, "the eviction itself is undoable")
+        XCTAssertEqual(
+            space.displacedCount, 1,
+            "the refused requester never moved, so only the victim is displaced")
     }
 
     func testContainmentRehouseStepsTheBlockerAsideThroughTheCanvas() {

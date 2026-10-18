@@ -117,12 +117,16 @@ final class LiveAXObserverDriver: AXObserverDriver {
 protocol WindowFrames: AnyObject {
     /// The window's frame, or nil when the app will not answer.
     func frame() -> CGRect?
-    /// The window's current origin, for the rollback after a partial
-    /// write. Nil when it cannot be read.
-    func origin() -> CGPoint?
-    /// Moves the origin; the AX result.
-    func setOrigin(_ origin: CGPoint) -> AXError
-    /// Resizes; the AX result.
+    /// The window's top-left corner in AppKit global coordinates (y
+    /// grows up): the counterpart of AX's top-left position attribute,
+    /// and the point the partial-write rollback restores. Nil when it
+    /// cannot be read.
+    func topLeft() -> CGPoint?
+    /// Moves the window's top-left corner; the AX result. The size is
+    /// unchanged.
+    func setTopLeft(_ topLeft: CGPoint) -> AXError
+    /// Resizes; the AX result. AX anchors a resize at the window's
+    /// top-left, so the size write never moves that corner.
     func setSize(_ size: CGSize) -> AXError
 }
 
@@ -140,7 +144,7 @@ final class AXWindowFrames: WindowFrames {
         LiveWindowGateway.frame(of: element)
     }
 
-    func origin() -> CGPoint? {
+    func topLeft() -> CGPoint? {
         guard
             let primaryTop = NSScreen.screens.first?.frame.maxY,
             let axOrigin = LiveWindowGateway.readPoint(
@@ -149,11 +153,11 @@ final class AXWindowFrames: WindowFrames {
         return CGPoint(x: axOrigin.x, y: primaryTop - axOrigin.y)
     }
 
-    func setOrigin(_ origin: CGPoint) -> AXError {
+    func setTopLeft(_ topLeft: CGPoint) -> AXError {
         guard
             let primaryTop = NSScreen.screens.first?.frame.maxY,
             let value = LiveWindowGateway.pointValue(
-                CGPoint(x: origin.x, y: primaryTop - origin.y))
+                CGPoint(x: topLeft.x, y: primaryTop - topLeft.y))
         else { return .failure }
         return AXUIElementSetAttributeValue(
             element, kAXPositionAttribute as CFString, value)
@@ -384,11 +388,11 @@ final class LiveWindowGateway: WindowGateway {
         guard let frames = windowFrames[handle] else { return false }
         // The pair can part-apply: a position write that lands followed by
         // a permanently refused size leaves the window moved at its old
-        // size. Remember the origin before writing, so the failure path
+        // size. Remember the top-left before writing, so the failure path
         // can put the window back; the README promises a refusing app's
         // window is left alone, not half-moved with state believing
         // nothing happened.
-        let previousOrigin = frames.origin()
+        let previousTopLeft = frames.topLeft()
         var positionLanded = false
 
         // The write pair retries as a unit: position writes are idempotent,
@@ -397,7 +401,12 @@ final class LiveWindowGateway: WindowGateway {
         var lastError: AXError = .success
         let error = AXWrite.retrying(
             operation: {
-                let positionResult = frames.setOrigin(frame.origin)
+                // AX's position attribute is the top-left corner, so hand
+                // it frame.maxY: passing the AppKit frame's bottom-left
+                // origin (frame.origin) lands every window a full height
+                // too low, pushing bottom-row tiles off the screen.
+                let positionResult = frames.setTopLeft(
+                    CGPoint(x: frame.minX, y: frame.maxY))
                 if positionResult == .success { positionLanded = true }
                 let sizeResult = frames.setSize(frame.size)
                 guard positionResult == .success, sizeResult == .success else {
@@ -412,12 +421,12 @@ final class LiveWindowGateway: WindowGateway {
             sleep: writeRetrySleep)
         if AXWrite.needsPositionRestore(
             positionLanded: positionLanded, failed: error != nil),
-            let previousOrigin
+            let previousTopLeft
         {
-            // Best effort: if even the origin write is refused, the
+            // Best effort: if even the position write is refused, the
             // window is where the app left it and the refusal is still
             // reported, so screen and state agree on the outcome.
-            _ = frames.setOrigin(previousOrigin)
+            _ = frames.setTopLeft(previousTopLeft)
         }
         if let error, ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: setFrame failed after retries (error %d)", error.rawValue)

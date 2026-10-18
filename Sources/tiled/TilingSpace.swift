@@ -454,17 +454,24 @@ struct TilingSpace {
         var result = ChapterRestore()
         var retained = retained
         for entry in group {
-            guard !retained.contains(where: {
+            if retained.contains(where: {
                 $0.overlaps(entry.slot) || $0.layout != entry.slot.layout
-            }) else { continue }
+            }) {
+                // The retained requester owns the cells this evictee would
+                // return to. The evictee stays untiled, and the chapter's
+                // story must name it: a successful requester otherwise
+                // makes the undo look complete while this window is still
+                // missing from its slot.
+                result.failures.append(
+                    ChapterRestore.Failure(
+                        handle: entry.handle,
+                        name: context.gateway.appName(of: entry.handle) ?? "A window"))
+                continue
+            }
             // Skip confirmed deaths only: an unknown liveness (busy app)
             // still attempts the restore: the write re-probes, and a
             // failed attempt is reported, not silently skipped.
             guard context.gateway.liveness(of: entry.handle) != .dead else { continue }
-            // Claim the handle locally too: the coordinator cannot see
-            // this inout copy.
-            discardDeferredRestore(for: entry.handle)
-            context.discardDeferredRestores(entry.handle)
             // Handles whose records were pruned need fresh ids, issued
             // through the coordinator's table so the window stays
             // resolvable by handle.
@@ -487,6 +494,11 @@ struct TilingSpace {
             // baseline; a deferred off-Space write stands and reconciles
             // when the canvas becomes visible.
             if applyLayout(for: id, context: context, on: entry.space).stands {
+                // The re-place landed (or stands deferred): it claims the
+                // handle, so every canvas's older deferred restore for it
+                // is stale.
+                discardDeferredRestore(for: entry.handle)
+                context.discardDeferredRestores(entry.handle)
                 result.restored.append(id)
             } else {
                 // The re-tile was refused: name the window before any
@@ -497,10 +509,18 @@ struct TilingSpace {
                 let name = appName(id, context: context) ?? "A window"
                 let handle = record.handle
                 if let previous {
+                    // The window still owns a slot on this canvas, so an
+                    // older deferred restore elsewhere is stale even
+                    // though this particular write was refused.
+                    discardDeferredRestore(for: entry.handle)
+                    context.discardDeferredRestores(entry.handle)
                     state.commit(window: id, into: previous)
                     records[id] = previousRecord
                     retained.append(previous)
                 } else {
+                    // The window never returned to this canvas. Its
+                    // pre-tile restore on the canvas it came from stays
+                    // live: do not claim or discard it on this refusal.
                     forget(id, context: context)
                     result.forget.append(id)
                 }
@@ -673,11 +693,11 @@ struct TilingSpace {
         // in a swap chapter: undo returns the requester to the slot it
         // vacated instead of releasing a window that was tiled before
         // the request. A fresh requester adds no entry: its undo is the
-        // pre-tile restore.
-        if let previous,
-            let entry = snapshotEntry(for: id, fallback: previous, space: context.space)
-        {
-            snapshot.append(entry)
+        // pre-tile restore. Capture the entry before the write, but add
+        // it only if the requester actually moved; a refused move keeps
+        // its old slot, so it displaced nobody.
+        let requesterEntry = previous.flatMap {
+            snapshotEntry(for: id, fallback: $0, space: context.space)
         }
         let restoreFailures = restore(
             evicted.filter { $0 != rehouse?.window }, context: context)
@@ -687,6 +707,9 @@ struct TilingSpace {
         commit.refusal = placeResult
         Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
         let clean = commit.clean
+        if clean, let requesterEntry {
+            snapshot.append(requesterEntry)
+        }
         // Re-house commit: once the requester sits, the victim moves
         // into the one free slot and stays tiled. The move only happens
         // when the requester's own placement landed: making room for a

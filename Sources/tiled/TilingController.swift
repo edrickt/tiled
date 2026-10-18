@@ -36,6 +36,9 @@ final class TilingController {
         markExpected: { [weak self] id, target in
             self?.tracker.markExpected(id, target)
         },
+        cancelExpected: { [weak self] id in
+            self?.tracker.cancelExpected(id)
+        },
         seedBaseline: { [weak self] id, target in
             self?.tracker.seedBaseline(id, target)
         },
@@ -335,9 +338,7 @@ final class TilingController {
 
     func handle(slot: Slot) {
         guard let (id, handle, key) = requesterAndCanvas(for: slot) else { return }
-        // A slot request claims the handle: the request is the window's
-        // new intent, so any older deferred restore is stale.
-        discardDeferredRestores(for: handle)
+        let hadSlot = spaces[key]?.state.slot(of: id) != nil
         let context = placementContext(for: key)
         // An expanded window getting a slot hotkey comes back to earth
         // first: its own slot becomes the strict no-op below; a different
@@ -349,6 +350,18 @@ final class TilingController {
                 : nil
             return (collapse, canvas.apply(slot: slot, requester: id, context: context))
         }
+        // A slot request clears an older deferred restore only when it
+        // actually claims the window. A refused first tiling leaves no
+        // record and no slot, so a restore still pending on the canvas the
+        // window came from remains live; only a tiled requester's refusal
+        // (its old slot survives) is still a claim.
+        let claimed: Bool
+        switch outcome.result {
+        case .placed, .alreadyTiled, .deferred: claimed = true
+        case .refused: claimed = hadSlot
+        case .nothingToEvict, .expandRefused: claimed = false
+        }
+        if claimed { discardDeferredRestores(for: handle) }
         let collapsed = collapse != nil
         if let collapse { announce(collapse.result) }
         if case .alreadyTiled = outcome.result {
@@ -667,9 +680,9 @@ final class TilingController {
     }
 
     /// Drops `handle`'s deferred pre-tile restore on every canvas. Call
-    /// this at a tiling claim (a slot request or an undo re-place): the
-    /// window is being tiled again, so the canvas it left must never
-    /// write the old frame over its new slot on the swipe back.
+    /// this at a claim (a slot request, an undo re-place, or an expand):
+    /// the window's frame now belongs to the new action, so the canvas
+    /// it left must never write the old frame over it on the swipe back.
     private func discardDeferredRestores(for handle: WindowHandle) {
         for key in Array(spaces.keys) {
             spaces[key]?.discardDeferredRestore(for: handle)
@@ -1109,10 +1122,12 @@ final class TilingController {
 
     // MARK: Live resize (observe & decide)
 
-    /// The user pressed the mouse button at `point`: records the hand
-    /// evidence a single far drag needs, so it can untile at mouse-up
-    /// while a programmatic jump cannot. Wired from the production
-    /// mouse-down monitor; tests call it directly.
+    /// The user pressed the mouse button at `point` (AppKit global
+    /// coordinates, like every frame the tracker compares against):
+    /// records the hand evidence a single far drag needs, so it can
+    /// untile at mouse-up while a programmatic jump cannot. Wired from
+    /// the production mouse-down monitor, which converts the event's
+    /// Quartz location first; tests call it directly.
     func mousePressed(at point: CGPoint) {
         tracker.mousePressed(at: point)
     }
@@ -1168,11 +1183,33 @@ final class TilingController {
     /// that go to other apps — where window-edge drags live — and the
     /// local monitor covers clicks this process receives. The tracker
     /// uses the press point only to tell a hand drag from a programmatic
-    /// move.
+    /// move, and it compares that point against AppKit frames: convert
+    /// the event's Quartz top-left location before handing it over.
     static func observeLeftMouseDown(_ fire: @escaping (CGPoint) -> Void) {
-        observeLeftMouse(.leftMouseDown) { point in
-            if let point { fire(point) }
+        observeLeftMouse(
+            .leftMouseDown,
+            mouseDownHandler(
+                primaryTop: { NSScreen.screens.first?.frame.maxY }, fire))
+    }
+
+    /// The press monitor's handler, split out so the conversion is
+    /// pinned without installing a real event monitor.
+    static func mouseDownHandler(
+        primaryTop: @escaping () -> CGFloat?,
+        _ fire: @escaping (CGPoint) -> Void
+    ) -> (CGPoint?) -> Void {
+        { point in
+            guard let point, let primaryTop = primaryTop() else { return }
+            fire(appKitPoint(fromQuartz: point, primaryTop: primaryTop))
         }
+    }
+
+    /// Quartz global event coordinates count y down from the main
+    /// display's top; the tracker's frames are AppKit global coordinates,
+    /// which count y up from its bottom. Pure, so the conversion is
+    /// pinned without installing an event monitor.
+    static func appKitPoint(fromQuartz point: CGPoint, primaryTop: CGFloat) -> CGPoint {
+        CGPoint(x: point.x, y: primaryTop - point.y)
     }
 
     /// Production mouse-drag registrar. A drag event refreshes the hand
@@ -1193,10 +1230,11 @@ final class TilingController {
 
     /// One registration shape for every left-mouse edge: the global
     /// monitor sees events delivered to other apps, the local one sees
-    /// events this process receives. The point is the CG event location
-    /// in AX's top-left global coordinates; nil when the event has no
-    /// CGEvent, which simply withholds hand evidence rather than
-    /// guessing a point.
+    /// events this process receives. The point is the raw CG event
+    /// location in Quartz top-left global coordinates; nil when the
+    /// event has no CGEvent, which simply withholds hand evidence rather
+    /// than guessing a point. Only the press registrar consumes it, and
+    /// it converts into the AppKit space the tracker compares against.
     private static func observeLeftMouse(
         _ mask: NSEvent.EventTypeMask, _ fire: @escaping (CGPoint?) -> Void
     ) {
@@ -1476,10 +1514,25 @@ final class TilingController {
         }
         let id = windowID(for: handle)
         let key = spaceOf(window: id) ?? focusedSpaceKey()
+        let wasExpanded = spaces[key]?.isExpanded(id) == true
         let outcome = mutateSpace(key) { canvas in
             canvas.attach(id, handle: handle)
             return canvas.expandToggle(
                 window: id, context: placementContext(for: key))
+        }
+        // Only a landed toggle (or a deferred one whose state stands)
+        // claims the handle for this canvas. A refused expand, or the
+        // no-readable-frame no-op, leaves the window exactly where it
+        // was, so a deferred pre-tile restore on another canvas is still
+        // live and must not be discarded.
+        let expandedNow = spaces[key]?.isExpanded(id) == true
+        switch outcome.result {
+        case .placed:
+            if expandedNow != wasExpanded { discardDeferredRestores(for: handle) }
+        case .deferred:
+            discardDeferredRestores(for: handle)
+        case .refused, .alreadyTiled, .nothingToEvict, .expandRefused:
+            break
         }
         announce(outcome.result)
         onChange?()

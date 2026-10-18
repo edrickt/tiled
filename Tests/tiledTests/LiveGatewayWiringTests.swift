@@ -308,7 +308,26 @@ final class LiveGatewayWiringTests: XCTestCase {
 
     // MARK: Frame reads and the write pair
 
-    func testPartialWriteRestoresTheOriginWhenTheSizeIsRefused() {
+    /// The reported bug: a tiled window landed a full window-height below
+    /// its slot, so the bottom row sat off the screen with only its title
+    /// bar showing. The position write must use the AppKit top-left point,
+    /// the counterpart of AX's top-left position, not the frame's
+    /// bottom-left origin.
+    func testSetFrameLandsTheExactRequestedFrame() {
+        let gateway = makeGateway()
+        let frames = FakeWindowFrames(
+            frame: CGRect(x: 10, y: 20, width: 200, height: 100))
+        let handle = gateway.registerTestWindow(
+            pid: 100, token: 1, frames: frames)
+        let target = CGRect(x: 0, y: 0, width: 720, height: 437)
+
+        XCTAssertTrue(gateway.setFrame(handle, to: target))
+        XCTAssertEqual(
+            frames.frame(), target,
+            "the window must land exactly in its slot, not a height lower")
+    }
+
+    func testPartialWriteRestoresTheTopLeftWhenTheSizeIsRefused() {
         let gateway = makeGateway()
         let original = CGRect(x: 10, y: 20, width: 200, height: 100)
         let frames = FakeWindowFrames(frame: original)
@@ -322,7 +341,11 @@ final class LiveGatewayWiringTests: XCTestCase {
             "a refused size means the placement did not land")
 
         XCTAssertEqual(
-            frames.originWrites, [target.origin, original.origin],
+            frames.topLeftWrites,
+            [
+                CGPoint(x: target.minX, y: target.maxY),
+                CGPoint(x: original.minX, y: original.maxY),
+            ],
             "the landed position is rolled back after the refusal")
         XCTAssertEqual(
             frames.sizeWrites, [target.size],
@@ -345,7 +368,11 @@ final class LiveGatewayWiringTests: XCTestCase {
         XCTAssertTrue(gateway.setFrame(handle, to: target))
 
         XCTAssertEqual(
-            frames.originWrites, [target.origin, target.origin],
+            frames.topLeftWrites,
+            [
+                CGPoint(x: target.minX, y: target.maxY),
+                CGPoint(x: target.minX, y: target.maxY),
+            ],
             "the pair retries as a unit after a busy app")
         XCTAssertEqual(frames.sizeWrites, [target.size, target.size])
         XCTAssertEqual(slept, [0.1], "the adapter uses the AXWrite backoff")

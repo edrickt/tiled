@@ -34,7 +34,7 @@ overlap findings already recorded there and are marked in the report.
 | 12 | Drag edges: programmatic jump and skipped-write baseline | – | F14, F18 | DONE (`a931559`) |
 | 13 | Hotkey registration is testable | – | T1 | DONE (`572de00`) |
 | 14 | App launch and action routing are testable | 13 | T2 | DONE (`702f938`) |
-| 15 | The live AX adapter has a testable seam | – | T3 | TODO |
+| 15 | The live AX adapter has a testable seam | – | T3 | DONE (`3078538`) |
 | 16 | One hotkey route, not a dead table | 13 | T4, A4 | DONE (`9856939`) |
 | 17 | Literal expectations for end-to-end tests | – | T5 | DONE (`e7e8b8a`) |
 | 18 | Splitter-backup drag semantics are pinned | – | T6 | DONE (`d8d4359`) |
@@ -45,9 +45,10 @@ overlap findings already recorded there and are marked in the report.
 | A3 | Explore: canvas directory | – | A3 | TODO (design) |
 | A6 | Explore: parked shortcuts module | 03 | A6 | TODO (design) |
 
-All functional and test-seam tickets (05–20) are complete. Final gates: 824 tests and
-140/140 mutants caught. A1/A2 are the next design explorations; A3/A6 remain exploratory
-and should not be cut into implementation until their design is approved.
+All functional and test-seam tickets (05–20) are complete. Final gates: 832 tests and
+143/143 mutants caught. The follow-up review fixes add seven tests and two mutants; the AX
+placement fix adds one test and one mutant. A1/A2 are the next design explorations; A3/A6
+remain exploratory and should not be cut into implementation until their design is approved.
 
 ## Gates (non-negotiable in every ticket)
 

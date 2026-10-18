@@ -374,6 +374,67 @@ final class SpaceIndependenceTests: XCTestCase {
         assertSwipeBackLeavesTheNewSlot(w, to: Self.spaceB, keeping: aSlot)
     }
 
+    func testRefusedExpandKeepsTheOldCanvasDeferredRestore() {
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let w = addFocusedWindow(frame: original)
+        controller.handle(slot: .topLeft)
+
+        switchTo(Self.spaceB)
+        gateway.focused = w
+        controller.handleEvict()
+        XCTAssertNotNil(
+            controller.canvas(for: keyA).deferredRestores[w],
+            "the eviction on hidden A deferred w's pre-tile restore")
+
+        gateway.focused = w
+        gateway.refuseNextWrites(w)
+        controller.handleExpandToggle()
+
+        XCTAssertNotNil(
+            controller.canvas(for: keyA).deferredRestores[w],
+            "a refused expand did not claim the window, so A's restore is still live")
+    }
+
+    func testRefusedUndoRetileKeepsTheOtherCanvasDeferredRestore() {
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let keyB = TilingSpaceKey(screen: Self.display.id, space: Self.spaceB)
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let w = addFocusedWindow(frame: original)
+        controller.handle(slot: .topLeft)
+        addFocusedWindow(frame: CGRect(x: 200, y: 200, width: 500, height: 400))
+        controller.handle(slot: .topLeft) // evicts w; A holds the undo chapter
+        XCTAssertFalse(controller.canvas(for: keyA).undoStack.isEmpty)
+
+        // Retile w on B, then evict it there while B is hidden: B holds
+        // the deferred pre-tile restore.
+        switchTo(Self.spaceB)
+        gateway.focused = w
+        controller.handle(slot: .bottomRight)
+        switchTo(Self.spaceA)
+        gateway.focused = w
+        controller.handleEvict()
+        XCTAssertNotNil(
+            controller.canvas(for: keyB).deferredRestores[w],
+            "the eviction on hidden B deferred w's pre-tile restore")
+
+        // A's undo re-places w, but its app refuses: w never returned to
+        // A, so B's restore is still live and must not be discarded.
+        gateway.refuseNextWrites(w)
+        controller.undoLastDisplacement(on: Self.display.id)
+        XCTAssertTrue(
+            controller.canvas(for: keyA).state.occupants.isEmpty,
+            "the refused re-place did not tile w on A")
+        XCTAssertNotNil(
+            controller.canvas(for: keyB).deferredRestores[w],
+            "a refused re-place did not claim or discard B's deferred restore")
+
+        switchTo(Self.spaceB)
+        XCTAssertEqual(
+            gateway.frame(of: w), original,
+            "B's pre-tile restore still lands after the refused undo")
+    }
+
     func testSplittersAreIndependentPerSpace() {
         let handle = addFocusedWindow()
         controller.handle(slot: .topLeft)
@@ -728,6 +789,61 @@ final class SpaceIndependenceTests: XCTestCase {
         // window belongs to B's slot now.
         assertSwipeBackLeavesTheNewSlot(a, to: Self.spaceA, keeping: bSlot)
         XCTAssertEqual(controller.canvas(for: keyB).state.slot(of: retiledID), .bottomRight)
+    }
+
+    /// F5 through Expand: the toggle claims the handle for the focused
+    /// canvas even though it does not assign a slot. A deferred restore
+    /// left on another canvas must not fire on the swipe back and write
+    /// the old frame over the expanded one.
+    func testExpandClaimsAHandleAndDiscardsTheOldCanvasDeferredRestore() {
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let w = addFocusedWindow(frame: original)
+        controller.handle(slot: .topLeft)
+
+        switchTo(Self.spaceB)
+        gateway.focused = w
+        controller.handleEvict()
+        XCTAssertNotNil(
+            controller.canvas(for: keyA).deferredRestores[w],
+            "the eviction on hidden A deferred w's pre-tile restore")
+
+        gateway.focused = w
+        controller.handleExpandToggle()
+        let expanded = controller.canvas(for: keyA).visibleFrame
+        XCTAssertEqual(gateway.frame(of: w), expanded, "the window is expanded on B")
+
+        XCTAssertNil(
+            controller.canvas(for: keyA).deferredRestores[w],
+            "expanding the handle on B must discard A's stale pre-tile restore")
+        assertSwipeBackLeavesTheNewSlot(w, to: Self.spaceA, keeping: expanded)
+    }
+
+    func testRefusedFirstTilingKeepsTheOldCanvasDeferredRestore() {
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let w = addFocusedWindow(frame: original)
+        controller.handle(slot: .topLeft)
+        let tiled = gateway.frame(of: w)!
+
+        switchTo(Self.spaceB)
+        gateway.focused = w
+        controller.handleEvict()
+        XCTAssertNotNil(
+            controller.canvas(for: keyA).deferredRestores[w],
+            "the eviction on hidden A deferred w's pre-tile restore")
+
+        gateway.refuseNextWrites(w)
+        controller.handle(slot: .topRight)
+        XCTAssertNotNil(
+            controller.canvas(for: keyA).deferredRestores[w],
+            "a refused first tiling did not claim the handle, so A's restore is still live")
+        XCTAssertEqual(gateway.frame(of: w), tiled, "the refusal changed nothing")
+
+        switchTo(Self.spaceA)
+        XCTAssertEqual(
+            gateway.frame(of: w), original,
+            "the deferred pre-tile restore still lands on the swipe back")
     }
 
     func testScreenChangeWhileHiddenReassertsWhenTheSpaceReturns() {

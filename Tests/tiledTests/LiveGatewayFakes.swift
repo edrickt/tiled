@@ -72,16 +72,16 @@ final class FakeAXObserverDriver: AXObserverDriver {
 /// A scripted window element: its frame and the answer to each AX write.
 final class FakeWindowFrames: WindowFrames {
     private(set) var frameValue: CGRect?
-    /// Status of each successive origin write; `.success` after the list
+    /// Status of each successive top-left write; `.success` after the list
     /// runs out.
-    var originResults: [AXError] = []
+    var topLeftResults: [AXError] = []
     /// Status of each successive size write; `.success` after the list
     /// runs out.
     var sizeResults: [AXError] = []
     /// Writes report success but change nothing: an app that silently
     /// ignores AX geometry writes, the dominant real-world refusal shape.
     var ignoresWrites = false
-    private(set) var originWrites: [CGPoint] = []
+    private(set) var topLeftWrites: [CGPoint] = []
     private(set) var sizeWrites: [CGSize] = []
 
     init(frame: CGRect?) {
@@ -90,13 +90,21 @@ final class FakeWindowFrames: WindowFrames {
 
     func frame() -> CGRect? { frameValue }
 
-    func origin() -> CGPoint? { frameValue?.origin }
+    /// The AppKit top-left of the frame: the counterpart of AX's position
+    /// attribute, which is a top-left point. The fake mirrors the live
+    /// adapter: a position write moves the top-left, and a size write keeps
+    /// it fixed (AX resize anchors the top-left). A caller that passes the
+    /// frame's bottom-left origin therefore shifts the window down by its
+    /// own height, exactly as the live path would.
+    func topLeft() -> CGPoint? {
+        frameValue.map { CGPoint(x: $0.minX, y: $0.maxY) }
+    }
 
-    func setOrigin(_ origin: CGPoint) -> AXError {
-        let result = nextResult(&originResults)
-        originWrites.append(origin)
+    func setTopLeft(_ topLeft: CGPoint) -> AXError {
+        let result = nextResult(&topLeftResults)
+        topLeftWrites.append(topLeft)
         if result == .success, !ignoresWrites, var frame = frameValue {
-            frame.origin = origin
+            frame.origin = CGPoint(x: topLeft.x, y: topLeft.y - frame.height)
             frameValue = frame
         }
         return result
@@ -106,7 +114,9 @@ final class FakeWindowFrames: WindowFrames {
         let result = nextResult(&sizeResults)
         sizeWrites.append(size)
         if result == .success, !ignoresWrites, var frame = frameValue {
+            let top = frame.maxY
             frame.size = size
+            frame.origin.y = top - size.height
             frameValue = frame
         }
         return result

@@ -55,7 +55,7 @@ final class FakeGatewayFidelityTests: XCTestCase {
     /// must read as gone on every seam. The fake used to keep the window
     /// readable and writable, letting release-on-a-released-handle bugs
     /// pass where the live adapter would answer nil.
-    func testReleaseForgetsTheWindowFrameBaselineAndHandlers() {
+    func testReleaseForgetsTheWindowFrameAndHandlers() {
         let a = gateway.addWindow(
             frame: CGRect(x: 10, y: 20, width: 200, height: 100))
         var changes = 0

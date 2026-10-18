@@ -269,6 +269,14 @@ final class DragTracker {
         clearDrag(id)
     }
 
+    /// Drops an expectation armed for a write the gateway refused. The
+    /// pending convergence check must find nothing to judge, not the
+    /// frame the app never accepted; the caller reseeds the diff baseline
+    /// with the frame the gateway still reports.
+    func cancelExpected(_ id: WindowID) {
+        expectedFrames[id] = nil
+    }
+
     /// Drops a pending edge reassert for `id`: a landed expand or collapse
     /// supersedes the gesture that never reached mouse-up, so the next
     /// release must not reconcile the splitters from the frame that action
@@ -672,11 +680,12 @@ final class DragTracker {
 
     // MARK: Mouse-up commit
 
-    /// The user pressed the left button at `point`. Records the hand
-    /// evidence a move tick cannot carry: a programmatic AX jump and a
-    /// real drag can both arrive as a single far tick, and only a recent
-    /// press inside the window tells them apart when an unrelated click
-    /// lifts the button.
+    /// The user pressed the left button at `point`, in the same AppKit
+    /// global coordinates as the frames this tracker compares. Records
+    /// the hand evidence a move tick cannot carry: a programmatic AX jump
+    /// and a real drag can both arrive as a single far tick, and only a
+    /// recent press inside the window tells them apart when an unrelated
+    /// click lifts the button.
     func mousePressed(at point: CGPoint) {
         handPressPoint = point
         handPressAt = context.now()

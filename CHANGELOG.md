@@ -53,10 +53,22 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   live undo chapter survives Untile All.
 - Undo reports a refused restore instead of claiming success, keeps a
   window that cannot be moved back in the slot it visibly holds, and
-  counts only the windows that actually landed.
-- Retiling a window on another Space after it was untiled on a hidden
-  Space no longer lets the hidden Space's swipe-back restore write the
-  old frame and pull the window off its new slot.
+  counts only the windows that actually landed, and names evictees a
+  retained requester blocks. A refused move no longer puts the requester
+  in the undo chapter when it never left its slot.
+- A refused write clears its armed convergence expectation and reseeds
+  the drag baseline, so a late check cannot evict a window that never
+  moved there and an immediate short drag still snaps back.
+- Tiling places a window at its exact slot again: the live AX adapter
+  writes the AppKit top-left corner instead of the bottom-left origin, so
+  a bottom-row tile no longer lands a full window-height below its slot
+  with only the title bar left on screen.
+- A refused undo re-place or a refused expand keeps the source canvas's
+  deferred pre-tile restore alive; only a landed claim discards it.
+- Retiling or expanding a window on another Space after it was untiled
+  on a hidden Space no longer lets the hidden Space's swipe-back restore
+  write the old frame and pull the window off its new slot or expanded
+  frame.
 
 ## [0.2.2] - 2026-10-15
 

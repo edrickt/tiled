@@ -284,7 +284,7 @@
  [
   "FrameWriter.swift",
   "no-op write pushed anyway (expectation never converges)",
-  "        if let live = gateway.frame(of: handle),\n            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            seedBaseline(id, target)\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
+  "        if let live = liveBefore,\n            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            seedBaseline(id, target)\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
   ""
  ],
  [
@@ -302,7 +302,7 @@
  [
   "FrameWriter.swift",
   "refusal reported as success (no write result reaches callers)",
-  "        guard gateway.setFrame(handle, to: target) else {\n            log(\"write win\\(id) refused target=\\(target)\")\n            return .refused\n        }",
+  "        guard gateway.setFrame(handle, to: target) else {\n            // The expectation armed above must not outlive a refusal: a\n            // pending convergence check would see the silent target and\n            // roll back a window that never moved there. Reset the diff\n            // baseline to the frame the gateway still reports, so an\n            // immediate short drag is measured against reality.\n            cancelExpected(id)\n            seedBaseline(id, gateway.frame(of: handle) ?? liveBefore ?? target)\n            log(\"write win\\(id) refused target=\\(target)\")\n            return .refused\n        }",
   "        _ = gateway.setFrame(handle, to: target)"
  ],
  [
@@ -524,14 +524,14 @@
  [
   "TilingController.swift",
   "handle claim keeps a deferred restore on the old canvas (swipe back yanks a retiled window)",
-  "        discardDeferredRestores(for: handle)\n",
-  "        _ = handle\n"
+  "        if claimed { discardDeferredRestores(for: handle) }",
+  "        if claimed { _ = handle }"
  ],
  [
   "TilingSpace.swift",
   "undo re-place keeps another canvas's deferred restore (swipe back yanks the retiled window)",
-  "            context.discardDeferredRestores(entry.handle)\n",
-  "            _ = entry.handle\n"
+  "                discardDeferredRestore(for: entry.handle)\n                context.discardDeferredRestores(entry.handle)\n                result.restored.append(id)",
+  "                discardDeferredRestore(for: entry.handle)\n                result.restored.append(id)"
  ],
  [
   "TilingController.swift",
@@ -608,8 +608,8 @@
  [
   "TilingSpace.swift",
   "restore ignores the requester's retained layout (two layouts on one canvas)",
-  "            guard !retained.contains(where: {\n                $0.overlaps(entry.slot) || $0.layout != entry.slot.layout\n            }) else { continue }",
-  "            guard !retained.contains(where: { $0.overlaps(entry.slot) }) else { continue }"
+  "                $0.overlaps(entry.slot) || $0.layout != entry.slot.layout",
+  "                $0.overlaps(entry.slot)"
  ],
  [
   "TilingSpace.swift",
@@ -817,9 +817,15 @@
  ],
  [
   "LiveWindowGateway.swift",
-  "a partial write cannot restore the origin it never read",
-  "        let previousOrigin = frames.origin()",
-  "        let previousOrigin: CGPoint? = nil"
+  "a partial write cannot restore the top-left it never read",
+  "        let previousTopLeft = frames.topLeft()",
+  "        let previousTopLeft: CGPoint? = nil"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a tiled window lands a height below its slot (bottom row off-screen)",
+  "                let positionResult = frames.setTopLeft(\n                    CGPoint(x: frame.minX, y: frame.maxY))",
+  "                let positionResult = frames.setTopLeft(frame.origin)"
  ],
  [
   "LiveWindowGateway.swift",
@@ -838,5 +844,17 @@
   "unknown Carbon ids route to the first action instead of falling through",
   "        actionByID[id]",
   "        actionByID[id] ?? HotkeyAction.allCases[0]"
+ ],
+ [
+  "TilingController.swift",
+  "mouse-down point is not converted from Quartz to AppKit (a real press misses the window)",
+  "CGPoint(x: point.x, y: primaryTop - point.y)",
+  "point"
+ ],
+ [
+  "FrameWriter.swift",
+  "a refused write keeps its armed expectation (the stale check evicts the window)",
+  "            cancelExpected(id)\n",
+  ""
  ]
 ]

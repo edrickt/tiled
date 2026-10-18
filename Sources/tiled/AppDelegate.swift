@@ -62,7 +62,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.actionGeneration += 1
             self?.refreshMenu()
         }
-        controller.onFocusedSpaceChange = { [weak self] in self?.refreshFocusedDisplay() }
+        controller.onFocusedSpaceChange = { [weak self] in
+            // A focus move supersedes a background action receipt. Clear
+            // all of it, not just the guard's focus key: returning to the
+            // same canvas later must not resurrect a stale notice.
+            self?.lastActionReceipt = nil
+            self?.lastReceiptFocusedSpace = nil
+            self?.lastReceiptGeneration = nil
+            self?.refreshFocusedDisplay()
+        }
         controller.onFeedback = { [weak self] feedback in
             DispatchQueue.main.async { self?.signalFeedback(feedback) }
         }

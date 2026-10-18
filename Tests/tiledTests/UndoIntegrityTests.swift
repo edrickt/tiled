@@ -234,8 +234,8 @@ final class UndoIntegrityTests: XCTestCase {
 
         XCTAssertEqual(
             canvas.error,
-            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.",
-            "two refused writes for one window are one failure")
+            "Couldn't restore 2 windows: they may still be sitting in their old tiles.",
+            "the requester's two refused writes are one failure; the evictee it blocks is the other")
         XCTAssertEqual(
             canvas.state.occupant(of: .rightHalf).map { canvas.handle(of: $0) }, requester,
             "the requester keeps the slot it visibly holds after the second refusal")
@@ -264,7 +264,8 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertNil(canvas.notice, "a refused requester is never narrated as success")
         XCTAssertEqual(
             canvas.error,
-            "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+            "Couldn't restore 3 windows: they may still be sitting in their old tiles.",
+            "the requester and the two evictees it blocked are all named in the count")
         XCTAssertEqual(
             canvas.state.occupant(of: .sixthLeft).map { canvas.handle(of: $0) }, requester,
             "the refused requester keeps the slot it visibly holds")

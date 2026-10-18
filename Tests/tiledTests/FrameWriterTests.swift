@@ -9,6 +9,8 @@ import XCTest
 final class FrameWriterTests: XCTestCase {
     private var gateway: FakeWindowGateway!
     private var echoed: [WindowID] = []
+    private var cancelled: [WindowID] = []
+    private var baselines: [(WindowID, CGRect)] = []
     private var checked: [WindowID] = []
     private var checkedSpaces: [TilingSpaceKey] = []
     private var staleMarks: [TilingSpaceKey] = []
@@ -25,6 +27,8 @@ final class FrameWriterTests: XCTestCase {
         super.setUp()
         gateway = FakeWindowGateway()
         echoed = []
+        cancelled = []
+        baselines = []
         checked = []
         checkedSpaces = []
         staleMarks = []
@@ -45,7 +49,13 @@ final class FrameWriterTests: XCTestCase {
                 self?.events.append("echo")
                 self?.echoed.append(id)
             },
-            seedBaseline: { _, _ in },
+            cancelExpected: { [weak self] id in
+                self?.events.append("cancel")
+                self?.cancelled.append(id)
+            },
+            seedBaseline: { [weak self] id, frame in
+                self?.baselines.append((id, frame))
+            },
             scheduleCheck: { [weak self] id, space in
                 self?.events.append("check")
                 self?.checked.append(id)
@@ -116,15 +126,23 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertTrue(checked.isEmpty)
     }
 
-    func testRefusedWriteArmsTheEchoButSchedulesNoCheck() {
-        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+    func testRefusedWriteCancelsTheEchoAndSeedsTheLiveBaseline() {
+        let original = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let handle = gateway.addWindow(frame: original)
         gateway.refuseNextWrites(handle)
         let target = CGRect(x: 40, y: 40, width: 300, height: 200)
 
         let result = makeWriter().write(7, handle: handle, to: target, bounds: Self.bounds, on: canvas, check: .rollback)
 
         XCTAssertEqual(result, .refused)
-        XCTAssertEqual(echoed, [7])
+        XCTAssertEqual(echoed, [7], "the expectation is armed before the write")
+        XCTAssertEqual(cancelled, [7], "a refused write clears the expectation again")
+        XCTAssertEqual(
+            baselines.last?.0, 7,
+            "the refusal reseeds the drag baseline from the live frame")
+        XCTAssertEqual(
+            baselines.last?.1, original,
+            "the baseline is the frame the app still holds, not the refused target")
         XCTAssertTrue(checked.isEmpty)
     }
 

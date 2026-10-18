@@ -73,6 +73,24 @@ final class ControllerGatewayTests: XCTestCase {
 
     // MARK: Hotkey entry point
 
+    func testRefusedMoveDoesNotEvictOnTheOldVerification() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        XCTAssertFalse(verifyFires.isEmpty, "the original placement armed a check")
+
+        gateway.refuseNextWrites(handle)
+        controller.handle(slot: .bottomRight)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft, "the refusal keeps the slot")
+
+        verifyFires.forEach { $0() }
+
+        XCTAssertEqual(
+            canvas.state.slot(of: 1), .topLeft,
+            "a stale verification must not evict after the refusal")
+    }
+
     func testHandleTilesFocusedWindow() {
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
@@ -281,6 +299,67 @@ final class ControllerGatewayTests: XCTestCase {
 
         XCTAssertNil(canvas.state.slot(of: 1), "a one-tick hand drag still untiles")
         XCTAssertEqual(gateway.frame(of: handle), far)
+    }
+
+    func testQuartzMouseDownAtTheWindowCenterAuthorizesAOneTickDrag() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tiled = CGRect(x: 0, y: 500, width: 800, height: 500)
+        gateway.simulateChange(handle, to: tiled) // settle the placement echo
+
+        // A real mouse event reports Quartz coordinates (y down from the
+        // screen top); the tracker compares AppKit frames (y up from the
+        // bottom). The production registrar must convert before recording
+        // hand evidence, or the press falls outside the window's frame.
+        let quartzCenter = CGPoint(x: tiled.midX, y: 1000 - tiled.midY)
+        let handler = TilingController.mouseDownHandler(
+            primaryTop: { 1000 }
+        ) { [weak controller] point in
+            controller?.mousePressed(at: point)
+        }
+        var seen: [CGPoint] = []
+        let spy = TilingController.mouseDownHandler(primaryTop: { 1000 }) {
+            seen.append($0)
+        }
+        spy(quartzCenter)
+        XCTAssertEqual(
+            seen, [CGPoint(x: tiled.midX, y: tiled.midY)],
+            "the production handler converts Quartz coordinates into the tracker's AppKit space")
+
+        handler(quartzCenter)
+        var far = tiled
+        far.origin.x += 200
+        far.origin.y += 200
+        gateway.simulateChange(handle, to: far)
+        controller.mouseLifted()
+
+        XCTAssertNil(
+            canvas.state.slot(of: 1),
+            "a one-tick hand drag whose press arrived in Quartz coordinates still untiles")
+    }
+
+    func testRefusedMoveSeedsTheBaselineForAnImmediateShortDrag() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tiled = CGRect(x: 0, y: 500, width: 800, height: 500)
+        gateway.simulateChange(handle, to: tiled)
+
+        gateway.refuseNextWrites(handle)
+        controller.handle(slot: .bottomRight)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft, "the refusal kept the slot")
+
+        controller.mousePressed(at: CGPoint(x: tiled.midX, y: tiled.midY))
+        var short = tiled
+        short.origin.x += 20
+        short.origin.y += 20
+        gateway.simulateChange(handle, to: short)
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            gateway.frame(of: handle), tiled,
+            "the refusal reseeded the baseline, so a short drag still snaps back")
     }
 
     func testProgrammaticJumpThenUnrelatedClickSnapsBack() {

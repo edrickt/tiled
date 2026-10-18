@@ -43,9 +43,13 @@ struct FrameWriter {
     private let isVisible: (TilingSpaceKey) -> Bool
     private let markStale: (TilingSpaceKey) -> Void
     private let markExpected: (WindowID, CGRect) -> Void
-    /// Seeds the tracker's diff baseline for a skipped write. The skip
-    /// arms no echo expectation, so without this a later one-tick drag
-    /// diffs against a stale frame and is dropped.
+    /// Drops an expectation armed for a write the gateway then refused.
+    /// Without this a pending convergence check judges a frame that never
+    /// landed and can roll the window back.
+    private let cancelExpected: (WindowID) -> Void
+    /// Seeds the tracker's diff baseline for a skipped or refused write.
+    /// Neither arms an echo expectation, so without this a later one-tick
+    /// drag diffs against a stale frame and is dropped.
     private let seedBaseline: (WindowID, CGRect) -> Void
     private let scheduleCheck: (WindowID, TilingSpaceKey) -> Void
     private let log: (String) -> Void
@@ -55,6 +59,7 @@ struct FrameWriter {
         isVisible: @escaping (TilingSpaceKey) -> Bool,
         markStale: @escaping (TilingSpaceKey) -> Void,
         markExpected: @escaping (WindowID, CGRect) -> Void,
+        cancelExpected: @escaping (WindowID) -> Void,
         seedBaseline: @escaping (WindowID, CGRect) -> Void,
         scheduleCheck: @escaping (WindowID, TilingSpaceKey) -> Void,
         log: @escaping (String) -> Void
@@ -63,6 +68,7 @@ struct FrameWriter {
         self.isVisible = isVisible
         self.markStale = markStale
         self.markExpected = markExpected
+        self.cancelExpected = cancelExpected
         self.seedBaseline = seedBaseline
         self.scheduleCheck = scheduleCheck
         self.log = log
@@ -93,7 +99,8 @@ struct FrameWriter {
         // nothing and emits no echo, so a marked expectation here
         // would never converge and the late check would misread an
         // already-correct window.
-        if let live = gateway.frame(of: handle),
+        let liveBefore = gateway.frame(of: handle)
+        if let live = liveBefore,
             DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)
         {
             seedBaseline(id, target)
@@ -102,6 +109,13 @@ struct FrameWriter {
         }
         markExpected(id, target)
         guard gateway.setFrame(handle, to: target) else {
+            // The expectation armed above must not outlive a refusal: a
+            // pending convergence check would see the silent target and
+            // roll back a window that never moved there. Reset the diff
+            // baseline to the frame the gateway still reports, so an
+            // immediate short drag is measured against reality.
+            cancelExpected(id)
+            seedBaseline(id, gateway.frame(of: handle) ?? liveBefore ?? target)
             log("write win\(id) refused target=\(target)")
             return .refused
         }
