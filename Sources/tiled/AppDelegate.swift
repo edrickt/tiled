@@ -8,6 +8,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeMouseUp: TilingController.observeLeftMouseUp,
         observeMouseDown: TilingController.observeLeftMouseDown,
         observeMouseDragged: TilingController.observeLeftMouseDragged)
+    /// The global-hotkey observer: forwards routes to the live controller
+    /// and delegate. Lazy because it captures both.
+    private lazy var hotkeyPerformer = AppHotkeyPerformer(
+        controller: controller,
+        presentEvict: { [weak self] in self?.present($0) },
+        openSettings: { [weak self] in self?.showSettings(nil) },
+        performUndo: { [weak self] in self?.performUndoSwitch() })
     private let hotkeyStore = HotkeyStore()
     private var hotkeys: HotkeyService?
     private var permissionTimer: Timer?
@@ -67,30 +74,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setupStatusItem()
         }
 
-        if gateway.isTrusted {
-            start()
-        } else {
-            // Register with TCC first (no dialog): without this call the
-            // app may not appear in System Settings' list at all, and
-            // the button would open a pane that can't grant anything.
-            gateway.registerAccessibilityInterest()
-            // The product's own explainer with one explicit button,
-            // never the bare system prompt: the request arrives with the
-            // reason attached, and granting is a deliberate click.
-            showPermissionWindow()
-            pollForPermission()
-        }
+        // One plan owns the launch branches: start versus permission wait,
+        // first-run Welcome, and hidden-icon recovery. The trusted path
+        // presents Welcome immediately; the permission-waiting path
+        // presents it on grant (see start(afterPermissionWait)).
+        let plan = AppLaunchPlan.make(
+            isTrusted: gateway.isTrusted,
+            didDismissWelcome: settings.didDismissWelcome,
+            hideMenuBarIcon: settings.hideMenuBarIcon)
+        plan.execute(
+            startNow: { start() },
+            waitForPermission: {
+                // Register with TCC first (no dialog): without this call
+                // the app may not appear in System Settings' list at all,
+                // and the button would open a pane that can't grant
+                // anything.
+                gateway.registerAccessibilityInterest()
+                // The product's own explainer with one explicit button,
+                // never the bare system prompt: the request arrives with
+                // the reason attached, and granting is a deliberate click.
+                showPermissionWindow()
+                pollForPermission()
+            })
         refreshMenu()
         // First run: land on Welcome so the one demonstrated combo plus
         // lit geometry teaches before the 17-row Shortcuts tab does.
-        let firstRun = !settings.didDismissWelcome
-        if firstRun {
-            // Trusted path: present immediately. Permission-waiting path:
-            // present on grant (see start(afterPermissionWait)).
-            if gateway.isTrusted {
-                showSettings(selecting: .welcome)
-            }
-        } else if settings.hideMenuBarIcon {
+        if plan.showsWelcome {
+            showSettings(selecting: .welcome)
+        }
+        if plan.showsSettings {
             // Hidden-icon recovery: with no status item there is no other
             // way back in, so a fresh launch opens Settings automatically.
             showSettings(nil)
@@ -154,19 +166,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionWindowController?.close()
         permissionWindowController = nil
         let service = HotkeyService(store: hotkeyStore)
-        // One entry point for every global hotkey, slot or app action:
-        // the switch is exhaustive, so a new action can never be
-        // registered and then silently dropped here.
+        // One entry point for every global hotkey, slot or app action.
+        // The router owns the route table; the closure holds the delegate
+        // weakly, so the service never keeps the app alive.
         service.handler = { [weak self] action in
             guard let self else { return }
-            switch action {
-            case .slot(let slot): controller.handle(slot: slot)
-            case .expand: controller.handleExpandToggle()
-            case .evict: self.present(controller.handleEvict())
-            case .settings: self.showSettings(nil)
-            case .undo: self.performUndoSwitch()
-            case .resetSplitters: controller.resetDividers()
-            }
+            HotkeyActionRouter(performer: self.hotkeyPerformer).dispatch(action)
         }
         hotkeys = service
         // Focus moving to another window can change which display drives
@@ -174,12 +179,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // as apps activate; this subscribes now that AX is trusted.
         controller.observeFocus()
         refreshMenu()
-        // Permission-grant teaching moment: the user waited at the
-        // highest-friction step with no picture of the product, so open
-        // Welcome once instead of leaving them at the menu.
-        if afterPermissionWait, !settings.didDismissWelcome {
+        switch AppStartCompletion.make(
+            afterPermissionWait: afterPermissionWait,
+            didDismissWelcome: settings.didDismissWelcome
+        ) {
+        case .showWelcome:
+            // Permission-grant teaching moment: the user waited at the
+            // highest-friction step with no picture of the product, so
+            // open Welcome once instead of leaving them at the menu.
             showSettings(selecting: .welcome)
-        } else {
+        case .refreshPermissionRows:
             // An already-open Settings window must re-probe now: its
             // permission rows are only refreshed on show() otherwise.
             settingsController?.permissionStateDidChange()

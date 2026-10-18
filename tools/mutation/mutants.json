@@ -688,5 +688,77 @@
   "deinit drops tokens without unregistering (hotkeys outlive the service)",
   "    deinit {\n        retireRegistrations()\n    }",
   "    deinit {\n        registrations.removeAll()\n    }"
+ ],
+ [
+  "AppLaunchPlan.swift",
+  "untrusted launch starts tiling without the permission wait",
+  "            mode: isTrusted ? .startNow : .waitForPermission,",
+  "            mode: .startNow,"
+ ],
+ [
+  "AppLaunchPlan.swift",
+  "launch mode executes the wrong branch",
+  "        case .startNow: startNow()\n        case .waitForPermission: waitForPermission()",
+  "        case .startNow: waitForPermission()\n        case .waitForPermission: startNow()"
+ ],
+ [
+  "AppLaunchPlan.swift",
+  "Welcome ignores the permission wait (untrusted first run opens the guide)",
+  "            showsWelcome: isTrusted && firstRun,",
+  "            showsWelcome: firstRun,"
+ ],
+ [
+  "AppLaunchPlan.swift",
+  "hidden-icon recovery ignores first run (Settings overwrites Welcome)",
+  "            showsSettings: !firstRun && hideMenuBarIcon)",
+  "            showsSettings: hideMenuBarIcon)"
+ ],
+ [
+  "AppLaunchPlan.swift",
+  "permission grant reopens Welcome after dismissal",
+  "        if afterPermissionWait, !didDismissWelcome {",
+  "        if afterPermissionWait {"
+ ],
+ [
+  "HotkeyActionRouter.swift",
+  "settings and undo hotkeys are swapped",
+  "        case .settings: performer.performSettings()\n        case .undo: performer.performUndo()",
+  "        case .settings: performer.performUndo()\n        case .undo: performer.performSettings()"
+ ],
+ [
+  "HotkeyActionRouter.swift",
+  "expand and evict hotkeys are swapped",
+  "        case .expand: performer.performExpandToggle()\n        case .evict: performer.performEvict()",
+  "        case .expand: performer.performEvict()\n        case .evict: performer.performExpandToggle()"
+ ],
+ [
+  "HotkeyActionRouter.swift",
+  "evict route drops the receipt presenter",
+  "    func performEvict() {\n        presentEvict(controller.handleEvict())\n    }",
+  "    func performEvict() {\n        controller.handleExpandToggle()\n    }"
+ ],
+ [
+  "HotkeyActionRouter.swift",
+  "settings and undo performer bodies are swapped",
+  "    func performSettings() {\n        openSettings()\n    }\n\n    func performUndo() {\n        performUndoAction()\n    }",
+  "    func performSettings() {\n        performUndoAction()\n    }\n\n    func performUndo() {\n        openSettings()\n    }"
+ ],
+ [
+  "HotkeyActionRouter.swift",
+  "reset-splitters route expands instead",
+  "    func performResetSplitters() {\n        controller.resetDividers()\n    }",
+  "    func performResetSplitters() {\n        controller.handleExpandToggle()\n    }"
+ ],
+ [
+  "AppLaunchPlan.swift",
+  "permission grant never opens Welcome",
+  "        if afterPermissionWait, !didDismissWelcome {\n            return .showWelcome\n        }",
+  "        if afterPermissionWait, !didDismissWelcome {\n            return .refreshPermissionRows\n        }"
+ ],
+ [
+  "AppLaunchPlan.swift",
+  "immediate start reopens Welcome on a first run",
+  "        if afterPermissionWait, !didDismissWelcome {",
+  "        if !didDismissWelcome {"
  ]
 ]
