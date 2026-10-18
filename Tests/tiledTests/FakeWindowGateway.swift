@@ -112,6 +112,14 @@ final class FakeWindowGateway: WindowGateway {
         releaseCalls.append(handle)
         changeHandlers[handle] = nil
         destroyedHandlers[handle] = nil
+        windows[handle] = nil
+        silentIgnore.remove(handle)
+        refuseSizeWrites.remove(handle)
+        busy.remove(handle)
+        probeDead.remove(handle)
+        hideFrames.remove(handle)
+        if focused == handle { focused = nil }
+        zOrder.removeAll { $0 == handle }
     }
 
     /// Handles whose liveness probe reports unknown (a busy app that

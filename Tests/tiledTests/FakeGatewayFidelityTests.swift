@@ -48,4 +48,37 @@ final class FakeGatewayFidelityTests: XCTestCase {
             "the live frame is the app's applied rect, not the tile target")
         XCTAssertEqual(canvas.state.slot(of: a.id), .topLeft)
     }
+
+    // MARK: Release forgets the window
+
+    /// F20: release is the adapter's forget path, so a released handle
+    /// must read as gone on every seam. The fake used to keep the window
+    /// readable and writable, letting release-on-a-released-handle bugs
+    /// pass where the live adapter would answer nil.
+    func testReleaseForgetsTheWindowFrameBaselineAndHandlers() {
+        let a = gateway.addWindow(
+            frame: CGRect(x: 10, y: 20, width: 200, height: 100))
+        var changes = 0
+        var destroys = 0
+        gateway.observe(
+            a, onChange: { changes += 1 }, onDestroyed: { destroys += 1 })
+        gateway.focused = a
+
+        gateway.release(a)
+
+        XCTAssertNil(gateway.frame(of: a), "a released window has no readable frame")
+        XCTAssertFalse(
+            gateway.setFrame(a, to: CGRect(x: 0, y: 0, width: 1, height: 1)),
+            "a released handle is not writable")
+        XCTAssertEqual(gateway.liveness(of: a), .dead)
+        XCTAssertNil(gateway.focusedWindow(), "a released window cannot stay focused")
+        XCTAssertFalse(gateway.zOrder.contains(a), "a released window leaves the z-order")
+        XCTAssertFalse(
+            gateway.observedHandles().contains(a),
+            "release drops the observation")
+        gateway.simulateChange(a, to: CGRect(x: 0, y: 0, width: 1, height: 1))
+        gateway.simulateDestroyed(a)
+        XCTAssertEqual(changes, 0, "a released handle's change handler is gone")
+        XCTAssertEqual(destroys, 0, "a released handle's destroy handler is gone")
+    }
 }

@@ -760,5 +760,71 @@
   "immediate start reopens Welcome on a first run",
   "        if afterPermissionWait, !didDismissWelcome {",
   "        if !didDismissWelcome {"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "release keeps the released window's frame access (a forgotten handle still reads)",
+  "        windowFrames[handle] = nil",
+  "        _ = windowFrames[handle]"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "Space cache never reuses a fresh table (every row lookup re-reads the window server)",
+  "            current.timeIntervalSince(stamp) < Self.spaceCacheLifetime",
+  "            current.timeIntervalSince(stamp) < 0"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "Space cache never refreshes after its lifetime (a stale Space misdirects a hotkey)",
+  "            current.timeIntervalSince(stamp) < Self.spaceCacheLifetime",
+  "            current.timeIntervalSince(stamp) >= 0"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "the workspace Space notification leaves the cached table fresh",
+  "    func spaceDidChange() {\n        spaceCacheStamp = nil\n        spaceChangeHandler?()",
+  "    func spaceDidChange() {\n        spaceChangeHandler?()"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a registered window forgets its pid's observer (every window creates its own)",
+  "            case .registered:\n                registeredKeys[key] = pid\n                observerPIDs.insert(pid)",
+  "            case .registered:\n                registeredKeys[key] = pid"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a failed observer creation is remembered as an existing observer",
+  "            guard result.status == .success, let newObserver = result.observer\n            else {\n                registry.finish(\n                    key: token, pid: pid, outcome: .observerUnavailable)",
+  "            guard result.status == .success, let newObserver = result.observer\n            else {\n                registry.finish(\n                    key: token, pid: pid, outcome: .registrationFailed)"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "pruning a pid leaks its runloop source",
+  "        observerDriver.removeRunLoopSource(observer)",
+  "        _ = observer"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a destroy report routed as a move (the controller reads a dead window frame)",
+  "        if notification == kAXUIElementDestroyedNotification as String {",
+  "        if false {"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a destroy notification is never registered (closed windows linger)",
+  "        for name in [\n            kAXWindowResizedNotification, kAXWindowMovedNotification,\n            kAXUIElementDestroyedNotification,\n        ] {",
+  "        for name in [\n            kAXWindowResizedNotification, kAXWindowMovedNotification,\n        ] {"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a partial write cannot restore the origin it never read",
+  "        let previousOrigin = frames.origin()",
+  "        let previousOrigin: CGPoint? = nil"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "adoption keeps the stale observation key (fresh notifications fall through)",
+  "        registry.forget(key: oldKey, pid: pid)\n        observedKeys[handle] = token",
+  "        registry.forget(key: oldKey, pid: pid)"
  ]
 ]

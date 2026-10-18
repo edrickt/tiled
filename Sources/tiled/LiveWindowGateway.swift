@@ -26,6 +26,149 @@ private enum CGS {
     }
 }
 
+/// Opaque handle to an AX observer. Production wraps `AXObserver`; a fake
+/// can stand in for it, so the suite pins observer reuse and registration
+/// without creating a real observer.
+protocol AXObserverHandle: AnyObject {}
+
+/// The AXObserver boundary: create the per-pid observer, register the
+/// per-window notifications, attach and detach its run-loop source, and
+/// deliver notifications. Injecting it keeps the adapter constructible
+/// and testable without a live Accessibility grant.
+protocol AXObserverDriver: AnyObject {
+    /// Creates the observer for `pid`. `onNotification` receives the
+    /// notification name and the AXUIElement token (its CFHash) so
+    /// a fake can deliver one; the live AXObserver callback carries no
+    /// user data, so the production driver routes through the one active
+    /// gateway instead.
+    func createObserver(
+        pid: pid_t, onNotification: @escaping (String, UInt) -> Void
+    ) -> (status: AXError, observer: AXObserverHandle?)
+    /// Adds one notification for one AXUIElement. `element` is nil for
+    /// a scripted test window, which a fake ignores; production refuses.
+    func addNotification(
+        _ notification: String, to observer: AXObserverHandle,
+        element: AXUIElement?) -> AXError
+    func addRunLoopSource(_ observer: AXObserverHandle)
+    func removeRunLoopSource(_ observer: AXObserverHandle)
+}
+
+/// Production AXObserver adapter. Its handles are `AXObserver`s; a
+/// foreign handle belongs to a test fake and is left alone.
+final class LiveAXObserverDriver: AXObserverDriver {
+    private final class LiveObserver: AXObserverHandle {
+        let observer: AXObserver
+
+        init(_ observer: AXObserver) {
+            self.observer = observer
+        }
+    }
+
+    func createObserver(
+        pid: pid_t, onNotification: @escaping (String, UInt) -> Void
+    ) -> (status: AXError, observer: AXObserverHandle?) {
+        // The closure is for fakes: AXObserverCreate's C callback has no
+        // user data, so the live path routes through the one active
+        // gateway, exactly as the adapter always has.
+        _ = onNotification
+        var created: AXObserver?
+        let result = AXObserverCreate(pid, Self.callback, &created)
+        guard result == .success, let created else { return (result, nil) }
+        return (.success, LiveObserver(created))
+    }
+
+    func addNotification(
+        _ notification: String, to observer: AXObserverHandle,
+        element: AXUIElement?
+    ) -> AXError {
+        guard let observer = observer as? LiveObserver, let element else {
+            return .invalidUIElement
+        }
+        return AXObserverAddNotification(
+            observer.observer, element, notification as CFString, nil)
+    }
+
+    func addRunLoopSource(_ observer: AXObserverHandle) {
+        guard let observer = observer as? LiveObserver else { return }
+        CFRunLoopAddSource(
+            CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer.observer),
+            CFRunLoopMode.commonModes)
+    }
+
+    func removeRunLoopSource(_ observer: AXObserverHandle) {
+        guard let observer = observer as? LiveObserver else { return }
+        CFRunLoopRemoveSource(
+            CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer.observer),
+            CFRunLoopMode.commonModes)
+    }
+
+    private static let callback: AXObserverCallback = {
+        _, element, notification, _ in
+        LiveWindowGateway.active?.handleAXNotification(
+            notification: notification as String,
+            token: UInt(CFHash(element)))
+    }
+}
+
+/// The AX frame calls for one registered window, in AppKit global
+/// coordinates. Production wraps `AXUIElement`; a fake scripts position,
+/// size, and refusal answers, so the adapter's write pair, retry, and
+/// partial-write rollback are testable without a live app.
+protocol WindowFrames: AnyObject {
+    /// The window's frame, or nil when the app will not answer.
+    func frame() -> CGRect?
+    /// The window's current origin, for the rollback after a partial
+    /// write. Nil when it cannot be read.
+    func origin() -> CGPoint?
+    /// Moves the origin; the AX result.
+    func setOrigin(_ origin: CGPoint) -> AXError
+    /// Resizes; the AX result.
+    func setSize(_ size: CGSize) -> AXError
+}
+
+/// The production window frames: AX position/size reads and writes with
+/// the AppKit y-flip. No screen means no coordinate space, so every
+/// method refuses rather than guessing, exactly as the old write path did.
+final class AXWindowFrames: WindowFrames {
+    private let element: AXUIElement
+
+    init(element: AXUIElement) {
+        self.element = element
+    }
+
+    func frame() -> CGRect? {
+        LiveWindowGateway.frame(of: element)
+    }
+
+    func origin() -> CGPoint? {
+        guard
+            let primaryTop = NSScreen.screens.first?.frame.maxY,
+            let axOrigin = LiveWindowGateway.readPoint(
+                element, kAXPositionAttribute)
+        else { return nil }
+        return CGPoint(x: axOrigin.x, y: primaryTop - axOrigin.y)
+    }
+
+    func setOrigin(_ origin: CGPoint) -> AXError {
+        guard
+            let primaryTop = NSScreen.screens.first?.frame.maxY,
+            let value = LiveWindowGateway.pointValue(
+                CGPoint(x: origin.x, y: primaryTop - origin.y))
+        else { return .failure }
+        return AXUIElementSetAttributeValue(
+            element, kAXPositionAttribute as CFString, value)
+    }
+
+    func setSize(_ size: CGSize) -> AXError {
+        guard
+            NSScreen.screens.first != nil,
+            let value = LiveWindowGateway.sizeValue(size)
+        else { return .failure }
+        return AXUIElementSetAttributeValue(
+            element, kAXSizeAttribute as CFString, value)
+    }
+}
+
 /// Thin wrapper over the Accessibility API: permissions, focused window,
 /// frame read/write. All coordinate conversion lives here.
 /// The production `WindowGateway`: macOS Accessibility plus the private
@@ -55,6 +198,14 @@ final class LiveWindowGateway: WindowGateway {
     /// window dies (probed via `isAlive`) so handles never dangle.
     private var elements: [WindowHandle: AXUIElement] = [:]
     private var pids: [WindowHandle: pid_t] = [:]
+    /// The frame calls for one handle. Production resolves the live
+    /// `AXUIElement`; a test window carries scripted answers, so the
+    /// adapter's reads and write pair run without a grant.
+    private var windowFrames: [WindowHandle: WindowFrames] = [:]
+    /// The AXUIElement token per handle: the observer registers and routes
+    /// notifications by it. Production is the AXUIElement's CFHash (already
+    /// the registry key); a test window carries its own token.
+    private var elementTokens: [WindowHandle: UInt] = [:]
     /// The observation key registered per observed handle, so `release`
     /// can forget exactly that key while the pid's shared observer and
     /// its other windows stay.
@@ -76,7 +227,14 @@ final class LiveWindowGateway: WindowGateway {
     private var lastFrames: [WindowHandle: CGRect] = [:]
     /// Observer per pid; registrations outlive untiled records and can
     /// never be unregistered, so they are created once and shared.
-    private var observers: [pid_t: AXObserver] = [:]
+    private var observers: [pid_t: AXObserverHandle] = [:]
+    /// The AXObserver calls behind registration and teardown. Injected so
+    /// the adapter can be constructed and exercised without a real
+    /// observer or an Accessibility grant.
+    private let observerDriver: AXObserverDriver
+    /// Retry backoff for the AX write pair. Injected so tests exercise a
+    /// transient failure through the adapter without waiting.
+    private let writeRetrySleep: (TimeInterval) -> Void
     /// Which elements have change notifications registered, and which
     /// processes already own a shared observer (CFHash keyed; dedupe, since
     /// re-tiling must not double-register). The adapter performs the AX
@@ -114,10 +272,35 @@ final class LiveWindowGateway: WindowGateway {
     /// never walks the window-server Space table once per row.
     private var spaceCache: [CGDirectDisplayID: SpaceID] = [:]
     private var spaceCacheStamp: Date?
+    /// The window-server Space table, injected so the cache policy is
+    /// testable without the private SkyLight symbols.
+    private let spaceTable: () -> [CGDirectDisplayID: SpaceID]
+    /// The clock behind the cache lifetime. Injected so a test can age
+    /// the cache without sleeping.
+    private let now: () -> Date
+    /// The workspace notification centre. The production default is
+    /// NSWorkspace's; tests pass a private centre so constructing the
+    /// adapter never subscribes to the running session.
+    private let workspaceNotifications: NotificationCenter
 
-    init() {
+    init(
+        observerDriver: AXObserverDriver = LiveAXObserverDriver(),
+        spaceTable: @escaping () -> [CGDirectDisplayID: SpaceID] =
+            LiveWindowGateway.currentSpaces,
+        now: @escaping () -> Date = Date.init,
+        workspaceNotifications: NotificationCenter =
+            NSWorkspace.shared.notificationCenter,
+        writeRetrySleep: @escaping (TimeInterval) -> Void = {
+            Thread.sleep(forTimeInterval: $0)
+        }
+    ) {
+        self.observerDriver = observerDriver
+        self.spaceTable = spaceTable
+        self.now = now
+        self.workspaceNotifications = workspaceNotifications
+        self.writeRetrySleep = writeRetrySleep
         LiveWindowGateway.active = self
-        activeAppObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        activeAppObserver = workspaceNotifications.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main
         ) { [weak self] notification in
@@ -126,7 +309,7 @@ final class LiveWindowGateway: WindowGateway {
             ] as? NSRunningApplication
             self?.retargetFocusObserver(to: activated)
         }
-        appTerminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        appTerminationObserver = workspaceNotifications.addObserver(
             forName: NSWorkspace.didTerminateApplicationNotification,
             object: nil, queue: .main
         ) { [weak self] notification in
@@ -137,7 +320,7 @@ final class LiveWindowGateway: WindowGateway {
             if pid == self?.focusObserverPID { self?.releaseFocusObserver() }
             self?.pruneObserver(for: pid)
         }
-        spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        spaceChangeObserver = workspaceNotifications.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
@@ -145,21 +328,20 @@ final class LiveWindowGateway: WindowGateway {
             // window server is still committing the switch, and the
             // Space table must answer with the newly visible Space.
             DispatchQueue.main.async {
-                self?.spaceCacheStamp = nil
-                self?.spaceChangeHandler?()
+                self?.spaceDidChange()
             }
         }
     }
 
     deinit {
         if let activeAppObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(activeAppObserver)
+            workspaceNotifications.removeObserver(activeAppObserver)
         }
         if let appTerminationObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(appTerminationObserver)
+            workspaceNotifications.removeObserver(appTerminationObserver)
         }
         if let spaceChangeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserver)
+            workspaceNotifications.removeObserver(spaceChangeObserver)
         }
         releaseFocusObserver()
     }
@@ -181,16 +363,66 @@ final class LiveWindowGateway: WindowGateway {
     }
 
     func frame(of handle: WindowHandle) -> CGRect? {
-        guard let element = elements[handle] else { return nil }
-        guard let frame = Self.frame(of: element) else { return nil }
+        guard let frames = windowFrames[handle] else { return nil }
+        guard let frame = frames.frame() else { return nil }
         lastFrames[handle] = frame
         return frame
     }
 
+    /// Writes the position and size as one retrying pair, then restores
+    /// the origin if the position landed and the size did not. The calls
+    /// live behind `WindowFrames`, so a fake can model position-landed /
+    /// size-refused and silent-ignore without a live app.
+    ///
+    /// Position is written BEFORE size: AX size-sets anchor the window's
+    /// top-left at its *current* position, so sizing first can push a bottom
+    /// window past the screen bottom, where AppKit silently clamps the height
+    /// and the later position write can't undo it. Anchoring at the target
+    /// top-left (always inside the visible frame) never clamps.
     @discardableResult
     func setFrame(_ handle: WindowHandle, to frame: CGRect) -> Bool {
-        guard let element = elements[handle] else { return false }
-        return Self.setFrame(element, to: frame)
+        guard let frames = windowFrames[handle] else { return false }
+        // The pair can part-apply: a position write that lands followed by
+        // a permanently refused size leaves the window moved at its old
+        // size. Remember the origin before writing, so the failure path
+        // can put the window back; the README promises a refusing app's
+        // window is left alone, not half-moved with state believing
+        // nothing happened.
+        let previousOrigin = frames.origin()
+        var positionLanded = false
+
+        // The write pair retries as a unit: position writes are idempotent,
+        // so a retry after a partial application (position landed, size hit
+        // a busy app) just rewrites both, never a half-moved window.
+        var lastError: AXError = .success
+        let error = AXWrite.retrying(
+            operation: {
+                let positionResult = frames.setOrigin(frame.origin)
+                if positionResult == .success { positionLanded = true }
+                let sizeResult = frames.setSize(frame.size)
+                guard positionResult == .success, sizeResult == .success else {
+                    // Report whichever write failed so the retry policy can
+                    // judge it; when both failed, either is a valid cause.
+                    lastError =
+                        positionResult == .success ? sizeResult : positionResult
+                    return lastError
+                }
+                return .success
+            },
+            sleep: writeRetrySleep)
+        if AXWrite.needsPositionRestore(
+            positionLanded: positionLanded, failed: error != nil),
+            let previousOrigin
+        {
+            // Best effort: if even the origin write is refused, the
+            // window is where the app left it and the refusal is still
+            // reported, so screen and state agree on the outcome.
+            _ = frames.setOrigin(previousOrigin)
+        }
+        if let error, ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+            NSLog("Tiled: setFrame failed after retries (error %d)", error.rawValue)
+        }
+        return error == nil
     }
 
     /// Drops a confirmed-gone handle: element, pid, handlers, baseline,
@@ -204,10 +436,38 @@ final class LiveWindowGateway: WindowGateway {
         observedKeys[handle] = nil
         elements[handle] = nil
         pids[handle] = nil
+        windowFrames[handle] = nil
+        elementTokens[handle] = nil
         changeHandlers[handle] = nil
         destructionHandlers[handle] = nil
         lastFrames[handle] = nil
         if !pids.values.contains(pid) { pruneObserver(for: pid) }
+    }
+
+    /// Test seam: registers a handle with a scripted AXUIElement token and
+    /// frame source, so the observation and frame wiring run without a
+    /// live `AXUIElement` or an Accessibility grant. Production never
+    /// calls this; a test window has no AX element, so liveness, focus,
+    /// and raise are outside this seam.
+    @discardableResult
+    func registerTestWindow(
+        pid: pid_t, token: UInt, frames: WindowFrames
+    ) -> WindowHandle {
+        let handle = WindowHandle(id: nextHandleID)
+        nextHandleID += 1
+        pids[handle] = pid
+        elementTokens[handle] = token
+        windowFrames[handle] = frames
+        return handle
+    }
+
+    /// Test seam: apply the adoption update the live `handle(for:)` path
+    /// performs, without a live AXUIElement.
+    func adoptTestWindow(
+        _ handle: WindowHandle, token: UInt, frames: WindowFrames
+    ) {
+        guard let pid = pids[handle] else { return }
+        adopt(handle, element: nil, token: token, frames: frames, pid: pid)
     }
 
     func liveness(of handle: WindowHandle) -> Liveness {
@@ -378,9 +638,7 @@ final class LiveWindowGateway: WindowGateway {
     private func pruneObserver(for pid: pid_t) {
         let keys = registry.forget(pid: pid)
         guard let observer = observers[pid] else { return }
-        CFRunLoopRemoveSource(
-            CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer),
-            CFRunLoopMode.commonModes)
+        observerDriver.removeRunLoopSource(observer)
         observers[pid] = nil
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] pruned observer for pid %d (%d keys)",
@@ -399,53 +657,60 @@ final class LiveWindowGateway: WindowGateway {
         _ handle: WindowHandle, onChange: @escaping () -> Void,
         onDestroyed: @escaping () -> Void
     ) {
-        guard let element = elements[handle], let pid = pids[handle] else { return }
+        guard let pid = pids[handle], let token = elementTokens[handle] else {
+            return
+        }
         changeHandlers[handle] = onChange
         destructionHandlers[handle] = onDestroyed
         // The death check confirms absence geometrically (the app answers
         // and no listed frame matches the last read frame), so it needs a
         // baseline even for a window whose frame was never read: a
         // destroy notification can arrive before any move or resize tick.
-        if lastFrames[handle] == nil, let frame = Self.frame(of: element) {
-            lastFrames[handle] = frame
+        if lastFrames[handle] == nil {
+            _ = frame(of: handle)
         }
-        let key = UInt(CFHash(element))
-        observedKeys[handle] = key
+        observedKeys[handle] = token
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] observe win%d pid=%d key=%lu observed=%d",
-                  handle.id, pid, key, registry.isObserved(key: key) ? 1 : 0)
+                  handle.id, pid, token, registry.isObserved(key: token) ? 1 : 0)
         }
-        switch registry.begin(key: key, pid: pid) {
+        switch registry.begin(key: token, pid: pid) {
         case .skip:
             return
 
         case .createObserver:
-            var created: AXObserver?
-            let result = AXObserverCreate(
-                pid, Self.observerCallback, &created)
-            guard result == .success, let newObserver = created else {
-                registry.finish(key: key, pid: pid, outcome: .observerUnavailable)
+            let result = observerDriver.createObserver(
+                pid: pid,
+                onNotification: { [weak self] notification, token in
+                    self?.handleAXNotification(
+                        notification: notification, token: token)
+                })
+            guard result.status == .success, let newObserver = result.observer
+            else {
+                registry.finish(
+                    key: token, pid: pid, outcome: .observerUnavailable)
                 NSLog(
                     "tiled: AXObserverCreate failed for pid %d (%d)", pid,
-                    result.rawValue)
+                    result.status.rawValue)
                 return
             }
             observers[pid] = newObserver
-            CFRunLoopAddSource(
-                CFRunLoopGetMain(), AXObserverGetRunLoopSource(newObserver),
-                CFRunLoopMode.commonModes)
+            observerDriver.addRunLoopSource(newObserver)
             registerChanges(
-                on: newObserver, element: element, pid: pid, key: key)
+                on: newObserver, element: elements[handle], pid: pid,
+                key: token)
 
         case .register:
             guard let observer = observers[pid] else {
                 // The registry believed this pid had an observer and the
                 // object is gone: forget the belief so the next attempt
                 // creates one instead of failing here forever.
-                registry.finish(key: key, pid: pid, outcome: .observerUnavailable)
+                registry.finish(
+                    key: token, pid: pid, outcome: .observerUnavailable)
                 return
             }
-            registerChanges(on: observer, element: element, pid: pid, key: key)
+            registerChanges(
+                on: observer, element: elements[handle], pid: pid, key: token)
         }
     }
 
@@ -455,15 +720,16 @@ final class LiveWindowGateway: WindowGateway {
     /// stays retryable, instead of losing drag-resize for the rest of the
     /// session with nothing on screen to say so.
     private func registerChanges(
-        on observer: AXObserver, element: AXUIElement, pid: pid_t, key: UInt
+        on observer: AXObserverHandle, element: AXUIElement?, pid: pid_t,
+        key: UInt
     ) {
         var failure: AXError?
         for name in [
             kAXWindowResizedNotification, kAXWindowMovedNotification,
             kAXUIElementDestroyedNotification,
         ] {
-            let status = AXObserverAddNotification(
-                observer, element, name as CFString, nil)
+            let status = observerDriver.addNotification(
+                name, to: observer, element: element)
             if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
                 NSLog("Tiled: [DEBUG-obs] add %@ on pid %d (%d)", name as String, pid, status.rawValue)
             }
@@ -494,24 +760,34 @@ final class LiveWindowGateway: WindowGateway {
         spaceChangeHandler = onChange
     }
 
+    /// Drops the cached Space table and tells the canvas layer to rebuild.
+    /// The workspace notification calls this after one main-queue hop;
+    /// tests call it directly, so the invalidation is pinned without
+    /// posting a real notification.
+    func spaceDidChange() {
+        spaceCacheStamp = nil
+        spaceChangeHandler?()
+    }
+
     /// Cache lifetime for the Space table. Long enough to collapse a
     /// menu build's repeated per-row lookups, short enough that a Space
     /// the workspace notification missed cannot misdirect a hotkey.
     private static let spaceCacheLifetime: TimeInterval = 0.1
 
     private func refreshSpaceCacheIfNeeded() {
+        let current = now()
         if let stamp = spaceCacheStamp,
-            Date().timeIntervalSince(stamp) < Self.spaceCacheLifetime
+            current.timeIntervalSince(stamp) < Self.spaceCacheLifetime
         { return }
-        spaceCacheStamp = Date()
-        spaceCache = Self.currentSpaces()
+        spaceCacheStamp = current
+        spaceCache = spaceTable()
     }
 
     /// One pass over the live window server's managed-display Space
     /// table: display UUID -> id of the Space currently shown there.
     /// Empty when the private symbols are unavailable, which keeps every
     /// canvas keyed by display (the old behavior).
-    private static func currentSpaces() -> [CGDirectDisplayID: SpaceID] {
+    static func currentSpaces() -> [CGDirectDisplayID: SpaceID] {
         guard
             let connection = CGS.defaultConnection?(),
             let displays = CGS.copyManagedDisplaySpaces?(connection)?
@@ -760,19 +1036,47 @@ final class LiveWindowGateway: WindowGateway {
                     return HandleCandidate(handle: handle, heldIsStale: heldIsStale)
                 }
                 if let inherited = Self.inheritedHandle(candidates) {
-                    elements[inherited] = element
+                    adopt(
+                        inherited, element: element, token: UInt(CFHash(element)),
+                        frames: AXWindowFrames(element: element), pid: pid)
                     lastFrames[inherited] = frame
-                    Self.applyMessagingTimeout(element)
                     return inherited
                 }
             }
         }
         let handle = WindowHandle(id: nextHandleID)
         nextHandleID += 1
-        elements[handle] = element
         pids[handle] = pid
-        Self.applyMessagingTimeout(element)
+        adopt(
+            handle, element: element, token: UInt(CFHash(element)),
+            frames: AXWindowFrames(element: element), pid: pid)
         return handle
+    }
+
+    /// Points a handle at the fresh AXUIElement and token. An observed
+    /// handle also moves its registry key and re-registers notifications
+    /// on the shared observer, so routing follows the adopted identity;
+    /// otherwise the old CFHash stayed registered and the fresh element's
+    /// notifications fell through.
+    private func adopt(
+        _ handle: WindowHandle, element: AXUIElement?, token: UInt,
+        frames: WindowFrames, pid: pid_t
+    ) {
+        if let element {
+            elements[handle] = element
+            Self.applyMessagingTimeout(element)
+        }
+        elementTokens[handle] = token
+        windowFrames[handle] = frames
+        guard let oldKey = observedKeys[handle], oldKey != token else { return }
+        registry.forget(key: oldKey, pid: pid)
+        observedKeys[handle] = token
+        if let observer = observers[pid] {
+            registerChanges(
+                on: observer, element: element, pid: pid, key: token)
+        } else {
+            registry.finish(key: token, pid: pid, outcome: .observerUnavailable)
+        }
     }
 
     /// One same-pid handle whose last-read frame matches the fresh
@@ -837,16 +1141,9 @@ final class LiveWindowGateway: WindowGateway {
         AXUIElementSetMessagingTimeout(element, messagingTimeout)
     }
 
-    private static let observerCallback: AXObserverCallback = {
-        _, element, notification, _ in
-        guard let gateway = LiveWindowGateway.active else { return }
-        gateway.handleAXNotification(
-            notification: notification as String, element: element)
-    }
-
-    /// Focus arrives on its own observer, not `observerCallback`: its
-    /// element is an application element, not a registered window, so the
-    /// window-handle routing would never match it.
+    /// Focus arrives on its own observer: its element is an application
+    /// element, not a registered window, so the window-handle routing
+    /// would never match it.
     private static let focusObserverCallback: AXObserverCallback = { _, _, _, _ in
         // The focus changed: the memoized resolution is stale by
         // definition, and the handler redraws from the new answer.
@@ -855,25 +1152,29 @@ final class LiveWindowGateway: WindowGateway {
     }
 
     /// Routes an AX notification to the registered handler of whichever
-    /// handle owns `element`. Element identity is resolved here so the
-    /// controller never touches `AXUIElement` (the old refcon-id scheme
-    /// went stale for the same reason: registrations outlive records).
-    private func handleAXNotification(notification: String, element: AXUIElement) {
+    /// handle owns `token` (the AXUIElement's CFHash). Identity is resolved
+    /// here so the controller never touches `AXUIElement`; registrations
+    /// outlive records, so routing keys on the observation token rather
+    /// than a refcon id. A released handle has forgotten its token, and
+    /// the notification falls through.
+    func handleAXNotification(notification: String, token: UInt) {
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] notification %@ arrived", notification)
         }
-        for (handle, registered) in elements
-        where CFEqual(registered, element) {
-            if notification == kAXUIElementDestroyedNotification as String {
-                destructionHandlers[handle]?()
-            } else {
-                changeHandlers[handle]?()
+        guard
+            let handle = observedKeys.first(where: { $0.value == token })?.key
+        else {
+            if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+                NSLog(
+                    "Tiled: [DEBUG-obs] notification %@ matched NO handle (%d observed)",
+                    notification, observedKeys.count)
             }
             return
         }
-        if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
-            NSLog("Tiled: [DEBUG-obs] notification %@ matched NO handle (%d elements)",
-                  notification, elements.count)
+        if notification == kAXUIElementDestroyedNotification as String {
+            destructionHandlers[handle]?()
+        } else {
+            changeHandlers[handle]?()
         }
     }
     // MARK: Permissions
@@ -968,7 +1269,7 @@ final class LiveWindowGateway: WindowGateway {
     /// The AX position attribute is the top-left corner in top-left-origin
     /// global coordinates, so the y axis must be converted here; everything
     /// downstream (layout, drag detection, echo suppression) speaks AppKit.
-    private static func frame(of element: AXUIElement) -> CGRect? {
+    fileprivate static func frame(of element: AXUIElement) -> CGRect? {
         guard
             let axOrigin = readPoint(element, positionAttribute),
             let size = readSize(element, sizeAttribute)
@@ -982,67 +1283,6 @@ final class LiveWindowGateway: WindowGateway {
         return appKitFrame(axOrigin: axOrigin, size: size, primaryTop: primaryTop)
     }
 
-    /// Sets position and size. `nsFrame` uses AppKit global coordinates
-    /// (bottom-left origin); converted to AX top-left coordinates internally.
-    ///
-    /// Position is written BEFORE size: AX size-sets anchor the window's
-    /// top-left at its *current* position, so sizing first can push a bottom
-    /// window past the screen bottom, where AppKit silently clamps the height
-    /// and the later position write can't undo it. Anchoring at the target
-    /// top-left (always inside the visible frame) never clamps.
-    @discardableResult
-    private static func setFrame(_ element: AXUIElement, to nsFrame: CGRect) -> Bool {
-        // Same reasoning as the read path: with no screen there is no
-        // coordinate space to convert into, so refuse the write rather
-        // than place the window at a guessed position.
-        guard let primaryTop = NSScreen.screens.first?.frame.maxY else { return false }
-        guard
-            let sizeValue = sizeValue(CGSize(width: nsFrame.width, height: nsFrame.height)),
-            let positionValue = pointValue(axTopLeft(of: nsFrame, primaryTop: primaryTop))
-        else { return false }
-
-        // The pair can part-apply: a position write that lands followed by
-        // a permanently refused size leaves the window moved at its old
-        // size. Remember the origin before writing, so the failure path
-        // can put the window back; the README promises a refusing app's
-        // window is left alone, not half-moved with state believing
-        // nothing happened.
-        let previousOrigin: AXValue? = readPoint(element, kAXPositionAttribute)
-            .flatMap(pointValue)
-        var positionLanded = false
-
-        // The write pair retries as a unit: position writes are idempotent,
-        // so a retry after a partial application (position landed, size hit
-        // a busy app) just rewrites both, never a half-moved window.
-        var lastError: AXError = .success
-        let error = AXWrite.retrying {
-            let positionResult = AXUIElementSetAttributeValue(
-                element, kAXPositionAttribute as CFString, positionValue)
-            if positionResult == .success { positionLanded = true }
-            let sizeResult = AXUIElementSetAttributeValue(
-                element, kAXSizeAttribute as CFString, sizeValue)
-            guard positionResult == .success, sizeResult == .success else {
-                // Report whichever write failed so the retry policy can
-                // judge it; when both failed, either is a valid cause.
-                lastError = positionResult == .success ? sizeResult : positionResult
-                return lastError
-            }
-            return .success
-        }
-        if AXWrite.needsPositionRestore(positionLanded: positionLanded, failed: error != nil),
-            let previousOrigin
-        {
-            // Best effort: if even the origin write is refused, the
-            // window is where the app left it and the refusal is still
-            // reported, so screen and state agree on the outcome.
-            AXUIElementSetAttributeValue(
-                element, kAXPositionAttribute as CFString, previousOrigin)
-        }
-        if let error, ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
-            NSLog("Tiled: setFrame failed after retries (error %d)", error.rawValue)
-        }
-        return error == nil
-    }
 
     // MARK: AX transient failures (pure policy, unit-tested without AX)
 
@@ -1235,17 +1475,17 @@ final class LiveWindowGateway: WindowGateway {
     private static let pointType = AXValueType(rawValue: kAXValueCGPointType)!
     private static let sizeType = AXValueType(rawValue: kAXValueCGSizeType)!
 
-    private static func pointValue(_ p: CGPoint) -> AXValue? {
+    fileprivate static func pointValue(_ p: CGPoint) -> AXValue? {
         var value = p
         return AXValueCreate(pointType, &value)
     }
 
-    private static func sizeValue(_ s: CGSize) -> AXValue? {
+    fileprivate static func sizeValue(_ s: CGSize) -> AXValue? {
         var value = s
         return AXValueCreate(sizeType, &value)
     }
 
-    private static func readPoint(_ element: AXUIElement, _ attribute: String) -> CGPoint? {
+    fileprivate static func readPoint(_ element: AXUIElement, _ attribute: String) -> CGPoint? {
         guard let axValue = readAXValue(element, attribute) else { return nil }
         var point = CGPoint()
         guard AXValueGetValue(axValue, pointType, &point) else { return nil }
