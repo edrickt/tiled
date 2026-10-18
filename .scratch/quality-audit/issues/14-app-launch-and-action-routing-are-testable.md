@@ -10,7 +10,7 @@ Extract the launch/routing decisions behind injectable collaborators and test th
 
 **Findings:** T2 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (702f938)
 
 - [ ] The trusted start and the untrusted explainer path are both testable and pinned.
 - [ ] First-run Welcome opens once and stays dismissed.
