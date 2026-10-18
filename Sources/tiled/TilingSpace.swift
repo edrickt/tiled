@@ -481,22 +481,12 @@ struct TilingSpace {
             record.preTileFrame = entry.preTileFrame
             records[id] = record
             state.commit(window: id, into: entry.slot)
-            // The frame may already be correct (e.g. an untile-all chapter
-            // whose windows still sit at their pre-tile frames, or a
-            // settle frame the gateway applied late): skip the write and
-            // count it restored. Rewriting an identical frame is not just
-            // wasteful: on a settling window it re-arms echo tracking
-            // and risks a phantom drag-out.
-            if let record = records[id],
-                let slot = state.slot(of: id),
-                let current = context.gateway.frame(of: record.handle),
-                current == grid.rect(for: slot, in: visibleFrame)
-            {
-                context.log("undo SKIP-WRITE win\(id) already placed")
-                result.restored.append(id)
-            } else if applyLayout(for: id, context: context, on: entry.space).stands {
-                // A deferred off-Space write stands: the window keeps its
-                // slot and reconciles when the canvas becomes visible.
+            // The shared write policy skips a frame the window already
+            // holds (an untile-all chapter still at its pre-tile frames,
+            // a settle the gateway applied late) and seeds the drag
+            // baseline; a deferred off-Space write stands and reconciles
+            // when the canvas becomes visible.
+            if applyLayout(for: id, context: context, on: entry.space).stands {
                 result.restored.append(id)
             } else {
                 // The re-tile was refused: name the window before any

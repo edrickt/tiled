@@ -21,10 +21,10 @@ import Foundation
 ///
 /// Edge drags resize only the dragged window while the button is down:
 /// splitter fractions commit live, but the settle waits for mouse-up
-/// (`mouseLifted`, wired by the controller's global event monitor).
-/// Resizing the tiles under a held button fights the user's drag; on
-/// release the canvas reasserts the whole layout at once — a screen
-/// edge the drag pulled away included. A resize tick
+/// (`mousePressed`/`mouseLifted`, wired by the controller's global event
+/// monitors). Resizing the tiles under a held button fights the user's
+/// drag; on release the canvas reasserts the whole layout at once — a
+/// screen edge the drag pulled away included. A resize tick
 /// that trails the mouse-up (AX streams the drag's final frame) re-arms
 /// its canvas's pending resize, and the next mouse-up anywhere commits
 /// it.
@@ -35,7 +35,9 @@ import Foundation
 /// otherwise it snaps back into its slot (the canvas reasserts with its
 /// existing splitters). The move-silence debounce is the fallback for a
 /// mouse-up that never arrives (a missed monitor, a drag the OS cancels).
-/// A single far jump is never a hand drag, so it snaps back too.
+/// A single far jump with no recent hand press on the window is never a
+/// hand drag, so it snaps back too — even when an unrelated click lifts
+/// the button before the debounce.
 final class DragTracker {
     /// Reads and writes splitter fractions, and reads the canvas's one
     /// stored visible frame. The canvas owns them; the tracker only
@@ -117,9 +119,29 @@ final class DragTracker {
         let startFrame: CGRect
         var lastFrame: CGRect
         var ticks = 0
+        /// Whether a recent hand press/drag landed inside this window's
+        /// start frame. A single far tick is a hand drag only with that
+        /// per-window evidence; a programmatic jump followed by an
+        /// unrelated click must not borrow the click's mouse-up.
+        let beganUnderHandPress: Bool
         var cancelDragEnd: (() -> Void)?
     }
     private var drags: [WindowID: DragState] = [:]
+    /// The last hand-press evidence: where the left button went down,
+    /// and when it was last refreshed by a drag. A programmatic AX jump
+    /// carries no such signal. The press point must fall inside the
+    /// dragged window's start frame, so a press elsewhere cannot
+    /// authorize it. The point is deliberately not moved to the drag's
+    /// latest location: a coalesced drag's last point is the drop,
+    /// normally outside the start frame. The point is an approximation
+    /// for overlapping windows (the tracker has no z-order): a press on
+    /// one window lying over another can authorize the lower one.
+    private var handPressPoint: CGPoint?
+    private var handPressAt: Date?
+    /// How fresh the hand evidence must be. Mouse drags stream alongside
+    /// AX ticks; a press held still for longer only becomes a drag when
+    /// the drag event refreshes this stamp.
+    private static let handPressWindow: TimeInterval = 0.5
 
     /// Edge drags awaiting mouse-up, keyed by canvas. The splitter
     /// fractions (if any) already committed; the reassert the movement
@@ -525,7 +547,13 @@ final class DragTracker {
     /// pauses.
     private func processMove(windowID id: WindowID, from previous: CGRect, to frame: CGRect) {
         if drags[id] == nil {
-            drags[id] = DragState(startFrame: previous, lastFrame: frame)
+            let handPress = handPressPoint.map { previous.contains($0) } == true
+                && handPressAt.map {
+                    context.now().timeIntervalSince($0) <= Self.handPressWindow
+                } == true
+            drags[id] = DragState(
+                startFrame: previous, lastFrame: frame,
+                beganUnderHandPress: handPress)
         }
         drags[id]?.lastFrame = frame
         drags[id]?.ticks += 1
@@ -538,19 +566,29 @@ final class DragTracker {
 
     /// A drag just ended: untile past the untile distance, snap back
     /// otherwise. A drag decided at the physical mouse-up is a hand drag
-    /// by definition (the button was down the whole time; programmatic
-    /// jumps do not click), so a single coalesced tick counts — a fast
-    /// fling can arrive as exactly one far AX tick. The silence-debounce
-    /// fallback has no such signal and keeps the two-tick rule: a single
-    /// far jump there is a programmatic move, and snaps back.
+    /// only when it began with fresh hand evidence inside the window:
+    /// programmatic jumps carry no press, and an unrelated click — even
+    /// one on another window — cannot decide their far tick as a
+    /// drag-out. Such a hand drag may arrive as exactly one coalesced
+    /// tick — a fast drag does. The silence-debounce fallback has no
+    /// button signal and keeps the two-tick rule: a single far jump there
+    /// is a programmatic move, and snaps back.
     private func endDrag(id: WindowID, decidedAtMouseUp: Bool) {
         guard context.slotOf(id) != nil, let drag = drags[id] else { return }
         drags[id] = nil
+        if drags.isEmpty {
+            // A debounce fallback can end the gesture without a mouse-up;
+            // drop its evidence so a later programmatic jump cannot use it.
+            handPressPoint = nil
+            handPressAt = nil
+        }
         let distance = hypot(
             drag.lastFrame.origin.x - drag.startFrame.origin.x,
             drag.lastFrame.origin.y - drag.startFrame.origin.y)
         log("dragend win\(id) ticks=\(drag.ticks) distance=\(distance) mouseUp=\(decidedAtMouseUp)")
-        let handDrag = decidedAtMouseUp || drag.ticks >= 2
+        let handDrag = decidedAtMouseUp
+            ? drag.beganUnderHandPress
+            : drag.ticks >= 2
         guard distance > Self.untileDragDistance, handDrag else {
             log("dragend win\(id) snapback")
             onDragEnd(.snapback(id))
@@ -634,6 +672,25 @@ final class DragTracker {
 
     // MARK: Mouse-up commit
 
+    /// The user pressed the left button at `point`. Records the hand
+    /// evidence a move tick cannot carry: a programmatic AX jump and a
+    /// real drag can both arrive as a single far tick, and only a recent
+    /// press inside the window tells them apart when an unrelated click
+    /// lifts the button.
+    func mousePressed(at point: CGPoint) {
+        handPressPoint = point
+        handPressAt = context.now()
+    }
+
+    /// The user moved the mouse with the button down. Refreshes the
+    /// freshness of the press evidence so a press held still before the
+    /// drag does not go stale. The press point stays put: it is the
+    /// containment witness, and a coalesced drag's latest point is the
+    /// drop, outside the window's start frame.
+    func mouseDragged() {
+        handPressAt = context.now()
+    }
+
     /// The user released the mouse button: every deferred edge drag's
     /// settle is now due, and every in-progress title-bar drag ends now —
     /// the drop decides (snapback or untile) instead of waiting out the
@@ -644,6 +701,8 @@ final class DragTracker {
     /// coordinator reads each dragged window's achieved frame and
     /// reasserts or untiles through the owning canvas.
     func mouseLifted() {
+        handPressPoint = nil
+        handPressAt = nil
         let pending = pendingReasserts
         pendingReasserts = [:]
         for id in pending.values {

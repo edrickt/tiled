@@ -49,6 +49,30 @@ final class TilingSpaceTests: XCTestCase {
             "the tile writes the slot rect in the injected bounds")
     }
 
+    func testSkippedPlacementWriteSeedsTheDragBaseline() {
+        // A window already sitting at the target rect makes the placement
+        // write a no-op skip. The skip still has to seed the drag
+        // baseline: a one-tick title-bar drag straight afterwards must be
+        // tracked and snap back, not be dropped and leave the window off
+        // its tile.
+        let target = harness.rect(.topLeft)
+        let id = harness.addWindow(frame: target)
+
+        harness.apply(slot: .topLeft, requester: id)
+
+        XCTAssertTrue(harness.expectedWrites.isEmpty, "the placement write skipped")
+        harness.tracker.mousePressed(at: CGPoint(x: target.midX, y: target.midY))
+        harness.tracker.handleChange(id: id, frame: target.offsetBy(dx: 30, dy: 30))
+        harness.tracker.mouseLifted()
+
+        XCTAssertEqual(
+            harness.decisions, [.snapback(id)],
+            "the one-tick short drag is tracked after the skipped write")
+        space.reassert(.grid, context: context())
+        XCTAssertEqual(
+            harness.frame(of: id), target, "the snapback returns the window to its tile")
+    }
+
     func testTileRefusalRollsBackAndReports() {
         let id = harness.addWindow()
         harness.gateway.refuseNextWrites(harness.handle(of: id)!)
@@ -562,6 +586,30 @@ final class TilingSpaceTests: XCTestCase {
             "the reflow chapter returns the survivor to the slot it held")
     }
 
+    func testSkippedReflowWriteSeedsTheDragBaseline() {
+        // The survivor's live frame already equals the slot it grows
+        // into, so the reflow write skips. The skip still seeds the drag
+        // baseline: a one-tick short title-bar drag afterwards must be
+        // tracked, not misread against the survivor's old tile.
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .bottomLeft, requester: b)
+        let grown = harness.rect(.leftHalf)
+        harness.gateway.simulateSilentChange(harness.handle(of: b)!, to: grown)
+
+        space.untile(window: a, reflowing: true, context: context())
+
+        XCTAssertEqual(space.state.slot(of: b), .leftHalf, "the survivor grows")
+        harness.tracker.mousePressed(at: CGPoint(x: grown.midX, y: grown.midY))
+        harness.tracker.handleChange(id: b, frame: grown.offsetBy(dx: 30, dy: 30))
+        harness.tracker.mouseLifted()
+
+        XCTAssertEqual(
+            harness.decisions, [.snapback(b)],
+            "the one-tick short drag is tracked after the skipped reflow write")
+    }
+
     func testUntileRefusedRestoreReportsAndStillReleases() {
         let a = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
@@ -1002,6 +1050,48 @@ final class TilingSpaceTests: XCTestCase {
             "undo writes the slot rect computed from the restored frame")
     }
 
+    func testSkippedUndoRetileSeedsTheDragBaseline() {
+        // The chapter's evictee already sits exactly on its slot rect, so
+        // restoreEvictees takes its explicit skip branch instead of
+        // writing. The skip must seed the baseline: a one-tick short
+        // title-bar drag after the undo must snap back, not be dropped
+        // and leave the window offset.
+        let topLeft = harness.rect(.topLeft)
+        let a = harness.addWindow(frame: topLeft)
+        harness.apply(slot: .topLeft, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        harness.apply(slot: .sixthLeft, requester: b)
+        guard let snapshot = space.undoStack.last?.snapshot else {
+            return XCTFail("switch should snapshot")
+        }
+
+        // Put the evictee back exactly where the undo will retile it:
+        // the current frame equals the target slot rect.
+        harness.gateway.simulateSilentChange(
+            harness.handle(of: a)!, to: harness.rect(.topLeft))
+        harness.clearExpectedWrites()
+
+        let result = harness.restoreEvictees(snapshot)
+
+        XCTAssertTrue(result.failures.isEmpty)
+        XCTAssertTrue(
+            harness.expectedWrites.isEmpty,
+            "the undo re-tile skipped because the live frame already matched")
+        guard let restored = result.restored.first else {
+            return XCTFail("the evictee returns to its slot")
+        }
+
+        let target = harness.rect(.topLeft)
+        harness.tracker.mousePressed(at: CGPoint(x: target.midX, y: target.midY))
+        harness.tracker.handleChange(id: restored, frame: target.offsetBy(dx: 30, dy: 30))
+        harness.tracker.mouseLifted()
+
+        XCTAssertEqual(
+            harness.decisions, [.snapback(restored)],
+            "the one-tick short drag is tracked after the skipped undo write")
+    }
+
     // MARK: Expand toggle
 
     func testExpandFillsTheInjectedBoundsWithoutTiling() {
@@ -1017,6 +1107,31 @@ final class TilingSpaceTests: XCTestCase {
         space.expandToggle(window: id, context: context())
         XCTAssertEqual(harness.frame(of: id), original, "a second press restores the frame")
         XCTAssertFalse(space.isExpanded(id))
+    }
+
+    func testSkippedExpansionWriteSeedsTheDragBaseline() {
+        // A tiled window already at the screen frame makes the expand
+        // write a no-op skip. The skip still seeds the drag baseline: a
+        // one-tick title-bar drag afterwards must be tracked, not
+        // misread as an edge grab against the old tile.
+        let id = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: id)
+        let tiled = harness.rect(.topLeft)
+        harness.tracker.handleChange(id: id, frame: tiled) // settle the placement echo
+        harness.gateway.simulateSilentChange(harness.handle(of: id)!, to: bounds)
+        harness.clearExpectedWrites()
+
+        space.expandToggle(window: id, context: context())
+
+        XCTAssertTrue(space.isExpanded(id))
+        XCTAssertTrue(harness.expectedWrites.isEmpty, "the expand write skipped")
+        harness.tracker.mousePressed(at: CGPoint(x: bounds.midX, y: bounds.midY))
+        harness.tracker.handleChange(id: id, frame: bounds.offsetBy(dx: 30, dy: 30))
+        harness.tracker.mouseLifted()
+
+        XCTAssertEqual(
+            harness.decisions, [.snapback(id)],
+            "the one-tick short drag is tracked after the skipped expand write")
     }
 
     func testExpandedTiledWindowKeepsItsSlotAndCollapseRetiles() {

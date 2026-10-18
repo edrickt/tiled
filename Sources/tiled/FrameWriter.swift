@@ -43,6 +43,10 @@ struct FrameWriter {
     private let isVisible: (TilingSpaceKey) -> Bool
     private let markStale: (TilingSpaceKey) -> Void
     private let markExpected: (WindowID, CGRect) -> Void
+    /// Seeds the tracker's diff baseline for a skipped write. The skip
+    /// arms no echo expectation, so without this a later one-tick drag
+    /// diffs against a stale frame and is dropped.
+    private let seedBaseline: (WindowID, CGRect) -> Void
     private let scheduleCheck: (WindowID, TilingSpaceKey) -> Void
     private let log: (String) -> Void
 
@@ -51,6 +55,7 @@ struct FrameWriter {
         isVisible: @escaping (TilingSpaceKey) -> Bool,
         markStale: @escaping (TilingSpaceKey) -> Void,
         markExpected: @escaping (WindowID, CGRect) -> Void,
+        seedBaseline: @escaping (WindowID, CGRect) -> Void,
         scheduleCheck: @escaping (WindowID, TilingSpaceKey) -> Void,
         log: @escaping (String) -> Void
     ) {
@@ -58,6 +63,7 @@ struct FrameWriter {
         self.isVisible = isVisible
         self.markStale = markStale
         self.markExpected = markExpected
+        self.seedBaseline = seedBaseline
         self.scheduleCheck = scheduleCheck
         self.log = log
     }
@@ -90,6 +96,7 @@ struct FrameWriter {
         if let live = gateway.frame(of: handle),
             DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)
         {
+            seedBaseline(id, target)
             log("write win\(id) no-op skip target=\(target)")
             return .skippedNoOp
         }

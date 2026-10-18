@@ -25,6 +25,10 @@ final class TilingSpaceHarness {
     /// a test pin that a restore participates in echo handling (and that
     /// a deferred or no-op one arms nothing).
     private(set) var expectedWrites: [WindowID] = []
+    /// The drag-end decisions this harness's tracker emitted, in order:
+    /// lets a canvas test drive the same drag loop the controller wires
+    /// and pin what a skipped write's baseline makes detectable.
+    private(set) var decisions: [DragTracker.DragDecision] = []
     private(set) var tracker: DragTracker!
     private(set) var writer: FrameWriter!
 
@@ -38,7 +42,7 @@ final class TilingSpaceHarness {
                 grid: { [weak self] _ in self?.space.grid ?? GridLayout() },
                 setGrid: { [weak self] updated, _ in self?.space.grid = updated },
                 visibleFrame: { [weak self] _ in self?.space.visibleFrame ?? .zero }),
-            onDragEnd: { _ in })
+            onDragEnd: { [weak self] in self?.decisions.append($0) })
         writer = FrameWriter(
             gateway: gateway,
             isVisible: { [weak self] _ in self?.canvasVisible ?? true },
@@ -46,6 +50,9 @@ final class TilingSpaceHarness {
             markExpected: { [weak self] id, target in
                 self?.expectedWrites.append(id)
                 self?.tracker.markExpected(id, target)
+            },
+            seedBaseline: { [weak self] id, target in
+                self?.tracker.seedBaseline(id, target)
             },
             scheduleCheck: { _, _ in },
             log: { _ in })

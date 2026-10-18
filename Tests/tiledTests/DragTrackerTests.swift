@@ -477,6 +477,7 @@ final class DragTrackerTests: XCTestCase {
         tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
         tracker.forget(1)
 
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
         dragTicks(1, size: size, to: [(0, 400), (40, 440), (100, 500)])
         XCTAssertTrue(decisions.isEmpty, "streaming ticks decide nothing on their own")
 
@@ -502,11 +503,14 @@ final class DragTrackerTests: XCTestCase {
         // AX can stream the drag's final frame after the mouse-up: the
         // tracker re-tracks it and the next mouse-up (or the fallback
         // debounce) decides, mirroring the resize path's documented
-        // residual.
+        // residual. That trailing tick did not begin under the held
+        // button — the drag-out already ended — so the next click snaps it
+        // back instead of treating the far frame as another drag.
         let size = CGSize(width: 500, height: 400)
         tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
         tracker.forget(1)
 
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
         dragTicks(1, size: size, to: [(0, 400), (40, 440), (100, 500)])
         tracker.mouseLifted()
         XCTAssertEqual(decisions, [.untile(1)])
@@ -520,9 +524,9 @@ final class DragTrackerTests: XCTestCase {
 
         tracker.mouseLifted()
         XCTAssertEqual(
-            decisions, [.untile(1), .untile(1)],
-            "the next mouse-up decides the trailing tick; a single far tick "
-                + "is a hand gesture there, and the second untile is a no-op upstream")
+            decisions, [.untile(1), .snapback(1)],
+            "the next mouse-up decides the trailing tick; it began with no button "
+                + "held, so it is a programmatic jump and snaps back")
     }
 
     func testAbsorbedSizeTickDuringTitleDragTracksAsAMove() {
@@ -538,6 +542,7 @@ final class DragTrackerTests: XCTestCase {
         // The placement echo expires un-consumed: the app emitted nothing
         // for it (silent absorption), as on live AX.
         now += TimeInterval(4)
+        tracker.mousePressed(at: CGPoint(x: 280, y: 760))
 
         tracker.handleChange(id: 1, frame: CGRect(x: 82, y: 510, width: 559, height: 505))
 
@@ -579,16 +584,127 @@ final class DragTrackerTests: XCTestCase {
     }
 
     func testSingleFarTickAtMouseUpUntiles() {
-        // A fast hand fling coalesces in AX: the whole drag can arrive as
+        // A fast hand drag coalesces in AX: the whole drag can arrive as
         // ONE far tick (observed live: ticks=1, distance=748). The
         // single-tick rule exists to reject programmatic jumps, but a
         // decision at the physical mouse-up has the signal the debounce
-        // never had: the button was down the whole time, and programmatic
-        // jumps do not click. The mouse-up must untile the fling.
+        // never had: a recent press on the window. The mouse-up must
+        // untile the drag.
         let size = CGSize(width: 500, height: 400)
         tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
         tracker.forget(1)
 
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600)) // on the window
+        dragTicks(1, size: size, to: [(0, 400), (400, 800)])
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.untile(1)])
+    }
+
+    func testProgrammaticFarTickThenAnUnrelatedClickSnapsBack() {
+        // A programmatic move streams one far tick with no button held.
+        // The unrelated click that follows — press elsewhere, then lift
+        // inside the move-silence debounce — must not turn that jump into
+        // a drag-out: the press is not on the dragged window.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 400), (400, 800)])
+        tracker.mousePressed(at: CGPoint(x: 900, y: 100))
+        tracker.mouseLifted()
+
+        XCTAssertEqual(
+            decisions, [.snapback(1)],
+            "an unrelated click's mouse-up does not decide a programmatic jump as a drag-out")
+    }
+
+    func testPressOutsideTheWindowDoesNotAuthorizeAProgrammaticJump() {
+        // The press precedes the AX tick, but it landed elsewhere. It is
+        // not per-window hand evidence, so the mouse-up still snaps back.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        tracker.mousePressed(at: CGPoint(x: 900, y: 100))
+        dragTicks(1, size: size, to: [(0, 400), (400, 800)])
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testMultiTickProgrammaticMoveThenMouseUpSnapsBack() {
+        // The press signal gates the mouse-up branch even after two ticks:
+        // a programmatic move that streamed more than once is still not a
+        // hand drag, so an unrelated click cannot untile it.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        dragTicks(1, size: size, to: [(0, 400), (400, 800), (420, 820)])
+        tracker.mousePressed(at: CGPoint(x: 900, y: 100))
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testStalePressDoesNotAuthorizeALaterProgrammaticJump() {
+        // A press that never became a drag goes stale; a later AX jump
+        // must not borrow it.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
+        now += 1
+        dragTicks(1, size: size, to: [(0, 400), (400, 800)])
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testMouseUpWithoutADragClearsTheHandEvidence() {
+        // A click that never moved the window must not leave a press
+        // stamp for a later programmatic jump to borrow.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
+        tracker.mouseLifted()
+        dragTicks(1, size: size, to: [(0, 400), (400, 800)])
+        tracker.mousePressed(at: CGPoint(x: 900, y: 100))
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testMouseDraggedRefreshesTheHandEvidence() {
+        // Holding still after the press must not make a real drag stale:
+        // the drag event refreshes the stamp before the AX tick.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
+        now += 1
+        tracker.mouseDragged()
+        dragTicks(1, size: size, to: [(0, 400), (400, 800)])
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.untile(1)])
+    }
+
+    func testDragToTheDropPointStillCountsThePressOnTheWindow() {
+        // A coalesced single-tick drag's last mouse-drag event is at the
+        // drop, outside the window's start frame. The press point remains
+        // the containment witness, so the drag still untiles.
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tracker.forget(1)
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
+        tracker.mouseDragged()
         dragTicks(1, size: size, to: [(0, 400), (400, 800)])
         tracker.mouseLifted()
 

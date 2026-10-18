@@ -4,7 +4,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let gateway = LiveWindowGateway()
     private lazy var controller = TilingController(
-        gateway: gateway, observeMouseUp: TilingController.observeLeftMouseUp)
+        gateway: gateway,
+        observeMouseUp: TilingController.observeLeftMouseUp,
+        observeMouseDown: TilingController.observeLeftMouseDown,
+        observeMouseDragged: TilingController.observeLeftMouseDragged)
     private let hotkeyStore = HotkeyStore()
     private var hotkeys: HotkeyService?
     private var permissionTimer: Timer?

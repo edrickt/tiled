@@ -36,6 +36,9 @@ final class TilingController {
         markExpected: { [weak self] id, target in
             self?.tracker.markExpected(id, target)
         },
+        seedBaseline: { [weak self] id, target in
+            self?.tracker.seedBaseline(id, target)
+        },
         scheduleCheck: { [weak self] id, space in
             self?.scheduleVerification(of: [id], on: space)
         },
@@ -180,7 +183,9 @@ final class TilingController {
         deathConfirmation: TimeInterval = 3.0,
         now: @escaping () -> Date = Date.init,
         uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-        observeMouseUp: (@escaping () -> Void) -> Void = { _ in }
+        observeMouseUp: (@escaping () -> Void) -> Void = { _ in },
+        observeMouseDown: (@escaping (CGPoint) -> Void) -> Void = { _ in },
+        observeMouseDragged: (@escaping () -> Void) -> Void = { _ in }
     ) {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
@@ -227,10 +232,14 @@ final class TilingController {
             self.applyAll()
             self.onChange?()
         }
-        // Mouse-up commits the deferred neighbor re-pushes of an edge
-        // drag (see DragTracker.mouseLifted). AppDelegate wires the
-        // production monitor; the no-op default keeps tests from
-        // installing real event monitors.
+        // Mouse presses/drags supply the hand evidence a move tick cannot
+        // carry (see DragTracker.mousePressed/mouseDragged), and mouse-up
+        // commits the deferred neighbor re-pushes of an edge drag (see
+        // DragTracker.mouseLifted). AppDelegate wires the production
+        // monitors; the no-op defaults keep tests from installing real
+        // event monitors.
+        observeMouseDown { [weak self] point in self?.mousePressed(at: point) }
+        observeMouseDragged { [weak self] in self?.mouseDragged() }
         observeMouseUp { [weak self] in self?.mouseLifted() }
         // Focus moving to another display or Space changes the status
         // glyph with no tiling action. Subscribe now when AX is already
@@ -1100,6 +1109,22 @@ final class TilingController {
 
     // MARK: Live resize (observe & decide)
 
+    /// The user pressed the mouse button at `point`: records the hand
+    /// evidence a single far drag needs, so it can untile at mouse-up
+    /// while a programmatic jump cannot. Wired from the production
+    /// mouse-down monitor; tests call it directly.
+    func mousePressed(at point: CGPoint) {
+        tracker.mousePressed(at: point)
+    }
+
+    /// The user moved the mouse with the button down. Refreshes the
+    /// freshness of the press evidence so a slow-starting drag stays
+    /// eligible; the press point itself remains the containment witness.
+    /// Wired from the production drag monitor; tests call it directly.
+    func mouseDragged() {
+        tracker.mouseDragged()
+    }
+
     /// The user released the mouse button: the tracker commits every
     /// splitter move an in-progress edge drag made as a resize decision.
     /// Wired from the production mouse-up monitor; tests call it directly.
@@ -1139,15 +1164,47 @@ final class TilingController {
         onChange?()
     }
 
-    /// Production mouse-up registrar: global monitors deliver clicks that
-    /// go to other apps — where window-edge drags live — and the local
-    /// monitor covers clicks this process receives. Both forward the
-    /// event untouched; the handler itself filters (no pending resize is
-    /// a no-op). Needs the same accessibility permission as AX.
+    /// Production mouse-down registrar: global monitors deliver clicks
+    /// that go to other apps — where window-edge drags live — and the
+    /// local monitor covers clicks this process receives. The tracker
+    /// uses the press point only to tell a hand drag from a programmatic
+    /// move.
+    static func observeLeftMouseDown(_ fire: @escaping (CGPoint) -> Void) {
+        observeLeftMouse(.leftMouseDown) { point in
+            if let point { fire(point) }
+        }
+    }
+
+    /// Production mouse-drag registrar. A drag event refreshes the hand
+    /// evidence while the button moves, so a press held still before the
+    /// drag does not go stale.
+    static func observeLeftMouseDragged(_ fire: @escaping () -> Void) {
+        observeLeftMouse(.leftMouseDragged) { _ in fire() }
+    }
+
+    /// Production mouse-up registrar: the same two monitors as the press,
+    /// because a release outside this process is exactly where a window
+    /// drag ends. Both forward the event untouched; the handler itself
+    /// filters (no pending resize is a no-op). Needs the same
+    /// accessibility permission as AX.
     static func observeLeftMouseUp(_ fire: @escaping () -> Void) {
-        NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { _ in fire() }
-        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { event in
-            fire()
+        observeLeftMouse(.leftMouseUp) { _ in fire() }
+    }
+
+    /// One registration shape for every left-mouse edge: the global
+    /// monitor sees events delivered to other apps, the local one sees
+    /// events this process receives. The point is the CG event location
+    /// in AX's top-left global coordinates; nil when the event has no
+    /// CGEvent, which simply withholds hand evidence rather than
+    /// guessing a point.
+    private static func observeLeftMouse(
+        _ mask: NSEvent.EventTypeMask, _ fire: @escaping (CGPoint?) -> Void
+    ) {
+        NSEvent.addGlobalMonitorForEvents(matching: mask) { event in
+            fire(event.cgEvent?.location)
+        }
+        NSEvent.addLocalMonitorForEvents(matching: mask) { event in
+            fire(event.cgEvent?.location)
             return event
         }
     }

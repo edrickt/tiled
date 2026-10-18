@@ -284,7 +284,7 @@
  [
   "FrameWriter.swift",
   "no-op write pushed anyway (expectation never converges)",
-  "        if let live = gateway.frame(of: handle),\n            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
+  "        if let live = gateway.frame(of: handle),\n            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            seedBaseline(id, target)\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
   ""
  ],
  [
@@ -622,5 +622,41 @@
   "retained requester slot not passed to evictee restoration",
   "                $0.restoreEvictees(\n                    group, retained: retainedSlots,",
   "                $0.restoreEvictees(\n                    group, retained: [],"
+ ],
+ [
+  "DragTracker.swift",
+  "mouse-up hand gate ignored (programmatic jump plus unrelated click untiles)",
+  "        let handDrag = decidedAtMouseUp\n            ? drag.beganUnderHandPress\n            : drag.ticks >= 2",
+  "        let handDrag = decidedAtMouseUp || drag.ticks >= 2"
+ ],
+ [
+  "DragTracker.swift",
+  "mouse-down point never recorded (a real one-tick hand drag snaps back)",
+  "    func mousePressed(at point: CGPoint) {\n        handPressPoint = point\n        handPressAt = context.now()\n    }",
+  "    func mousePressed(at point: CGPoint) {\n        _ = point\n        handPressAt = context.now()\n    }"
+ ],
+ [
+  "DragTracker.swift",
+  "hand-press location ignored (a press elsewhere authorizes a programmatic jump)",
+  "            let handPress = handPressPoint.map { previous.contains($0) } == true",
+  "            let handPress = handPressPoint != nil"
+ ],
+ [
+  "DragTracker.swift",
+  "hand-press staleness ignored (an old press authorizes a later jump)",
+  "                && handPressAt.map {\n                    context.now().timeIntervalSince($0) <= Self.handPressWindow\n                } == true",
+  "                && handPressAt != nil"
+ ],
+ [
+  "DragTracker.swift",
+  "mouse-up leaves the hand evidence set (a later jump borrows a click)",
+  "    func mouseLifted() {\n        handPressPoint = nil\n        handPressAt = nil\n        let pending = pendingReasserts",
+  "    func mouseLifted() {\n        let pending = pendingReasserts"
+ ],
+ [
+  "FrameWriter.swift",
+  "skipped write seeds no drag baseline (first short drag dropped)",
+  "            seedBaseline(id, target)\n            log(\"write win\\(id) no-op skip target=\\(target)\")",
+  "            log(\"write win\\(id) no-op skip target=\\(target)\")"
  ]
 ]

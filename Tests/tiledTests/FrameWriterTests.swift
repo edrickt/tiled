@@ -45,6 +45,7 @@ final class FrameWriterTests: XCTestCase {
                 self?.events.append("echo")
                 self?.echoed.append(id)
             },
+            seedBaseline: { _, _ in },
             scheduleCheck: { [weak self] id, space in
                 self?.events.append("check")
                 self?.checked.append(id)

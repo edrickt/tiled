@@ -8,6 +8,14 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A programmatic window jump no longer untiles when an unrelated click
+  lands before the move-silence debounce: a far tick decides a drag-out at
+  mouse-up only when a recent hand press landed on that window and mouse
+  movement kept it live, so a real one-tick hand drag still drops where
+  released while a programmatic jump — even a multi-tick one — snaps back. A placement,
+  undo, reflow, or expand/collapse write skipped because the window already
+  held its target frame now seeds the drag baseline, so a one-tick short
+  title-bar drag after it snaps back instead of leaving the window offset.
 - The re-house notice names the slot a window finally holds after reflow,
   not the intermediate slot it passed through. Undo now says “last
   displacement” and “Restore N Displaced Windows” instead of describing a

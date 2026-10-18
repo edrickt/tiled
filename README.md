@@ -145,8 +145,8 @@ tell you which app took it.
 - **Drag a tiled window by its title bar**: past ~50pt of drag it untiles
   right where you dropped it (the drop is the placement; no pre-tile
   restore); a shorter drag snaps back into its tile. A single far jump
-  that arrives while nothing is pressed (a programmatic move, not a hand
-  drag) still snaps back.
+  with no recent hand press on the window (a programmatic move, not a
+  hand drag) still snaps back, even if an unrelated click follows.
 - Use the untile row in the menu (**Untile 1 Window** / **Untile N
   Windows**, titled by count) to restore every tiled window on the focused
   canvas, or open a
@@ -243,7 +243,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (755 tests)
+swift test             # hermetic unit suite (769 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -277,7 +277,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (755 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (769 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; ~3-4 min for the full table (parallel workers) |

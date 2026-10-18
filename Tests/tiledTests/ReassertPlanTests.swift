@@ -358,6 +358,31 @@ final class ReassertPlanTests: XCTestCase {
             "the reassert seeded the diff baseline for the skipped write")
     }
 
+    func testDeferredReassertSeedsTheDragBaseline() {
+        // A reassert on a hidden canvas defers every write, so neither
+        // markExpected nor writeRects' skip branch can seed the diff
+        // baseline; only the reassert's own seeding does. Without it the
+        // first one-tick drag after the swipe back is dropped.
+        let harness = TilingSpaceHarness()
+        let a = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.tracker.forget(a)
+        harness.canvasVisible = false
+        harness.space.grid.columnSplit = 0.7
+
+        harness.space.reassert(.grid, context: harness.context())
+
+        harness.canvasVisible = true
+        let rect = harness.rect(.topLeft)
+        harness.tracker.mousePressed(at: CGPoint(x: rect.midX, y: rect.midY))
+        harness.tracker.handleChange(id: a, frame: rect.offsetBy(dx: 30, dy: 30))
+        harness.tracker.mouseLifted()
+
+        XCTAssertEqual(
+            harness.decisions, [.snapback(a)],
+            "the deferred reassert seeded the drag baseline")
+    }
+
     func testClampedReassertRepinsAgainstTheCanvasFrameNotTheWindow() {
         // A window drifted off-canvas before the reassert. Its clamped
         // write must be pulled back inside the canvas's one visible frame

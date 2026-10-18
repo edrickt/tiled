@@ -261,6 +261,52 @@ final class ControllerGatewayTests: XCTestCase {
             "the untiled window stays where the user dropped it")
     }
 
+    func testSingleTickHandDragAtMouseUpUntiles() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tiled = CGRect(x: 0, y: 500, width: 800, height: 500)
+        XCTAssertEqual(gateway.frame(of: handle), tiled)
+        gateway.simulateChange(handle, to: tiled) // settle the placement echo
+
+        // The whole hand drag coalesces into one far tick. The button
+        // was down on the window when it arrived, so the mouse-up decides
+        // it as a drag-out.
+        controller.mousePressed(at: CGPoint(x: tiled.midX, y: tiled.midY))
+        var far = tiled
+        far.origin.x += 200
+        far.origin.y += 200
+        gateway.simulateChange(handle, to: far)
+        controller.mouseLifted()
+
+        XCTAssertNil(canvas.state.slot(of: 1), "a one-tick hand drag still untiles")
+        XCTAssertEqual(gateway.frame(of: handle), far)
+    }
+
+    func testProgrammaticJumpThenUnrelatedClickSnapsBack() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tiled = CGRect(x: 0, y: 500, width: 800, height: 500)
+        XCTAssertEqual(gateway.frame(of: handle), tiled)
+        gateway.simulateChange(handle, to: tiled) // settle the placement echo
+
+        // A programmatic move arrives as one far tick with no hand
+        // evidence; the click that follows is elsewhere. Its mouse-up
+        // must snap the window back, not decide the jump as a drag-out.
+        var far = tiled
+        far.origin.x += 200
+        far.origin.y += 200
+        gateway.simulateChange(handle, to: far)
+        controller.mousePressed(at: CGPoint(x: 1400, y: 100))
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            canvas.state.slot(of: 1), .topLeft,
+            "an unrelated click does not untile a programmatically moved window")
+        XCTAssertEqual(gateway.frame(of: handle), tiled, "the snapback reasserts the tile")
+    }
+
     func testPruneDuringDragDropsTheDragWithoutUntiling() {
         // A title-bar drag is in flight (ticks streamed, drag-end
         // pending) when the window dies: pruning releases the slot and
