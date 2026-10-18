@@ -11,7 +11,7 @@ registration, disabled actions, failures, teardown, and reload.
 
 **Findings:** T1 (`.scratch/quality-audit/report.md`).
 
-**Status:** TODO
+**Status:** DONE (572de00)
 
 - [ ] A registrar adapter replaces the direct Carbon registration call at the test seam.
 - [ ] Tests pin registration of every enabled action, skipping every disabled action, and the
