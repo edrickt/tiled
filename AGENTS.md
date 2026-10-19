@@ -8,12 +8,10 @@ Issues and specs are local markdown under `.scratch/` (a feature's spec
 is its `README.md`; tickets are `issues/NN-slug.md`). See
 `docs/agents/issue-tracker.md`.
 
-### Triage labels
-
-The five default roles, each label string equal to its role name. See
-`docs/agents/triage-labels.md`.
-
 ### Domain docs
 
-Single-context: `CONTEXT.md` is the glossary; ADRs under `docs/adr/`.
-See `docs/agents/domain.md`.
+`CONTEXT.md` is the glossary; ADRs under `docs/adr/`. Read both before
+exploring an area. Name concepts with the glossary's positive terms —
+the `_Avoid_` lists bind. If an output contradicts an ADR, surface it
+explicitly; if a concept has no term, the project either speaks
+differently or the glossary has a real gap.

@@ -10,7 +10,7 @@ every prose surface: CONTEXT.md itself, README, CHANGELOG, commit
 messages, and new doc comments. Write "the mouse-up reasserts", not
 "settles"; "display", not "monitor"; "slot", not "tile". If a concept has
 no term, that's a signal: either the project speaks differently or the
-glossary has a real gap for `/domain-modeling`.
+glossary has a real gap.
 
 ## Behavior docs move with the behavior
 
