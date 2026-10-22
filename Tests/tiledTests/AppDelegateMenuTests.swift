@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import XCTest
 
 @testable import tiled
@@ -288,6 +289,48 @@ final class AppDelegateMenuTests: XCTestCase {
                 occupiedSlots: 1,
                 displayName: "Studio Display"),
             "the glyph half names and fills the same passed canvas")
+    }
+
+    func testLabelOnlyRemapChangesThePresenterSnapshot() {
+        // The store lives behind the presenter's snapshot assembly. Editing
+        // one binding changes nothing but a label, yet the snapshot must
+        // differ so the ordinary diff rebuilds the menu; this is the hole
+        // `force:` used to patch.
+        let defaults = UserDefaults(suiteName: "label-remap-\(UUID())")!
+        let store = HotkeyStore(defaults: defaults)
+        let controller = TilingController(
+            gateway: FakeWindowGateway(), pruneInterval: nil,
+            screens: { [ScreenInfo(
+                id: ScreenID(rawValue: 1),
+                frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+                visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+                name: "Built-in")] },
+            deathConfirmation: 0)
+        controller.onChange = {}
+        let presenter = MenuBarPresenter(
+            controller: controller,
+            hotkeyStore: store,
+            hotkeyService: { nil },
+            actionTarget: NSObject())
+
+        let before = presenter.snapshot(for: controller.focusedTilingSpace)
+        store.set(
+            HotkeyBinding(
+                modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_Q)),
+            for: .slot(.sixthTopLeft))
+        let after = presenter.snapshot(for: controller.focusedTilingSpace)
+
+        XCTAssertEqual(store.binding(for: .slot(.sixthTopLeft)).label, "⌥Q")
+        XCTAssertEqual(after.menu.labels[.slot(.sixthTopLeft)], "⌥Q")
+        XCTAssertTrue(after.menu.isTrusted)
+        XCTAssertEqual(after.menu.activeLayout, .sixths)
+        XCTAssertNotEqual(
+            before.menu, after.menu,
+            "a label-only remap must be visible to the last-snapshot diff")
+        let topLeft = MenuModel.items(snapshot: after.menu)
+            .first { $0.title == "Tile Focused Window" }?
+            .children?.first { $0.action == .tileSlot(.sixthTopLeft) }
+        XCTAssertEqual(topLeft?.title, "Top Left Sixth · ⌥Q")
     }
 
     // MARK: Refresh ordering (refreshPlan)
