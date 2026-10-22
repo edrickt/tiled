@@ -746,18 +746,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    /// Undo title names what returns: the displaced windows.
-    private var undoDisplacementTitle: String {
-        let canvas = controller.canvas(for: controller.focusedTilingSpace)
-        return MenuText.undoDisplacementTitle(
-            displacedCount: canvas.displacedCount)
-    }
-
-    /// Bulk-action title names the consequence: restoring every window.
-    private var untileAllTitle: String {
-        MenuText.untileAllTitle(count: controller.tiledWindowsInfo.count)
-    }
-
     /// User-visible problems, split by kind: the last tiling failure
     /// (a refusal narrative, rendered verbatim) versus hotkey
     /// registration losses (counted into the summary row with their

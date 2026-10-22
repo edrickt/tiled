@@ -168,7 +168,10 @@ final class MenuModelTests: XCTestCase {
             if case .tileSlot(let slot)? = $0.action { return slot }
             return nil
         }
-        XCTAssertEqual(qSlots, SlotPresentation.quartersQuads + SlotPresentation.quartersHalves)
+        XCTAssertEqual(qSlots, [
+            .topLeft, .topRight, .bottomLeft, .bottomRight,
+            .leftHalf, .rightHalf,
+        ])
         let qSwitch = qChildren.first { $0.action == .switchToSixths }
         XCTAssertEqual(qSwitch?.title, "Switch to Sixths (focused window → Top Left Sixth)")
         XCTAssertTrue(qSwitch?.isEnabled == true, "focused window in the test harness")
@@ -191,11 +194,12 @@ final class MenuModelTests: XCTestCase {
             if case .tileSlot(let slot)? = $0.action { return slot }
             return nil
         }
-        XCTAssertEqual(
-            sSlots,
-            SlotPresentation.sixthsCorners
-                + SlotPresentation.sixthsThirds
-                + SlotPresentation.sixthsTwoThirds)
+        XCTAssertEqual(sSlots, [
+            .sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+            .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight,
+            .sixthLeft, .sixthMiddle, .sixthRight,
+            .sixthsLeftTwoThirds, .sixthsRightTwoThirds,
+        ])
         let sSwitch = sChildren.first { $0.action == .switchToQuarters }
         XCTAssertEqual(sSwitch?.title, "Switch to Quarters (focused window → Top Left)")
     }

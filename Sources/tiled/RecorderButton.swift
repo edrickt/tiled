@@ -34,12 +34,6 @@ final class RecorderButton: NSButton {
         setAccessibilityValue("disabled")
     }
 
-    /// The tiling slot this recorder drives, when it drives one.
-    var slot: Slot? {
-        if case .slot(let slot) = hotkeyAction { return slot }
-        return nil
-    }
-
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
