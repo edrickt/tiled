@@ -508,6 +508,51 @@ final class ControllerBulkOperationTests: XCTestCase {
             controller.restoreSplitters(), "no backup left: second restore is a no-op")
     }
 
+    func testResetOrRestoreSplittersReturnsOneReceiptAndKeepsTheBackup() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        var echo = gateway.frame(of: a)!
+        echo.size.width -= 10
+        gateway.simulateChange(a, to: echo)
+        var dragged = gateway.frame(of: a)!
+        dragged.size.width -= 60
+        gateway.simulateChange(a, to: dragged)
+        let draggedGrid = canvas.grid
+
+        let reset = controller.resetOrRestoreSplitters()
+
+        XCTAssertTrue(reset.performed)
+        XCTAssertEqual(reset.announcement, "Splitters reset to even splits.")
+        XCTAssertTrue(canvas.hasSplitterBackup)
+
+        let restore = controller.resetOrRestoreSplitters()
+
+        XCTAssertTrue(restore.performed)
+        XCTAssertEqual(
+            restore.announcement, "Splitters restored to their pre-reset positions.")
+        XCTAssertEqual(canvas.grid, draggedGrid)
+        XCTAssertFalse(canvas.hasSplitterBackup, "the restore consumes the backup")
+    }
+
+    func testResetOrRestoreSplittersReportsARefusalAsNotPerformed() {
+        let a = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        var echo = gateway.frame(of: a)!
+        echo.size.width -= 10
+        gateway.simulateChange(a, to: echo)
+        var dragged = gateway.frame(of: a)!
+        dragged.size.width -= 60
+        gateway.simulateChange(a, to: dragged)
+        gateway.refuseNextWrites(a)
+
+        let receipt = controller.resetOrRestoreSplitters()
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement,
+            "Couldn't move that window: the app refused to resize it.")
+    }
+
     func testResetDividersReportsRefusals() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)

@@ -34,17 +34,20 @@ struct HotkeyActionRouter {
 final class AppHotkeyPerformer: HotkeyActionPerformer {
     private let controller: TilingController
     private let presentEvict: (ActionReceipt) -> Void
+    private let presentSplitter: (ActionReceipt) -> Void
     private let openSettings: () -> Void
     private let performUndoAction: () -> Void
 
     init(
         controller: TilingController,
         presentEvict: @escaping (ActionReceipt) -> Void,
+        presentSplitter: @escaping (ActionReceipt) -> Void,
         openSettings: @escaping () -> Void,
         performUndo: @escaping () -> Void
     ) {
         self.controller = controller
         self.presentEvict = presentEvict
+        self.presentSplitter = presentSplitter
         self.openSettings = openSettings
         self.performUndoAction = performUndo
     }
@@ -70,6 +73,6 @@ final class AppHotkeyPerformer: HotkeyActionPerformer {
     }
 
     func performResetSplitters() {
-        controller.resetDividers()
+        presentSplitter(controller.resetOrRestoreSplitters())
     }
 }

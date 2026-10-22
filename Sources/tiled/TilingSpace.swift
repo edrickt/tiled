@@ -1501,7 +1501,7 @@ struct TilingSpace {
         grid = backup
         splitterBackup = nil
         error = nil
-        notice = "Splitters restored to their pre-reset positions."
+        notice = MenuText.splittersRestoredAnnouncement()
         return reassert(.grid, context: context)
     }
 

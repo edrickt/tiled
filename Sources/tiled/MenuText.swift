@@ -169,6 +169,22 @@ enum MenuText {
         "Displaced windows restored."
     }
 
+    /// A splitter reset parked the old fractions and re-tiled everyone.
+    static func splittersResetAnnouncement() -> String {
+        "Splitters reset to even splits."
+    }
+
+    /// The parked splitter fractions came back.
+    static func splittersRestoredAnnouncement() -> String {
+        "Splitters restored to their pre-reset positions."
+    }
+
+    /// A splitter action found nothing to change. Unreachable through the
+    /// one action today, but the receipt builder always names an outcome.
+    static func splittersNothingToDoAnnouncement() -> String {
+        "No splitter changes to make."
+    }
+
     /// A background display's canvas refused an untile. The display name
     /// tells the user which display the menu row acted on; the focused
     /// display (or a single display) adds no name because it would

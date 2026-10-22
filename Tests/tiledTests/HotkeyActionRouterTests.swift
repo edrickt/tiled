@@ -66,6 +66,7 @@ final class AppHotkeyPerformerTests: XCTestCase {
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
     private var evictedReceipt: ActionReceipt?
+    private var splitterReceipt: ActionReceipt?
     private var settingsOpened = 0
     private var undoPerformed = 0
     private var performer: AppHotkeyPerformer!
@@ -80,11 +81,13 @@ final class AppHotkeyPerformerTests: XCTestCase {
         controller = TilingController(
             gateway: gateway, pruneInterval: nil, screens: { [Self.screen] })
         evictedReceipt = nil
+        splitterReceipt = nil
         settingsOpened = 0
         undoPerformed = 0
         performer = AppHotkeyPerformer(
             controller: controller,
             presentEvict: { [weak self] in self?.evictedReceipt = $0 },
+            presentSplitter: { [weak self] in self?.splitterReceipt = $0 },
             openSettings: { [weak self] in self?.settingsOpened += 1 },
             performUndo: { [weak self] in self?.undoPerformed += 1 })
     }
@@ -138,7 +141,7 @@ final class AppHotkeyPerformerTests: XCTestCase {
         XCTAssertEqual(undoPerformed, 1)
     }
 
-    func testResetSplittersRoutesToTheController() {
+    func testResetSplittersRoutesToTheReceiptPresenterAndBacksUpTheReset() throws {
         let handle = addFocusedWindow()
         controller.handle(slot: .topLeft)
         var echo = gateway.frame(of: handle)!
@@ -148,9 +151,24 @@ final class AppHotkeyPerformerTests: XCTestCase {
         dragged.size.width -= 60
         gateway.simulateChange(handle, to: dragged)
         XCTAssertNotEqual(canvas.grid.columnSplit, 0.5, accuracy: 0.001)
+        let draggedGrid = canvas.grid
 
         performer.performResetSplitters()
 
         XCTAssertEqual(canvas.grid, GridLayout())
+        let receipt = try XCTUnwrap(splitterReceipt)
+        XCTAssertTrue(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "Splitters reset to even splits.")
+        XCTAssertTrue(canvas.hasSplitterBackup, "the reset parks its restore")
+
+        // The same hotkey now restores instead of resetting over the
+        // parked fractions: one action, two outcomes, never a lost backup.
+        performer.performResetSplitters()
+
+        XCTAssertEqual(canvas.grid, draggedGrid)
+        XCTAssertFalse(canvas.hasSplitterBackup)
+        XCTAssertEqual(
+            splitterReceipt?.announcement,
+            "Splitters restored to their pre-reset positions.")
     }
 }

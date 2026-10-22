@@ -848,6 +848,33 @@ final class TilingController {
             noOp: MenuText.nothingToUntileAnnouncement())
     }
 
+    /// Resets the focused canvas's splitters, or restores the parked
+    /// backup when one exists. One action for both surfaces: the menu row
+    /// and the reset hotkey must agree, and a reset must never overwrite
+    /// a parked restore (the menu already branches this way; the hotkey
+    /// did not). The receipt names which outcome happened.
+    @discardableResult
+    func resetOrRestoreSplitters() -> ActionReceipt {
+        let space = focusedSpaceKey()
+        let restored = spaces[space]?.hasSplitterBackup == true
+        mutateSpace(space) { canvas in
+            if restored {
+                _ = canvas.restoreSplitters(context: placementContext(for: space))
+            } else {
+                canvas.visibleFrame = visibleFrame(for: space)
+                _ = canvas.resetSplitters(context: placementContext(for: space))
+            }
+        }
+        onChange?()
+        let error = spaces[space]?.error
+        return receipt(
+            canvas: space, performed: error == nil, failure: error,
+            success: restored
+                ? MenuText.splittersRestoredAnnouncement()
+                : MenuText.splittersResetAnnouncement(),
+            noOp: MenuText.splittersNothingToDoAnnouncement())
+    }
+
     /// Snaps all splitters back to defaults and re-tiles everyone. The
     /// displaced fractions are kept as a one-step restore (same pattern
     /// as the shortcuts reset backup), so the app's "destruction is

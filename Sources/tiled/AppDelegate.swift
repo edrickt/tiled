@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var hotkeyPerformer = AppHotkeyPerformer(
         controller: controller,
         presentEvict: { [weak self] in self?.present($0) },
+        presentSplitter: { [weak self] in self?.present($0) },
         openSettings: { [weak self] in self?.showSettings(nil) },
         performUndo: { [weak self] in self?.performUndoSwitch() })
     private let hotkeyStore = HotkeyStore()
@@ -874,23 +875,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func resetDividers(_ sender: NSMenuItem) {
-        // Two actions in sequence, like Reset Shortcuts: a reversible
-        // reset first (fractions parked), then a restore of the backup.
-        if controller.canvas(for: controller.focusedTilingSpace).hasSplitterBackup {
-            controller.restoreSplitters()
-            announce(
-                "Splitters restored to their pre-reset positions.",
-                fallback: "Splitters restored to their pre-reset positions.")
-            return
+        // A parked backup turns the row into its own undo: restore it
+        // without another confirmation. A fresh reset needs the
+        // confirmation, then the same controller action the hotkey uses.
+        if !controller.canvas(for: controller.focusedTilingSpace).hasSplitterBackup {
+            guard confirmBulkAction(
+                message: "Reset every splitter to even splits?",
+                detail: "Custom drag positions in both layouts are replaced. "
+                    + "Your current positions are kept; use Restore Previous Splitters to get them back.",
+                button: "Reset Splitters")
+            else { return }
         }
-        guard confirmBulkAction(
-            message: "Reset every splitter to even splits?",
-            detail: "Custom drag positions in both layouts are replaced. "
-                + "Your current positions are kept; use Restore Previous Splitters to get them back.",
-            button: "Reset Splitters")
-        else { return }
-        controller.resetDividers()
-        announce("Splitters reset to even splits.", fallback: "Splitters reset to even splits.")
+        present(controller.resetOrRestoreSplitters())
     }
 
     /// Confirms a destructive bulk action with the consequence in the
