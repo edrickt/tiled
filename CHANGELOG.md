@@ -69,6 +69,18 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on a hidden Space no longer lets the hidden Space's swipe-back restore
   write the old frame and pull the window off its new slot or expanded
   frame.
+- Restore Previous Shortcuts restores a parked snapshot atomically,
+  keeps clash-skipped entries for a retry, persists the footer across
+  reopens, and leaves registration failures visible beside a partial
+  restore result.
+- The reset-splitters hotkey restores a parked splitter backup instead of
+  overwriting it with the already-reset grid, and the menu and hotkey now
+  speak one receipt; a refused reassert is no longer announced as a
+  successful reset.
+- A mouse-up during an unreadable frame read still reasserts the canvas
+  under the stored splitters, and two windows edge-dragging on one canvas
+  both reconcile when the button lifts. A released window's memoized
+  focus answer no longer outlives the handle.
 
 ### Tooling
 

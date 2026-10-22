@@ -243,7 +243,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (833 tests)
+swift test             # hermetic unit suite (842 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -277,16 +277,21 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (833 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (842 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; a few minutes for the full table (parallel workers) |
 
 The unit suite drives the pure engine through `FakeWindowGateway`, with
 clocks, schedulers, and the display set injected; only a few live-screen
-identity checks touch AppKit. The live adapter (`LiveWindowGateway`) is
-exercised by `scripts/run-repro.sh`, which launches the app plus a throwaway
-`host` app and drives real clicks, drags, and global hotkeys: 39 cases
+identity checks touch AppKit. The live adapter (`LiveWindowGateway`) also has
+a hermetic seam: `LiveGatewayWiringTests` drives its Space cache, observer
+routing, destroy delivery, adoption, release pruning, focus memo, and
+write-pair recovery through fakes, without a grant. Focus resolution itself,
+the element registry fallback, and app-list assembly stay live-only. The
+adapter is exercised end to end by `scripts/run-repro.sh`, which launches
+the app plus a throwaway `host` app and drives real clicks, drags, and
+global hotkeys: 39 cases
 covering the quarters family end to end (tiling, edge drags with
 per-column row independence, clamping, screen edges, eviction, swap,
 re-house, undo, closes) and the sixths family (the layout
