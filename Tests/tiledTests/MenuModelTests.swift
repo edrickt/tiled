@@ -15,7 +15,6 @@ final class MenuModelTests: XCTestCase {
         layoutTitle: String = "Quarters",
         activeLayout: LayoutKind = .quarters,
         tileError: String? = nil,
-        hasHotkeyWarnings: Bool = false,
         hasFocusedWindow: Bool = true,
         hasSplitterBackup: Bool = false,
         expandState: ExpandToggleState = .expands,
@@ -31,7 +30,6 @@ final class MenuModelTests: XCTestCase {
             layoutTitle: layoutTitle,
             activeLayout: activeLayout,
             tileError: tileError,
-            hasHotkeyWarnings: hasHotkeyWarnings,
             hasSplitterBackup: hasSplitterBackup,
             hasFocusedWindow: hasFocusedWindow,
             expandState: expandState,
@@ -57,8 +55,7 @@ final class MenuModelTests: XCTestCase {
     func testWarningsCollapseToOneSummaryRow() {
         let model = items(snapshot(
             warnings: ["⌥⇧U is already used by another app"],
-            notice: "Switched to Sixths · 1 window untiled.",
-            hasHotkeyWarnings: true))
+            notice: "Switched to Sixths · 1 window untiled."))
         // One summary row, not one row per warning: the menu's first
         // screenful is the everyday surface, not a troubleshooting essay.
         XCTAssertEqual(model.first?.title, "⚠ 1 shortcut problem: a combo is taken")
@@ -86,8 +83,7 @@ final class MenuModelTests: XCTestCase {
         // Both kinds at once: two failure kinds, two rows, each named.
         let model = items(snapshot(
             warnings: ["⌥⇧U is already used by another app"],
-            tileError: "Safari couldn't be tiled",
-            hasHotkeyWarnings: true))
+            tileError: "Safari couldn't be tiled"))
         XCTAssertEqual(model[0].title, "Safari couldn't be tiled")
         XCTAssertEqual(model[1].title, "⚠ 1 shortcut problem: a combo is taken")
         XCTAssertEqual(model[2].title, "Open Shortcuts…")
@@ -125,8 +121,7 @@ final class MenuModelTests: XCTestCase {
 
     func testHotkeyWarningsGrowAnOpenShortcutsRow() {
         let model = items(snapshot(
-            warnings: ["⌥⇧U is already used by another app; “Top Left” has no hotkey."],
-            hasHotkeyWarnings: true))
+            warnings: ["⌥⇧U is already used by another app; “Top Left” has no hotkey."]))
         let warnings = model.prefix(2).map(\.title)
         XCTAssertEqual(warnings[0], "⚠ 1 shortcut problem: a combo is taken")
         // A disabled row can't fix itself: the actionable row follows,

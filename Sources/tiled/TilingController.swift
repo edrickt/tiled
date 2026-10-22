@@ -1380,6 +1380,13 @@ final class TilingController {
 
     var isTrusted: Bool { gateway.isTrusted }
 
+    /// Whether a window has keyboard focus right now. The menu's collapsed
+    /// switch rows read this from the controller instead of having the
+    /// presenter post its own AX query, so one refresh pass stays one read.
+    var hasFocusedWindow: Bool {
+        gateway.isTrusted && gateway.focusedWindow() != nil
+    }
+
     // MARK: Per-canvas spaces
 
     /// The canvas currently shown on `screen` (nil resolves the main

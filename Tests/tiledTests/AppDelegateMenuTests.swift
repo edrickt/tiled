@@ -27,7 +27,7 @@ final class AppDelegateMenuTests: XCTestCase {
             row(2, .topRight),
         ]
 
-        let presentation = AppDelegate.monitorPresentation(
+        let presentation = MenuReads.monitorPresentation(
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
@@ -47,7 +47,7 @@ final class AppDelegateMenuTests: XCTestCase {
             row(2, .topRight, screen: display, screenName: "Built-in"),
         ]
 
-        let presentation = AppDelegate.monitorPresentation(
+        let presentation = MenuReads.monitorPresentation(
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
@@ -58,7 +58,7 @@ final class AppDelegateMenuTests: XCTestCase {
     }
 
     func testNoWindowsAtAllRendersTheEmptyStatusLine() {
-        let presentation = AppDelegate.monitorPresentation(
+        let presentation = MenuReads.monitorPresentation(
             rows: [], layoutForScreen: { _ in .sixths })
 
         XCTAssertTrue(presentation.sections.isEmpty)
@@ -77,7 +77,7 @@ final class AppDelegateMenuTests: XCTestCase {
             row(3, .bottomLeft, screen: left, screenName: "Display 1"),
         ]
 
-        let presentation = AppDelegate.monitorPresentation(
+        let presentation = MenuReads.monitorPresentation(
             rows: rows, layoutForScreen: { $0 == right ? .sixths : .quarters })
 
         XCTAssertEqual(presentation.sections, [
@@ -91,12 +91,12 @@ final class AppDelegateMenuTests: XCTestCase {
 
     func testSectionTitlesUseTheSingularAndPluralNoun() {
         let display = ScreenID(rawValue: 0)
-        let one = AppDelegate.monitorPresentation(
+        let one = MenuReads.monitorPresentation(
             rows: [row(1, .topLeft, screen: display, screenName: "D")],
             layoutForScreen: { _ in .quarters })
         XCTAssertEqual(one.sections.first?.title, "D · Quarters · 1 tiled")
 
-        let two = AppDelegate.monitorPresentation(
+        let two = MenuReads.monitorPresentation(
             rows: [
                 row(1, .topLeft, screen: display, screenName: "D"),
                 row(2, .bottomLeft, screen: display, screenName: "D"),
@@ -114,7 +114,7 @@ final class AppDelegateMenuTests: XCTestCase {
             row(2, .topRight, screen: display, screenName: nil),
         ]
 
-        let presentation = AppDelegate.monitorPresentation(
+        let presentation = MenuReads.monitorPresentation(
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
@@ -133,7 +133,7 @@ final class AppDelegateMenuTests: XCTestCase {
             row(2, .sixthTopLeft, screen: right, screenName: "Studio Display"),
         ]
 
-        let presentation = AppDelegate.monitorPresentation(
+        let presentation = MenuReads.monitorPresentation(
             rows: rows, layoutForScreen: { $0 == right ? .sixths : .quarters })
 
         XCTAssertEqual(presentation.sections, [
@@ -155,7 +155,7 @@ final class AppDelegateMenuTests: XCTestCase {
             row(2, .topRight, screen: right, screenName: nil),
         ]
 
-        let presentation = AppDelegate.monitorPresentation(
+        let presentation = MenuReads.monitorPresentation(
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
@@ -176,7 +176,7 @@ final class AppDelegateMenuTests: XCTestCase {
             row(2, .sixthTopLeft, screen: display, screenName: "Built-in"),
         ]
 
-        let presentation = AppDelegate.monitorPresentation(
+        let presentation = MenuReads.monitorPresentation(
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
@@ -196,7 +196,7 @@ final class AppDelegateMenuTests: XCTestCase {
             row(1, .topLeft, screen: display, screenName: "Built-in"),
         ]
 
-        let presentation = AppDelegate.monitorPresentation(
+        let presentation = MenuReads.monitorPresentation(
             rows: rows, layoutForScreen: { _ in .quarters })
 
         XCTAssertEqual(presentation.sections, [
@@ -320,7 +320,7 @@ final class AppDelegateMenuTests: XCTestCase {
     private func emptySnapshot() -> MenuModel.Snapshot {
         MenuModel.Snapshot(
             isTrusted: true, warnings: [], notice: nil, layoutTitle: "Quarters",
-            activeLayout: .quarters, tileError: nil, hasHotkeyWarnings: false,
+            activeLayout: .quarters, tileError: nil,
             hasSplitterBackup: false, hasFocusedWindow: false, expandState: .expands,
             tiledWindows: [], canUndoDisplacement: false, displacedCount: 0,
             untileCount: 0)

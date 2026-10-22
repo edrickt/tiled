@@ -542,47 +542,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// resolves the key once and hands the same one to the menu and the
     /// icon, so the two halves can never describe different canvases.
     private func menuSnapshot(space: TilingSpaceKey) -> MenuModel.Snapshot {
-        // One canvas read for the whole pass: every unscoped field
-        // describes the focused canvas's own surface.
-        let canvas = controller.canvas(for: space)
-        let warnings = activeWarnings
-        let rows = controller.tiledWindowsInfo
-        let presentation = Self.monitorPresentation(
-            rows: rows,
-            layoutForScreen: { screen in
-                // A row with no display tag describes the focused canvas
-                // (headless/legacy); tagged rows read their own screen.
-                if let screen {
-                    return controller.canvas(for: screen).state.activeLayout
-                }
-                return canvas.state.activeLayout
-            })
+        // One scoped read for the whole pass: every unscoped field,
+        // including the tiling error and hotkey warnings, describes the
+        // canvas key the caller resolved.
+        let reads = MenuReads(
+            space: space,
+            controller: controller,
+            failedActions: hotkeys?.failedActions ?? [],
+            binding: { self.hotkeyStore.binding(for: $0) })
         return MenuModel.Snapshot(
-            isTrusted: controller.isTrusted,
-            warnings: warnings.hotkeyWarnings,
+            reads: reads,
             notice: Self.menuNotice(
-                canvasNotice: canvas.notice,
-                canvasError: canvas.error,
+                canvasNotice: reads.canvas.notice,
+                canvasError: reads.canvas.error,
                 receipt: lastActionReceipt,
                 receiptFocusedSpace: lastReceiptFocusedSpace,
                 receiptGeneration: lastReceiptGeneration,
                 currentGeneration: actionGeneration,
-                focusedSpace: space),
-            layoutTitle: presentation.statusLine,
-            activeLayout: canvas.state.activeLayout,
-            tileError: warnings.tileError,
-            hasHotkeyWarnings: hasHotkeyWarnings,
-            hasSplitterBackup: canvas.hasSplitterBackup,
-            hasFocusedWindow: gateway.isTrusted && gateway.focusedWindow() != nil,
-            expandState: controller.focusedExpandState,
-            tiledWindows: presentation.tiledWindows,
-            canUndoDisplacement: !canvas.undoStack.isEmpty,
-            displacedCount: canvas.displacedCount,
-            // Read from the same canvas as every other unscoped field:
-            // re-resolving focus here could title the row with one
-            // canvas's count while the menu describes another.
-            untileCount: canvas.tiledCount,
-            monitorSections: presentation.sections)
+                focusedSpace: space))
     }
 
     /// The menu's notice row. A receipt from another canvas is the latest
@@ -607,64 +584,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               receiptGeneration == currentGeneration
         else { return canvasNotice }
         return receipt.notice ?? canvasError ?? canvasNotice
-    }
-
-    /// Pure multi-monitor grouping for the manage list, extracted from
-    /// menuSnapshot so tests pin it without a live controller. The
-    /// grouping key is the display's `ScreenID` (identity); the display
-    /// name is used only for the header text. One section per display
-    /// that has windows, in controller order. Two same-named monitors
-    /// stay separate because identity, not the name, groups them. Single
-    /// monitor (or no screen tags) renders the flat legacy list.
-    static func monitorPresentation(
-        rows: [TilingController.TiledWindowInfo],
-        layoutForScreen: (ScreenID?) -> LayoutKind
-    ) -> (sections: [MenuModel.Snapshot.MonitorSection],
-          tiledWindows: [MenuModel.Snapshot.TiledWindow],
-          statusLine: String) {
-        // One row per window: a display with both an identified and a
-        // withheld canvas can emit the same window from both canvases, and
-        // the manage list must never double-list it (nor count it twice).
-        var seen: Set<WindowID> = []
-        let rows = rows.filter { seen.insert($0.id).inserted }
-        let grouped = Dictionary(grouping: rows, by: \.screen)
-        let sections: [MenuModel.Snapshot.MonitorSection]
-        let orderedRows: [MenuModel.Snapshot.TiledWindow]
-        if grouped.count > 1 || (grouped.count == 1 && grouped.keys.first != nil) {
-            var built: [MenuModel.Snapshot.MonitorSection] = []
-            var ordered: [MenuModel.Snapshot.TiledWindow] = []
-            for row in rows {
-                if !built.contains(where: { $0.key == row.screen }) {
-                    let count = rows.filter { $0.screen == row.screen }.count
-                    let layout = layoutForScreen(row.screen)
-                    let display = row.screenName ?? "Display"
-                    let noun = count == 1 ? "1 tiled" : "\(count) tiled"
-                    built.append(.init(
-                        title: "\(display) · \(layout.title) · \(noun)",
-                        key: row.screen))
-                }
-                ordered.append(.init(
-                    id: row.id, slot: row.slot, appName: row.appName,
-                    screen: row.screen))
-            }
-            sections = built
-            orderedRows = ordered
-        } else {
-            sections = []
-            orderedRows = rows.map {
-                .init(id: $0.id, slot: $0.slot, appName: $0.appName)
-            }
-        }
-        // Status line: one monitor reads as before; two read per
-        // display ("Display 1 · Quarters · 2 tiled + Display 2 · Sixths
-        // · 1 tiled") so the compass never hides a background monitor.
-        let statusLine: String
-        if sections.isEmpty {
-            statusLine = "Layout: \(layoutForScreen(nil).title) · \(rows.count) tiled"
-        } else {
-            statusLine = sections.map(\.title).joined(separator: " + ")
-        }
-        return (sections, orderedRows, statusLine)
     }
 
     /// Pure Action → selector wiring, extracted from makeItem so a table
@@ -748,24 +667,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    /// User-visible problems, split by kind: the last tiling failure
-    /// (a refusal narrative, rendered verbatim) versus hotkey
-    /// registration losses (counted into the summary row with their
-    /// Open Shortcuts door). Mixing the two misdiagnosed refusals as
-    /// shortcut problems: the menu's headline row pointed users at the
-    /// wrong subsystem. Failures are reported here, never only logged.
-    /// Labels come from the store so they reflect custom bindings.
-    private var activeWarnings: (tileError: String?, hotkeyWarnings: [String]) {
-        let hotkeyWarnings = (hotkeys?.failedActions ?? []).map { action in
-            MenuText.hotkeyFailureWarning(
-                label: hotkeyStore.binding(for: action).label,
-                title: action.title,
-                recovery: action.registrationRecovery)
-        }
-        return (tileError: controller.canvas(for: controller.focusedTilingSpace).error,
-                hotkeyWarnings: hotkeyWarnings)
-    }
-
     // MARK: Actions
 
     @objc private func openShortcuts(_ sender: Any?) {
@@ -824,12 +725,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             settingsController = controller
         }
-    }
-
-    /// True when at least one global hotkey lost registration: the menu
-    /// then pairs its warnings with an "Open Shortcuts…" action row.
-    private var hasHotkeyWarnings: Bool {
-        !(hotkeys?.failedActions ?? []).isEmpty
     }
 
     @objc private func showGuide(_ sender: Any?) {

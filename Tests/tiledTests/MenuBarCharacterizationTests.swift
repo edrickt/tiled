@@ -31,7 +31,6 @@ final class MenuBarCharacterizationTests: XCTestCase {
             layoutTitle: "Built-in · Quarters · 2 tiled + Studio Display · Sixths · 1 tiled",
             activeLayout: .quarters,
             tileError: "Safari couldn't be tiled: the app refused to resize it.",
-            hasHotkeyWarnings: true,
             hasSplitterBackup: true,
             hasFocusedWindow: true,
             expandState: .returnsToSlot(.leftHalf),

@@ -52,7 +52,7 @@ enum MenuModel {
     /// changed (frame pushes during drag-resize fire change callbacks
     /// every tick; the menu only cares about state, warnings, rows).
     ///
-    /// `memberwise` keeps the existing 15-arg construction working:
+    /// The memberwise initializer keeps direct construction working:
     /// `monitorSections` defaults to [] (single monitor, no headers).
     struct Snapshot: Equatable {
         var isTrusted: Bool
@@ -71,10 +71,6 @@ enum MenuModel {
         /// "shortcut problem" summary would misdiagnose it and point
         /// the user at the wrong subsystem.
         var tileError: String?
-        /// True when any warning names a lost global-hotkey registration
-        /// (fixed combos or slots), as opposed to a one-off tiling error.
-        /// Those rows get an actionable follow-up, not just prose.
-        var hasHotkeyWarnings: Bool
         /// Whether a splitter backup is parked: the manage row reads
         /// "Restore Previous Splitters" instead of "Reset Splitters".
         var hasSplitterBackup: Bool
@@ -98,7 +94,6 @@ enum MenuModel {
         var untileCount: Int
         /// Per-monitor section headers for the tiled-windows list, in
         /// menu order. Empty = single monitor (no headers rendered).
-        /// Defaulted so the existing 15-arg construction keeps working.
         var monitorSections: [MonitorSection] = []
 
         struct TiledWindow: Equatable {
@@ -119,6 +114,7 @@ enum MenuModel {
             /// Display identity matching `TiledWindow.screen`.
             var key: ScreenID?
         }
+
     }
 
     /// Builds the full menu from a snapshot. `binding` supplies each
@@ -154,8 +150,6 @@ enum MenuModel {
                 items.append(Item(
                     title: MenuText.warningSummaryTitle(count: snapshot.warnings.count),
                     isEnabled: false))
-            }
-            if snapshot.hasHotkeyWarnings {
                 // A disabled row can't fix itself: offer the door. The
                 // hotkey surface lives in Settings → Shortcuts, so the
                 // row after a failure opens exactly that tab: the one
@@ -344,5 +338,31 @@ enum MenuModel {
                 Item(title: "Focus \(window.appName ?? "Window")", action: .focusWindow(window.id)),
                 Item(title: "Tile Focused Window Here", action: .tileHere(window.slot)),
             ])
+    }
+}
+
+extension MenuModel.Snapshot {
+    /// Derives the menu's presentation fields from one scoped read.
+    /// Pure: no controller, store, or gateway is touched here, so the
+    /// snapshot cannot borrow another canvas's truth while it is built.
+    init(reads: MenuReads, notice: String?) {
+        let presentation = MenuReads.monitorPresentation(
+            rows: reads.rows,
+            layoutForScreen: { reads.layout(for: $0) })
+        self.init(
+            isTrusted: reads.isTrusted,
+            warnings: reads.hotkeyWarnings,
+            notice: notice,
+            layoutTitle: presentation.statusLine,
+            activeLayout: reads.canvas.state.activeLayout,
+            tileError: reads.tileError,
+            hasSplitterBackup: reads.canvas.hasSplitterBackup,
+            hasFocusedWindow: reads.hasFocusedWindow,
+            expandState: reads.expandState,
+            tiledWindows: presentation.tiledWindows,
+            canUndoDisplacement: !reads.canvas.undoStack.isEmpty,
+            displacedCount: reads.canvas.displacedCount,
+            untileCount: reads.canvas.tiledCount,
+            monitorSections: presentation.sections)
     }
 }
