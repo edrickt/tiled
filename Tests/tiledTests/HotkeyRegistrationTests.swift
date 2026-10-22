@@ -218,6 +218,41 @@ final class HotkeyRegistrationTests: XCTestCase {
         XCTAssertTrue(registrar.activeTokens.isEmpty)
         XCTAssertEqual(registrar.unregisteredTokens.count, 22)
     }
+
+    /// F29: the Carbon router is process-wide, but the action handler belongs
+    /// to the service that installed it. Teardown must clear that handler so
+    /// a dead service is never called.
+    func testDeinitClearsTheRouterHandler() throws {
+        let registrar = FakeHotkeyRegistrar()
+        let store = makeStore()
+        var service: HotkeyService? = makeService(store: store, registrar: registrar)
+        let router = try XCTUnwrap(service?.router)
+        service?.setHandler { _ in }
+        XCTAssertNotNil(router.handler)
+
+        service = nil
+
+        XCTAssertNil(router.handler, "a dead service leaves no handler behind")
+    }
+
+    /// A replacement service claims the same process-wide route; the old
+    /// service's teardown must leave that newer handler installed.
+    func testAReplacementServiceKeepsItsHandlerWhenTheOldOneTearsDown() {
+        let registrar = FakeHotkeyRegistrar()
+        let store = makeStore()
+        let router = CarbonHotkeyEventRouter(installer: {})
+        var old: HotkeyService? = HotkeyService(
+            store: store, registrar: registrar, router: router)
+        old?.setHandler { _ in }
+        let replacement = HotkeyService(
+            store: store, registrar: registrar, router: router)
+        replacement.setHandler { _ in }
+
+        old = nil
+
+        XCTAssertNotNil(
+            router.handler, "the replacement service owns the live route")
+    }
 }
 
 /// Records every registration request and answers from a per-action table.

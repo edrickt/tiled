@@ -100,8 +100,9 @@ extension Slot {
 /// app actions alike — registers from the store, so a user rebinds ⌥⇧R or
 /// ⌃⌥⇧⌘Z exactly like ⌥⇧U.
 ///
-/// One service owns the process-wide Carbon handler at a time; the shared
-/// context keeps its callback valid across service replacement.
+/// Registration belongs to the service; the Carbon event tap belongs to the
+/// process. `CarbonHotkeyEventRouter` owns that one tap, and a service claims
+/// its action handler for as long as it lives.
 final class HotkeyService {
     // MARK: App-action Carbon ids
     //
@@ -155,10 +156,10 @@ final class HotkeyService {
     static let undoDefaultBinding = HotkeyBinding(
         modifiers: undoModifiers, keyCode: undoKeyCode)
 
-    /// One routing declaration, consumed by the Carbon callback and its
-    /// tests: every action's stable id maps back to that action. Derived
+    /// One routing declaration, consumed by `CarbonHotkeyEventRouter` and
+    /// its tests: every action's stable id maps back to that action. Derived
     /// from `allCases`, so an action cannot appear in one map and be
-    /// missing from another. Unknown ids return nil (the callback answers
+    /// missing from another. Unknown ids return nil (the router answers
     /// eventNotHandledErr, letting the event fall through to other apps).
     static let actionByID: [UInt32: HotkeyAction] = Dictionary(
         uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID, $0) })
@@ -167,25 +168,16 @@ final class HotkeyService {
         actionByID[id]
     }
 
-    private final class Context {
-        var handler: ((HotkeyAction) -> Void)?
-    }
-
     private static let signature = OSType(0x54_49_4C_44) // 'TILD'
-    private static let eventType = EventTypeSpec(
-        eventClass: OSType(kEventClassKeyboard),
-        eventKind: UInt32(kEventHotKeyPressed))
 
     /// Tokens to retire on reload and deinit. The service never touches a
     /// Carbon ref directly; the registrar owns the token's meaning.
     private var registrations: [HotkeyRegistration] = []
     private let registrar: HotkeyRegistrar
-    /// The Carbon callback's context is process-wide, like the once-only
-    /// event handler that points at it. A per-service context would dangle
-    /// as soon as a service deinits; a new service updates this shared
-    /// handler instead of leaving Carbon aimed at freed memory.
-    private static let sharedContext = Context()
-    private static var handlerInstalled = false
+    /// The process-wide event tap. Production shares one router; tests
+    /// inject their own with a no-op installer so no live Carbon target is
+    /// touched.
+    let router: CarbonHotkeyEventRouter
     private let store: HotkeyStore
 
     /// Actions whose global hotkey could not be registered (likely owned
@@ -193,34 +185,35 @@ final class HotkeyService {
     /// never just logged.
     private(set) var failedActions: [HotkeyAction] = []
 
-    /// Fired for every registered hotkey. The handler switches on the
-    /// action; one entry point replaces the per-combo handler properties
-    /// so adding an action can never forget a dispatch branch (the
-    /// switch is exhaustive).
-    var handler: ((HotkeyAction) -> Void)? {
-        get { Self.sharedContext.handler }
-        set { Self.sharedContext.handler = newValue }
-    }
-
     init(
         store: HotkeyStore = HotkeyStore(),
         registrar: HotkeyRegistrar = CarbonHotkeyRegistrar(),
+        router: CarbonHotkeyEventRouter? = nil,
         eventHandlerInstaller: (() -> Void)? = nil
     ) {
         self.store = store
         self.registrar = registrar
-        if let eventHandlerInstaller {
-            eventHandlerInstaller()
+        if let router {
+            self.router = router
+        } else if let eventHandlerInstaller {
+            self.router = CarbonHotkeyEventRouter(installer: eventHandlerInstaller)
         } else {
-            Self.installEventHandler(with: Self.sharedContext)
+            self.router = .shared
         }
         registerHotkeys()
     }
 
-    /// No registration may outlive the service: retire every token the
-    /// registrar still considers live.
+    /// No registration may outlive the service, and neither may its action
+    /// handler: the router is process-wide, so teardown clears only this
+    /// service's claim and leaves a replacement's handler installed.
     deinit {
         retireRegistrations()
+        router.clearHandler(ifOwner: self)
+    }
+
+    /// Hands this service's route to the Carbon router for its lifetime.
+    func setHandler(_ handler: @escaping (HotkeyAction) -> Void) {
+        router.setHandler(handler, owner: self)
     }
 
     /// Unregisters everything and registers from the store again.
@@ -261,39 +254,5 @@ final class HotkeyService {
                     action.title, result.status)
             }
         }
-    }
-
-    private static func installEventHandler(with context: Context) {
-        guard !handlerInstalled else { return }
-        handlerInstalled = true
-        let userData = Unmanaged.passUnretained(context).toOpaque()
-        var eventType = Self.eventType
-        InstallEventHandler(
-            GetApplicationEventTarget(),
-            carbonCallback,
-            1,
-            &eventType,
-            userData,
-            nil)
-    }
-
-    private static let carbonCallback: EventHandlerUPP = { _, event, userData in
-        guard let event else { return OSStatus(eventNotHandledErr) }
-        var hotKeyID = EventHotKeyID()
-        let status = GetEventParameter(
-            event,
-            EventParamName(kEventParamDirectObject),
-            EventParamType(typeEventHotKeyID),
-            nil,
-            MemoryLayout<EventHotKeyID>.size,
-            nil,
-            &hotKeyID)
-        guard status == noErr else { return status }
-        let context = Unmanaged<Context>.fromOpaque(userData!).takeUnretainedValue()
-        guard let action = HotkeyService.route(forHotKeyID: hotKeyID.id) else {
-            return OSStatus(eventNotHandledErr)
-        }
-        DispatchQueue.main.async { context.handler?(action) }
-        return noErr
     }
 }

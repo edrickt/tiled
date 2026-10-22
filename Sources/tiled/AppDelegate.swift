@@ -175,10 +175,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionWindowController?.close()
         permissionWindowController = nil
         let service = HotkeyService(store: hotkeyStore)
-        // One entry point for every global hotkey, slot or app action.
-        // The router owns the route table; the closure holds the delegate
-        // weakly, so the service never keeps the app alive.
-        service.handler = { [weak self] action in
+        // One entry point for every global hotkey, slot or app action. The
+        // Carbon router parses and hops; this closure owns the action route,
+        // and holds the delegate weakly so the service never keeps the app
+        // alive.
+        service.setHandler { [weak self] action in
             guard let self else { return }
             HotkeyActionRouter(performer: self.hotkeyPerformer).dispatch(action)
         }
