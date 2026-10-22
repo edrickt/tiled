@@ -95,6 +95,16 @@ enum MenuModel {
         /// Per-monitor section headers for the tiled-windows list, in
         /// menu order. Empty = single monitor (no headers rendered).
         var monitorSections: [MonitorSection] = []
+        /// The live combo label for each action that has one. Absent means
+        /// the action is disabled, so its row renders without a combo. The
+        /// labels travel in the snapshot, not through a live store read at
+        /// item-build time, so a label-only remap changes snapshot equality
+        /// and the ordinary diff rebuilds the menu.
+        var labels: [HotkeyAction: String] = [:]
+
+        func label(for action: HotkeyAction) -> String? {
+            labels[action]
+        }
 
         struct TiledWindow: Equatable {
             var id: WindowID
@@ -117,12 +127,11 @@ enum MenuModel {
 
     }
 
-    /// Builds the full menu from a snapshot. `binding` supplies each
-    /// action's live label so custom bindings show and disabled actions
-    /// render without a combo.
-    static func items(
-        snapshot: Snapshot, binding: (HotkeyAction) -> HotkeyBinding
-    ) -> [Item] {
+    /// Builds the full menu from a snapshot. The snapshot carries each
+    /// action's live label, so this is a pure function of its input: custom
+    /// bindings show, disabled actions render without a combo, and a
+    /// label-only remap is an ordinary snapshot difference.
+    static func items(snapshot: Snapshot) -> [Item] {
         var items: [Item] = []
 
         // 1. Status: warnings never displace the compass, and the latest
@@ -177,11 +186,11 @@ enum MenuModel {
                 // a section.
                 tileChildren.append(Item(title: "Quarters · Quads", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.quartersQuads {
-                    tileChildren.append(tileItem(slot, binding))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
                 tileChildren.append(Item(title: "Halves", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.quartersHalves {
-                    tileChildren.append(tileItem(slot, binding))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
                 tileChildren.append(.separator())
                 // Honest switch row: enabled only with a focused window to
@@ -201,15 +210,15 @@ enum MenuModel {
                 // of action, so chunk them into corners, thirds, two-thirds.
                 tileChildren.append(Item(title: "Sixths · Corners", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsCorners {
-                    tileChildren.append(tileItem(slot, binding))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
                 tileChildren.append(Item(title: "Thirds", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsThirds {
-                    tileChildren.append(tileItem(slot, binding))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
                 tileChildren.append(Item(title: "Two-Thirds", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsTwoThirds {
-                    tileChildren.append(tileItem(slot, binding))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
                 tileChildren.append(.separator())
                 tileChildren.append(Item(
@@ -222,11 +231,11 @@ enum MenuModel {
             items.append(Item(title: "Tile Focused Window", children: tileChildren))
             items.append(Item(
                 title: MenuText.expandItemTitle(
-                    label: binding(.expand).label,
+                    label: snapshot.label(for: .expand),
                     expandState: snapshot.expandState),
                 action: .toggleExpand))
             items.append(Item(
-                title: MenuText.evictItemTitle(label: binding(.evict).label),
+                title: MenuText.evictItemTitle(label: snapshot.label(for: .evict)),
                 action: .evictFocusedWindow))
             // The window list stays aggregate across every visible canvas
             // (grouped per display). The focused-canvas rows follow the
@@ -247,7 +256,7 @@ enum MenuModel {
                 // tiled"). Single-monitor setups render the flat list.
                 if snapshot.monitorSections.isEmpty {
                     for window in snapshot.tiledWindows {
-                        items.append(windowItem(window, binding))
+                        items.append(windowItem(window, snapshot))
                     }
                 } else {
                     var index = 0
@@ -257,14 +266,14 @@ enum MenuModel {
                         while index < snapshot.tiledWindows.count,
                               snapshot.tiledWindows[index].screen == section.key
                         {
-                            items.append(windowItem(snapshot.tiledWindows[index], binding))
+                            items.append(windowItem(snapshot.tiledWindows[index], snapshot))
                             index += 1
                         }
                     }
                     // Defensive: windows whose section key mismatched
                     // (stale snapshot) still render rather than vanish.
                     while index < snapshot.tiledWindows.count {
-                        items.append(windowItem(snapshot.tiledWindows[index], binding))
+                        items.append(windowItem(snapshot.tiledWindows[index], snapshot))
                         index += 1
                     }
                 }
@@ -280,7 +289,7 @@ enum MenuModel {
                 items.append(Item(
                     title: MenuText.undoDisplacementTitle(
                         displacedCount: snapshot.displacedCount)
-                        + (binding(.undo).label.map { " · \($0)" } ?? ""),
+                        + (snapshot.label(for: .undo).map { " · \($0)" } ?? ""),
                     action: .undoSwitch))
             }
             if snapshot.untileCount > 0 {
@@ -297,7 +306,7 @@ enum MenuModel {
                 items.append(Item(
                     title: (snapshot.hasSplitterBackup
                         ? "Restore Previous Splitters" : "Reset Splitters")
-                        + (binding(.resetSplitters).label.map { " · \($0)" } ?? ""),
+                        + (snapshot.label(for: .resetSplitters).map { " · \($0)" } ?? ""),
                     action: .resetDividers))
             }
         } else {
@@ -316,10 +325,11 @@ enum MenuModel {
     /// One clickable equivalent per global hotkey: the shortcut stays in
     /// the title text, since firing both would tile-then-untile.
     private static func tileItem(
-        _ slot: Slot, _ binding: (HotkeyAction) -> HotkeyBinding
+        _ slot: Slot, _ snapshot: Snapshot
     ) -> Item {
         Item(
-            title: MenuText.tileItemTitle(slot: slot, label: binding(.slot(slot)).label),
+            title: MenuText.tileItemTitle(
+                slot: slot, label: snapshot.label(for: .slot(slot))),
             action: .tileSlot(slot))
     }
 
@@ -327,12 +337,12 @@ enum MenuModel {
     /// back. The row itself doesn't act (no click-focus surprise); the
     /// submenu leads with the distinctive action so opening it pays off.
     private static func windowItem(
-        _ window: Snapshot.TiledWindow, _ binding: (HotkeyAction) -> HotkeyBinding
+        _ window: Snapshot.TiledWindow, _ snapshot: Snapshot
     ) -> Item {
         Item(
             title: MenuText.windowLine(
                 slot: window.slot, appName: window.appName,
-                label: binding(.slot(window.slot)).label),
+                label: snapshot.label(for: .slot(window.slot))),
             children: [
                 Item(title: "Untile This Window", action: .untileWindow(window.id)),
                 Item(title: "Focus \(window.appName ?? "Window")", action: .focusWindow(window.id)),
@@ -363,6 +373,7 @@ extension MenuModel.Snapshot {
             canUndoDisplacement: !reads.canvas.undoStack.isEmpty,
             displacedCount: reads.canvas.displacedCount,
             untileCount: reads.canvas.tiledCount,
-            monitorSections: presentation.sections)
+            monitorSections: presentation.sections,
+            labels: reads.labels)
     }
 }

@@ -15,6 +15,10 @@ struct MenuReads {
     let rows: [TilingController.TiledWindowInfo]
     let hasFocusedWindow: Bool
     let expandState: ExpandToggleState
+    /// The live combo label for every action that has one; absent means
+    /// disabled. Labels are part of the snapshot so a remap is an ordinary
+    /// value difference, never a force-rebuild escape.
+    let labels: [HotkeyAction: String]
     /// Active layout per display for the manage list's section headers. The
     /// nil key is the passed canvas's own layout: an untagged (legacy) row
     /// describes the canvas the menu is scoped to.
@@ -41,6 +45,11 @@ struct MenuReads {
         self.rows = rows
         self.hasFocusedWindow = controller.hasFocusedWindow
         self.expandState = controller.focusedExpandState
+        var labels: [HotkeyAction: String] = [:]
+        for action in HotkeyAction.allCases {
+            if let label = binding(action).label { labels[action] = label }
+        }
+        self.labels = labels
         var layouts: [ScreenID?: LayoutKind] = [nil: canvas.state.activeLayout]
         for row in rows {
             guard let screen = row.screen else { continue }

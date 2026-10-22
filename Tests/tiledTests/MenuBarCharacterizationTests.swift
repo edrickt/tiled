@@ -1,4 +1,3 @@
-import Carbon.HIToolbox
 import XCTest
 @testable import tiled
 
@@ -20,7 +19,7 @@ final class MenuBarCharacterizationTests: XCTestCase {
 
     /// The fixed menu snapshot: two displays' rows, warnings, a notice, an
     /// expanded window returning to a half, undo and splitter receipts.
-    private func fixedSnapshot() -> MenuModel.Snapshot {
+    private func fixedSnapshot(topLeftLabel: String = "⌃⌥Q") -> MenuModel.Snapshot {
         var snapshot = MenuModel.Snapshot(
             isTrusted: true,
             warnings: [
@@ -46,23 +45,42 @@ final class MenuBarCharacterizationTests: XCTestCase {
             .init(title: "Built-in · Quarters · 2 tiled", key: leftDisplay),
             .init(title: "Studio Display · Sixths · 1 tiled", key: rightDisplay),
         ]
+        snapshot.labels = labels(topLeft: topLeftLabel)
         return snapshot
     }
 
-    /// The live bindings for the fixed set. Top Left is deliberately remapped
-    /// to a combo no default uses, so the pinned title proves the menu reads
-    /// the store's label, not the slot's default.
-    private func binding(_ action: HotkeyAction) -> HotkeyBinding {
-        switch action {
-        case .slot(.topLeft):
-            HotkeyBinding(modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_Q))
-        default:
-            action.defaultBinding
-        }
+    /// The live labels for the fixed set, written out literally. Top Left is
+    /// deliberately remapped to a combo no default uses, so the pinned title
+    /// proves the menu reads the snapshot's label, not the slot's default.
+    private func labels(topLeft: String) -> [HotkeyAction: String] {
+        [
+            .slot(.topLeft): topLeft,
+            .slot(.topRight): "⌥⇧⌘O",
+            .slot(.bottomLeft): "⌥⇧⌘M",
+            .slot(.bottomRight): "⌥⇧⌘.",
+            .slot(.leftHalf): "⌥⇧⌘J",
+            .slot(.rightHalf): "⌥⇧⌘L",
+            .slot(.sixthTopLeft): "⌥⇧U",
+            .slot(.sixthTopMiddle): "⌥⇧I",
+            .slot(.sixthTopRight): "⌥⇧O",
+            .slot(.sixthBottomLeft): "⌥⇧M",
+            .slot(.sixthBottomMiddle): "⌥⇧,",
+            .slot(.sixthBottomRight): "⌥⇧.",
+            .slot(.sixthLeft): "⌥⇧J",
+            .slot(.sixthMiddle): "⌥⇧K",
+            .slot(.sixthRight): "⌥⇧L",
+            .slot(.sixthsLeftTwoThirds): "⌥⇧H",
+            .slot(.sixthsRightTwoThirds): "⌥⇧;",
+            .expand: "⌥⇧⏎",
+            .evict: "⌥⇧⌫",
+            .resetSplitters: "⌥⇧R",
+            .settings: "⌃⌥⇧⌘,",
+            .undo: "⌃⌥⇧⌘Z",
+        ]
     }
 
     func testMenuTitlesAndOrderForAFixedCanvasSet() {
-        let items = MenuModel.items(snapshot: fixedSnapshot(), binding: binding)
+        let items = MenuModel.items(snapshot: fixedSnapshot())
 
         XCTAssertEqual(items.map(\.title), [
             "Safari couldn't be tiled: the app refused to resize it.",
@@ -105,7 +123,7 @@ final class MenuBarCharacterizationTests: XCTestCase {
     }
 
     func testTileSubmenuTitlesAndOrderForQuarters() {
-        let items = MenuModel.items(snapshot: fixedSnapshot(), binding: binding)
+        let items = MenuModel.items(snapshot: fixedSnapshot())
         let tile = items.first { $0.title == "Tile Focused Window" }!
 
         XCTAssertEqual(tile.children?.map(\.title), [
@@ -126,7 +144,7 @@ final class MenuBarCharacterizationTests: XCTestCase {
     }
 
     func testManageSubmenusForTheFixedWindows() {
-        let items = MenuModel.items(snapshot: fixedSnapshot(), binding: binding)
+        let items = MenuModel.items(snapshot: fixedSnapshot())
 
         let safari = items.first { $0.title == "Top Left · Safari (⌃⌥Q)" }!
         XCTAssertEqual(safari.action, nil, "the manage row itself does not act")
@@ -148,13 +166,15 @@ final class MenuBarCharacterizationTests: XCTestCase {
 
     func testALabelOnlyRemapChangesTheSnapshotVisibleOutput() {
         // The same menu state with only one binding label changed: the two
-        // snapshots differ, so only a rebuild can show the new combo. Before
-        // the labels live in the snapshot, this is the diff hole `force:`
-        // patched; the literal titles below pin the two outputs.
-        var remapped = fixedSnapshot()
-        remapped.notice = nil
-        let before = MenuModel.items(snapshot: remapped, binding: { $0.defaultBinding })
-        let after = MenuModel.items(snapshot: remapped, binding: binding)
+        // snapshots differ, so the ordinary diff rebuilds and shows the new
+        // combo. This is the hole `force:` used to patch.
+        let beforeSnapshot = fixedSnapshot(topLeftLabel: "⌥⇧⌘U")
+        let afterSnapshot = fixedSnapshot(topLeftLabel: "⌃⌥Q")
+        XCTAssertNotEqual(
+            beforeSnapshot, afterSnapshot,
+            "a label-only remap must be visible to the snapshot diff")
+        let before = MenuModel.items(snapshot: beforeSnapshot)
+        let after = MenuModel.items(snapshot: afterSnapshot)
         let beforeTopLeft = before.first { $0.title == "Tile Focused Window" }?
             .children?.first { $0.action == .tileSlot(.topLeft) }
         let afterTopLeft = after.first { $0.title == "Tile Focused Window" }?

@@ -23,7 +23,7 @@ final class MenuModelTests: XCTestCase {
         displacedCount: Int = 0,
         untileCount: Int = 0
     ) -> MenuModel.Snapshot {
-        MenuModel.Snapshot(
+        var snapshot = MenuModel.Snapshot(
             isTrusted: isTrusted,
             warnings: warnings,
             notice: notice,
@@ -37,13 +37,21 @@ final class MenuModelTests: XCTestCase {
             canUndoDisplacement: canUndoDisplacement,
             displacedCount: displacedCount,
             untileCount: untileCount)
+        snapshot.labels = Self.defaultLabels
+        return snapshot
     }
 
-    private var defaultBinding = HotkeyStore.defaultBinding(for: .topLeft)
+    /// The factory combo for every action that has one: the ordinary store
+    /// answer a fresh install renders. Tests that need a custom label
+    /// override one entry, which is exactly the label-only remap the
+    /// snapshot must see.
+    private static let defaultLabels: [HotkeyAction: String] =
+        Dictionary(uniqueKeysWithValues: HotkeyAction.allCases.compactMap { action in
+            action.defaultBinding.label.map { (action, $0) }
+        })
+
     private func items(_ snap: MenuModel.Snapshot) -> [MenuModel.Item] {
-        MenuModel.items(snapshot: snap) { [self] action in
-            action == .slot(.topLeft) ? defaultBinding : action.defaultBinding
-        }
+        MenuModel.items(snapshot: snap)
     }
 
     private func tileSubmenu(_ model: [MenuModel.Item]) -> MenuModel.Item? {
@@ -234,16 +242,11 @@ final class MenuModelTests: XCTestCase {
     /// The tile submenu lists the active layout only, so the custom-label
     /// test forces sixths (the disabled slot under test is a sixth).
     func testTileItemsCarryLiveLabelsFromTheStore() {
-        let model = MenuModel.items(snapshot: snapshot(activeLayout: .sixths)) { action in
-            switch action {
-            case .slot(.sixthTopLeft):
-                return HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_Q))
-            case .slot(.sixthRight):
-                return HotkeyBinding(modifiers: 0, keyCode: nil) // disabled slot
-            default:
-                return action.defaultBinding
-            }
-        }
+        var snap = snapshot(activeLayout: .sixths)
+        snap.labels[.slot(.sixthTopLeft)] =
+            HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_Q)).label
+        snap.labels[.slot(.sixthRight)] = nil // disabled slot
+        let model = MenuModel.items(snapshot: snap)
         let tile = model.first { $0.title == "Tile Focused Window" }!
         let topLeft = tile.children!.first { $0.title.contains("Top Left Sixth") }!
         XCTAssertEqual(topLeft.title, "Top Left Sixth · ⌥Q")

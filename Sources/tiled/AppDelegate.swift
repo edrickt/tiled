@@ -476,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return RefreshPlan(redrawIcon: iconChanged, rebuildMenu: menuChanged)
     }
 
-    private func refreshMenu(force: Bool = false) {
+    private func refreshMenu() {
         // Destructive outcomes stay in the menu (notice + undo row), not
         // on screen: tiling feedback never pops a panel over the workspace.
         // Rebuilding the menu while it's open flickers or dismisses it;
@@ -496,7 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let snapshot = pass.menu
         let icon = pass.icon
         let plan = Self.refreshPlan(
-            menuChanged: force || snapshot != lastMenuSnapshot || statusItem?.menu == nil,
+            menuChanged: snapshot != lastMenuSnapshot || statusItem?.menu == nil,
             iconChanged: lastIconSnapshot != icon || statusItem?.button?.image == nil,
             menuOpen: menuOpen)
         if plan.redrawIcon { drawStatusIcon(icon) }
@@ -524,7 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// can never render different rows.
     private func populate(_ menu: NSMenu, from snapshot: MenuModel.Snapshot) {
         menu.removeAllItems()
-        for model in MenuModel.items(snapshot: snapshot, binding: { hotkeyStore.binding(for: $0) }) {
+        for model in MenuModel.items(snapshot: snapshot) {
             menu.addItem(makeItem(model))
         }
     }
@@ -704,10 +704,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             controller.onHotkeysChange = { [weak self] in
                 self?.hotkeys?.reload()
-                // Binding labels live in menu titles but not in the
-                // snapshot, so a label-only change would diff clean.
-                // Force past the diff on any binding edit.
-                self?.refreshMenu(force: true)
+                // The labels ride in the snapshot, so a label-only remap
+                // is an ordinary diff and rebuilds without a force path.
+                self?.refreshMenu()
             }
             // The Shortcuts tab surfaces cross-app registration failures
             // beside the recorder that accepted the combo, not only in
