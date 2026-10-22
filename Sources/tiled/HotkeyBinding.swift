@@ -9,6 +9,29 @@ struct HotkeyBinding: Equatable {
 
     var isEnabled: Bool { keyCode != nil }
 
+    init(modifiers: UInt32, keyCode: UInt32?) {
+        self.modifiers = modifiers
+        self.keyCode = keyCode
+    }
+
+    /// The persisted dictionary form shared by the store and both park
+    /// namespaces. A negative modifiers entry is corrupt: `set` never
+    /// writes one, and passing it to `UInt32` traps. Decoding returns nil
+    /// so each caller chooses its own fallback (factory default, or
+    /// "no parked binding").
+    init?(storedEntry: [String: Any]) {
+        guard let modifiers = storedEntry["modifiers"] as? Int,
+            let code = storedEntry["keyCode"] as? Int,
+            modifiers >= 0
+        else { return nil }
+        self.init(
+            modifiers: UInt32(modifiers), keyCode: code >= 0 ? UInt32(code) : nil)
+    }
+
+    var storedEntry: [String: Int] {
+        ["modifiers": Int(modifiers), "keyCode": keyCode.map(Int.init) ?? -1]
+    }
+
     /// Display label, e.g. "⌥⇧U" or "⌃⌥⇧⌘F5". nil when disabled.
     /// Modifiers always render in ⌃⌥⇧⌘ order.
     var label: String? {
@@ -198,18 +221,9 @@ final class HotkeyStore {
 
     func binding(for action: HotkeyAction) -> HotkeyBinding {
         guard let dict = defaults.dictionary(forKey: Self.key(for: action)),
-              let modifiers = dict["modifiers"] as? Int,
-              let code = dict["keyCode"] as? Int
-        else {
-            return Self.defaultBinding(for: action)
-        }
-        // A negative keyCode is the disabled encoding; a negative modifiers
-        // is corrupt data (never written by set) and must not reach
-        // UInt32 (a trap). Fall back to the factory default like any
-        // other unreadable entry.
-        guard modifiers >= 0 else { return Self.defaultBinding(for: action) }
-        return HotkeyBinding(
-            modifiers: UInt32(modifiers), keyCode: code >= 0 ? UInt32(code) : nil)
+            let binding = HotkeyBinding(storedEntry: dict)
+        else { return Self.defaultBinding(for: action) }
+        return binding
     }
 
     func binding(for slot: Slot) -> HotkeyBinding {
@@ -228,9 +242,7 @@ final class HotkeyStore {
     }
 
     func set(_ binding: HotkeyBinding, for action: HotkeyAction) {
-        defaults.set(
-            ["modifiers": Int(binding.modifiers), "keyCode": binding.keyCode.map(Int.init) ?? -1],
-            forKey: Self.key(for: action))
+        defaults.set(binding.storedEntry, forKey: Self.key(for: action))
     }
 
     func set(_ binding: HotkeyBinding, for slot: Slot) {

@@ -551,17 +551,13 @@ final class ShortcutsTab: NSObject {
 
     private func parkedBinding(for action: HotkeyAction) -> HotkeyBinding? {
         guard let dict = defaults.dictionary(forKey: parkedKey(for: action)),
-              let modifiers = dict["modifiers"] as? Int,
-              let code = dict["keyCode"] as? Int, code >= 0
+            let binding = HotkeyBinding(storedEntry: dict), binding.keyCode != nil
         else { return nil }
-        return HotkeyBinding(modifiers: UInt32(modifiers), keyCode: UInt32(code))
+        return binding
     }
 
     private func parkBinding(_ binding: HotkeyBinding, for action: HotkeyAction) {
-        defaults.set(
-            ["modifiers": Int(binding.modifiers),
-             "keyCode": binding.keyCode.map(Int.init) ?? -1],
-            forKey: parkedKey(for: action))
+        defaults.set(binding.storedEntry, forKey: parkedKey(for: action))
     }
 
     private func clearParkedBinding(for action: HotkeyAction) {
@@ -832,18 +828,12 @@ final class ShortcutsTab: NSObject {
     }
 
     private func resetBackupBinding(for action: HotkeyAction) -> HotkeyBinding? {
-        guard let dict = defaults.dictionary(forKey: resetBackupKey(for: action)),
-              let modifiers = dict["modifiers"] as? Int,
-              let code = dict["keyCode"] as? Int
-        else { return nil }
-        return HotkeyBinding(modifiers: UInt32(modifiers), keyCode: code >= 0 ? UInt32(code) : nil)
+        defaults.dictionary(forKey: resetBackupKey(for: action))
+            .flatMap(HotkeyBinding.init(storedEntry:))
     }
 
     private func parkResetBackup(_ binding: HotkeyBinding, for action: HotkeyAction) {
-        defaults.set(
-            ["modifiers": Int(binding.modifiers),
-             "keyCode": binding.keyCode.map(Int.init) ?? -1],
-            forKey: resetBackupKey(for: action))
+        defaults.set(binding.storedEntry, forKey: resetBackupKey(for: action))
     }
 
     private func clearResetBackup(for action: HotkeyAction) {

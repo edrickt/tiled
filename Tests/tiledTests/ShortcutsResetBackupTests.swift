@@ -142,6 +142,40 @@ final class ShortcutsResetBackupTests: XCTestCase {
         XCTAssertEqual(restore.title, "Reset Shortcuts")
     }
 
+    func testCorruptResetBackupModifiersAreIgnoredInsteadOfTrapping() {
+        defaults.set(
+            ["modifiers": -1, "keyCode": Int(kVK_ANSI_J)],
+            forKey: "resetBackupHotkey.\(HotkeyAction.slot(.topLeft).storageKey)")
+
+        let tab = makeTab()
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+
+        XCTAssertNotNil(
+            findButton(titled: "Reset Shortcuts", in: view),
+            "an unreadable backup is not offered as a restore")
+    }
+
+    func testCorruptSectionParkFallsBackToTheDefaultInsteadOfTrapping() {
+        let tab = makeTab()
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let disable = findButton(titled: "Disable all 11", in: view)
+        else { return XCTFail("expected the sixths bulk button") }
+        disable.performClick(nil)
+        defaults.set(
+            ["modifiers": -1, "keyCode": Int(kVK_ANSI_J)],
+            forKey: "parkedHotkey.\(HotkeyAction.slot(.sixthTopLeft).storageKey)")
+        let rebuilt = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+
+        guard let enable = findButton(titled: "Enable all 11", in: rebuilt)
+        else { return XCTFail("expected the sixths bulk button to flip") }
+        enable.performClick(nil)
+
+        XCTAssertEqual(
+            store.binding(for: .sixthTopLeft),
+            HotkeyStore.defaultBinding(for: .sixthTopLeft),
+            "the corrupt park falls back to the factory default")
+    }
+
     func testRestoreClashKeepsTheRegistrationFailureVisible() {
         let claimed = HotkeyAction.slot(.topLeft)
         let claimer = HotkeyAction.slot(.sixthTopLeft)
