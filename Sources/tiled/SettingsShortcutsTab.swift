@@ -282,16 +282,22 @@ final class ShortcutsTab: NSObject {
     /// announced, not just shown. Probed on every reload, since failures
     /// can predate this window (set at launch or while it was hidden).
     private func surfaceHotkeyFailures() {
-        guard let failedActionsProvider else { return }
-        let failed = failedActionsProvider()
-        guard !failed.isEmpty else { return }
-        let messages = failed.map { action in
+        let messages = hotkeyFailureMessages()
+        guard !messages.isEmpty else { return }
+        showConflict(messages.joined(separator: "\n"))
+    }
+
+    /// The registration-failure sentences, shared by the reload surface
+    /// and the restore result. A skipped restore must not erase them:
+    /// both truths compete for the one live-region line.
+    private func hotkeyFailureMessages() -> [String] {
+        guard let failedActionsProvider else { return [] }
+        return failedActionsProvider().map { action in
             MenuText.hotkeyFailureWarning(
                 label: hotkeyStore.binding(for: action).label,
                 title: action.title,
                 recovery: action.registrationRecovery)
         }
-        showConflict(messages.joined(separator: "\n"))
     }
 
     /// Re-probes trust without touching recorder labels or a visible
@@ -810,7 +816,12 @@ final class ShortcutsTab: NSObject {
                 .map {
                     "\($0.action.title) (taken by \($0.owners.map(\.title).joined(separator: ", ")))"
                 }
-            showConflict("Not restored: \(names.joined(separator: ", ")).")
+            // reload() just surfaced the registration failures; joining
+            // them keeps both truths on the one line instead of letting
+            // the restore result overwrite the failure.
+            let messages = ["Not restored: \(names.joined(separator: ", "))."]
+                + hotkeyFailureMessages()
+            showConflict(messages.joined(separator: "\n"))
         }
     }
 

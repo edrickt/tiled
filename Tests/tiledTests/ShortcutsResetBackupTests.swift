@@ -142,6 +142,31 @@ final class ShortcutsResetBackupTests: XCTestCase {
         XCTAssertEqual(restore.title, "Reset Shortcuts")
     }
 
+    func testRestoreClashKeepsTheRegistrationFailureVisible() {
+        let claimed = HotkeyAction.slot(.topLeft)
+        let claimer = HotkeyAction.slot(.sixthTopLeft)
+        let combo = HotkeyBinding(
+            modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_J))
+        park(combo, for: claimed)
+        XCTAssertEqual(store.apply(combo, for: .sixthTopLeft), .applied)
+
+        let tab = makeTab()
+        tab.failedActionsProvider = { [.expand] }
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let restore = findButton(titled: "Restore Previous Shortcuts", in: view)
+        else { return XCTFail("expected a Restore Previous Shortcuts button") }
+
+        restore.performClick(nil)
+
+        let message = label(containing: "Not restored", in: view) ?? ""
+        XCTAssertTrue(
+            message.contains("Not restored: Top Left (taken by Top Left Sixth)."),
+            "the partial restore names the clash")
+        XCTAssertTrue(
+            message.contains("Expand to Fill Screen") && message.contains("could not be registered"),
+            "the registration failure stays visible beside the restore result")
+    }
+
     func testResetDialogsPromiseHoldsThroughTheRestore() {
         store.set(
             HotkeyBinding(modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_J)),
