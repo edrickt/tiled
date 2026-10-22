@@ -15,3 +15,10 @@ exploring an area. Name concepts with the glossary's positive terms —
 the `_Avoid_` lists bind. If an output contradicts an ADR, surface it
 explicitly; if a concept has no term, the project either speaks
 differently or the glossary has a real gap.
+
+### Validation runs
+
+Run `swift build`, `swift test`, and `./scripts/check-test-count.sh`
+after each unit. Run the full mutation table (`python3
+tools/mutation/mutate.py`) once at the end, before push or hand-off,
+not after every unit.
