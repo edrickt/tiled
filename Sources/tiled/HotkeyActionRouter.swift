@@ -33,35 +33,32 @@ struct HotkeyActionRouter {
 /// `AppDelegate` so the forwarding bodies are testable with a fake gateway.
 final class AppHotkeyPerformer: HotkeyActionPerformer {
     private let controller: TilingController
-    private let presentEvict: (ActionReceipt) -> Void
-    private let presentSplitter: (ActionReceipt) -> Void
+    private let present: (ActionReceipt) -> Void
     private let openSettings: () -> Void
     private let performUndoAction: () -> Void
 
     init(
         controller: TilingController,
-        presentEvict: @escaping (ActionReceipt) -> Void,
-        presentSplitter: @escaping (ActionReceipt) -> Void,
+        present: @escaping (ActionReceipt) -> Void,
         openSettings: @escaping () -> Void,
         performUndo: @escaping () -> Void
     ) {
         self.controller = controller
-        self.presentEvict = presentEvict
-        self.presentSplitter = presentSplitter
+        self.present = present
         self.openSettings = openSettings
         self.performUndoAction = performUndo
     }
 
     func tile(slot: Slot) {
-        controller.handle(slot: slot)
+        present(controller.handle(slot: slot))
     }
 
     func performExpandToggle() {
-        controller.handleExpandToggle()
+        present(controller.handleExpandToggle())
     }
 
     func performEvict() {
-        presentEvict(controller.handleEvict())
+        present(controller.handleEvict())
     }
 
     func performSettings() {
@@ -73,6 +70,6 @@ final class AppHotkeyPerformer: HotkeyActionPerformer {
     }
 
     func performResetSplitters() {
-        presentSplitter(controller.resetOrRestoreSplitters())
+        present(controller.resetOrRestoreSplitters())
     }
 }

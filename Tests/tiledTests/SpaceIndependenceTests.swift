@@ -542,10 +542,8 @@ final class SpaceIndependenceTests: XCTestCase {
         switchTo(Self.spaceB)
         gateway.focused = a
         let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
-        var feedbacks: [TilingController.Feedback] = []
-        controller.onFeedback = { feedbacks.append($0) }
 
-        controller.handle(slot: .topRight)
+        let receipt = controller.handle(slot: .topRight)
 
         XCTAssertEqual(
             gateway.frame(of: a), hiddenFrame,
@@ -553,9 +551,10 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertEqual(
             controller.canvas(for: keyA).state.slot(of: a.id), .topRight,
             "the deferred placement stands rather than rolling back")
-        guard case .deferred = feedbacks.first else {
-            return XCTFail("expected .deferred, got \(feedbacks)")
-        }
+        XCTAssertTrue(receipt.performed, "a deferral is never a failure")
+        XCTAssertEqual(
+            receipt.announcement,
+            "That Space isn't visible yet: the change will apply when you return to it.")
         XCTAssertTrue(
             controller.isMarkedStale(keyA),
             "the deferred write marks the hidden canvas stale for the swipe back")
@@ -583,10 +582,8 @@ final class SpaceIndependenceTests: XCTestCase {
         // The Space table hiccups: the display's active Space can no
         // longer be named, though the canvas shown is still Space A.
         gateway.activeSpaces = [:]
-        var feedbacks: [TilingController.Feedback] = []
-        controller.onFeedback = { feedbacks.append($0) }
 
-        controller.handle(slot: .topRight)
+        let receipt = controller.handle(slot: .topRight)
 
         let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
         XCTAssertEqual(
@@ -594,7 +591,7 @@ final class SpaceIndependenceTests: XCTestCase {
             GridLayout().rect(for: .topRight, in: Self.display.visibleFrame),
             "an unknown Space read is not a hidden canvas: the placement is written")
         XCTAssertTrue(
-            feedbacks.isEmpty,
+            receipt.announcement == nil,
             "an unknown Space read is not a deferral: nothing is narrated")
         XCTAssertEqual(
             controller.canvas(for: keyA).state.slot(of: a.id), .topRight,
@@ -620,15 +617,14 @@ final class SpaceIndependenceTests: XCTestCase {
         let bTiled = gateway.frame(of: b)!
 
         // Expanding A while its canvas is hidden defers and retains.
-        var feedbacks: [TilingController.Feedback] = []
-        controller.onFeedback = { feedbacks.append($0) }
         gateway.focused = a
-        controller.handleExpandToggle()
+        let receipt = controller.handleExpandToggle()
 
         XCTAssertEqual(gateway.frame(of: a), aTiled, "hidden A is never written")
-        guard case .deferred = feedbacks.first else {
-            return XCTFail("expected .deferred, got \(feedbacks)")
-        }
+        XCTAssertTrue(receipt.performed, "a deferral is never a failure")
+        XCTAssertEqual(
+            receipt.announcement,
+            "That Space isn't visible yet: the change will apply when you return to it.")
         XCTAssertEqual(
             gateway.frame(of: b), bTiled,
             "the deferred request for A is never applied to the visible B")

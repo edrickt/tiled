@@ -18,7 +18,6 @@ final class ExpandToggleTests: XCTestCase {
 
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
-    private var feedbacks: [TilingController.Feedback] = []
 
     /// The canvas the test's single display tiles onto: reads go through
     /// the same accessor actions do.
@@ -27,12 +26,10 @@ final class ExpandToggleTests: XCTestCase {
     override func setUp() {
         super.setUp()
         gateway = FakeWindowGateway()
-        feedbacks = []
         // No runloop timer: tests drive pruneDeadWindows directly.
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             screens: { [Self.screen] })
-        controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
         controller.onChange = {}
     }
 
@@ -90,9 +87,10 @@ final class ExpandToggleTests: XCTestCase {
         let handle = gateway.addWindow(frame: full)
         gateway.focused = handle
 
-        controller.handleExpandToggle()
+        let receipt = controller.handleExpandToggle()
         XCTAssertTrue(gateway.writes.isEmpty)
-        XCTAssertTrue(feedbacks.isEmpty)
+        XCTAssertTrue(receipt.performed)
+        XCTAssertNil(receipt.announcement, "a landed toggle stays silent")
 
         controller.handleExpandToggle()
         XCTAssertTrue(gateway.writes.isEmpty)
@@ -279,18 +277,17 @@ final class ExpandToggleTests: XCTestCase {
             bounds(for: CGRect(x: 120, y: 90, width: 700, height: 500)))
     }
 
-    // MARK: Feedback
+    // MARK: Receipts
 
     func testExpandWithNoFocusedWindowIsSafeNoop() {
         gateway.focused = nil
 
-        controller.handleExpandToggle()
+        let receipt = controller.handleExpandToggle()
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
-        XCTAssertEqual(feedbacks.count, 1)
-        guard case .noFocusedWindow = feedbacks[0] else {
-            return XCTFail("expected .noFocusedWindow, got \(feedbacks[0])")
-        }
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement, "No focused window: click a window first.")
     }
 
     func testRefusedExpandLeavesWindowPutAndReports() {
@@ -299,13 +296,13 @@ final class ExpandToggleTests: XCTestCase {
         gateway.focused = handle
         gateway.refuseNextWrites(handle)
 
-        controller.handleExpandToggle()
+        let receipt = controller.handleExpandToggle()
 
         XCTAssertEqual(gateway.frame(of: handle), original)
-        XCTAssertEqual(feedbacks.count, 1)
-        guard case .expandRefused = feedbacks[0] else {
-            return XCTFail("expected .expandRefused, got \(feedbacks[0])")
-        }
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement,
+            "TestApp couldn't be expanded: the app refused to resize it.")
         XCTAssertNotNil(canvas.error)
 
         // The window never expanded: the next press retries the expand.

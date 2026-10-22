@@ -11,8 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// and delegate. Lazy because it captures both.
     private lazy var hotkeyPerformer = AppHotkeyPerformer(
         controller: controller,
-        presentEvict: { [weak self] in self?.present($0) },
-        presentSplitter: { [weak self] in self?.present($0) },
+        present: { [weak self] in self?.present($0) },
         openSettings: { [weak self] in self?.showSettings(nil) },
         performUndo: { [weak self] in self?.performUndoSwitch() })
     private let hotkeyStore = HotkeyStore()
@@ -30,30 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller: controller,
         hotkeyStore: hotkeyStore,
         hotkeyService: { [weak self] in self?.hotkeys },
-        actionTarget: self,
-        noticeProvider: { [weak self] reads in
-            guard let self else { return reads.canvas.notice }
-            return Self.menuNotice(
-                canvasNotice: reads.canvas.notice,
-                canvasError: reads.canvas.error,
-                receipt: self.lastActionReceipt,
-                receiptFocusedSpace: self.lastReceiptFocusedSpace,
-                receiptGeneration: self.lastReceiptGeneration,
-                currentGeneration: self.actionGeneration,
-                focusedSpace: reads.space)
-        })
-    /// The latest action receipt. The menu carries its notice even when the
-    /// action touched a background canvas, so a refusal there is not
-    /// spoken once and then absent from the menu. The focus and action
-    /// generation at presentation bound the overlay: a later state change
-    /// or focus move supersedes it instead of hiding the new outcome.
-    private var lastActionReceipt: ActionReceipt?
-    private var lastReceiptFocusedSpace: TilingSpaceKey?
-    private var lastReceiptGeneration: Int?
-    /// Bumped by every controller change. It makes "a later action
-    /// supersedes the receipt" exact even when the new notice is nil or
-    /// happens to repeat the old text.
-    private var actionGeneration = 0
+        actionTarget: self)
     /// App activation moves focus, and focus picks the display the status
     /// icon depicts and the window the menu rows describe. The
     /// controller's change callback only runs for tiling actions, so
@@ -70,20 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
         controller.onChange = { [weak self] in
-            self?.actionGeneration += 1
-            self?.menuBar.refresh()
+            self?.menuBar.stateDidChange()
         }
         controller.onFocusedSpaceChange = { [weak self] in
-            // A focus move supersedes a background action receipt. Clear
-            // all of it, not just the guard's focus key: returning to the
-            // same canvas later must not resurrect a stale notice.
-            self?.lastActionReceipt = nil
-            self?.lastReceiptFocusedSpace = nil
-            self?.lastReceiptGeneration = nil
-            self?.menuBar.refreshFocusedDisplay()
+            self?.menuBar.focusDidChange()
         }
-        controller.onFeedback = { [weak self] feedback in
-            DispatchQueue.main.async { self?.signalFeedback(feedback) }
+        controller.onLateReceipt = { [weak self] receipt in
+            self?.present(receipt)
         }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
@@ -229,30 +198,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The menu's notice row. A receipt from another canvas is the latest
-    /// user-visible outcome and must not vanish just because the menu reads
-    /// the focused canvas; a receipt on this canvas is already carried by
-    /// `canvasNotice`. The overlay is bounded to the focus and action
-    /// generation the receipt was presented against, so a later state
-    /// change or focus move supersedes it even when the new notice is nil
-    /// or repeats the old text.
-    static func menuNotice(
-        canvasNotice: String?,
-        canvasError: String?,
-        receipt: ActionReceipt?,
-        receiptFocusedSpace: TilingSpaceKey?,
-        receiptGeneration: Int?,
-        currentGeneration: Int,
-        focusedSpace: TilingSpaceKey
-    ) -> String? {
-        guard let receipt,
-              receipt.canvas != focusedSpace,
-              receiptFocusedSpace == focusedSpace,
-              receiptGeneration == currentGeneration
-        else { return canvasNotice }
-        return receipt.notice ?? canvasError ?? canvasNotice
-    }
-
     /// Pure Action → selector wiring, extracted from makeItem so a table
     /// test pins every case: a selector typo or cast mistake here
     /// degrades to a silent no-op row, which no UI test would catch.
@@ -366,7 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let raw = sender.representedObject as? String,
               let slot = Slot(rawValue: raw)
         else { return }
-        controller.handle(slot: slot)
+        present(controller.handle(slot: slot))
     }
 
     /// Collapsed layout-switch rows: honest about focus. With a focused
@@ -376,15 +321,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// reversibility). With no focused window the row is disabled, not a
     /// no-op: a menu row must not promise a switch it cannot perform.
     @objc private func switchToQuarters(_ sender: Any?) {
-        controller.handle(slot: .topLeft)
+        present(controller.handle(slot: .topLeft))
     }
 
     @objc private func switchToSixths(_ sender: Any?) {
-        controller.handle(slot: .sixthTopLeft)
+        present(controller.handle(slot: .sixthTopLeft))
     }
 
     @objc private func expandFocusedWindow(_ sender: Any?) {
-        controller.handleExpandToggle()
+        present(controller.handleExpandToggle())
     }
 
     @objc private func evictFocusedWindow(_ sender: Any?) {
@@ -430,78 +375,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// decided whether the action performed, which canvas owns it, what the
     /// menu carries, and the one sentence to speak. The delegate never
     /// reconstructs success from the keypress, so an empty undo or a refused
-    /// restore cannot be announced as a win and then contradicted. A no-op
-    /// or refusal gets the subtle haptic; success speaks without it.
+    /// restore cannot be announced as a win and then contradicted. One
+    /// haptic point: a receipt with something to say gets the current
+    /// haptic; a silent success stays silent.
     private func present(_ receipt: ActionReceipt) {
-        lastActionReceipt = receipt
-        lastReceiptFocusedSpace = controller.focusedTilingSpace
-        lastReceiptGeneration = actionGeneration
-        if !receipt.performed {
-            NSHapticFeedbackManager.defaultPerformer.perform(
-                .generic, performanceTime: .default)
-        }
-        if let announcement = receipt.announcement {
-            announce(announcement, fallback: receipt.notice)
-        }
-        menuBar.refresh()
-    }
-
-    /// VoiceOver announcement for actions whose feedback is otherwise
-    /// visual-only (menu titles, shakes, status lines). Posts against the
-    /// status-item button when present; the Settings window when the icon
-    /// is hidden (the one configuration where the menu isn't a glance
-    /// away and spoken feedback matters most); logs only when neither
-    /// exists. The state change is never visual-only, and never
-    /// announcement-less, either.
-    private func announce(_ text: String, fallback noticeText: String? = nil) {
-        let element: Any? =
-            menuBar.statusButton ?? settingsController?.window ?? NSApp
-        if let element {
-            NSAccessibility.post(
-                element: element,
-                notification: .announcementRequested,
-                userInfo: [.announcement: text,
-                           .priority: NSAccessibilityPriorityLevel.high.rawValue])
-        } else if let noticeText {
-            NSLog("Tiled: %@", noticeText)
-        }
-    }
-
-    /// Subtle confirmation for ineffective hotkey presses: the safe no-op
-    /// stays silent in state and menu, but the hand gets a haptic and
-    /// VoiceOver users get an announcement: pressing harder is never the
-    /// answer, and now the app says so. No on-screen panel: tiling
-    /// feedback stays out of the way; the menu carries the details.
-    private func signalFeedback(_ feedback: TilingController.Feedback) {
+        menuBar.present(receipt)
+        guard let announcement = receipt.announcement else { return }
         NSHapticFeedbackManager.defaultPerformer.perform(
             .generic, performanceTime: .default)
-        let text: String
-        let noticeFallback: String?
-        switch feedback {
-        case .noFocusedWindow:
-            text = MenuText.noFocusedWindowAnnouncement()
-            noticeFallback = "No focused window."
-        case .alreadyTiled(let slot):
-            text = MenuText.alreadyTiledAnnouncement(slot: slot)
-            noticeFallback = "Already in \(SlotPresentation.title(of: slot))."
-        case .refused(let name):
-            text = MenuText.refusedAnnouncement(windowName: name)
-            noticeFallback = controller.canvas(for: controller.focusedTilingSpace).error
-            announce(text, fallback: noticeFallback)
-            menuBar.refresh()
-            return
-        case .expandRefused(let name):
-            text = MenuText.expandRefusedAnnouncement(windowName: name)
-            noticeFallback = controller.canvas(for: controller.focusedTilingSpace).error
-            announce(text, fallback: noticeFallback)
-            menuBar.refresh()
-            return
-        case .deferred:
-            text = MenuText.deferredOffSpaceAnnouncement()
-            noticeFallback = "Space isn't visible yet."
-        }
-        announce(text, fallback: noticeFallback)
-        menuBar.refresh()
+        announce(announcement)
+    }
+
+    /// VoiceOver announcement for actions whose outcome is otherwise
+    /// visual-only (menu titles, status lines, the glyph). Posts against
+    /// the status-item button when present; the Settings window when the
+    /// icon is hidden (the one configuration where the menu isn't a glance
+    /// away and spoken feedback matters most). The app is always the last
+    /// anchor, so there is no logging-only fallback.
+    private func announce(_ text: String) {
+        let element: Any =
+            menuBar.statusButton ?? settingsController?.window ?? NSApp as Any
+        NSAccessibility.post(
+            element: element,
+            notification: .announcementRequested,
+            userInfo: [.announcement: text,
+                       .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     @objc private func undoSwitch(_ sender: NSMenuItem) {
@@ -531,7 +429,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let raw = sender.representedObject as? String,
               let slot = Slot(rawValue: raw)
         else { return }
-        controller.handle(slot: slot)
+        present(controller.handle(slot: slot))
     }
 
     @objc private func openAccessibilitySettings(_ sender: Any?) {

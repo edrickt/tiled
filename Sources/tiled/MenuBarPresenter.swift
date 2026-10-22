@@ -41,9 +41,9 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     private let hotkeyService: () -> HotkeyService?
     /// The object carrying the menu's action selectors (the AppDelegate).
     private weak var actionTarget: AnyObject?
-    /// The menu's sticky notice for one scoped read. The presenter owns the
-    /// snapshot assembly; the delegate still owns the receipt that feeds it.
-    private let noticeProvider: (MenuReads) -> String?
+    /// The latest receipt's overlay, bounded to the focus and generation it
+    /// was presented against.
+    private var notices = NoticePresentation()
     private var statusItem: NSStatusItem?
     /// The last snapshot actually rendered. The menu and icon halves are
     /// compared separately so an icon-only change never rebuilds the menu.
@@ -54,14 +54,34 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         controller: TilingController,
         hotkeyStore: HotkeyStore,
         hotkeyService: @escaping () -> HotkeyService?,
-        actionTarget: AnyObject,
-        noticeProvider: @escaping (MenuReads) -> String?
+        actionTarget: AnyObject
     ) {
         self.controller = controller
         self.hotkeyStore = hotkeyStore
         self.hotkeyService = hotkeyService
         self.actionTarget = actionTarget
-        self.noticeProvider = noticeProvider
+    }
+
+    /// A controller change: the receipt a later action presents is bounded
+    /// to the generation after this change, and the menu and glyph refresh.
+    func stateDidChange() {
+        notices.stateDidChange()
+        refresh()
+    }
+
+    /// Focus moved: supersede any background receipt, then redraw the
+    /// glyph. The menu is rebuilt in place when it opens.
+    func focusDidChange() {
+        notices.clear()
+        refreshFocusedDisplay()
+    }
+
+    /// Presents one action's receipt: the menu carries its notice even when
+    /// the action touched a background canvas, then the snapshot refreshes.
+    /// The delegate still owns the haptic and the one spoken sentence.
+    func present(_ receipt: ActionReceipt) {
+        notices.present(receipt, focusedSpace: controller.focusedTilingSpace)
+        refresh()
     }
 
     /// The status button, when the icon is visible: the anchor for the
@@ -148,7 +168,12 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
             failedActions: hotkeyService()?.failedActions ?? [],
             binding: { self.hotkeyStore.binding(for: $0) })
         return MenuBarSnapshot(
-            menu: MenuModel.Snapshot(reads: reads, notice: noticeProvider(reads)),
+            menu: MenuModel.Snapshot(
+                reads: reads,
+                notice: notices.overlay(
+                    canvasNotice: reads.canvas.notice,
+                    canvasError: reads.canvas.error,
+                    focusedSpace: space)),
             icon: Self.iconSnapshot(
                 space: space,
                 canvas: { self.controller.canvas(for: $0) },

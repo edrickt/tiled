@@ -213,60 +213,39 @@ final class MenuBarCharacterizationTests: XCTestCase {
             displayName: nil))
     }
 
-    // MARK: Feedback announcements preserved by the receipt cut
+    // MARK: Slot and expand receipt announcements
 
-    /// What the current feedback channel says to the user, as the delegate
-    /// composes it. Literal sentences so the receipt migration can prove it
-    /// speaks the same words.
-    private func announcement(for feedback: TilingController.Feedback) -> String {
-        switch feedback {
-        case .noFocusedWindow:
-            "No focused window: click a window first."
-        case .alreadyTiled(.topLeft):
-            "Top Left: already there."
-        case .alreadyTiled(let slot):
-            "\(SlotPresentation.title(of: slot)): already there."
-        case .refused(let name):
-            "\(name ?? "That window") couldn't be tiled: the app refused to resize it."
-        case .expandRefused(let name):
-            "\(name ?? "That window") couldn't be expanded: the app refused to resize it."
-        case .deferred:
-            "That Space isn't visible yet: the change will apply when you return to it."
-        }
-    }
-
-    func testSlotFeedbackForNoFocusAlreadyTiledRefusedAndDeferred() {
+    func testSlotReceiptsForNoFocusAlreadyTiledRefusedAndDeferred() {
         let gateway = FakeWindowGateway()
         let screen = Self.screen
         let controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             screens: { [screen] }, deathConfirmation: 0)
-        var feedbacks: [TilingController.Feedback] = []
-        controller.onFeedback = { feedbacks.append($0) }
 
         // No focused window.
-        controller.handle(slot: .topLeft)
+        let noFocus = controller.handle(slot: .topLeft)
+        XCTAssertFalse(noFocus.performed)
         XCTAssertEqual(
-            feedbacks.last.map { announcement(for: $0) },
-            "No focused window: click a window first.")
+            noFocus.announcement, "No focused window: click a window first.")
 
         // Already there: the strict no-op answers once.
         let safari = gateway.addWindow(
             frame: CGRect(x: 0, y: 0, width: 800, height: 600), appName: "Safari")
         gateway.focused = safari
         controller.handle(slot: .topLeft)
-        controller.handle(slot: .topLeft)
-        XCTAssertEqual(
-            feedbacks.last.map { announcement(for: $0) }, "Top Left: already there.")
+        let already = controller.handle(slot: .topLeft)
+        XCTAssertFalse(already.performed)
+        XCTAssertEqual(already.announcement, "Top Left: already there.")
 
         // A refused write names the app, never a shortcut problem.
         let mail = gateway.addWindow(
             frame: CGRect(x: 900, y: 0, width: 800, height: 600), appName: "Mail")
         gateway.focused = mail
         gateway.refuseNextWrites(mail)
-        controller.handle(slot: .topRight)
+        let refused = controller.handle(slot: .topRight)
+        XCTAssertFalse(refused.performed)
         XCTAssertEqual(
-            feedbacks.last.map { announcement(for: $0) },
+            refused.announcement,
             "Mail couldn't be tiled: the app refused to resize it.")
 
         // A write deferred off-Space narrates the deferral, never a refusal.
@@ -284,8 +263,6 @@ final class MenuBarCharacterizationTests: XCTestCase {
         let spaceController = TilingController(
             gateway: spaceGateway, pruneInterval: nil,
             screens: { [spacedScreen] }, deathConfirmation: 0)
-        var spaceFeedbacks: [TilingController.Feedback] = []
-        spaceController.onFeedback = { spaceFeedbacks.append($0) }
         let notes = spaceGateway.addWindow(
             frame: CGRect(x: 100, y: 100, width: 800, height: 600), appName: "Notes")
         spaceGateway.focused = notes
@@ -293,34 +270,34 @@ final class MenuBarCharacterizationTests: XCTestCase {
         spaceGateway.activeSpaces = [displayID: spaceB]
         spaceGateway.simulateSpaceChange()
         spaceGateway.focused = notes
-        spaceController.handle(slot: .topRight)
+        let deferred = spaceController.handle(slot: .topRight)
+        XCTAssertTrue(deferred.performed, "a deferral is never a failure")
         XCTAssertEqual(
-            spaceFeedbacks.last.map { announcement(for: $0) },
+            deferred.announcement,
             "That Space isn't visible yet: the change will apply when you return to it.")
     }
 
-    func testExpandFeedbackForNoFocusAndRefused() {
+    func testExpandReceiptsForNoFocusAndRefused() {
         let gateway = FakeWindowGateway()
         let screen = Self.screen
         let controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             screens: { [screen] }, deathConfirmation: 0)
-        var feedbacks: [TilingController.Feedback] = []
-        controller.onFeedback = { feedbacks.append($0) }
 
-        controller.handleExpandToggle()
+        let noFocus = controller.handleExpandToggle()
+        XCTAssertFalse(noFocus.performed)
         XCTAssertEqual(
-            feedbacks.last.map { announcement(for: $0) },
-            "No focused window: click a window first.")
+            noFocus.announcement, "No focused window: click a window first.")
 
         let safari = gateway.addWindow(
             frame: CGRect(x: 0, y: 0, width: 800, height: 600), appName: "Safari")
         gateway.focused = safari
         controller.handle(slot: .topLeft)
         gateway.refuseNextWrites(safari)
-        controller.handleExpandToggle()
+        let refused = controller.handleExpandToggle()
+        XCTAssertFalse(refused.performed)
         XCTAssertEqual(
-            feedbacks.last.map { announcement(for: $0) },
+            refused.announcement,
             "Safari couldn't be expanded: the app refused to resize it.")
     }
 }

@@ -18,7 +18,6 @@ final class UndoIntegrityTests: XCTestCase {
 
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
-    private var feedbacks: [TilingController.Feedback] = []
 
     /// The canvas the test's single display tiles onto: reads go through
     /// the same accessor actions do.
@@ -35,7 +34,6 @@ final class UndoIntegrityTests: XCTestCase {
         gateway = FakeWindowGateway()
         controller = TilingController(
             gateway: gateway, pruneInterval: nil, deathConfirmation: 0)
-        controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
     }
 
     @discardableResult
@@ -323,7 +321,6 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertFalse(controller.undoLastDisplacement())
         XCTAssertTrue(canvas.undoStack.isEmpty, "the refused chapter is consumed once")
         gateway.clearWrites()
-        feedbacks.removeAll()
 
         let receipt = controller.undoAction()
 
@@ -663,8 +660,6 @@ final class UndoIntegrityTests: XCTestCase {
         let localController = TilingController(
             gateway: localGateway, pruneInterval: nil,
             screens: { [screen] }, deathConfirmation: 0)
-        var localFeedbacks: [TilingController.Feedback] = []
-        localController.onFeedback = { localFeedbacks.append($0) }
         let handle = localGateway.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
         localGateway.focused = handle
         localController.handle(slot: .topLeft)
@@ -675,14 +670,15 @@ final class UndoIntegrityTests: XCTestCase {
         localGateway.activeSpaces = [displayID: spaceB]
         localGateway.simulateSpaceChange()
         localGateway.focused = handle
-        localController.handleExpandToggle()
+        let receipt = localController.handleExpandToggle()
 
         XCTAssertEqual(
             localGateway.frame(of: handle), original,
             "an off-Space window is never written")
-        guard case .deferred = localFeedbacks.first else {
-            return XCTFail("expected .deferred, got \(localFeedbacks)")
-        }
+        XCTAssertTrue(receipt.performed, "a deferral is never a failure")
+        XCTAssertEqual(
+            receipt.announcement,
+            "That Space isn't visible yet: the change will apply when you return to it.")
 
         // The retained expansion is applied when the Space returns.
         localGateway.activeSpaces = [displayID: spaceA]

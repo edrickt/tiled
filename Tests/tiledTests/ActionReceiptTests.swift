@@ -17,7 +17,6 @@ final class ActionReceiptTests: XCTestCase {
 
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
-    private var feedbacks: [TilingController.Feedback] = []
 
     /// The canvas the test's single display tiles onto: reads go through
     /// the same accessor actions do.
@@ -29,7 +28,6 @@ final class ActionReceiptTests: XCTestCase {
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             screens: { [Self.screen] }, deathConfirmation: 0)
-        controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
         controller.onChange = {}
     }
 
@@ -76,7 +74,6 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertTrue(receipt.performed)
         XCTAssertNil(receipt.notice, "eviction leaves no sticky notice")
         XCTAssertEqual(receipt.announcement, "Focused window evicted.")
-        XCTAssertTrue(feedbacks.isEmpty, "the receipt replaces the old evict feedback")
     }
 
     func testEvictWithoutFocusedWindowReceiptAnswersOnce() {
@@ -87,7 +84,6 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertEqual(receipt.canvas, controller.focusedTilingSpace)
         XCTAssertFalse(receipt.performed)
         XCTAssertEqual(receipt.announcement, "No focused window: click a window first.")
-        XCTAssertTrue(feedbacks.isEmpty, "no duplicate feedback beside the receipt")
     }
 
     func testEvictUntiledWindowReceiptAnswersOnce() {
@@ -97,7 +93,6 @@ final class ActionReceiptTests: XCTestCase {
 
         XCTAssertFalse(receipt.performed)
         XCTAssertEqual(receipt.announcement, "That window isn't tiled: nothing to evict.")
-        XCTAssertTrue(feedbacks.isEmpty, "no duplicate feedback beside the receipt")
         XCTAssertTrue(canvas.records.isEmpty, "a no-op evict leaves no record")
     }
 
@@ -114,7 +109,6 @@ final class ActionReceiptTests: XCTestCase {
             "Couldn't restore “Safari”: it may still be sitting in its old tile.")
         XCTAssertEqual(receipt.notice, receipt.announcement, "the menu carries the refusal")
         XCTAssertFalse(receipt.announcement!.contains("evicted"))
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     // MARK: Untile All
@@ -134,7 +128,6 @@ final class ActionReceiptTests: XCTestCase {
             "Untiled 2 windows. Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
         XCTAssertEqual(receipt.notice, canvas.notice)
         XCTAssertEqual(receipt.announcement, "All tiled windows restored.")
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     func testUntileAllOnEmptyCanvasReceiptAnswersOnce() {
@@ -143,7 +136,6 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertFalse(receipt.performed)
         XCTAssertNil(receipt.notice)
         XCTAssertEqual(receipt.announcement, "No tiled windows on this canvas.")
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     func testUntileAllRefusedRestoreReceiptNamesTheErrorNeverSuccess() {
@@ -160,7 +152,6 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertEqual(receipt.notice, receipt.announcement, "the menu carries the refusal")
         XCTAssertEqual(canvas.error, receipt.announcement, "the canvas carries the refusal too")
         XCTAssertFalse(receipt.announcement!.contains("restored"))
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     // MARK: Single-window untile
@@ -176,7 +167,6 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertTrue(receipt.performed)
         XCTAssertNil(receipt.notice)
         XCTAssertEqual(receipt.announcement, "Safari untiled.")
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     func testUntileWindowWithoutAppNameUsesWindowFallback() {
@@ -198,7 +188,6 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertFalse(receipt.performed)
         XCTAssertEqual(
             receipt.announcement, "That window isn't tiled: nothing to untile.")
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     func testUntileWindowOfUntiledWindowLeavesTheStickyNoticeAlone() {
@@ -231,7 +220,6 @@ final class ActionReceiptTests: XCTestCase {
             "Couldn't restore “Safari”: it may still be sitting in its old tile.")
         XCTAssertEqual(receipt.notice, receipt.announcement)
         XCTAssertFalse(receipt.announcement!.contains("untiled"))
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     func testBackgroundCanvasUntileRefusalNamesItsDisplayAndWindow() {
@@ -249,7 +237,6 @@ final class ActionReceiptTests: XCTestCase {
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             screens: { [left, right] }, deathConfirmation: 0)
-        controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
         controller.onChange = {}
 
         // Tile Safari on the second display, then move focus to an untiled
@@ -275,7 +262,6 @@ final class ActionReceiptTests: XCTestCase {
             receipt.announcement,
             "Display 2: Couldn't restore “Safari”: it may still be sitting in its old tile.")
         XCTAssertFalse(receipt.announcement!.contains("untiled"))
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     // MARK: Undo
@@ -290,7 +276,6 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertEqual(receipt.notice, "Undid displacement \u{00B7} 1 window restored.")
         XCTAssertEqual(receipt.notice, canvas.notice)
         XCTAssertEqual(receipt.announcement, "Displaced windows restored.")
-        XCTAssertTrue(feedbacks.isEmpty, "the receipt path emits no duplicate feedback")
     }
 
     func testUndoEmptyStackReceiptAnswersOnceNeverSuccess() {
@@ -304,7 +289,6 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertEqual(
             receipt.announcement, "Nothing to undo: a later change replaced it.")
         XCTAssertNotEqual(receipt.announcement, "Displaced windows restored.")
-        XCTAssertTrue(feedbacks.isEmpty, "the receipt path answers once, without duplicate feedback")
     }
 
     func testUndoRefusedRestoreReceiptNamesTheErrorNeverSuccess() {
@@ -319,7 +303,6 @@ final class ActionReceiptTests: XCTestCase {
             "Couldn't restore “Safari”: it may still be sitting in its old tile.")
         XCTAssertEqual(receipt.notice, receipt.announcement)
         XCTAssertFalse(receipt.announcement!.contains("restored"))
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     func testUndoChapterWhoseWindowsAllDiedReceiptReportsTheFailure() {
@@ -331,7 +314,6 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertFalse(receipt.performed)
         XCTAssertEqual(receipt.announcement, "Couldn't restore the displaced windows.")
         XCTAssertEqual(receipt.notice, receipt.announcement)
-        XCTAssertTrue(feedbacks.isEmpty, "the receipt path emits no feedback")
     }
 
     // MARK: Bool seam
@@ -342,6 +324,5 @@ final class ActionReceiptTests: XCTestCase {
         let performed = controller.undoLastDisplacement()
 
         XCTAssertFalse(performed)
-        XCTAssertTrue(feedbacks.isEmpty, "the receipt is the one no-op announcement")
     }
 }

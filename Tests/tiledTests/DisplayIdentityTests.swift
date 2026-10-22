@@ -226,16 +226,15 @@ final class DisplayIdentityTests: XCTestCase {
         // A hotkey still resolves the window's own (now unplugged)
         // canvas, and that canvas is not visible.
         gateway.focused = rightHandle
-        var feedbacks: [TilingController.Feedback] = []
-        controller.onFeedback = { feedbacks.append($0) }
-        controller.handle(slot: .topRight)
+        let receipt = controller.handle(slot: .topRight)
 
         XCTAssertEqual(
             gateway.frame(of: rightHandle), tiledFrame,
             "an unplugged display's withheld canvas is not written")
-        guard case .deferred = feedbacks.first else {
-            return XCTFail("expected .deferred, got \(feedbacks)")
-        }
+        XCTAssertTrue(receipt.performed, "a deferral is never a failure")
+        XCTAssertEqual(
+            receipt.announcement,
+            "That Space isn't visible yet: the change will apply when you return to it.")
         XCTAssertEqual(
             controller.canvas(for: withheld).state.slot(of: rightHandle.id), .topRight,
             "the deferred placement stands on the kept canvas")

@@ -143,26 +143,11 @@ final class TilingController {
     /// glyph's layout and occupancy cannot change.
     var onFocusedSpaceChange: (() -> Void)?
 
-    /// Feedback for ineffective hotkey presses: the hotkey path is the
-    /// primary interface, so silence trains users to press harder, not
-    /// smarter. The delegate turns these into a haptic + announcement;
-    /// state and menu side effects are unchanged (safe no-ops stay safe).
-    enum Feedback {
-        case noFocusedWindow
-        case alreadyTiled(slot: Slot)
-        /// A tiling write was refused. The delegate announces it; there
-        /// is no on-screen panel; tiling feedback stays out of the way.
-        case refused(windowName: String?)
-        /// A ⌥⇧⏎ expand write was refused: same shape as `.refused` but
-        /// the announcement must not say “tiled”.
-        case expandRefused(windowName: String?)
-        /// A tiling write was deferred: its canvas is on a Space the user
-        /// cannot see, so the intent stands and reconciles on return.
-        /// Never an app refusal: the app did nothing wrong.
-        case deferred
-    }
-
-    var onFeedback: ((Feedback) -> Void)?
+    /// A late outcome with no action caller to return a receipt to: the
+    /// silent-ignore convergence rollback. It hands the delegate the same
+    /// receipt shape the actions return, so a late refusal still speaks
+    /// once and the menu carries it instead of only logging it.
+    var onLateReceipt: ((ActionReceipt) -> Void)?
 
     private static let debugLogging = ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1"
 
@@ -316,7 +301,6 @@ final class TilingController {
         pruneDeadWindows()
         guard let handle = gateway.focusedWindow() else {
             dbg("no focused window for \(slot.rawValue)")
-            onFeedback?(.noFocusedWindow)
             return nil
         }
         let liveID = register.liveID(for: handle)
@@ -328,8 +312,15 @@ final class TilingController {
         return (id, handle, key)
     }
 
-    func handle(slot: Slot) {
-        guard let (id, handle, key) = requesterAndCanvas(for: slot) else { return }
+    /// One tiling request, answered with the one receipt every surface
+    /// presents. A landed placement stays silent (the canvas's notice
+    /// carries it); a no-op, refusal, or deferral names itself once.
+    @discardableResult
+    func handle(slot: Slot) -> ActionReceipt {
+        let focusedSpace = directory.focusedKey()
+        guard let (id, handle, key) = requesterAndCanvas(for: slot) else {
+            return noFocusedWindowReceipt(on: focusedSpace)
+        }
         let hadSlot = directory.storedCanvas(for: key)?.state.slot(of: id) != nil
         let context = placementContext(for: key)
         // An expanded window getting a slot hotkey comes back to earth
@@ -355,42 +346,128 @@ final class TilingController {
         }
         if claimed { discardDeferredRestores(for: handle) }
         let collapsed = collapse != nil
-        if let collapse { announce(collapse.result) }
         if case .alreadyTiled = outcome.result {
             // Already in that tile: a strict no-op; no state, error, or
-            // menu side effects. Still signal it so the hotkey path can
+            // menu side effects. Still answers once so the hotkey path can
             // confirm subtly (the Welcome tab teaches this as safety).
             dbg("noop win\(id) already in \(slot.rawValue)")
-            onFeedback?(.alreadyTiled(slot: slot))
             // A collapse that ran just before the no-op already wrote a
             // frame, so the menu must refresh even though the placement
             // itself changed nothing.
             if collapsed { onChange?() }
-            return
+            return placementReceipt(
+                outcome.result, slot: slot, collapse: collapse?.result, on: key)
         }
         apply(outcome, on: key)
-        announce(outcome.result)
         if collapsed { onChange?() }
         // The reflow's survivors share the event's undo chapter: undo
         // restores the pre-event world in one ⌃⇧⌘Z (a move with no
         // eviction has no chapter of its own, so the reflow starts one).
         // The canvas pushed the chapter; the coordinator refreshes.
         onChange?()
+        return placementReceipt(
+            outcome.result, slot: slot, collapse: collapse?.result, on: key)
     }
 
-    /// Maps one canvas outcome to the hotkey feedback channel: refusals
-    /// are announced, everything else is silent (the canvas's notice/
-    /// error carry the rest).
-    private func announce(_ result: TilingSpace.Outcome.Result) {
+    /// One receipt for a hotkey or menu action that found no focused
+    /// window. The no-op still names itself rather than staying silent.
+    private func noFocusedWindowReceipt(on space: TilingSpaceKey) -> ActionReceipt {
+        let canvas = directory.storedCanvas(for: space)
+        return ActionReceipt(
+            canvas: space, performed: false,
+            notice: canvas?.error ?? canvas?.notice,
+            announcement: MenuText.noFocusedWindowAnnouncement())
+    }
+
+    /// One slot request's receipt. The placement result speaks first; a
+    /// collapse that failed or deferred before an otherwise silent
+    /// placement still speaks, because the window did not come back to
+    /// earth. A refusal's notice prefers the canvas's refusal sentence.
+    private func placementReceipt(
+        _ result: TilingSpace.Outcome.Result,
+        slot: Slot,
+        collapse: TilingSpace.Outcome.Result?,
+        on space: TilingSpaceKey
+    ) -> ActionReceipt {
+        let canvas = directory.storedCanvas(for: space)
+        let notice = canvas?.error ?? canvas?.notice
         switch result {
         case .refused(let windowName):
-            onFeedback?(.refused(windowName: windowName))
-        case .expandRefused(let windowName):
-            onFeedback?(.expandRefused(windowName: windowName))
+            let announcement = MenuText.refusedAnnouncement(windowName: windowName)
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: canvas?.error ?? announcement,
+                announcement: announcement)
         case .deferred:
-            onFeedback?(.deferred)
-        case .placed, .alreadyTiled, .nothingToEvict:
-            break
+            return ActionReceipt(
+                canvas: space, performed: true, notice: notice,
+                announcement: MenuText.deferredOffSpaceAnnouncement())
+        case .alreadyTiled:
+            return ActionReceipt(
+                canvas: space, performed: false, notice: notice,
+                announcement: MenuText.alreadyTiledAnnouncement(slot: slot))
+        case .expandRefused(let windowName):
+            let announcement = MenuText.expandRefusedAnnouncement(windowName: windowName)
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: canvas?.error ?? announcement,
+                announcement: announcement)
+        case .nothingToEvict:
+            return ActionReceipt(
+                canvas: space, performed: false, notice: notice,
+                announcement: nil)
+        case .placed:
+            if case .expandRefused(let windowName)? = collapse {
+                let announcement = MenuText.expandRefusedAnnouncement(windowName: windowName)
+                return ActionReceipt(
+                    canvas: space, performed: false,
+                    notice: canvas?.error ?? announcement,
+                    announcement: announcement)
+            }
+            if case .deferred? = collapse {
+                return ActionReceipt(
+                    canvas: space, performed: true, notice: notice,
+                    announcement: MenuText.deferredOffSpaceAnnouncement())
+            }
+            return ActionReceipt(
+                canvas: space, performed: true, notice: notice, announcement: nil)
+        }
+    }
+
+    /// One expand toggle's receipt. A landed toggle stays silent (the
+    /// canvas's notice/error carries it); a refusal or deferral answers
+    /// once, and a deferral is never a failure.
+    private func expansionReceipt(
+        _ result: TilingSpace.Outcome.Result,
+        on space: TilingSpaceKey
+    ) -> ActionReceipt {
+        let canvas = directory.storedCanvas(for: space)
+        let notice = canvas?.error ?? canvas?.notice
+        switch result {
+        case .deferred:
+            return ActionReceipt(
+                canvas: space, performed: true, notice: notice,
+                announcement: MenuText.deferredOffSpaceAnnouncement())
+        case .expandRefused(let windowName):
+            let announcement = MenuText.expandRefusedAnnouncement(windowName: windowName)
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: canvas?.error ?? announcement,
+                announcement: announcement)
+        case .refused(let windowName):
+            let announcement = MenuText.refusedAnnouncement(windowName: windowName)
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: canvas?.error ?? announcement,
+                announcement: announcement)
+        case .nothingToEvict, .alreadyTiled:
+            return ActionReceipt(
+                canvas: space, performed: false, notice: notice,
+                announcement: nil)
+        case .placed:
+            return ActionReceipt(
+                canvas: space, performed: true, notice: notice,
+                announcement: nil)
         }
     }
 
@@ -478,7 +555,11 @@ final class TilingController {
                 $0.error = TilingSpace.refusalMessage(windowName: name)
             }
         }
-        onFeedback?(.refused(windowName: name))
+        let error = directory.storedCanvas(for: errorSpace)?.error
+        let announcement = MenuText.refusedAnnouncement(windowName: name)
+        onLateReceipt?(ActionReceipt(
+            canvas: errorSpace, performed: false,
+            notice: error ?? announcement, announcement: announcement))
         onChange?()
         dbg("verify FAILED win\(id): silent ignore, rolled back")
     }
@@ -1294,13 +1375,14 @@ final class TilingController {
     /// Expands the focused window to fill its screen; pressing again
     /// retiles it to its previous tile (or restores its previous frame
     /// when it wasn't tiled). Layout state is untouched: a tiled window
-    /// keeps its slot while expanded, exactly like focusing it.
-    func handleExpandToggle() {
+    /// keeps its slot while expanded, exactly like focusing it. Returns
+    /// the one receipt the menu and hotkey paths present.
+    @discardableResult
+    func handleExpandToggle() -> ActionReceipt {
         pruneDeadWindows()
         guard let handle = gateway.focusedWindow() else {
             dbg("no focused window for expand toggle")
-            onFeedback?(.noFocusedWindow)
-            return
+            return noFocusedWindowReceipt(on: directory.focusedKey())
         }
         let liveID = register.liveID(for: handle)
         let key = liveID.flatMap { directory.owner(of: $0) } ?? directory.focusedKey()
@@ -1325,8 +1407,8 @@ final class TilingController {
         case .refused, .alreadyTiled, .nothingToEvict, .expandRefused:
             break
         }
-        announce(outcome.result)
         onChange?()
+        return expansionReceipt(outcome.result, on: key)
     }
 
     /// Slot a window presents to the tracker: expanded windows read as

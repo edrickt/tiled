@@ -19,7 +19,6 @@ final class EvictTests: XCTestCase {
 
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
-    private var feedbacks: [TilingController.Feedback] = []
 
     /// The canvas the test's single display tiles onto: reads go through
     /// the same accessor actions do.
@@ -31,7 +30,6 @@ final class EvictTests: XCTestCase {
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             screens: { [Self.screen] })
-        controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
         controller.onChange = {}
     }
 
@@ -133,7 +131,6 @@ final class EvictTests: XCTestCase {
         let receipt = controller.handleEvict()
         XCTAssertFalse(receipt.performed)
         XCTAssertEqual(receipt.announcement, "No focused window: click a window first.")
-        XCTAssertTrue(feedbacks.isEmpty, "the receipt replaces the old .noFocusedWindow feedback")
     }
 
     func testEvictUntiledWindowAnswers() {
@@ -141,7 +138,6 @@ final class EvictTests: XCTestCase {
         let receipt = controller.handleEvict()
         XCTAssertFalse(receipt.performed)
         XCTAssertEqual(receipt.announcement, "That window isn't tiled: nothing to evict.")
-        XCTAssertTrue(feedbacks.isEmpty, "the receipt replaces the old .nothingToEvict feedback")
         XCTAssertTrue(canvas.state.occupants.isEmpty)
     }
 

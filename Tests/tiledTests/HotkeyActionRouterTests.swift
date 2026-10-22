@@ -65,8 +65,7 @@ final class AppHotkeyPerformerTests: XCTestCase {
 
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
-    private var evictedReceipt: ActionReceipt?
-    private var splitterReceipt: ActionReceipt?
+    private var presentedReceipts: [ActionReceipt] = []
     private var settingsOpened = 0
     private var undoPerformed = 0
     private var performer: AppHotkeyPerformer!
@@ -80,14 +79,12 @@ final class AppHotkeyPerformerTests: XCTestCase {
         gateway = FakeWindowGateway()
         controller = TilingController(
             gateway: gateway, pruneInterval: nil, screens: { [Self.screen] })
-        evictedReceipt = nil
-        splitterReceipt = nil
+        presentedReceipts = []
         settingsOpened = 0
         undoPerformed = 0
         performer = AppHotkeyPerformer(
             controller: controller,
-            presentEvict: { [weak self] in self?.evictedReceipt = $0 },
-            presentSplitter: { [weak self] in self?.splitterReceipt = $0 },
+            present: { [weak self] in self?.presentedReceipts.append($0) },
             openSettings: { [weak self] in self?.settingsOpened += 1 },
             performUndo: { [weak self] in self?.undoPerformed += 1 })
     }
@@ -100,21 +97,27 @@ final class AppHotkeyPerformerTests: XCTestCase {
         return handle
     }
 
-    func testTileRoutesToTheController() {
+    func testTileRoutesToTheControllerAndPresentsItsReceipt() throws {
         addFocusedWindow()
 
         performer.tile(slot: .topLeft)
 
         XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        let receipt = try XCTUnwrap(presentedReceipts.last)
+        XCTAssertTrue(receipt.performed)
+        XCTAssertNil(receipt.announcement, "a landed placement stays silent")
     }
 
-    func testExpandRoutesToTheController() {
+    func testExpandRoutesToTheControllerAndPresentsItsReceipt() throws {
         addFocusedWindow()
         controller.handle(slot: .topLeft)
 
         performer.performExpandToggle()
 
         XCTAssertTrue(canvas.isExpanded(1))
+        let receipt = try XCTUnwrap(presentedReceipts.last)
+        XCTAssertTrue(receipt.performed)
+        XCTAssertNil(receipt.announcement, "a landed toggle stays silent")
     }
 
     func testEvictRoutesToTheReceiptPresenter() throws {
@@ -123,7 +126,7 @@ final class AppHotkeyPerformerTests: XCTestCase {
 
         performer.performEvict()
 
-        let receipt = try XCTUnwrap(evictedReceipt)
+        let receipt = try XCTUnwrap(presentedReceipts.last)
         XCTAssertTrue(receipt.performed)
         XCTAssertEqual(receipt.announcement, "Focused window evicted.")
         XCTAssertNil(canvas.state.slot(of: 1))
@@ -156,7 +159,7 @@ final class AppHotkeyPerformerTests: XCTestCase {
         performer.performResetSplitters()
 
         XCTAssertEqual(canvas.grid, GridLayout())
-        let receipt = try XCTUnwrap(splitterReceipt)
+        let receipt = try XCTUnwrap(presentedReceipts.last)
         XCTAssertTrue(receipt.performed)
         XCTAssertEqual(receipt.announcement, "Splitters reset to even splits.")
         XCTAssertTrue(canvas.hasSplitterBackup, "the reset parks its restore")
@@ -168,7 +171,7 @@ final class AppHotkeyPerformerTests: XCTestCase {
         XCTAssertEqual(canvas.grid, draggedGrid)
         XCTAssertFalse(canvas.hasSplitterBackup)
         XCTAssertEqual(
-            splitterReceipt?.announcement,
+            presentedReceipts.last?.announcement,
             "Splitters restored to their pre-reset positions.")
     }
 }

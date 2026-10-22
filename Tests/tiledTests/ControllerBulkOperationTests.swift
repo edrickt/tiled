@@ -18,7 +18,6 @@ final class ControllerBulkOperationTests: XCTestCase {
 
     private var gateway: FakeWindowGateway!
     private var controller: TilingController!
-    private var feedbacks: [TilingController.Feedback] = []
     private var changeCount = 0
     /// Block-based observers returned by addObserver(forName:) must be
     /// removed explicitly or they leak for the process lifetime.
@@ -34,7 +33,6 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
             screens: { [Self.screen] }, deathConfirmation: 0)
-        controller.onFeedback = { [weak self] in self?.feedbacks.append($0) }
         controller.onChange = { [weak self] in self?.changeCount += 1 }
     }
 
@@ -81,7 +79,6 @@ final class ControllerBulkOperationTests: XCTestCase {
     func testUntileUnknownWindowIsSafe() {
         controller.untile(window: 99)
         XCTAssertTrue(canvas.state.occupants.isEmpty)
-        XCTAssertTrue(feedbacks.isEmpty)
     }
 
     func testUntileAllRestoresEveryWindow() {
@@ -345,37 +342,38 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertTrue(canvas.undoStack.isEmpty, "the chapter is consumed")
     }
 
-    // MARK: Feedback
+    // MARK: Slot receipts
 
-    func testFeedbackNoFocusedWindow() {
+    func testSlotNoFocusedWindowReturnsAReceipt() {
         gateway.focused = nil
-        controller.handle(slot: .topLeft)
-        XCTAssertEqual(feedbacks.count, 1)
-        guard case .noFocusedWindow = feedbacks[0] else {
-            return XCTFail("expected .noFocusedWindow, got \(feedbacks[0])")
-        }
+
+        let receipt = controller.handle(slot: .topLeft)
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement, "No focused window: click a window first.")
     }
 
-    func testFeedbackAlreadyTiled() {
+    func testSlotAlreadyTiledReturnsAReceiptThatNamesTheSlot() {
         addFocusedWindow()
         controller.handle(slot: .topLeft)
-        controller.handle(slot: .topLeft)
-        XCTAssertEqual(feedbacks.count, 1)
-        guard case .alreadyTiled(let slot) = feedbacks[0] else {
-            return XCTFail("expected .alreadyTiled, got \(feedbacks[0])")
-        }
-        XCTAssertEqual(slot, .topLeft)
+
+        let receipt = controller.handle(slot: .topLeft)
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "Top Left: already there.")
     }
 
-    func testFeedbackRefused() {
+    func testSlotRefusedReturnsAReceiptThatNamesTheWindow() {
         let handle = addFocusedWindow()
         gateway.refuseNextWrites(handle)
-        controller.handle(slot: .topLeft)
-        XCTAssertEqual(feedbacks.count, 1)
-        guard case .refused(let name) = feedbacks[0] else {
-            return XCTFail("expected .refused, got \(feedbacks[0])")
-        }
-        XCTAssertEqual(name, "TestApp")
+
+        let receipt = controller.handle(slot: .topLeft)
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement,
+            "TestApp couldn't be tiled: the app refused to resize it.")
     }
 
     func testUntileWithRefusedRestoreReportsTheWindow() {
@@ -419,16 +417,14 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handle(slot: .sixthLeft)
         XCTAssertNotNil(canvas.notice)
 
-        // Strict no-op: no state, error, or menu side effects; the
-        // already-tiled feedback fires, but the notice survives untouched.
+        // Strict no-op: no state, error, or menu side effects; the receipt
+        // answers once, but the notice survives untouched.
         gateway.focused = b
-        controller.handle(slot: .sixthLeft)
+        let receipt = controller.handle(slot: .sixthLeft)
 
         XCTAssertNotNil(canvas.notice, "no-op must not clear the notice")
-        XCTAssertEqual(feedbacks.count, 1)
-        guard case .alreadyTiled = feedbacks[0] else {
-            return XCTFail("expected .alreadyTiled, got \(feedbacks[0])")
-        }
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "Left Third: already there.")
     }
 
     func testFocusBringsWindowForwardAndIgnoresUnknownIDs() {
@@ -456,7 +452,6 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(canvas.state.slot(of: 1), .topLeft,
             "the gateway reported success, so occupancy commits")
         XCTAssertNil(canvas.error, "no refusal: the write 'succeeded'")
-        XCTAssertTrue(feedbacks.isEmpty)
         XCTAssertEqual(gateway.frame(of: handle), original,
             "the app ignored the resize; screen and state disagree until the next assertion")
     }
