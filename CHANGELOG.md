@@ -8,6 +8,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A title-bar drag whose first tick carries a size change the app absorbed
+  now moves the window instead of yanking a splitter. The tick is read from
+  both edges of each axis, so an absorbed translation stays a move while an
+  edge grab with a little opposite-edge drift still resizes.
 - Hotkey registrations are retired when the service is released, and a
   reload unregisters the old set before registering the edited bindings.
   Registration, disabled actions, failed actions, reload, and teardown are

@@ -106,6 +106,13 @@ final class DragTrackerTests: XCTestCase {
         tracker.markExpected(id, frame)
     }
 
+    /// Seeds the diff baseline without an echo entry, so the next tick is
+    /// classified live instead of swallowed as a converging write.
+    private func armBaseline(_ id: WindowID, _ slot: Slot, frame: CGRect) {
+        tile(id, slot, frame: frame)
+        tracker.cancelExpected(id)
+    }
+
     /// Streams a real edge drag: a close echo tick is swallowed, then the
     /// far frame escapes the tolerance radius and reaches the splitters.
     private func drag(_ id: WindowID, from frame: CGRect, to target: CGRect, tracker: DragTracker) {
@@ -584,6 +591,70 @@ final class DragTrackerTests: XCTestCase {
         tracker.handleChange(id: 1, frame: echo)
         tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 400, width: 600, height: 400))
         XCTAssertEqual(grid().columnSplit, 0.6, accuracy: 0.001)
+    }
+
+    func testAbsorbedTranslationPastTheNoiseBoundDoesNotYankASplitter() {
+        // F23: the app silently absorbed the placement write by 50pt of
+        // width, then the first title-bar tick translated the window
+        // 100pt. The left edge moved 100 and the right edge moved 50 in the
+        // same direction. A size-only gate reads 50 > 8 and moves the
+        // column splitter by the absorbed width; the shape is a move.
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        tile(1, .topLeft, frame: tiled)
+        now = now.addingTimeInterval(4) // silent absorption aged the echo out
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 100, y: 400, width: 450, height: 400))
+
+        XCTAssertEqual(
+            grid(), GridLayout(),
+            "an app-absorbed size change is not a splitter drag")
+        tracker.mouseLifted()
+        XCTAssertEqual(
+            decisions, [.untile(1)],
+            "the first tick of a 100pt title-bar drag is a move, not a resize")
+    }
+
+    func testDriftyGrabWithOppositeEdgeJitterStillResizes() {
+        // A hand on the right edge travels 20 while the left edge drifts 2
+        // the same way. The opposite edge stays inside the noise bound, so
+        // this is a grab, not a title-bar translation.
+        armBaseline(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 2, y: 400, width: 518, height: 400))
+
+        XCTAssertEqual(
+            grid().columnSplit, 0.52, accuracy: 0.001,
+            "the dragged right edge lands where the hand put it")
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [.resize(1)])
+    }
+
+    func testCleanGrabStillResizes() {
+        // One edge moves 20, the opposite stays pinned: a clean grab.
+        armBaseline(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 0, y: 400, width: 520, height: 400))
+
+        XCTAssertEqual(grid().columnSplit, 0.52, accuracy: 0.001)
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [.resize(1)])
+    }
+
+    func testOpposingEdgeResizeStillResizes() {
+        // Both horizontal edges moved beyond the noise bound in opposite
+        // directions: the window is resized from both sides, not moved.
+        armBaseline(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: -50, y: 400, width: 600, height: 400))
+
+        XCTAssertEqual(grid().columnSplit, 0.55, accuracy: 0.001)
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [.resize(1)])
     }
 
     func testSingleFarJumpEmitsSnapback() {

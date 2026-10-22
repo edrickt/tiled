@@ -97,6 +97,76 @@ final class DragTracker {
         var liveFrameOf: (WindowID) -> CGRect? = { _ in nil }
     }
 
+    /// What one axis's two edge deltas say about a tick. The tracker sees
+    /// only where the two edges of an axis landed, never the hand that moved
+    /// them, so the shape comes from the pair of deltas: one edge moving with
+    /// the opposite pinned is a grab; both moving together is a translation;
+    /// both moving apart, or one far outrunning the other, is a resize.
+    enum TickShape: Equatable {
+        /// Neither edge moved beyond the noise bound in a recognizable way.
+        case none
+        /// Both edges moved together: the window translated on this axis.
+        case translation
+        /// One edge moved while the opposite stayed pinned: an edge grab.
+        case grab
+        /// Both edges moved apart, or one far outran the other: a resize.
+        case resize
+
+        /// Classifies one axis from its two edge deltas.
+        ///
+        /// `noise` absorbs the first tick after a placement: an app can
+        /// silently round a written frame, and that absorbed size must not
+        /// read as an edge grab — the residual that yanked a splitter by the
+        /// whole origin delta (F23). `dominance` keeps a drifty grab from
+        /// reading as a translation: when one edge leads the other by more
+        /// than this ratio, the tick resizes even though both edges moved
+        /// the same way. `pinned` is the opposite-edge jitter floor.
+        static func classify(
+            _ first: CGFloat,
+            _ second: CGFloat,
+            noise: CGFloat,
+            dominance: CGFloat,
+            pinned: CGFloat
+        ) -> TickShape {
+            let firstMoved = abs(first) > noise
+            let secondMoved = abs(second) > noise
+            if firstMoved && secondMoved {
+                guard first.sign == second.sign else { return .resize }
+                let larger = max(abs(first), abs(second))
+                let smaller = min(abs(first), abs(second))
+                return larger > dominance * smaller ? .resize : .translation
+            }
+            if firstMoved || secondMoved { return .grab }
+
+            // Both edges under the noise bound: absorption and jitter. A
+            // same-direction pair that travelled together is still a tiny
+            // translation (a small title-bar drag); one pinned edge and one
+            // moving is a tiny grab. Opposing sub-noise edges are
+            // absorption, not a resize.
+            let larger = max(abs(first), abs(second))
+            guard larger > pinned, first.sign == second.sign else {
+                return .none
+            }
+            return min(abs(first), abs(second)) <= pinned ? .grab : .translation
+        }
+
+        /// Aggregates the axes: any grab or resize wins, because an edge move
+        /// on either axis must reach the splitters even when the other axis
+        /// absorbed cleanly; otherwise a translation moves the window. No
+        /// recognizable shape keeps the conservative resize fallback.
+        static func combined(_ horizontal: TickShape, _ vertical: TickShape) -> TickShape {
+            if horizontal == .grab || horizontal == .resize
+                || vertical == .grab || vertical == .resize
+            {
+                return .resize
+            }
+            if horizontal == .translation || vertical == .translation {
+                return .translation
+            }
+            return .resize
+        }
+    }
+
     private let gridProvider: GridProvider
 
     /// Splitter set for `space` (defaults when the canvas has none).
@@ -187,9 +257,15 @@ final class DragTracker {
     private static let settleWindow: TimeInterval = 1
     /// Minimum edge travel that counts as a drag (below this is jitter).
     private static let edgeMoveThreshold: CGFloat = 1
-    /// Above this travel an edge counts as genuinely moved for the
-    /// grab/translation signatures; below it the edge reads as pinned.
-    private static let translationMargin: CGFloat = 8
+    /// Per-edge travel below this is noise: app absorption, rounding, and
+    /// jitter. One edge over it starts a gesture; the opposite edge still
+    /// under it means a grab rather than a translation.
+    private static let tickNoiseBound: CGFloat = 8
+    /// How much farther one edge may travel than the other before a
+    /// same-direction tick reads as a resize rather than a translation.
+    /// Above 1:1 so an absorbed translation (both edges travelling the same
+    /// way) stays a move, while a led edge still resizes.
+    private static let tickDominanceRatio: CGFloat = 2
     /// How close a tick must be to the settle's gesture frame to read as
     /// the app's own resize-session override of the write: coalesced AX
     /// ticks can lag the true final frame by a few points.
@@ -487,63 +563,31 @@ final class DragTracker {
         let previous = lastKnownFrames[id]
         lastKnownFrames[id] = frame
         guard let previous, previous != frame else { return }
-        // Classify the tick by what a hand can do. Windows do not resize
-        // during a title-bar drag — the size stays put while both edges of
-        // each axis travel together — so a size change beyond the
-        // absorption-noise bound is user intent: an edge or corner grab,
-        // whose opposite edges stay pinned. Apps DO absorb writes
-        // silently, rounding frames to their own grid, so the first live
-        // tick after a placement can carry a slightly different size than
-        // the target it was written against; judging size alone misreads
-        // that absorption as an edge grab and yanks a splitter by the full
-        // origin delta (observed: an 82pt title drag expanded the tile it
-        // was dragged out of). Residual: an app absorbing more than
-        // `translationMargin` still misroutes its first tick.
-        let sizeDelta = abs(frame.width - previous.width) + abs(frame.height - previous.height)
-        if sizeDelta > Self.translationMargin {
-            clearDrag(id)
-            processResize(windowID: id, from: previous, to: frame)
-            return
-        }
-        let dMinX = frame.minX - previous.minX
-        let dMaxX = frame.maxX - previous.maxX
-        let dMinY = frame.minY - previous.minY
-        let dMaxY = frame.maxY - previous.maxY
-
-        // One edge travelled, the opposite stayed pinned: a grab too small
-        // to trip the size bound (per-axis, so a corner grab on one axis
-        // is not drowned out by noise on the other).
-        func clearGrab(_ a: CGFloat, _ b: CGFloat) -> Bool {
-            (abs(a) > Self.translationMargin && abs(b) <= Self.edgeMoveThreshold)
-                || (abs(b) > Self.translationMargin && abs(a) <= Self.edgeMoveThreshold)
-        }
-        // Both edges of the axis travelled together: a translation.
-        func clearTranslation(_ a: CGFloat, _ b: CGFloat) -> Bool {
-            abs(a) > Self.edgeMoveThreshold && abs(b) > Self.edgeMoveThreshold
-                && abs(a - b) <= Self.translationMargin
-        }
-
-        if clearGrab(dMinX, dMaxX) || clearGrab(dMinY, dMaxY) {
-            clearDrag(id)
-            processResize(windowID: id, from: previous, to: frame)
-            return
-        }
-        if clearTranslation(dMinX, dMaxX) || clearTranslation(dMinY, dMaxY)
-            || originMovedMoreThanSize(previous, frame)
-        {
+        // Classify each axis by its two edge deltas, then aggregate. A size
+        // change alone is not proof of a grab: apps absorb writes silently,
+        // rounding frames to their own grid, so the first live tick after a
+        // placement can carry an absorbed size. The noise bound keeps that
+        // absorption out of the decision, and the dominance ratio keeps a
+        // genuinely led edge a resize even when the opposite edge drifts.
+        let horizontal = TickShape.classify(
+            frame.minX - previous.minX,
+            frame.maxX - previous.maxX,
+            noise: Self.tickNoiseBound,
+            dominance: Self.tickDominanceRatio,
+            pinned: Self.edgeMoveThreshold)
+        let vertical = TickShape.classify(
+            frame.minY - previous.minY,
+            frame.maxY - previous.maxY,
+            noise: Self.tickNoiseBound,
+            dominance: Self.tickDominanceRatio,
+            pinned: Self.edgeMoveThreshold)
+        switch TickShape.combined(horizontal, vertical) {
+        case .translation:
             processMove(windowID: id, from: previous, to: frame)
-            return
+        case .grab, .resize, .none:
+            clearDrag(id)
+            processResize(windowID: id, from: previous, to: frame)
         }
-        clearDrag(id)
-        processResize(windowID: id, from: previous, to: frame)
-    }
-
-    /// The sub-noise fallback: the origin outpaced the size, so the tick
-    /// reads as a move wearing a rounding error.
-    private func originMovedMoreThanSize(_ previous: CGRect, _ frame: CGRect) -> Bool {
-        let originDelta = abs(frame.minX - previous.minX) + abs(frame.minY - previous.minY)
-        let sizeDelta = abs(frame.width - previous.width) + abs(frame.height - previous.height)
-        return originDelta > sizeDelta
     }
 
     // MARK: Drag-out untile
