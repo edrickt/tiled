@@ -122,7 +122,7 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     func refresh() {
         let snapshot = snapshot(for: controller.focusedTilingSpace)
         // Destructive outcomes stay in the menu (notice + undo row), not
-        // on screen: tiling feedback never pops a panel over the workspace.
+        // on screen: a tiling outcome never pops a panel over the workspace.
         // Rebuilding the menu while it's open flickers or dismisses it;
         // the close handler picks up whatever changed meanwhile.
         //

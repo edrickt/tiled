@@ -142,7 +142,7 @@ struct TilingSpace {
     }
 
     /// What one action returns: the typed result the coordinator maps to
-    /// feedback, plus the coordinator effects it applies. `notice` and
+    /// its receipt, plus the coordinator effects it applies. `notice` and
     /// `error` are not here: they stay readable on the canvas.
     struct Outcome {
         enum Result: Equatable {

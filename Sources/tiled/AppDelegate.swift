@@ -390,8 +390,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// visual-only (menu titles, status lines, the glyph). Posts against
     /// the status-item button when present; the Settings window when the
     /// icon is hidden (the one configuration where the menu isn't a glance
-    /// away and spoken feedback matters most). The app is always the last
-    /// anchor, so there is no logging-only fallback.
+    /// away and the spoken outcome matters most). The app is always the
+    /// last anchor, so there is no logging-only fallback.
     private func announce(_ text: String) {
         let element: Any =
             menuBar.statusButton ?? settingsController?.window ?? NSApp as Any

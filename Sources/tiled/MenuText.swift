@@ -1,7 +1,7 @@
-/// User-visible strings for the status menu and feedback announcements,
-/// extracted from `AppDelegate` so the composition rules (pluralization,
-/// disabled labels, hotkey-failure warnings) are unit-testable without
-/// building AppKit menus or running alerts.
+/// User-visible strings for the status menu and action receipts, extracted
+/// from `AppDelegate` so the composition rules (pluralization, disabled
+/// labels, hotkey-failure warnings) are unit-testable without building
+/// AppKit menus or running alerts.
 enum MenuText {
     // MARK: Menu titles
 
@@ -93,7 +93,7 @@ enum MenuText {
             ?? SlotPresentation.title(of: slot)
     }
 
-    // MARK: Feedback announcements (haptic + VoiceOver text)
+    // MARK: Placement receipt announcements (haptic + VoiceOver text)
 
     static func noFocusedWindowAnnouncement() -> String {
         "No focused window: click a window first."

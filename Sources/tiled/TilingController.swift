@@ -294,7 +294,8 @@ final class TilingController {
 
     /// The requester for a slot hotkey and the canvas the request belongs
     /// to: prunes dead windows first, then resolves the focused window to
-    /// its registry id. Nil (with feedback) when nothing is focused.
+    /// its registry id. Nil when nothing is focused; the caller's receipt
+    /// answers that case.
     private func requesterAndCanvas(
         for slot: Slot
     ) -> (id: WindowID, handle: WindowHandle, key: TilingSpaceKey)? {
@@ -1265,8 +1266,8 @@ final class TilingController {
 
     /// Evicts the focused window (⌥⇧⌫): restores its pre-tile frame and
     /// releases the slot. Untiled focused windows and failed focuses are
-    /// safe no-ops whose receipt answers once, instead of emitting
-    /// feedback the delegate could duplicate; like `untile`, eviction
+    /// safe no-ops whose receipt answers once instead of opening a second
+    /// outcome channel; like `untile`, eviction
     /// keeps no undo chapter (the restoration IS the frame) — unless the
     /// reflow moved a survivor into the freed cells, which is its own
     /// chapter.
