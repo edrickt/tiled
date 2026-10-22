@@ -86,12 +86,16 @@ final class TilingController {
     /// chapters, and transient notices. Reads go through `canvas(for:)`;
     /// the coordinator keeps no derived second copy of any canvas.
     private var spaces: [TilingSpaceKey: TilingSpace] = [:]
-    /// The coordinator's handle registry: one id per live handle. The
-    /// record itself lives on the canvas holding the window; this table
-    /// only answers "which id is this handle", and allocating a fresh id
-    /// hands the window over to the handle->id space the canvases share.
-    private var windowIDs: [WindowHandle: WindowID] = [:]
-    private var nextID: WindowID = 1
+    /// The controller-owned identity register: the id each handle wears,
+    /// the allocator, the death clock, and pending convergence checks.
+    /// Ownership is read through `spaceOf`, so the canvas records remain
+    /// the only owner of which canvas a window lives on.
+    private lazy var register = WindowRegister(
+        owner: { [weak self] in self?.spaceOf(window: $0) },
+        releaseForeignClaim: { [weak self] id, owner in
+            self?.releaseRecordClaimedByAnotherCanvas(id, on: owner)
+        },
+        schedule: scheduleVerify)
 
     private var pruneTimer: Timer?
     private var screenObserver: NSObjectProtocol?
@@ -122,9 +126,6 @@ final class TilingController {
     /// seconds with the machine awake. Injectable so tests advance it
     /// instead of waiting on real seconds.
     private let uptime: () -> TimeInterval
-    /// Uptime at the first dead-probe sighting per window. Cleared when
-    /// the probe recovers or the record goes away.
-    private var deadSince: [WindowID: TimeInterval] = [:]
     /// Last focused canvas (display plus Mission Control Space) observed
     /// through `gateway`. The first focus callback always reports; later
     /// moves within one canvas are filtered so an AX event per window
@@ -332,8 +333,10 @@ final class TilingController {
             onFeedback?(.noFocusedWindow)
             return nil
         }
-        let id = windowID(for: handle)
-        return (id, handle, spaceKeyForRequester(id, handle: handle))
+        let liveID = register.liveID(for: handle)
+        let key = spaceKeyForRequester(liveID, handle: handle)
+        let id = liveID ?? register.claim(handle, on: key)
+        return (id, handle, key)
     }
 
     func handle(slot: Slot) {
@@ -409,7 +412,7 @@ final class TilingController {
         // Restored-not-re-housed windows: untiled for good. A re-housed
         // window stayed tiled, so its record and observation survive.
         for evicted in outcome.forget {
-            forgetBookkeeping(evicted)
+            register.forget(evicted)
         }
         for window in outcome.observe {
             observe(window: window)
@@ -441,7 +444,7 @@ final class TilingController {
             space: key,
             allocateID: { [weak self] handle in
                 guard let self else { return 0 }
-                return self.allocateID(for: handle, on: key)
+                return self.register.claim(handle, on: key)
             },
             discardDeferredRestores: { [weak self] handle in
                 self?.discardDeferredRestores(for: handle)
@@ -449,28 +452,14 @@ final class TilingController {
             log: { [weak self] message in self?.dbg(message) })
     }
 
-    /// Pending convergence checks by window: a newer placement for the
-    /// same window supersedes (cancels) the older check, and forget paths
-    /// cancel outright: a verification must never roll back a window
-    /// that already moved on.
-    private var pendingVerifications: [WindowID: () -> Void] = [:]
-
     /// Schedules one convergence check per window, superseding any pending
     /// check for the same window: only the latest write is ever judged.
     private func scheduleVerification(of placed: [WindowID], on space: TilingSpaceKey) {
         for window in placed {
-            pendingVerifications[window]?()
-            let checkSpace = space
-            pendingVerifications[window] = scheduleVerify { [weak self] in
-                self?.pendingVerifications[window] = nil
-                self?.verifyConvergence(window, on: checkSpace)
+            register.scheduleVerification(of: window) { [weak self] in
+                self?.verifyConvergence(window, on: space)
             }
         }
-    }
-
-    private func cancelVerification(_ id: WindowID) {
-        pendingVerifications[id]?()
-        pendingVerifications[id] = nil
     }
 
     /// Late silent-ignore check: `scheduleVerification` fires this one
@@ -491,7 +480,7 @@ final class TilingController {
             canvas.discard(window: id, context: placementContext(for: errorSpace))
             return canvas.error != nil
         }
-        forgetBookkeeping(id)
+        register.forget(id)
         // A later error (e.g. a newer refusal) wins over this late one.
         // Scoped to the window's own canvas: the placement may tile onto
         // a background display or Space while focus sits elsewhere.
@@ -636,12 +625,12 @@ final class TilingController {
     /// else the focused canvas. Untiled windows with no readable frame
     /// land on the focused canvas, never guessed from another monitor's
     /// geometry.
-    private func spaceKeyForRequester(_ id: WindowID, handle: WindowHandle) -> TilingSpaceKey {
-        if let owned = spaceOf(window: id) { return owned }
+    private func spaceKeyForRequester(_ id: WindowID?, handle: WindowHandle) -> TilingSpaceKey {
+        if let id, let owned = spaceOf(window: id) { return owned }
         if let frame = gateway.frame(of: handle),
            let info = screenInfo(for: frame)
         { return tilingKey(for: info.id) }
-        if let record = record(of: id), record.preTileFrame != .zero,
+        if let id, let record = record(of: id), record.preTileFrame != .zero,
            let info = screenInfo(for: record.preTileFrame)
         { return tilingKey(for: info.id) }
         return focusedSpaceKey()
@@ -666,19 +655,6 @@ final class TilingController {
 
     // MARK: Registry
 
-    private func windowID(for handle: WindowHandle) -> WindowID {
-        // Reuse the table id only while the handle still has a record on
-        // some canvas: a released window's next resolution is a fresh
-        // window as far as the canvas state is concerned.
-        if let existing = windowIDs[handle], spaceOf(window: existing) != nil {
-            return existing
-        }
-        let id = nextID
-        nextID += 1
-        windowIDs[handle] = id
-        return id
-    }
-
     /// Drops `handle`'s deferred pre-tile restore on every canvas. Call
     /// this at a claim (a slot request, an undo re-place, or an expand):
     /// the window's frame now belongs to the new action, so the canvas
@@ -689,18 +665,11 @@ final class TilingController {
         }
     }
 
-    /// Existing id for a live handle whose record still lives on a
-    /// canvas, without creating a stub.
-    private func recordID(for handle: WindowHandle) -> WindowID? {
-        guard let id = windowIDs[handle], spaceOf(window: id) != nil else { return nil }
-        return id
-    }
-
     /// Test seam for the ownership invariant (audit M1/L2): the id the
-    /// handle table currently names for `handle`, if any. A forgotten
-    /// window must leave no entry behind; a live tiled window names its
-    /// canvas's id.
-    func registeredID(for handle: WindowHandle) -> WindowID? { windowIDs[handle] }
+    /// register currently names for `handle` while its record lives. A
+    /// forgotten window must leave no entry behind; a live tiled window
+    /// names its canvas's id.
+    func registeredID(for handle: WindowHandle) -> WindowID? { register.liveID(for: handle) }
 
     /// Test seam for ticket 09's visibility guard: whether the canvas is
     /// currently marked stale, i.e. still owes a reassert for when its
@@ -710,27 +679,8 @@ final class TilingController {
 
     /// Test seam for the death-bookkeeping half of ticket 02: whether `id`
     /// has an unconfirmed death pending. Forgetting a window must clear
-    /// this clock along with the handle table.
-    func hasPendingDeath(_ id: WindowID) -> Bool { deadSince[id] != nil }
-
-    /// Issues an id for `handle` on the canvas that is about to own it,
-    /// enforcing one canvas per handle: a record the handle still wears on
-    /// another canvas is released first, so the handle table never points
-    /// at two live records and no canvas double-books the window. A canvas
-    /// calls this only when it has no record of its own for the handle (a
-    /// pruned undo entry, an untile-all re-observation); the table's
-    /// mapping is never overwritten while it still names a live record.
-    private func allocateID(for handle: WindowHandle, on key: TilingSpaceKey) -> WindowID {
-        if let existing = windowIDs[handle],
-            let owner = spaceOf(window: existing), owner != key
-        {
-            releaseRecordClaimedByAnotherCanvas(existing, on: owner)
-        }
-        let id = nextID
-        nextID += 1
-        windowIDs[handle] = id
-        return id
-    }
+    /// this clock along with the handle entry.
+    func hasPendingDeath(_ id: WindowID) -> Bool { register.hasPendingDeath(id) }
 
     /// Releases the record `id` holds on `owner` because another canvas is
     /// claiming its handle: the freed cells reflow and the coordinator's
@@ -759,15 +709,14 @@ final class TilingController {
         let timestamp = now()
         let awake = uptime()
         for entry in dead {
-            let first = deadSince[entry.id] ?? awake
+            let first = register.deathClock(entry.id, seenAt: awake)
             guard awake - first >= deathConfirmation else {
-                deadSince[entry.id] = first
                 dbg(
                     "prune win\(entry.id): dead handle sighted at \(timestamp), "
                         + "awaiting confirmation")
                 continue
             }
-            deadSince[entry.id] = nil
+            register.clearDeath(entry.id)
             dbg("prune win\(entry.id): dead handle confirmed, releasing slot")
             // Hand the element back to the adapter before the record
             // (the only holder of the handle) goes away.
@@ -779,17 +728,7 @@ final class TilingController {
         }
         // A recovered probe or a vanished record clears the pending
         // death: only windows still reading dead stay marked.
-        let deadIDs = Set(dead.map(\.id))
-        deadSince = deadSince.filter { deadIDs.contains($0.key) }
-    }
-
-    /// Clears the coordinator-side bookkeeping of a window the canvas
-    /// released: the handle table, the death clock, and any pending
-    /// convergence check. The record itself is already gone.
-    private func forgetBookkeeping(_ id: WindowID) {
-        cancelVerification(id)
-        deadSince[id] = nil
-        windowIDs = windowIDs.filter { $0.value != id }
+        register.retainDeaths(only: Set(dead.map(\.id)))
     }
 
     private func raiseOccupants(on space: TilingSpaceKey) {
@@ -905,7 +844,7 @@ final class TilingController {
     /// menu row's stateful title.
     var focusedExpandState: ExpandToggleState {
         guard let handle = gateway.focusedWindow(),
-            let id = recordID(for: handle),
+            let id = register.liveID(for: handle),
             let key = spaceOf(window: id)
         else { return .expands }
         return spaces[key]?.expandToggleState(of: id) ?? .expands
@@ -1004,7 +943,7 @@ final class TilingController {
             // slot is a final barrier for the evictees below. With one,
             // the entry is re-placed first and decides the barrier.
             if spaceOf(window: requester) == nil {
-                forgetBookkeeping(requester)
+                register.forget(requester)
             } else if !hasChapterEntry {
                 retainedRequester = spaceOf(window: requester).flatMap { key in
                     spaceState(for: key).slot(of: requester).map { (space: key, slot: $0) }
@@ -1061,7 +1000,7 @@ final class TilingController {
             // handle table (and death clock) for every id it forgot, not
             // just the requester's.
             for window in result.forget {
-                forgetBookkeeping(window)
+                register.forget(window)
             }
         }
         // The chapter's story, told once here: any refused frame surfaces
@@ -1258,7 +1197,7 @@ final class TilingController {
             handle,
             onChange: { [weak self] in
                 guard let self else { return }
-                guard let currentID = self.recordID(for: handle) else { return }
+                guard let currentID = self.register.liveID(for: handle) else { return }
                 guard let frame = self.gateway.frame(of: handle) else { return }
                 self.tracker.handleChange(id: currentID, frame: frame)
             },
@@ -1275,7 +1214,7 @@ final class TilingController {
     /// leaves the ordinary prune cadence in charge. Called on the main
     /// thread by both adapters.
     private func windowDestroyed(_ handle: WindowHandle) {
-        guard let id = recordID(for: handle) else { return }
+        guard let id = register.liveID(for: handle) else { return }
         guard gateway.liveness(of: handle) == .dead else {
             dbg("destroyed win\(id): still live by the death standard; prune cadence decides")
             return
@@ -1409,8 +1348,9 @@ final class TilingController {
                 failure: nil, success: MenuText.evictedAnnouncement(),
                 noOp: MenuText.noFocusedWindowAnnouncement())
         }
-        let id = windowID(for: handle)
-        let key = spaceOf(window: id) ?? focusedSpaceKey()
+        let liveID = register.liveID(for: handle)
+        let key = liveID.flatMap { spaceOf(window: $0) } ?? focusedSpaceKey()
+        let id = liveID ?? register.claim(handle, on: key)
         // No pre-attach: a window with no slot is not tiled, and handing
         // it a record only for the eviction to find no slot would leave
         // stale ownership behind. The eviction forgets any record it
@@ -1511,8 +1451,9 @@ final class TilingController {
             onFeedback?(.noFocusedWindow)
             return
         }
-        let id = windowID(for: handle)
-        let key = spaceOf(window: id) ?? focusedSpaceKey()
+        let liveID = register.liveID(for: handle)
+        let key = liveID.flatMap { spaceOf(window: $0) } ?? focusedSpaceKey()
+        let id = liveID ?? register.claim(handle, on: key)
         let wasExpanded = spaces[key]?.isExpanded(id) == true
         let outcome = mutateSpace(key) { canvas in
             canvas.attach(id, handle: handle)
@@ -1763,7 +1704,7 @@ final class TilingController {
             if let frame = gateway.frame(of: handle),
                let info = visibleScreen(for: frame)
             { return info.id }
-            if let id = recordID(for: handle),
+            if let id = register.liveID(for: handle),
                let record = record(of: id), record.preTileFrame != .zero,
                let info = visibleScreen(for: record.preTileFrame)
             { return info.id }
