@@ -12,7 +12,7 @@ final class ScreenOwnershipTests: XCTestCase {
     private static let frames = [left, right]
 
     private func owner(of frame: CGRect) -> Int? {
-        TilingController.owningScreenIndex(frames: Self.frames, for: frame)
+        CanvasDirectory.owningScreenIndex(frames: Self.frames, for: frame)
     }
 
     // MARK: Containment
@@ -48,7 +48,7 @@ final class ScreenOwnershipTests: XCTestCase {
         let frame = CGRect(x: 1860, y: 100, width: 260, height: 600)
         XCTAssertTrue(frames[1].contains(CGPoint(x: frame.midX, y: frame.midY)))
         XCTAssertEqual(
-            TilingController.owningScreenIndex(frames: frames, for: frame), 2)
+            CanvasDirectory.owningScreenIndex(frames: frames, for: frame), 2)
     }
 
     func testEvenSplitResolvesToFirstScreen() {
@@ -72,10 +72,10 @@ final class ScreenOwnershipTests: XCTestCase {
         ]
         let topHeavy = CGRect(x: 200, y: 780, width: 800, height: 1000)
         XCTAssertEqual(
-            TilingController.owningScreenIndex(frames: frames, for: topHeavy), 0)
+            CanvasDirectory.owningScreenIndex(frames: frames, for: topHeavy), 0)
         let bottomHeavy = CGRect(x: 200, y: 300, width: 800, height: 1000)
         XCTAssertEqual(
-            TilingController.owningScreenIndex(frames: frames, for: bottomHeavy), 1)
+            CanvasDirectory.owningScreenIndex(frames: frames, for: bottomHeavy), 1)
     }
 
     func testStackedEvenSplitResolvesToFirstScreen() {
@@ -84,7 +84,7 @@ final class ScreenOwnershipTests: XCTestCase {
             CGRect(x: 0, y: 0, width: 1920, height: 1080),
         ]
         XCTAssertEqual(
-            TilingController.owningScreenIndex(
+            CanvasDirectory.owningScreenIndex(
                 frames: frames, for: CGRect(x: 200, y: 580, width: 800, height: 1000)),
             0)
     }
@@ -107,7 +107,7 @@ final class ScreenOwnershipTests: XCTestCase {
         let frame = CGRect(x: 0, y: 800, width: 900, height: 430)
         XCTAssertTrue(frames[1].contains(CGPoint(x: frame.midX, y: frame.midY)))
         XCTAssertEqual(
-            TilingController.owningScreenIndex(frames: frames, for: frame), 0)
+            CanvasDirectory.owningScreenIndex(frames: frames, for: frame), 0)
     }
 
     // MARK: Degenerate
@@ -119,7 +119,7 @@ final class ScreenOwnershipTests: XCTestCase {
     }
 
     func testEmptyFramesYieldNil() {
-        XCTAssertNil(TilingController.owningScreenIndex(frames: [], for: Self.left))
+        XCTAssertNil(CanvasDirectory.owningScreenIndex(frames: [], for: Self.left))
     }
 
     // MARK: Midpoint fallback rule
@@ -129,7 +129,7 @@ final class ScreenOwnershipTests: XCTestCase {
         // caller falls back to the main screen.
         let frame = CGRect(x: 2000, y: 2000, width: 200, height: 200)
         XCTAssertNil(
-            TilingController.midpointScreenIndex(frames: [Self.left, Self.right], for: frame))
+            CanvasDirectory.midpointScreenIndex(frames: [Self.left, Self.right], for: frame))
     }
 
     func testMidpointOnScreenResolvesBeforeMainFallback() {
@@ -137,11 +137,11 @@ final class ScreenOwnershipTests: XCTestCase {
         // share; midpoint containment picks the right screen (index 1).
         let frame = CGRect(x: 2000, y: 100, width: 100, height: 100)
         XCTAssertEqual(
-            TilingController.midpointScreenIndex(frames: [Self.left, Self.right], for: frame), 1)
+            CanvasDirectory.midpointScreenIndex(frames: [Self.left, Self.right], for: frame), 1)
     }
 
     func testMidpointRuleOverEmptyFramesYieldsNil() {
         XCTAssertNil(
-            TilingController.midpointScreenIndex(frames: [], for: Self.left))
+            CanvasDirectory.midpointScreenIndex(frames: [], for: Self.left))
     }
 }

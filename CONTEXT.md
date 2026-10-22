@@ -21,6 +21,16 @@ One display's one Mission Control Space: its occupancy, layout, splitters, undo 
 _Avoid_: monitor space (prose for the display dimension only), screen (AppKit type), desktop
 _Code_: `TilingSpace` (one canvas's occupancy, records, splitters, expansion, visible frame, placement pipeline, and undo chapters), `TilingSpaceKey` (display + Space identity); `TilingController` restores chapters across canvases.
 
+**Canvas directory**:
+The one owner of display plus Space identity: the canvas table, stale marks, the last focused canvas, visibility, the withheld-Space fallback, and the single visible-canvas enumeration. A display action resolves the identified canvas when it holds anything, else that display's withheld canvas; the manage list enumerates both so a withheld canvas's windows stay reachable.
+_Avoid_: monitor table, space registry
+_Code_: `CanvasDirectory`
+
+**Window register**:
+The controller's identity and lifetime bookkeeping for window handles: which id a handle wears, the id allocator, the death-confirmation clock, and any pending convergence check. Ownership stays derived from the canvas records; the register reads through them and keeps no id-to-canvas map.
+_Avoid_: handle table, ownership map (the canvas records own canvases)
+_Code_: `WindowRegister`
+
 **Receipt**:
 The user-visible truth of one app action: whether it performed, the canvas that owns the outcome, the menu's sticky notice, and exactly one spoken sentence. The controller builds it at the action's commit point; the delegate only presents it.
 _Avoid_: result, feedback, notification (one channel, not the whole truth)

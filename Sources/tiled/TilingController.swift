@@ -28,10 +28,9 @@ final class TilingController {
     /// write declares. Lazy so its closures can capture self.
     private lazy var frameWriter = FrameWriter(
         gateway: gateway,
-        isVisible: { [weak self] in self?.isVisible($0) ?? false },
+        isVisible: { [weak self] in self?.directory.isVisible($0) ?? false },
         markStale: { [weak self] space in
-            guard let self else { return }
-            self.staleSpaces.insert(space)
+            self?.directory.markStale(space)
         },
         markExpected: { [weak self] id, target in
             self?.tracker.markExpected(id, target)
@@ -56,21 +55,23 @@ final class TilingController {
         context: DragTracker.Context(
             slotOf: { [weak self] in self?.trackedSlot(of: $0) },
             occupants: { [weak self] in self?.trackedOccupants ?? [:] },
-            spaceOf: { [weak self] in self?.spaceOf(window: $0) },
+            spaceOf: { [weak self] in self?.directory.owner(of: $0) },
             occupantsOf: { [weak self] space in self?.trackedOccupants(on: space) ?? [:] },
             liveFrameOf: { [weak self] id in self?.liveFrameForTracker(id) }),
         gridProvider: DragTracker.GridProvider(
             grid: { [weak self] space in
                 guard let self else { return GridLayout() }
-                return self.spaces[space ?? .displayless]?.grid ?? GridLayout()
+                return self.directory.storedCanvas(for: space ?? .displayless)?.grid
+                    ?? GridLayout()
             },
             setGrid: { [weak self] updated, space in
                 guard let self else { return }
-                self.mutateSpace(space ?? .displayless) { $0.grid = updated }
+                self.directory.withCanvas(space ?? .displayless) { $0.grid = updated }
             },
             visibleFrame: { [weak self] space in
                 guard let self else { return .zero }
-                return self.spaces[space ?? .displayless]?.visibleFrame ?? .zero
+                return self.directory.storedCanvas(for: space ?? .displayless)?.visibleFrame
+                    ?? .zero
             }),
         onDragEnd: { [weak self] decision in self?.handleDragEnd(decision) },
         scheduleDragEnd: scheduleDragEnd,
@@ -81,17 +82,20 @@ final class TilingController {
     /// action (never cached between them), so replugs and rearranges take
     /// effect without an observer.
     private let screens: ScreenProvider
-    /// Per-canvas tiling spaces: each display's each Mission Control
-    /// Space runs its own occupancy, records, expansion, splitters, undo
-    /// chapters, and transient notices. Reads go through `canvas(for:)`;
-    /// the coordinator keeps no derived second copy of any canvas.
-    private var spaces: [TilingSpaceKey: TilingSpace] = [:]
+    /// The one owner of display + Space identity: the canvas table, stale
+    /// marks, last focus, visibility, and the withheld-Space fallback.
+    private lazy var directory = CanvasDirectory(
+        screens: screens,
+        activeSpace: { [weak self] in self?.gateway.activeSpace(on: $0) },
+        focusedWindow: { [weak self] in self?.gateway.focusedWindow() },
+        frameOf: { [weak self] in self?.gateway.frame(of: $0) },
+        preTileFrameOf: { [weak self] in self?.preTileFrame(of: $0) })
     /// The controller-owned identity register: the id each handle wears,
     /// the allocator, the death clock, and pending convergence checks.
-    /// Ownership is read through `spaceOf`, so the canvas records remain
-    /// the only owner of which canvas a window lives on.
+    /// Ownership is read through the directory, so the canvas records
+    /// remain the only owner of which canvas a window lives on.
     private lazy var register = WindowRegister(
-        owner: { [weak self] in self?.spaceOf(window: $0) },
+        owner: { [weak self] in self?.directory.owner(of: $0) },
         releaseForeignClaim: { [weak self] id, owner in
             self?.releaseRecordClaimedByAnotherCanvas(id, on: owner)
         },
@@ -126,17 +130,6 @@ final class TilingController {
     /// seconds with the machine awake. Injectable so tests advance it
     /// instead of waiting on real seconds.
     private let uptime: () -> TimeInterval
-    /// Last focused canvas (display plus Mission Control Space) observed
-    /// through `gateway`. The first focus callback always reports; later
-    /// moves within one canvas are filtered so an AX event per window
-    /// switch never turns into UI work.
-    private var lastFocusedSpace: TilingSpaceKey?
-    private var hasResolvedFocusedSpace = false
-    /// Known canvases whose geometry was invalidated by a display change
-    /// while the Space was hidden. They are re-asserted when shown again:
-    /// writing an off-Space window risks moving it to the active Space,
-    /// so a hidden canvas waits instead of being corrected in the dark.
-    private var staleSpaces: Set<TilingSpaceKey> = []
 
     /// Called after any state change (for menu refresh).
     var onChange: (() -> Void)?
@@ -231,8 +224,8 @@ final class TilingController {
         ) { [weak self] _ in
             guard let self else { return }
             self.dbg("screens changed; reasserting visible canvases")
-            self.refreshVisibleFrames(of: Array(self.spaces.keys))
-            self.staleSpaces.formUnion(self.spaces.keys)
+            self.directory.refreshAllFrames()
+            self.directory.markAllStale()
             self.applyAll()
             self.onChange?()
         }
@@ -280,12 +273,7 @@ final class TilingController {
     /// so switching between two windows on the same display and Space
     /// never redraws a glyph whose layout and occupancy are unchanged.
     private func focusedCanvasMayHaveChanged() {
-        let key = focusedSpaceKey()
-        guard !hasResolvedFocusedSpace || key != lastFocusedSpace else {
-            return
-        }
-        hasResolvedFocusedSpace = true
-        lastFocusedSpace = key
+        guard directory.noteFocusedKey(directory.focusedKey()) else { return }
         onFocusedSpaceChange?()
     }
 
@@ -295,12 +283,9 @@ final class TilingController {
     /// canvases, so both the stale reassert and the menu refresh are
     /// unconditional; only the glyph is scoped to the focused canvas.
     private func activeSpaceMayHaveChanged() {
-        refreshVisibleFrames(of: activeSpaceKeys())
+        directory.refreshFrames(directory.visibleKeys())
         reassertStaleActiveSpaces()
-        let key = focusedSpaceKey()
-        if !hasResolvedFocusedSpace || key != lastFocusedSpace {
-            hasResolvedFocusedSpace = true
-            lastFocusedSpace = key
+        if directory.noteFocusedKey(directory.focusedKey()) {
             onFocusedSpaceChange?()
         }
         onChange?()
@@ -311,7 +296,7 @@ final class TilingController {
     /// active Space lookup is fresh, so a swipe is enough to know which
     /// canvas just appeared.
     private func reassertStaleActiveSpaces() {
-        let stale = activeSpaceKeys().filter { staleSpaces.contains($0) }
+        let stale = directory.visibleKeys().filter { directory.isMarkedStale($0) }
         guard !stale.isEmpty else { return }
         for key in stale {
             dbg("reasserting stale canvas screen=\(key.screen?.rawValue ?? -1)")
@@ -334,19 +319,22 @@ final class TilingController {
             return nil
         }
         let liveID = register.liveID(for: handle)
-        let key = spaceKeyForRequester(liveID, handle: handle)
+        let key = directory.keyForRequester(
+            owned: liveID.flatMap { directory.owner(of: $0) },
+            frame: gateway.frame(of: handle),
+            preTileFrame: liveID.flatMap { record(of: $0)?.preTileFrame })
         let id = liveID ?? register.claim(handle, on: key)
         return (id, handle, key)
     }
 
     func handle(slot: Slot) {
         guard let (id, handle, key) = requesterAndCanvas(for: slot) else { return }
-        let hadSlot = spaces[key]?.state.slot(of: id) != nil
+        let hadSlot = directory.storedCanvas(for: key)?.state.slot(of: id) != nil
         let context = placementContext(for: key)
         // An expanded window getting a slot hotkey comes back to earth
         // first: its own slot becomes the strict no-op below; a different
         // slot retiles from the collapsed state.
-        let (collapse, outcome) = mutateSpace(key) { canvas in
+        let (collapse, outcome) = directory.withCanvas(key) { canvas in
             canvas.attach(id, handle: handle)
             let collapse = canvas.isExpanded(id)
                 ? canvas.collapseExpanded(id, context: context)
@@ -469,14 +457,14 @@ final class TilingController {
     /// released, tracker entry cleared, standard refusal surfaced), so
     /// state and screen agree instead of disagreeing silently.
     private func verifyConvergence(_ id: WindowID, on space: TilingSpaceKey) {
-        guard let errorSpace = spaceOf(window: id),
-            spaces[errorSpace]?.state.slot(of: id) != nil
+        guard let errorSpace = directory.owner(of: id),
+            directory.storedCanvas(for: errorSpace)?.state.slot(of: id) != nil
         else { return }
         guard tracker.convergence(for: id) == .ignored else { return }
         // Name the window before its record goes; the rollback itself
         // writes nothing (the write never took effect).
         let name = appName(for: id) ?? "That window"
-        let hasError = mutateSpace(errorSpace) { canvas in
+        let hasError = directory.withCanvas(errorSpace) { canvas in
             canvas.discard(window: id, context: placementContext(for: errorSpace))
             return canvas.error != nil
         }
@@ -485,7 +473,7 @@ final class TilingController {
         // Scoped to the window's own canvas: the placement may tile onto
         // a background display or Space while focus sits elsewhere.
         if !hasError {
-            mutateSpace(errorSpace) {
+            directory.withCanvas(errorSpace) {
                 $0.error = TilingSpace.refusalMessage(windowName: name)
             }
         }
@@ -505,20 +493,21 @@ final class TilingController {
     /// paths, so the source is `.grid`.
     private func applyAll(on space: TilingSpaceKey? = nil) {
         let keys: [TilingSpaceKey] =
-            if let space { [space] } else { activeSpaceKeys() }
+            if let space { [space] } else { directory.visibleKeys() }
         for key in keys {
             // The mark means "this canvas still owes a reassert", so it may
             // only be cleared by a reassert with real geometry to write
             // against: `reassert` early-returns on a degenerate visible
             // frame (and an absent display cannot be written), and clearing
             // the mark then would drop the deferred reassert for good.
-            let hasGeometry = isDisplayAttached(key.screen)
-                && (spaces[key]?.visibleFrame).map { $0.width > 0 && $0.height > 0 } == true
-            mutateSpace(key) {
+            let hasGeometry = directory.isDisplayAttached(key.screen)
+                && (directory.storedCanvas(for: key)?.visibleFrame)
+                    .map { $0.width > 0 && $0.height > 0 } == true
+            directory.withCanvas(key) {
                 $0.reassert(.grid, context: placementContext(for: key))
             }
             if hasGeometry {
-                staleSpaces.remove(key)
+                directory.clearStale(key)
             }
         }
     }
@@ -531,128 +520,6 @@ final class TilingController {
         return gateway.frame(of: record.handle)
     }
 
-    /// Pure screen-ownership rule, extracted for tests: index of the
-    /// screen showing the largest share of `frame`, so straddles resolve
-    /// to the mostly-visible side and never jitter on the midpoint.
-    /// Compared by intersection *area*, not width: vertically stacked
-    /// displays at equal widths produce equal-width intersections, so a
-    /// width-only comparison always returns the first screen. Ties resolve
-    /// to the first screen; zero-area intersections and zero-overlap yield
-    /// nil, and the caller falls back to the midpoint screen, then main.
-    static func owningScreenIndex(frames: [CGRect], for frame: CGRect) -> Int? {
-        let areas = frames.map { rect -> CGFloat in
-            let overlap = rect.intersection(frame)
-            guard !overlap.isNull else { return 0 }
-            return overlap.width * overlap.height
-        }
-        guard
-            let largest = areas.enumerated().max(by: { $0.element < $1.element }),
-            largest.element > 0
-        else { return nil }
-        return largest.offset
-    }
-
-    /// Provider-backed screen info owning `frame` (same fallback chain
-    /// as the screen-ownership rule): largest overlap, then midpoint,
-    /// then main.
-    private func visibleScreen(for frame: CGRect) -> ScreenInfo? {
-        let infos = screens()
-        if let index = Self.owningScreenIndex(frames: infos.map(\.frame), for: frame) {
-            return infos[index]
-        }
-        if let index = Self.midpointScreenIndex(frames: infos.map(\.frame), for: frame) {
-            return infos[index]
-        }
-        dbg("no screen overlaps \(frame); falling back to main")
-        return mainScreenInfo(infos)
-    }
-
-    /// The provider's main screen: first entry, mirroring NSScreen.main
-    /// order. Nil when the provider reports no displays; the caller then
-    /// falls back to raw frames.
-    private func mainScreenInfo(_ infos: [ScreenInfo]) -> ScreenInfo? {
-        infos.first
-    }
-
-    /// The visible frame of the display a canvas lives on: the one
-    /// geometry every rect on that canvas derives from, resolved from the
-    /// canvas's own display and never from a window's frame. A display-less
-    /// key (headless, withheld Space) uses the main screen, then the live
-    /// main screen, then zero.
-    private func visibleFrame(for space: TilingSpaceKey) -> CGRect {
-        if let screen = space.screen,
-            let info = screens().first(where: { $0.id == screen })
-        {
-            return info.visibleFrame
-        }
-        return mainScreenInfo(screens())?.visibleFrame
-            ?? NSScreen.main?.visibleFrame ?? .zero
-    }
-
-    /// A brand-new canvas with its visible frame resolved from its own
-    /// display. Existing canvases keep their frame until one of the
-    /// refresh events; the coordinator never re-resolves per action.
-    private func establishedCanvas(for space: TilingSpaceKey) -> TilingSpace {
-        var canvas = TilingSpace()
-        canvas.visibleFrame = visibleFrame(for: space)
-        return canvas
-    }
-
-    /// Whether a canvas's own display is currently attached. A key with no
-    /// screen is genuinely display-less (headless, withheld Space): it has
-    /// no display to be absent, so the main-screen fallback still applies.
-    private func isDisplayAttached(_ screen: ScreenID?) -> Bool {
-        guard let screen else { return true }
-        return screens().contains { $0.id == screen }
-    }
-
-    /// Re-resolves the stored visible frame of the named canvases: the
-    /// refresh half of a display change and a swipe back. Keys without a
-    /// canvas yet are left alone; they resolve on first use. A canvas whose
-    /// display is absent keeps the geometry it had — it is re-resolved on
-    /// replug — so a kept-for-replug canvas never adopts the main display's
-    /// frame.
-    private func refreshVisibleFrames(of keys: [TilingSpaceKey]) {
-        for key in keys where spaces[key] != nil {
-            guard isDisplayAttached(key.screen) else { continue }
-            spaces[key]?.visibleFrame = visibleFrame(for: key)
-        }
-    }
-
-    /// Canvas for a tiling request: a tiled window's own canvas wins (it
-    /// never migrates mid-session), else the owning display's currently
-    /// shown Space from the window's live frame, else its pre-tile frame,
-    /// else the focused canvas. Untiled windows with no readable frame
-    /// land on the focused canvas, never guessed from another monitor's
-    /// geometry.
-    private func spaceKeyForRequester(_ id: WindowID?, handle: WindowHandle) -> TilingSpaceKey {
-        if let id, let owned = spaceOf(window: id) { return owned }
-        if let frame = gateway.frame(of: handle),
-           let info = screenInfo(for: frame)
-        { return tilingKey(for: info.id) }
-        if let id, let record = record(of: id), record.preTileFrame != .zero,
-           let info = screenInfo(for: record.preTileFrame)
-        { return tilingKey(for: info.id) }
-        return focusedSpaceKey()
-    }
-
-    /// Screen info owning `frame`, or the main screen when nothing
-    /// overlaps (off-screen or inter-Space windows still tile somewhere
-    /// sane). Nil only when the provider reports no displays at all.
-    private func screenInfo(for frame: CGRect) -> ScreenInfo? {
-        visibleScreen(for: frame)
-    }
-
-    /// Pure screen-fallback rule, extracted for tests: index of the screen
-    /// containing the frame's midpoint, used when no screen shows a
-    /// majority share (off-screen or inter-Space windows still tile
-    /// somewhere sane). nil when no screen contains the midpoint; the
-    /// caller falls back to the main screen.
-    static func midpointScreenIndex(frames: [CGRect], for frame: CGRect) -> Int? {
-        let point = CGPoint(x: frame.midX, y: frame.midY)
-        return frames.firstIndex { $0.contains(point) }
-    }
-
     // MARK: Registry
 
     /// Drops `handle`'s deferred pre-tile restore on every canvas. Call
@@ -660,8 +527,8 @@ final class TilingController {
     /// the window's frame now belongs to the new action, so the canvas
     /// it left must never write the old frame over it on the swipe back.
     private func discardDeferredRestores(for handle: WindowHandle) {
-        for key in Array(spaces.keys) {
-            spaces[key]?.discardDeferredRestore(for: handle)
+        for key in directory.allKeys {
+            directory.modifyCanvas(key) { $0.discardDeferredRestore(for: handle) }
         }
     }
 
@@ -675,7 +542,9 @@ final class TilingController {
     /// currently marked stale, i.e. still owes a reassert for when its
     /// display or Space becomes visible. A deferred write marks the
     /// canvas; a reassert with real geometry clears it.
-    func isMarkedStale(_ space: TilingSpaceKey) -> Bool { staleSpaces.contains(space) }
+    func isMarkedStale(_ space: TilingSpaceKey) -> Bool {
+        directory.isMarkedStale(space)
+    }
 
     /// Test seam for the death-bookkeeping half of ticket 02: whether `id`
     /// has an unconfirmed death pending. Forgetting a window must clear
@@ -687,7 +556,7 @@ final class TilingController {
     /// bookkeeping drops the id, but no frame is written — the claiming
     /// canvas owns the window's next write.
     private func releaseRecordClaimedByAnotherCanvas(_ id: WindowID, on owner: TilingSpaceKey) {
-        let outcome = mutateSpace(owner) {
+        let outcome = directory.withCanvas(owner) {
             $0.release(window: id, context: placementContext(for: owner))
         }
         apply(outcome, on: owner)
@@ -700,7 +569,7 @@ final class TilingController {
     /// and pruning on a maybe would untile a live window.
     func pruneDeadWindows() {
         var dead: [(key: TilingSpaceKey, id: WindowID, handle: WindowHandle)] = []
-        for (key, canvas) in spaces {
+        for (key, canvas) in directory.allCanvases {
             for (id, record) in canvas.records
             where gateway.liveness(of: record.handle) == .dead {
                 dead.append((key, id, record.handle))
@@ -721,7 +590,7 @@ final class TilingController {
             // Hand the element back to the adapter before the record
             // (the only holder of the handle) goes away.
             gateway.release(entry.handle)
-            let outcome = mutateSpace(entry.key) {
+            let outcome = directory.withCanvas(entry.key) {
                 $0.release(window: entry.id, context: placementContext(for: entry.key))
             }
             apply(outcome, on: entry.key)
@@ -734,13 +603,15 @@ final class TilingController {
     private func raiseOccupants(on space: TilingSpaceKey) {
         // Raising an off-Space window can pull it to the visible Space;
         // z-order is a nicety, so a hidden canvas waits for its swipe.
-        guard isVisible(space) else { return }
+        guard directory.isVisible(space) else { return }
         // Expanded windows are non-evicted too: they cover the layout
         // while holding their slots, and the evictee sits below them.
         for (_, id) in spaceState(for: space).occupants
             .sorted(by: { $0.key.rawValue < $1.key.rawValue })
         {
-            guard let handle = spaces[space]?.handle(of: id) else { continue }
+            guard let handle = directory.storedCanvas(for: space)?.handle(of: id) else {
+                continue
+            }
             gateway.raise(handle)
         }
     }
@@ -755,7 +626,7 @@ final class TilingController {
         pruneDeadWindows()
         // Untile-all dissolves only the focused canvas: other displays
         // and Spaces keep their arrangements.
-        return untileAll(in: focusedSpaceKey())
+        return untileAll(in: directory.focusedKey())
     }
 
     /// Dissolves one tiling canvas, leaving every other canvas alone.
@@ -764,13 +635,14 @@ final class TilingController {
     @discardableResult
     private func untileAll(in space: TilingSpaceKey) -> ActionReceipt {
         pruneDeadWindows()
-        let hadWindows = spaces[space]?.state.tiledWindows.isEmpty == false
-        let outcome = mutateSpace(space) {
+        let hadWindows =
+            directory.storedCanvas(for: space)?.state.tiledWindows.isEmpty == false
+        let outcome = directory.withCanvas(space) {
             $0.untileAll(context: placementContext(for: space))
         }
         apply(outcome, on: space)
         onChange?()
-        let error = spaces[space]?.error
+        let error = directory.storedCanvas(for: space)?.error
         let performed = hadWindows && error == nil
         return receipt(
             canvas: space, performed: performed,
@@ -785,18 +657,18 @@ final class TilingController {
     /// did not). The receipt names which outcome happened.
     @discardableResult
     func resetOrRestoreSplitters() -> ActionReceipt {
-        let space = focusedSpaceKey()
-        let restored = spaces[space]?.hasSplitterBackup == true
-        mutateSpace(space) { canvas in
+        let space = directory.focusedKey()
+        let restored = directory.storedCanvas(for: space)?.hasSplitterBackup == true
+        directory.withCanvas(space) { canvas in
             if restored {
                 _ = canvas.restoreSplitters(context: placementContext(for: space))
             } else {
-                canvas.visibleFrame = visibleFrame(for: space)
+                canvas.visibleFrame = directory.visibleFrame(for: space)
                 _ = canvas.resetSplitters(context: placementContext(for: space))
             }
         }
         onChange?()
-        let error = spaces[space]?.error
+        let error = directory.storedCanvas(for: space)?.error
         return receipt(
             canvas: space, performed: error == nil, failure: error,
             success: restored
@@ -812,12 +684,12 @@ final class TilingController {
     /// the focused canvas: other displays and Spaces keep their drag
     /// positions.
     func resetDividers() {
-        resetDividers(in: focusedSpaceKey())
+        resetDividers(in: directory.focusedKey())
     }
 
     private func resetDividers(in space: TilingSpaceKey) {
-        mutateSpace(space) { canvas in
-            canvas.visibleFrame = visibleFrame(for: space)
+        directory.withCanvas(space) { canvas in
+            canvas.visibleFrame = directory.visibleFrame(for: space)
             _ = canvas.resetSplitters(context: placementContext(for: space))
         }
         onChange?()
@@ -828,12 +700,14 @@ final class TilingController {
     /// Scoped to the focused canvas, like `resetDividers`.
     @discardableResult
     func restoreSplitters() -> Bool {
-        restoreSplitters(in: focusedSpaceKey())
+        restoreSplitters(in: directory.focusedKey())
     }
 
     private func restoreSplitters(in space: TilingSpaceKey) -> Bool {
-        guard spaces[space]?.hasSplitterBackup == true else { return false }
-        mutateSpace(space) {
+        guard directory.storedCanvas(for: space)?.hasSplitterBackup == true else {
+            return false
+        }
+        directory.withCanvas(space) {
             $0.restoreSplitters(context: placementContext(for: space))
         }
         onChange?()
@@ -845,9 +719,9 @@ final class TilingController {
     var focusedExpandState: ExpandToggleState {
         guard let handle = gateway.focusedWindow(),
             let id = register.liveID(for: handle),
-            let key = spaceOf(window: id)
+            let key = directory.owner(of: id)
         else { return .expands }
-        return spaces[key]?.expandToggleState(of: id) ?? .expands
+        return directory.storedCanvas(for: key)?.expandToggleState(of: id) ?? .expands
     }
 
     /// Undoes the freshest destructive tiling action: a layout switch, an
@@ -862,19 +736,19 @@ final class TilingController {
     /// verdict; the menu and hotkey paths present `undoAction()`'s receipt.
     @discardableResult
     func undoLastDisplacement() -> Bool {
-        undoReceipt(in: focusedSpaceKey()).performed
+        undoReceipt(in: directory.focusedKey()).performed
     }
 
     /// The menu and hotkey Undo path: one receipt carrying whether the
     /// chapter restored, its canvas and notice, and exactly one sentence.
     @discardableResult
     func undoAction() -> ActionReceipt {
-        undoReceipt(in: focusedSpaceKey())
+        undoReceipt(in: directory.focusedKey())
     }
 
     @discardableResult
     private func undoReceipt(in space: TilingSpaceKey) -> ActionReceipt {
-        guard let chapter = mutateSpace(space, { $0.undoStack.popLast() }) else {
+        guard let chapter = directory.withCanvas(space, { $0.undoStack.popLast() }) else {
             // Expired or empty: the one announcement is the answer.
             return receipt(
                 canvas: space, performed: false,
@@ -882,7 +756,7 @@ final class TilingController {
                 noOp: MenuText.nothingToUndoAnnouncement())
         }
         let performed = restoreChapter(chapter, on: space)
-        let error = spaces[space]?.error
+        let error = directory.storedCanvas(for: space)?.error
         return receipt(
             canvas: space, performed: performed,
             failure: error, success: MenuText.undoAnnouncement(),
@@ -902,7 +776,7 @@ final class TilingController {
         _ chapter: TilingSpace.UndoChapter, on space: TilingSpaceKey
     ) -> Bool {
         pruneDeadWindows()
-        mutateSpace(space) { $0.error = nil; $0.notice = nil }
+        directory.withCanvas(space) { $0.error = nil; $0.notice = nil }
         var failures: [String] = []
         var failedWindows: Set<WindowHandle> = []
         // One window can be refused on both its pre-tile restore and its
@@ -922,7 +796,7 @@ final class TilingController {
         var retainedRequester: (space: TilingSpaceKey, slot: Slot)?
         let requesterHandle = chapter.requester.flatMap { handle(of: $0) }
         if let requester = chapter.requester {
-            let requesterSpace = spaceOf(window: requester) ?? space
+            let requesterSpace = directory.owner(of: requester) ?? space
             let handle = requesterHandle
             let name = appName(for: requester) ?? "A window"
             let hasChapterEntry = handle.map { handle in
@@ -932,7 +806,7 @@ final class TilingController {
             // visibly holds (mirroring a refused move). A confirmed-dead
             // one is forgotten: it has no state left to own.
             let isDead = handle.map { gateway.liveness(of: $0) == .dead } ?? false
-            let refused = mutateSpace(requesterSpace) { canvas -> Bool in
+            let refused = directory.withCanvas(requesterSpace) { canvas -> Bool in
                 !canvas.restore(
                     window: requester, context: placementContext(for: requesterSpace),
                     keepingOccupancyOnRefusal: !isDead)
@@ -942,10 +816,10 @@ final class TilingController {
             // outcome released the record. Without a chapter entry this
             // slot is a final barrier for the evictees below. With one,
             // the entry is re-placed first and decides the barrier.
-            if spaceOf(window: requester) == nil {
+            if directory.owner(of: requester) == nil {
                 register.forget(requester)
             } else if !hasChapterEntry {
-                retainedRequester = spaceOf(window: requester).flatMap { key in
+                retainedRequester = directory.owner(of: requester).flatMap { key in
                     spaceState(for: key).slot(of: requester).map { (space: key, slot: $0) }
                 }
             }
@@ -984,7 +858,7 @@ final class TilingController {
             } else {
                 retainedSlots = []
             }
-            let result = mutateSpace(destination) {
+            let result = directory.withCanvas(destination) {
                 $0.restoreEvictees(
                     group, retained: retainedSlots,
                     context: placementContext(for: destination))
@@ -1007,19 +881,19 @@ final class TilingController {
         // ahead of the success sentence, so a partial failure can never
         // hide behind "N windows restored".
         if !failures.isEmpty {
-            mutateSpace(space) {
+            directory.withCanvas(space) {
                 $0.error = MenuText.restoreFailureMessage(failures)
             }
         } else if restored > 0 {
             let noun = restored == 1 ? "1 window" : "\(restored) windows"
-            mutateSpace(space) {
+            directory.withCanvas(space) {
                 $0.notice = "Undid displacement \u{00B7} \(noun) restored."
             }
         } else {
             // Nothing restored and nothing refused (a chapter whose
             // windows all died): report the standard failure. The entry
             // is consumed either way.
-            mutateSpace(space) { $0.error = MenuText.restoreDisplacedWindowsFailure }
+            directory.withCanvas(space) { $0.error = MenuText.restoreDisplacedWindowsFailure }
         }
         onChange?()
         // A refused frame means the chapter did not fully restore: report
@@ -1044,7 +918,7 @@ final class TilingController {
             let destination = evicted.space ?? space
             for (slot, current) in spaceState(for: destination).occupants
             where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {
-                guard let handle = spaces[destination]?.handle(of: current),
+                guard let handle = directory.storedCanvas(for: destination)?.handle(of: current),
                       handle != evicted.handle,
                       !chapterHandles.contains(handle),
                       !handled.contains(current)
@@ -1109,8 +983,8 @@ final class TilingController {
     /// the outcome and refreshes the menu. One spelling for the drag's
     /// resize and snapback settles, which differ only in the source.
     private func reassert(_ id: WindowID, source: TilingSpace.ReassertSource) {
-        guard let key = spaceOf(window: id) else { return }
-        let outcome = mutateSpace(key) {
+        guard let key = directory.owner(of: id) else { return }
+        let outcome = directory.withCanvas(key) {
             $0.reassert(source, context: placementContext(for: key))
         }
         apply(outcome, on: key)
@@ -1219,10 +1093,10 @@ final class TilingController {
             dbg("destroyed win\(id): still live by the death standard; prune cadence decides")
             return
         }
-        let key = spaceOf(window: id) ?? focusedSpaceKey()
+        let key = directory.owner(of: id) ?? directory.focusedKey()
         dbg("destroyed win\(id): releasing slot now")
         gateway.release(handle)
-        let outcome = mutateSpace(key) {
+        let outcome = directory.withCanvas(key) {
             $0.release(window: id, context: placementContext(for: key))
         }
         apply(outcome, on: key)
@@ -1244,12 +1118,12 @@ final class TilingController {
 
     /// The display currently owning focus, resolved from the focused
     /// window's live frame (else its pre-tile frame, else main).
-    var focusedScreen: ScreenID? { focusedScreenID() }
+    var focusedScreen: ScreenID? { directory.focusedScreenID() }
 
     /// The focused tiling canvas (display plus Mission Control Space),
     /// captured once so a UI pass can read the glyph's layout and
     /// occupancy consistently even if focus moves between the reads.
-    var focusedTilingSpace: TilingSpaceKey { focusedSpaceKey() }
+    var focusedTilingSpace: TilingSpaceKey { directory.focusedKey() }
 
     var tiledWindowsInfo: [TiledWindowInfo] {
         allTiledWindowsInfo()
@@ -1278,51 +1152,26 @@ final class TilingController {
     /// display (manage list scope). Windows parked in Spaces that are
     /// hidden right now stay managed, but are absent from the menu: the
     /// menu describes what a hotkey acts on, and a hotkey acts on the
-    /// visible canvas. With no displays (headless tests), falls back to
-    /// listing every remembered canvas.
+    /// visible canvas. A canvas whose Space id the server withheld is not
+    /// a hidden Space, so it is listed even when a display action resolves
+    /// its identified sibling; the menu dedupes the rows by window. With
+    /// no displays (headless tests), falls back to every remembered canvas.
     func allTiledWindowsInfo() -> [TiledWindowInfo] {
-        let infos = screens()
-        var sources: [(key: TilingSpaceKey, screenName: String?)] =
-            if infos.isEmpty {
-                spaces.keys.sorted(by: Self.spaceOrder).map { ($0, nil) }
-            } else {
-                infos.map { (tilingKey(for: $0.id), $0.name) }
-            }
-        // A canvas whose Space id the server withheld holds windows too,
-        // and it is this display's canvas, not a hidden Space: list it so
-        // the manage rows and Untile All can still reach them.
-        for info in infos {
-            let fallback = TilingSpaceKey(screen: info.id, space: nil)
-            guard withheldCanvas(on: info.id) != nil,
-                  !sources.contains(where: { $0.key == fallback })
-            else { continue }
-            sources.append((fallback, info.name))
-        }
         var rows: [TiledWindowInfo] = []
-        for source in sources {
-            let occupants = spaces[source.key]?.state.occupants ?? [:]
+        for key in directory.visibleKeys() {
+            let occupants = directory.storedCanvas(for: key)?.state.occupants ?? [:]
             for (slot, id) in occupants.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
                 rows.append(TiledWindowInfo(
                     id: id, slot: slot, appName: appName(for: id),
-                    screen: source.key.screen, screenName: source.screenName))
+                    screen: key.screen, screenName: screenName(for: key)))
             }
         }
         return rows
     }
 
-    /// Stable menu order for canvases: display first, then Space.
-    private static func spaceOrder(_ a: TilingSpaceKey, _ b: TilingSpaceKey) -> Bool {
-        let left = a.screen?.rawValue ?? -1
-        let right = b.screen?.rawValue ?? -1
-        if left != right { return left < right }
-        return (a.space?.rawValue ?? 0) < (b.space?.rawValue ?? 0)
-    }
-
-
-
     /// Every tiled window on every monitor (prune timer + legacy counts).
     private var allTiledWindows: [WindowID] {
-        spaces.values.flatMap(\.state.tiledWindows)
+        directory.allCanvases.values.flatMap(\.state.tiledWindows)
     }
 
     /// Brings a tiled window to the front without disturbing the layout.
@@ -1344,19 +1193,19 @@ final class TilingController {
         guard let handle = gateway.focusedWindow() else {
             dbg("no focused window for evict")
             return receipt(
-                canvas: focusedSpaceKey(), performed: false,
+                canvas: directory.focusedKey(), performed: false,
                 failure: nil, success: MenuText.evictedAnnouncement(),
                 noOp: MenuText.noFocusedWindowAnnouncement())
         }
         let liveID = register.liveID(for: handle)
-        let key = liveID.flatMap { spaceOf(window: $0) } ?? focusedSpaceKey()
+        let key = liveID.flatMap { directory.owner(of: $0) } ?? directory.focusedKey()
         let id = liveID ?? register.claim(handle, on: key)
         // No pre-attach: a window with no slot is not tiled, and handing
         // it a record only for the eviction to find no slot would leave
         // stale ownership behind. The eviction forgets any record it
         // finds, and this applies that release so the handle table goes
         // with it.
-        let outcome = mutateSpace(key) {
+        let outcome = directory.withCanvas(key) {
             $0.evict(window: id, context: placementContext(for: key))
         }
         apply(outcome, on: key)
@@ -1367,7 +1216,7 @@ final class TilingController {
                 noOp: MenuText.nothingToEvictAnnouncement())
         }
         onChange?()
-        let error = spaces[key]?.error
+        let error = directory.storedCanvas(for: key)?.error
         return receipt(
             canvas: key, performed: error == nil,
             failure: error, success: MenuText.evictedAnnouncement(),
@@ -1393,10 +1242,10 @@ final class TilingController {
         // Resolve focus before the action: an untile on another display or
         // Space must still know whether the canvas it touched was the
         // focused one when its refusal is spoken.
-        let focusedBefore = focusedSpaceKey()
-        let key = spaceOf(window: id) ?? focusedBefore
+        let focusedBefore = directory.focusedKey()
+        let key = directory.owner(of: id) ?? focusedBefore
         let name = appName(for: id)
-        guard spaces[key]?.state.slot(of: id) != nil else {
+        guard directory.storedCanvas(for: key)?.state.slot(of: id) != nil else {
             // A true no-op leaves the canvas's notice and error alone: the
             // menu must not lose a live receipt just because a stale row
             // was clicked after its window left.
@@ -1406,7 +1255,7 @@ final class TilingController {
                 noOp: MenuText.nothingToUntileWindowAnnouncement())
         }
         let refused = untile(window: id, reflowing: true)
-        let error = spaces[key]?.error
+        let error = directory.storedCanvas(for: key)?.error
         let display = key.screen == focusedBefore.screen ? nil : displayName(for: key)
         let failure = error.map {
             MenuText.untileWindowRefusalAnnouncement(displayName: display, error: $0)
@@ -1426,8 +1275,8 @@ final class TilingController {
         pruneDeadWindows()
         // The window's own canvas clears (not the focused one): menu
         // untile rows act on background displays and Spaces.
-        let key = spaceOf(window: id) ?? focusedSpaceKey()
-        let (outcome, refused) = mutateSpace(key) {
+        let key = directory.owner(of: id) ?? directory.focusedKey()
+        let (outcome, refused) = directory.withCanvas(key) {
             canvas -> (TilingSpace.Outcome, Bool) in
             let outcome = canvas.untile(
                 window: id, reflowing: reflowing, context: placementContext(for: key))
@@ -1452,10 +1301,10 @@ final class TilingController {
             return
         }
         let liveID = register.liveID(for: handle)
-        let key = liveID.flatMap { spaceOf(window: $0) } ?? focusedSpaceKey()
+        let key = liveID.flatMap { directory.owner(of: $0) } ?? directory.focusedKey()
         let id = liveID ?? register.claim(handle, on: key)
-        let wasExpanded = spaces[key]?.isExpanded(id) == true
-        let outcome = mutateSpace(key) { canvas in
+        let wasExpanded = directory.storedCanvas(for: key)?.isExpanded(id) == true
+        let outcome = directory.withCanvas(key) { canvas in
             canvas.attach(id, handle: handle)
             return canvas.expandToggle(
                 window: id, context: placementContext(for: key))
@@ -1465,7 +1314,7 @@ final class TilingController {
         // no-readable-frame no-op, leaves the window exactly where it
         // was, so a deferred pre-tile restore on another canvas is still
         // live and must not be discarded.
-        let expandedNow = spaces[key]?.isExpanded(id) == true
+        let expandedNow = directory.storedCanvas(for: key)?.isExpanded(id) == true
         switch outcome.result {
         case .placed:
             if expandedNow != wasExpanded { discardDeferredRestores(for: handle) }
@@ -1482,15 +1331,17 @@ final class TilingController {
     /// untiled, so the tracker never diff-resizes them into splitter
     /// moves or drags them out.
     private func trackedSlot(of id: WindowID) -> Slot? {
-        guard let key = spaceOf(window: id), spaces[key]?.isExpanded(id) != true else {
+        guard let key = directory.owner(of: id),
+            directory.storedCanvas(for: key)?.isExpanded(id) != true
+        else {
             return nil
         }
-        return spaces[key]?.state.slot(of: id)
+        return directory.storedCanvas(for: key)?.state.slot(of: id)
     }
 
     private var trackedOccupants: [Slot: WindowID] {
         var all: [Slot: WindowID] = [:]
-        for space in spaces.values {
+        for space in directory.allCanvases.values {
             for (slot, id) in space.state.occupants where !space.isExpanded(id) {
                 all[slot] = id
             }
@@ -1500,7 +1351,7 @@ final class TilingController {
 
     /// Unexpanded occupants of one canvas.
     private func trackedOccupants(on space: TilingSpaceKey) -> [Slot: WindowID] {
-        guard let canvas = self.space(for: space) else { return [:] }
+        guard let canvas = directory.storedCanvas(for: space) else { return [:] }
         return canvas.state.occupants.filter { !canvas.isExpanded($0.value) }
     }
 
@@ -1512,8 +1363,8 @@ final class TilingController {
     /// drags snap back inside the tracker and never reach here.)
     func untileFromDrag(_ id: WindowID) {
         guard record(of: id) != nil else { return }
-        let key = spaceOf(window: id) ?? focusedSpaceKey()
-        let outcome = mutateSpace(key) {
+        let key = directory.owner(of: id) ?? directory.focusedKey()
+        let outcome = directory.withCanvas(key) {
             $0.untileFromDrag(window: id, context: placementContext(for: key))
         }
         apply(outcome, on: key)
@@ -1534,29 +1385,14 @@ final class TilingController {
     /// would target, withheld-Space fallback included, so a menu or test
     /// can never observe a different canvas than an action touches.
     func canvas(for screen: ScreenID?) -> TilingSpace {
-        spaces[actionSpaceKey(for: screen)] ?? TilingSpace()
+        directory.canvas(for: directory.actionKey(for: screen))
     }
 
     /// One canvas by key: the single scoped read surface. A key that has
     /// never been used reads as an empty canvas (never nil), so callers
     /// assert against the same shape an action would have created.
     func canvas(for space: TilingSpaceKey) -> TilingSpace {
-        spaces[space] ?? TilingSpace()
-    }
-
-    /// One tiling canvas's stored space, if it has been used yet. Keys
-    /// carry both the display and the Mission Control Space; a nil Space
-    /// id is the per-display fallback when the OS cannot name the Space.
-    private func space(for space: TilingSpaceKey) -> TilingSpace? {
-        spaces[space]
-    }
-
-    @discardableResult
-    private func mutateSpace<T>(_ space: TilingSpaceKey, _ body: (inout TilingSpace) -> T) -> T {
-        var value = spaces[space] ?? establishedCanvas(for: space)
-        let result = body(&value)
-        spaces[space] = value
-        return result
+        directory.canvas(for: space)
     }
 
     /// One action receipt, built after the action so the canvas's notice or
@@ -1571,7 +1407,7 @@ final class TilingController {
         performed: Bool, failure: String?, success: String, noOp: String,
         noticeOverride: String? = nil
     ) -> ActionReceipt {
-        let canvas = spaces[space]
+        let canvas = directory.storedCanvas(for: space)
         return ActionReceipt(
             canvas: space, performed: performed,
             notice: noticeOverride ?? canvas?.error ?? canvas?.notice,
@@ -1579,143 +1415,23 @@ final class TilingController {
     }
 
     private func spaceState(for space: TilingSpaceKey) -> TilingState {
-        spaces[space]?.state ?? TilingState()
-    }
-
-    /// Owning canvas of a managed window, derived from the canvas that
-    /// holds its record (nil when untiled/unknown). A tiled window never
-    /// migrates mid-session: its canvas wins over geometry, so dragging
-    /// it across displays keeps its slot until untiled.
-    private func spaceOf(window id: WindowID) -> TilingSpaceKey? {
-        for (key, space) in spaces where space.record(of: id) != nil {
-            return key
-        }
-        return nil
+        directory.canvas(for: space).state
     }
 
     /// The record of a managed window, wherever it lives.
     private func record(of id: WindowID) -> WindowRecord? {
-        spaceOf(window: id).flatMap { spaces[$0]?.record(of: id) }
+        directory.owner(of: id).flatMap { directory.canvas(for: $0).record(of: id) }
+    }
+
+    /// The pre-tile frame of a handle whose record still lives. Focus
+    /// resolution falls back to it when the live frame will not read.
+    private func preTileFrame(of handle: WindowHandle) -> CGRect? {
+        guard let id = register.liveID(for: handle) else { return nil }
+        return record(of: id)?.preTileFrame
     }
 
     /// The handle of a managed window, wherever it lives.
     private func handle(of id: WindowID) -> WindowHandle? {
-        spaceOf(window: id).flatMap { spaces[$0]?.handle(of: id) }
-    }
-
-    /// Canvas key for a display: the Space shown there right now, resolved
-    /// fresh so a swipe is reflected on the next action. A nil or unknown
-    /// screen falls back to the main display's canvas, then to the
-    /// display-less key.
-    private func tilingKey(for screen: ScreenID?) -> TilingSpaceKey {
-        let resolved = screen ?? fallbackScreen()
-        return TilingSpaceKey(
-            screen: resolved, space: activeSpaceID(on: resolved))
-    }
-
-    private func activeSpaceID(on screen: ScreenID?) -> SpaceID? {
-        guard let screen,
-              let info = screens().first(where: { $0.id == screen })
-        else { return nil }
-        return gateway.activeSpace(on: info.displayID)
-    }
-
-    /// Whether `space` is the canvas the user can see right now.
-    ///
-    /// A key with no display (headless tests, `TilingSpaceKey.displayless`)
-    /// is genuinely display-less: there is no hidden canvas to protect, so
-    /// it stays visible. A key whose display is no longer attached is never
-    /// visible, even when its Space id is withheld: its stored frame may
-    /// already belong to another display, so writing it would lay the
-    /// window out against the wrong geometry. On an attached display a
-    /// withheld Space id is the per-display fallback the user is looking
-    /// at, so it stays visible; an identified canvas is visible when it is
-    /// the Space shown there. When the window server cannot name the
-    /// visible Space at all, the canvas is *unknown*, not hidden: the
-    /// unnameable answer is the same fallback a withheld id is, so the
-    /// canvas stays visible and the write proceeds. Deferring on it would
-    /// skip a placement on a canvas the user can see for no reason beyond
-    /// a transient Space-table hiccup, and no swipe back would land it.
-    private func isVisible(_ space: TilingSpaceKey) -> Bool {
-        guard let screen = space.screen else { return true }
-        guard screens().contains(where: { $0.id == screen }) else { return false }
-        guard let id = space.space else { return true }
-        // No answer names the visible Space: unknown, not different.
-        // Treat it like the withheld id above rather than a hidden canvas.
-        guard let active = activeSpaceID(on: screen) else { return true }
-        return active == id
-    }
-
-    /// The focused canvas: the focused window's display plus the Space
-    /// shown there. Focus lands on the active Space of whichever display
-    /// owns the focused window, so this is the canvas a hotkey acts on.
-    private func focusedSpaceKey() -> TilingSpaceKey {
-        actionSpaceKey(for: focusedScreenID())
-    }
-
-    /// A display's withheld-Space canvas, when it still holds windows or
-    /// chapters. This is not a hidden Space: it is the canvas the window
-    /// server would not name when those windows tiled. If the id resolves
-    /// later, the canvas must stay reachable or its windows vanish from
-    /// the menu, the bulk actions, and undo.
-    private func withheldCanvas(on screen: ScreenID?) -> TilingSpaceKey? {
-        guard let screen else { return nil }
-        let key = TilingSpaceKey(screen: screen, space: nil)
-        guard let canvas = spaces[key], canvas.holdsAnything else { return nil }
-        return key
-    }
-
-    /// The canvas an action on `screen` resolves to: the identified
-    /// canvas when it holds anything, else the display's withheld-Space
-    /// canvas. Without this the first successful Space lookup after a
-    /// withheld period would strand every window tiled during it.
-    private func actionSpaceKey(for screen: ScreenID?) -> TilingSpaceKey {
-        let identified = tilingKey(for: screen)
-        if let canvas = spaces[identified], canvas.holdsAnything {
-            return identified
-        }
-        return withheldCanvas(on: identified.screen) ?? identified
-    }
-
-    /// The canvas key for every display right now, in screen order. One
-    /// entry per display even when the same Space spans displays (the
-    /// screen keeps the canvases distinct).
-    private func activeSpaceKeys() -> [TilingSpaceKey] {
-        var keys: [TilingSpaceKey] = []
-        for info in screens() {
-            let key = tilingKey(for: info.id)
-            if !keys.contains(key) { keys.append(key) }
-            // A withheld-Space canvas is reasserted like the identified
-            // one: it is the same display, just unnamed.
-            if let fallback = withheldCanvas(on: info.id), fallback != key {
-                keys.append(fallback)
-            }
-        }
-        if keys.isEmpty { keys = [tilingKey(for: nil)] }
-        return keys
-    }
-
-    /// Focused display id: owning display of the focused window's live
-    /// frame, else its pre-tile frame, else main.
-    private func focusedScreenID() -> ScreenID? {
-        let infos = screens()
-        guard !infos.isEmpty else { return nil }
-        if let handle = gateway.focusedWindow() {
-            if let frame = gateway.frame(of: handle),
-               let info = visibleScreen(for: frame)
-            { return info.id }
-            if let id = register.liveID(for: handle),
-               let record = record(of: id), record.preTileFrame != .zero,
-               let info = visibleScreen(for: record.preTileFrame)
-            { return info.id }
-        }
-        return infos.first?.id
-    }
-
-    /// Single-canvas fallback key: the main display when the provider
-    /// reports screens, nil for a display-less environment (headless
-    /// tests keep the legacy nil-keyed canvas and shared grid).
-    private func fallbackScreen() -> ScreenID? {
-        screens().first?.id
+        directory.owner(of: id).flatMap { directory.canvas(for: $0).handle(of: id) }
     }
 }
