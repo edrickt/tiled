@@ -19,7 +19,7 @@ so every binding edit bypasses the diff.
 **Findings:** `../report.md` "Still open 3"; `../slices/04-presentation.md`
 P1–P3, P5.
 
-**Status:** DONE (19f2564)
+**Status:** DONE (5411987)
 
 - [x] A characterization test pins the current menu/icon output for a
       fixed canvas set, including label-only remaps.
@@ -40,7 +40,8 @@ snapshot and deletes `refreshMenu(force:)`; `4f5d67b` extracts
 `StatusIconRenderer`; `4449814` extracts `MenuBarPresenter` and
 `MenuBarSnapshot`; `e585d31` returns `ActionReceipt` from slot and expand
 actions and replaces the receipt fields with `NoticePresentation`;
-`19f2564` pins the presenter's label-only snapshot diff.
+`19f2564` pins the presenter's label-only snapshot diff; `5411987`
+points the remaining presentation prose at receipts.
 
 Shapes: `MenuReads` is one scoped pass over a resolved canvas key (canvas,
 tile error, hotkey warnings, rows, trust, focused-window answer, expand
