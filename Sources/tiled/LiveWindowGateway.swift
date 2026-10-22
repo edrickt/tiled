@@ -217,10 +217,13 @@ final class LiveWindowGateway: WindowGateway {
     /// Last focused-window resolution, memoized for one refresh pass:
     /// a single menu build asks three times (has-focused, the expanded
     /// slot, the icon's canvas), and every answer is a system-wide AX
-    /// element plus attribute reads. The focus observer clears it; the
-    /// TTL only bounds a pass that races a notification.
-    private var focusedCache: (handle: WindowHandle?, stamp: Date)?
-    private static let focusedCacheLifetime: TimeInterval = 0.05
+    /// element plus attribute reads. The focus observer and `release`
+    /// clear it; the lifetime only bounds a pass that races a notification.
+    private var focusMemo = FocusMemo()
+    /// Test seam: replaces the system-wide focus read so the memo's
+    /// lifetime and release invalidation run without an Accessibility
+    /// grant. Production leaves it nil.
+    private var testFocusedWindow: (() -> WindowHandle?)?
     /// Last successfully-read frame per handle: the geometry a death
     /// confirmation matches against, refreshed by every frame read and by
     /// a successful liveness probe. Geometry alone is not enough: after a
@@ -353,17 +356,21 @@ final class LiveWindowGateway: WindowGateway {
     // MARK: WindowGateway
 
     func focusedWindow() -> WindowHandle? {
-        if let cache = focusedCache,
-           Date().timeIntervalSince(cache.stamp) < Self.focusedCacheLifetime {
-            return cache.handle
+        focusMemo.resolve(now: now()) {
+            if let testFocusedWindow {
+                return testFocusedWindow()
+            }
+            guard let (element, pid) = Self.focusedAXWindow() else {
+                return nil
+            }
+            return handle(for: element, pid: pid)
         }
-        guard let (element, pid) = Self.focusedAXWindow() else {
-            focusedCache = (nil, Date())
-            return nil
-        }
-        let handle = handle(for: element, pid: pid)
-        focusedCache = (handle, Date())
-        return handle
+    }
+
+    /// Test seam: supplies the focus answer in place of the system-wide
+    /// read. Production never calls this.
+    func setTestFocusedWindow(_ read: (() -> WindowHandle?)?) {
+        testFocusedWindow = read
     }
 
     func frame(of handle: WindowHandle) -> CGRect? {
@@ -439,6 +446,7 @@ final class LiveWindowGateway: WindowGateway {
     /// window and only goes when the pid's last handle does.
     func release(_ handle: WindowHandle) {
         guard let pid = pids[handle] else { return }
+        focusMemo.invalidate(handle)
         if let key = observedKeys[handle] {
             registry.forget(key: key, pid: pid)
         }
@@ -1156,7 +1164,7 @@ final class LiveWindowGateway: WindowGateway {
     private static let focusObserverCallback: AXObserverCallback = { _, _, _, _ in
         // The focus changed: the memoized resolution is stale by
         // definition, and the handler redraws from the new answer.
-        LiveWindowGateway.active?.focusedCache = nil
+        LiveWindowGateway.active?.focusMemo.clear()
         LiveWindowGateway.active?.focusChangeHandler?()
     }
 

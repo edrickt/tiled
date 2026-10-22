@@ -112,6 +112,63 @@ final class LiveGatewayWiringTests: XCTestCase {
         XCTAssertEqual(reads, 2)
     }
 
+    // MARK: Focus memo
+
+    func testFocusedWindowMemoizesInsideTheLifetimeAndReReadsAfter() {
+        var clock = Date(timeIntervalSince1970: 0)
+        let gateway = makeGateway(now: { clock })
+        let handle = gateway.registerTestWindow(
+            pid: 100, token: 1, frames: FakeWindowFrames(frame: nil))
+        var reads = 0
+        gateway.setTestFocusedWindow {
+            reads += 1
+            return handle
+        }
+
+        XCTAssertEqual(gateway.focusedWindow(), handle)
+        XCTAssertEqual(gateway.focusedWindow(), handle)
+        XCTAssertEqual(reads, 1, "a menu build's repeated asks share one focus read")
+
+        clock = clock.addingTimeInterval(0.06)
+        XCTAssertEqual(gateway.focusedWindow(), handle)
+        XCTAssertEqual(reads, 2, "the lifetime only bounds a pass that races a notification")
+    }
+
+    func testReleasingTheFocusedHandleForcesAReRead() {
+        let gateway = makeGateway()
+        let handle = gateway.registerTestWindow(
+            pid: 100, token: 1, frames: FakeWindowFrames(frame: nil))
+        var focused: WindowHandle? = handle
+        gateway.setTestFocusedWindow { focused }
+        XCTAssertEqual(gateway.focusedWindow(), handle)
+
+        focused = nil
+        gateway.release(handle)
+
+        XCTAssertNil(
+            gateway.focusedWindow(),
+            "a released handle is never the memoized answer")
+    }
+
+    func testReleasingAnotherHandleKeepsTheFocusedAnswer() {
+        let gateway = makeGateway()
+        let focused = gateway.registerTestWindow(
+            pid: 100, token: 1, frames: FakeWindowFrames(frame: nil))
+        let other = gateway.registerTestWindow(
+            pid: 100, token: 2, frames: FakeWindowFrames(frame: nil))
+        var reads = 0
+        gateway.setTestFocusedWindow {
+            reads += 1
+            return focused
+        }
+        XCTAssertEqual(gateway.focusedWindow(), focused)
+
+        gateway.release(other)
+
+        XCTAssertEqual(gateway.focusedWindow(), focused)
+        XCTAssertEqual(reads, 1, "another window's release must not force an AX read")
+    }
+
     // MARK: Observer registration
 
     func testFirstObserveCreatesOneObserverAndRegistersAllThreeNotifications() {
