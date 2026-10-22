@@ -198,22 +198,41 @@ final class LiveWindowGateway: WindowGateway {
     private static let messagingTimeout: Float = 1.0
 
     private var nextHandleID = 1
-    /// Live element per issued handle. Entries are removed when the
-    /// window dies (probed via `isAlive`) so handles never dangle.
-    private var elements: [WindowHandle: AXUIElement] = [:]
-    private var pids: [WindowHandle: pid_t] = [:]
-    /// The frame calls for one handle. Production resolves the live
-    /// `AXUIElement`; a test window carries scripted answers, so the
-    /// adapter's reads and write pair run without a grant.
-    private var windowFrames: [WindowHandle: WindowFrames] = [:]
-    /// The AXUIElement token per handle: the observer registers and routes
-    /// notifications by it. Production is the AXUIElement's CFHash (already
-    /// the registry key); a test window carries its own token.
-    private var elementTokens: [WindowHandle: UInt] = [:]
-    /// The observation key registered per observed handle, so `release`
-    /// can forget exactly that key while the pid's shared observer and
-    /// its other windows stay.
-    private var observedKeys: [WindowHandle: UInt] = [:]
+    /// One handle's registration. One value per handle makes a
+    /// registration all-or-nothing: a test window's missing AX element is
+    /// an explicit nil field, not a half-registered set of maps, and
+    /// `release` is one removal.
+    struct WindowBinding {
+        /// The live element; nil for a scripted test window.
+        var element: AXUIElement? = nil
+        let pid: pid_t
+        /// The frame calls: production resolves the live element, a test
+        /// window carries scripted answers.
+        var frames: WindowFrames
+        /// The AXUIElement token (production: its CFHash; a test window
+        /// carries its own).
+        var token: UInt
+        /// The observation key registered per observed handle, so `release`
+        /// can forget exactly that key while the pid's shared observer and
+        /// its other windows stay. Nil until `observe`.
+        var observedKey: UInt? = nil
+        /// Change handler per observed handle.
+        var changeHandler: (() -> Void)? = nil
+        /// Destruction handler per observed handle: the OS reported the
+        /// element destroyed, which is categorically different from a
+        /// move or resize, so the controller never reads a frame for it.
+        var destructionHandler: (() -> Void)? = nil
+        /// Last successfully-read frame per handle: the geometry a death
+        /// confirmation matches against, refreshed by every frame read and
+        /// by a successful liveness probe.
+        var lastFrame: CGRect? = nil
+    }
+
+    /// The one registration per live handle.
+    private var bindings: [WindowHandle: WindowBinding] = [:]
+    /// Observation token -> handle: the notification router's index,
+    /// derived from each binding's `observedKey` and updated with it.
+    private var tokenIndex: [UInt: WindowHandle] = [:]
     /// Last focused-window resolution, memoized for one refresh pass:
     /// a single menu build asks three times (has-focused, the expanded
     /// slot, the icon's canvas), and every answer is a system-wide AX
@@ -224,14 +243,6 @@ final class LiveWindowGateway: WindowGateway {
     /// lifetime and release invalidation run without an Accessibility
     /// grant. Production leaves it nil.
     private var testFocusedWindow: (() -> WindowHandle?)?
-    /// Last successfully-read frame per handle: the geometry a death
-    /// confirmation matches against, refreshed by every frame read and by
-    /// a successful liveness probe. Geometry alone is not enough: after a
-    /// display teardown a held element stops comparing equal (CFEqual) to
-    /// the app's fresh reference for the same window (observed on live AX:
-    /// `listed=no` while the app listed every window), so the frame is the
-    /// fallback the app-list match leans on.
-    private var lastFrames: [WindowHandle: CGRect] = [:]
     /// Observer per pid; registrations outlive untiled records and can
     /// never be unregistered, so they are created once and shared.
     private var observers: [pid_t: AXObserverHandle] = [:]
@@ -247,14 +258,6 @@ final class LiveWindowGateway: WindowGateway {
     /// re-tiling must not double-register). The adapter performs the AX
     /// calls; this decides what a registration request needs.
     private var registry = ObservationRegistry()
-    /// Change handler per observed handle.
-    private var changeHandlers: [WindowHandle: () -> Void] = [:]
-    /// Destruction handler per observed handle: the OS reported the
-    /// element destroyed. Separate from `changeHandlers` because the
-    /// notification means something categorically different (the window
-    /// is gone, not moved), and the controller must not read a frame for
-    /// an element that no longer answers.
-    private var destructionHandlers: [WindowHandle: () -> Void] = [:]
     /// Focus observer for the frontmost application: its key-window
     /// changes move which display's layout the status icon depicts.
     /// Separate from the per-window resize observers so an app with no
@@ -374,9 +377,9 @@ final class LiveWindowGateway: WindowGateway {
     }
 
     func frame(of handle: WindowHandle) -> CGRect? {
-        guard let frames = windowFrames[handle] else { return nil }
+        guard let frames = bindings[handle]?.frames else { return nil }
         guard let frame = frames.frame() else { return nil }
-        lastFrames[handle] = frame
+        bindings[handle]?.lastFrame = frame
         return frame
     }
 
@@ -392,7 +395,7 @@ final class LiveWindowGateway: WindowGateway {
     /// top-left (always inside the visible frame) never clamps.
     @discardableResult
     func setFrame(_ handle: WindowHandle, to frame: CGRect) -> Bool {
-        guard let frames = windowFrames[handle] else { return false }
+        guard let frames = bindings[handle]?.frames else { return false }
         // The pair can part-apply: a position write that lands followed by
         // a permanently refused size leaves the window moved at its old
         // size. Remember the top-left before writing, so the failure path
@@ -441,24 +444,19 @@ final class LiveWindowGateway: WindowGateway {
         return error == nil
     }
 
-    /// Drops a confirmed-gone handle: element, pid, handlers, baseline,
-    /// and its observation key. The shared observer outlives any one
+    /// Drops a confirmed-gone handle: its whole binding and its
+    /// observation-token entry. The shared observer outlives any one
     /// window and only goes when the pid's last handle does.
     func release(_ handle: WindowHandle) {
-        guard let pid = pids[handle] else { return }
+        guard let binding = bindings.removeValue(forKey: handle) else { return }
         focusMemo.invalidate(handle)
-        if let key = observedKeys[handle] {
-            registry.forget(key: key, pid: pid)
+        if let key = binding.observedKey {
+            registry.forget(key: key, pid: binding.pid)
+            if tokenIndex[key] == handle { tokenIndex[key] = nil }
         }
-        observedKeys[handle] = nil
-        elements[handle] = nil
-        pids[handle] = nil
-        windowFrames[handle] = nil
-        elementTokens[handle] = nil
-        changeHandlers[handle] = nil
-        destructionHandlers[handle] = nil
-        lastFrames[handle] = nil
-        if !pids.values.contains(pid) { pruneObserver(for: pid) }
+        if !bindings.values.contains(where: { $0.pid == binding.pid }) {
+            pruneObserver(for: binding.pid)
+        }
     }
 
     /// Test seam: registers a handle with a scripted AXUIElement token and
@@ -472,9 +470,7 @@ final class LiveWindowGateway: WindowGateway {
     ) -> WindowHandle {
         let handle = WindowHandle(id: nextHandleID)
         nextHandleID += 1
-        pids[handle] = pid
-        elementTokens[handle] = token
-        windowFrames[handle] = frames
+        bindings[handle] = WindowBinding(pid: pid, frames: frames, token: token)
         return handle
     }
 
@@ -483,12 +479,15 @@ final class LiveWindowGateway: WindowGateway {
     func adoptTestWindow(
         _ handle: WindowHandle, token: UInt, frames: WindowFrames
     ) {
-        guard let pid = pids[handle] else { return }
+        guard let pid = bindings[handle]?.pid else { return }
         adopt(handle, element: nil, token: token, frames: frames, pid: pid)
     }
 
     func liveness(of handle: WindowHandle) -> Liveness {
-        guard let element = elements[handle], let pid = pids[handle] else { return .dead }
+        guard let binding = bindings[handle], let element = binding.element else {
+            return .dead
+        }
+        let pid = binding.pid
         var value: CFTypeRef?
         let probeError = AXUIElementCopyAttributeValue(
             element, kAXPositionAttribute as CFString, &value)
@@ -528,7 +527,7 @@ final class LiveWindowGateway: WindowGateway {
             // compare them against; the count of listed windows still
             // decides absence.
             let listedFrames: [CGRect?] =
-                lastFrames[handle] != nil ? list.map { Self.frame(of: $0) } : []
+                binding.lastFrame != nil ? list.map { Self.frame(of: $0) } : []
             appAnswer = Self.AppWindowAnswer(
                 appWindowsError: listError, listedFrames: listedFrames,
                 processAlive: processAlive, identityListed: mine != nil,
@@ -536,9 +535,9 @@ final class LiveWindowGateway: WindowGateway {
         }
         let pass = Self.livenessPass(
             probe: Self.LivenessProbe(error: probeError, frame: probedFrame),
-            baseline: lastFrames[handle], appAnswer: appAnswer)
+            baseline: binding.lastFrame, appAnswer: appAnswer)
         if let refreshed = pass.baseline {
-            lastFrames[handle] = refreshed
+            bindings[handle]?.lastFrame = refreshed
         }
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog(
@@ -674,19 +673,20 @@ final class LiveWindowGateway: WindowGateway {
         _ handle: WindowHandle, onChange: @escaping () -> Void,
         onDestroyed: @escaping () -> Void
     ) {
-        guard let pid = pids[handle], let token = elementTokens[handle] else {
-            return
-        }
-        changeHandlers[handle] = onChange
-        destructionHandlers[handle] = onDestroyed
+        guard let binding = bindings[handle] else { return }
+        let pid = binding.pid
+        let token = binding.token
+        bindings[handle]?.changeHandler = onChange
+        bindings[handle]?.destructionHandler = onDestroyed
         // The death check confirms absence geometrically (the app answers
         // and no listed frame matches the last read frame), so it needs a
         // baseline even for a window whose frame was never read: a
         // destroy notification can arrive before any move or resize tick.
-        if lastFrames[handle] == nil {
+        if binding.lastFrame == nil {
             _ = frame(of: handle)
         }
-        observedKeys[handle] = token
+        bindings[handle]?.observedKey = token
+        tokenIndex[token] = handle
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] observe win%d pid=%d key=%lu observed=%d",
                   handle.id, pid, token, registry.isObserved(key: token) ? 1 : 0)
@@ -714,7 +714,7 @@ final class LiveWindowGateway: WindowGateway {
             observers[pid] = newObserver
             observerDriver.addRunLoopSource(newObserver)
             registerChanges(
-                on: newObserver, element: elements[handle], pid: pid,
+                on: newObserver, element: bindings[handle]?.element, pid: pid,
                 key: token)
 
         case .register:
@@ -727,7 +727,7 @@ final class LiveWindowGateway: WindowGateway {
                 return
             }
             registerChanges(
-                on: observer, element: elements[handle], pid: pid, key: token)
+                on: observer, element: bindings[handle]?.element, pid: pid, key: token)
         }
     }
 
@@ -971,24 +971,23 @@ final class LiveWindowGateway: WindowGateway {
     }
 
     func focus(_ handle: WindowHandle) {
-        guard let element = elements[handle], let pid = pids[handle] else { return }
+        guard let binding = bindings[handle], let element = binding.element else { return }
         AXUIElementSetAttributeValue(
             element, kAXMainAttribute as CFString, kCFBooleanTrue)
-        NSRunningApplication(processIdentifier: pid)?.activate()
+        NSRunningApplication(processIdentifier: binding.pid)?.activate()
     }
 
     /// Raises the window above its siblings without focusing it. Best
     /// effort: not every app supports the AXRaise action, and a z-order
     /// nicety must never surface as an error.
     func raise(_ handle: WindowHandle) {
-        guard let element = elements[handle] else { return }
+        guard let element = bindings[handle]?.element else { return }
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
     }
 
     func appName(of handle: WindowHandle) -> String? {
-        pids[handle].flatMap {
-            NSRunningApplication(processIdentifier: $0)?.localizedName
-        }
+        guard let pid = bindings[handle]?.pid else { return nil }
+        return NSRunningApplication(processIdentifier: pid)?.localizedName
     }
 
     var isTrusted: Bool { Self.isTrusted }
@@ -1008,8 +1007,10 @@ final class LiveWindowGateway: WindowGateway {
     /// (The controller used to scan records with `CFEqual`; the registry
     /// does that once, here, behind the seam.)
     private func handle(for element: AXUIElement, pid: pid_t) -> WindowHandle {
-        for (handle, registered) in elements where CFEqual(registered, element) {
-            return handle
+        for (handle, binding) in bindings {
+            if let registered = binding.element, CFEqual(registered, element) {
+                return handle
+            }
         }
         // A held element can stop comparing equal to the app's fresh
         // reference for the same window after a display teardown (the
@@ -1024,8 +1025,8 @@ final class LiveWindowGateway: WindowGateway {
         // See `heldElementIsStale` and `inheritedHandle`.
         if let frame = Self.frame(of: element) {
             var matching: [WindowHandle] = []
-            for (handle, registeredPID) in pids where registeredPID == pid {
-                guard let cached = lastFrames[handle],
+            for (handle, binding) in bindings where binding.pid == pid {
+                guard let cached = binding.lastFrame,
                       Self.framesClose(cached, frame)
                 else { continue }
                 matching.append(handle)
@@ -1036,7 +1037,7 @@ final class LiveWindowGateway: WindowGateway {
                 // membership is undeterminable, never "absent".
                 let listed = Self.appWindowList(pid: pid)
                 let candidates = matching.map { handle -> HandleCandidate in
-                    let held = elements[handle]
+                    let held = bindings[handle]?.element
                     let listedByApp = listed.map { list in
                         guard let held else { return false }
                         return list.contains { CFEqual($0, held) }
@@ -1056,14 +1057,16 @@ final class LiveWindowGateway: WindowGateway {
                     adopt(
                         inherited, element: element, token: UInt(CFHash(element)),
                         frames: AXWindowFrames(element: element), pid: pid)
-                    lastFrames[inherited] = frame
+                    bindings[inherited]?.lastFrame = frame
                     return inherited
                 }
             }
         }
         let handle = WindowHandle(id: nextHandleID)
         nextHandleID += 1
-        pids[handle] = pid
+        bindings[handle] = WindowBinding(
+            pid: pid, frames: AXWindowFrames(element: element),
+            token: UInt(CFHash(element)))
         adopt(
             handle, element: element, token: UInt(CFHash(element)),
             frames: AXWindowFrames(element: element), pid: pid)
@@ -1079,21 +1082,29 @@ final class LiveWindowGateway: WindowGateway {
         _ handle: WindowHandle, element: AXUIElement?, token: UInt,
         frames: WindowFrames, pid: pid_t
     ) {
+        guard var binding = bindings[handle] else { return }
+        let oldKey = binding.observedKey
         if let element {
-            elements[handle] = element
+            binding.element = element
             Self.applyMessagingTimeout(element)
         }
-        elementTokens[handle] = token
-        windowFrames[handle] = frames
-        guard let oldKey = observedKeys[handle], oldKey != token else { return }
-        registry.forget(key: oldKey, pid: pid)
-        observedKeys[handle] = token
-        if let observer = observers[pid] {
-            registerChanges(
-                on: observer, element: element, pid: pid, key: token)
-        } else {
-            registry.finish(key: token, pid: pid, outcome: .observerUnavailable)
+        binding.token = token
+        binding.frames = frames
+        if let oldKey, oldKey != token {
+            registry.forget(key: oldKey, pid: pid)
+            if tokenIndex[oldKey] == handle { tokenIndex[oldKey] = nil }
+            binding.observedKey = token
+            tokenIndex[token] = handle
+            bindings[handle] = binding
+            if let observer = observers[pid] {
+                registerChanges(
+                    on: observer, element: element, pid: pid, key: token)
+            } else {
+                registry.finish(key: token, pid: pid, outcome: .observerUnavailable)
+            }
+            return
         }
+        bindings[handle] = binding
     }
 
     /// One same-pid handle whose last-read frame matches the fresh
@@ -1178,20 +1189,18 @@ final class LiveWindowGateway: WindowGateway {
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] notification %@ arrived", notification)
         }
-        guard
-            let handle = observedKeys.first(where: { $0.value == token })?.key
-        else {
+        guard let handle = tokenIndex[token] else {
             if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
                 NSLog(
                     "Tiled: [DEBUG-obs] notification %@ matched NO handle (%d observed)",
-                    notification, observedKeys.count)
+                    notification, tokenIndex.count)
             }
             return
         }
         if notification == kAXUIElementDestroyedNotification as String {
-            destructionHandlers[handle]?()
+            bindings[handle]?.destructionHandler?()
         } else {
-            changeHandlers[handle]?()
+            bindings[handle]?.changeHandler?()
         }
     }
     // MARK: Permissions

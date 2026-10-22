@@ -363,6 +363,38 @@ final class LiveGatewayWiringTests: XCTestCase {
         XCTAssertEqual(changes, 1)
     }
 
+    func testReleaseDropsAnUnobservedBindingInOneRemoval() {
+        // A scripted window can be registered and released without ever
+        // being observed. Release must remove the whole binding, not
+        // early-return for the missing observation key.
+        let gateway = makeGateway()
+        let frame = CGRect(x: 10, y: 20, width: 200, height: 100)
+        let handle = gateway.registerTestWindow(
+            pid: 100, token: 1, frames: FakeWindowFrames(frame: frame))
+        XCTAssertEqual(gateway.frame(of: handle), frame)
+
+        gateway.release(handle)
+
+        XCTAssertNil(gateway.frame(of: handle), "the binding is gone")
+        XCTAssertEqual(gateway.liveness(of: handle), .dead, "no element is left to probe")
+    }
+
+    func testAdoptingAScriptedWindowKeepsItsMissingElementExplicit() {
+        // The test seam's handle has a frame source but no AX element;
+        // adoption rewrites the token and frames without inventing an
+        // element, so liveness still reports the honest .dead.
+        let gateway = makeGateway()
+        let updated = FakeWindowFrames(
+            frame: CGRect(x: 30, y: 40, width: 300, height: 150))
+        let handle = gateway.registerTestWindow(
+            pid: 100, token: 1, frames: FakeWindowFrames(frame: nil))
+
+        gateway.adoptTestWindow(handle, token: 2, frames: updated)
+
+        XCTAssertEqual(gateway.frame(of: handle), updated.frame())
+        XCTAssertEqual(gateway.liveness(of: handle), .dead)
+    }
+
     // MARK: Frame reads and the write pair
 
     /// The reported bug: a tiled window landed a full window-height below
