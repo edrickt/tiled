@@ -19,7 +19,7 @@ structural candidates as one-or-two-sentence notes in the slice files.
 | `swift build`, warnings/errors | clean | clean |
 | `swift test` | 833 green, 1 skipped | **845 green, 1 skipped** |
 | `scripts/check-test-count.sh` | README 833 matches | README 845 matches |
-| `tools/mutation/mutate.py` | last run 143/143 | see the run recorded with this report |
+| `tools/mutation/mutate.py` | last run 143/143 | **143/143 caught** after updating four anchors the reshaped code invalidated |
 
 ## Verdict
 
@@ -78,8 +78,10 @@ The engine slice's findings 1–2. A single-window `MoveAttempt`
 (`from`, `to`, previous record) owns rollback and its reverse write; an
 action-scoped `[Failure]` collected by the push layer replaces the one
 `Refusal` slot and `reportRestoreFailures`' precedence rule. This is the
-durable fix for the F21/F22 class and the canvas-side half of the
-expected-write ledger. `FrameWriter`'s clamp repair (controller S8)
+durable fix for the F21 class and the canvas-side half of the
+expected-write ledger. F22's recovery pass already announces its refusal
+through `writeRects`; the residue is the discarded result and the missing
+second-refusal test. `FrameWriter`'s clamp repair (controller S8)
 belongs in the same ledger: it currently writes a second time, ignores
 the result, and arms an expectation anyway.
 
@@ -171,8 +173,13 @@ end-to-end expectations added by the prior audit (T5).
 Read-only slice reviews were done by six parallel reviewers; the
 consolidation and every edit were done in the main checkout, one
 commit per verifiable unit. No live AX run and no physical-display
-checklist were executed. The mutation gate is the remaining check; see
-its recorded result below.
+checklist were executed.
+
+The full mutation table scored 139/139 valid mutants on its first pass,
+with four anchors stale because the remediation changed the code shape
+they matched. The four anchors were updated to the new shape and the
+resume pass caught all four: **143/143 mutants caught**, none stale.
+`tools/mutation/mutants.json` is part of this commit.
 
 ## Slice files
 

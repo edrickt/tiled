@@ -8,8 +8,8 @@
  [
   "TilingSpace.swift",
   "swap write-home deleted (screen/state diverge)",
-  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            applyLayout(for: displaced, context: context, on: context.space)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")",
-  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            context.log(\"place FAILED win\\(id) -> \\(slot.rawValue); swap rolled back\")"
+  "            let requesterRefusal = refusal(for: id, context: context)\n            if applyLayout(for: displaced, context: context, on: context.space) == .refused {",
+  "            let requesterRefusal = refusal(for: id, context: context)\n            if false {"
  ],
  [
   "TilingSpace.swift",
@@ -362,8 +362,8 @@
  [
   "TilingSpace.swift",
   "resize reconcile trusts an expanded window's screen frame (stale drag moves splitters)",
-  "        guard case .resize(let dragged, let achieved) = source,\n            expanded[dragged] == nil,\n            let slot = state.slot(of: dragged)",
-  "        guard case .resize(let dragged, let achieved) = source,\n            let slot = state.slot(of: dragged)"
+  "        guard case .resize(let dragged, let achieved) = source,\n            let achieved,\n            expanded[dragged] == nil,\n            let slot = state.slot(of: dragged)",
+  "        guard case .resize(let dragged, let achieved) = source,\n            let achieved,\n            let slot = state.slot(of: dragged)"
  ],
  [
   "TilingSpace.swift",
@@ -428,7 +428,7 @@
  [
   "TilingController.swift",
   "resize reassert downgraded to a grid reassert (clamp not reconciled)",
-  "            reassert(id, source: .resize(dragged: id, achieved: achieved))",
+  "            reassert(\n                id,\n                source: .resize(dragged: id, achieved: gateway.frame(of: handle)))",
   "            reassert(id, source: .grid)"
  ],
  [
@@ -746,7 +746,7 @@
  [
   "HotkeyActionRouter.swift",
   "reset-splitters route expands instead",
-  "    func performResetSplitters() {\n        controller.resetDividers()\n    }",
+  "    func performResetSplitters() {\n        presentSplitter(controller.resetOrRestoreSplitters())\n    }",
   "    func performResetSplitters() {\n        controller.handleExpandToggle()\n    }"
  ],
  [
