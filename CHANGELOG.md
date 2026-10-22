@@ -59,6 +59,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A swap rolled back after the requester's write was refused now also
   names a failed home write, instead of reporting only the requester's
   refusal while the displaced window stayed in the vacated tile.
+- A refused action now names every write it lost instead of letting one
+  refusal outrank another: a refused eviction restore is reported beside a
+  refused placement, and a refused reflow recovery write is reported beside
+  the refused grow that triggered it.
 - Corrupt stored shortcut data with negative modifiers is ignored like
   any other unreadable entry instead of trapping when Settings opens or
   a parked section is restored.

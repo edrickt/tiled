@@ -311,15 +311,16 @@ struct TilingSpace {
     ) -> Outcome {
         var commit = commit
         var outcome = Outcome()
-        switch (commit.refusal, commit.deferred) {
-        case (let refusal?, _):
-            // A restore failure carries no window name: the outcome stays
-            // `.placed` and the canvas's `error` speaks for it.
-            outcome.result = refusal.windowName.map { .refused(windowName: $0) } ?? .placed
-        case (nil, true):
-            outcome.result = .deferred
-        case (nil, false):
+        if let placement = commit.failures.first(where: { $0.kind == .placement }) {
+            // The requester's or displaced window's own write was refused:
+            // the outcome names it for the announcement.
+            outcome.result = .refused(windowName: placement.windowName)
+        } else if commit.failures.contains(where: { $0.kind == .restore }) {
+            // A restore-only failure carries no placement name: the
+            // outcome stays `.placed` and the canvas's `error` speaks.
             outcome.result = .placed
+        } else if commit.deferred {
+            outcome.result = .deferred
         }
         // Restored-not-re-housed windows: untiled for good. A re-housed
         // window is the exception: it stayed tiled in the slot the
@@ -334,6 +335,11 @@ struct TilingSpace {
         if commit.requesterReleased {
             outcome.forget.append(id)
         }
+        // The action's failures: the plan branch's own list plus whatever
+        // its reflow pass refused. `commit.clean` stays the branch's
+        // placement/restore verdict, so a failed reflow still leaves the
+        // settled event's focus and verification rules unchanged.
+        var actionFailures = commit.failures
         // Reflow: the cells the event freed (eviction remainders, the
         // requester's vacated tile) flow into the one survivor that
         // merges with them into a whole slot. Skipped when the placement
@@ -351,7 +357,9 @@ struct TilingSpace {
             let skip = Set(
                 ([id] + decision.windowsToRestore(requester: id))
                     .filter { $0 != commit.rehoused })
-            reflowSnapshot = reflow(freed, excluding: skip, context: context)
+            let reflow = reflow(freed, excluding: skip, context: context)
+            reflowSnapshot = reflow.undoEntries
+            actionFailures += reflow.failures
         }
         // Reflow can grow the re-housed window into a larger slot (the
         // left two-thirds blocker of a left-third request ends up as the
@@ -376,7 +384,9 @@ struct TilingSpace {
             outcome.focusAfter = displaced
         }
         self.notice = commit.notice
-        if let refusal = commit.refusal { self.error = refusal.message }
+        if let message = Self.failureMessage(actionFailures) {
+            self.error = message
+        }
         if commit.clean {
             // Late convergence check: a silent ignore (gateway success,
             // app never moved) is invisible at write time, so verify one
@@ -509,7 +519,9 @@ struct TilingSpace {
                 // it visibly holds or forget an already-untiled window.
                 let name = appName(id, context: context) ?? "A window"
                 let previous = move.from
-                move.rollback(in: &self, context: context)
+                var reverseFailures: [Failure] = []
+                move.rollback(
+                    in: &self, context: context, failures: &reverseFailures)
                 if let previous {
                     // The window still owns a slot on this canvas, so an
                     // older deferred restore elsewhere is stale even
@@ -525,6 +537,14 @@ struct TilingSpace {
                 }
                 result.failures.append(
                     ChapterRestore.Failure(handle: record.handle, name: name))
+                // A refused reverse write is part of the same window's
+                // failure: the coordinator dedupes by handle, so the
+                // chapter still names the window once.
+                for failure in reverseFailures {
+                    result.failures.append(
+                        ChapterRestore.Failure(
+                            handle: record.handle, name: failure.windowName))
+                }
             }
         }
         return result
@@ -553,13 +573,13 @@ struct TilingSpace {
         switch placement {
         case .noRecord:
             // `place` bailed (no record): nothing to snapshot. A refused
-            // write also drops the record now, but carries its refusal in
+            // write also drops the record now, but carries its refusals in
             // `placement`, so it falls through to be narrated below.
-            Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
-        case .refused(let refusal, let released):
-            commit.refusal = refusal
+            commit.failures += restoreFailures
+        case .refused(let failures, let released):
+            commit.failures += failures
             commit.requesterReleased = released
-            Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
+            commit.failures += restoreFailures
         case .placed(let deferred):
             commit.deferred = deferred
             if restoreFailures.isEmpty, !evicted.isEmpty {
@@ -574,7 +594,7 @@ struct TilingSpace {
                 commit.snapshot = snapshot
                 commit.requester = id
             } else {
-                Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
+                commit.failures += restoreFailures
             }
         }
         context.log("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
@@ -627,39 +647,33 @@ struct TilingSpace {
         commit.observed.append(displaced)
         if displacedWrite == .refused {
             // The refused write moved nothing on screen: both attempts roll
-            // back state-only. The displaced commit had already taken the
+            // back, and any refused reverse write joins the displaced
+            // window's refusal. The displaced commit had already taken the
             // requester's vacated tile in state, so the requester's
             // occupancy must be restored alongside it.
-            let failed = refusal(for: displaced, context: context)
-            displacedMove.rollback(in: &self, context: context)
-            requesterMove.rollback(in: &self, context: context)
+            var failures = [
+                placementFailure(for: displaced, slot: previous, context: context)
+            ]
+            displacedMove.rollback(in: &self, context: context, failures: &failures)
+            requesterMove.rollback(in: &self, context: context, failures: &failures)
             context.log("swap FAILED displaced win\(displaced) -> \(previous.rawValue)")
-            commit.refusal = failed
+            commit.failures = failures
             return commit
         }
         if displacedWrite == .deferredOffSpace { commit.deferred = true }
         let requesterWrite = requesterMove.commit(in: &self, context: context)
         commit.observed.append(id)
         if requesterWrite == .refused {
-            // Roll the whole swap back: the displaced window's frame
-            // visibly moved, so its attempt writes it home; the requester
-            // was refused, so its attempt restores state only.
-            let requesterRefusal = refusal(for: id, context: context)
-            requesterMove.rollback(in: &self, context: context)
-            let homeWrite = displacedMove.rollback(in: &self, context: context)
-            if homeWrite == .refused {
-                // The home write is the second failure of the same swap:
-                // name it too, or the canvas would claim the rollback
-                // succeeded while the displaced window visibly holds the
-                // requester's vacated tile.
-                let name = appName(displaced, context: context) ?? "That window"
-                commit.refusal = Refusal(
-                    message: requesterRefusal.message + " "
-                        + MenuText.restoreFailureMessage([name]),
-                    windowName: requesterRefusal.windowName)
-            } else {
-                commit.refusal = requesterRefusal
-            }
+            // Roll the whole swap back: every reverse write the transaction
+            // runs appends its own refusal, so the requester's refusal and
+            // a failed home write are both named by the action's one
+            // composed sentence.
+            var failures = [
+                placementFailure(for: id, slot: slot, context: context)
+            ]
+            requesterMove.rollback(in: &self, context: context, failures: &failures)
+            displacedMove.rollback(in: &self, context: context, failures: &failures)
+            commit.failures = failures
             context.log("place FAILED win\(id) -> \(slot.rawValue); swap rolled back")
             return commit
         }
@@ -732,13 +746,16 @@ struct TilingSpace {
         switch placement {
         case .noRecord:
             break
-        case .refused(let refusal, let released):
-            commit.refusal = refusal
+        case .refused(let failures, let released):
+            commit.failures += failures
             commit.requesterReleased = released
         case .placed(let deferred):
             commit.deferred = deferred
         }
-        Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
+        // A restore refusal is its own failure now: it names the window
+        // beside a refused placement instead of being dropped by
+        // precedence.
+        commit.failures += restoreFailures
         let clean = commit.clean
         if clean, let requesterEntry {
             snapshot.append(requesterEntry)
@@ -798,12 +815,33 @@ struct TilingSpace {
         return commit
     }
 
+    /// One refused write in an action: which window, what the action was
+    /// trying to do, and the frame it meant to put there. The push layer
+    /// appends every refusal to the action's list; `failureMessage`
+    /// composes the canvas's one sentence, so no branch has to decide
+    /// whether its failure outranks another.
+    struct Failure: Equatable {
+        enum Kind: Equatable {
+            /// A named placement or swap write: "X couldn't be tiled".
+            case placement
+            /// A reflow or reassert batch write, counted rather than named.
+            case move
+            /// A pre-tile restore or a rollback's reverse write: the
+            /// window may still sit in its old tile.
+            case restore
+        }
+
+        let windowName: String
+        let kind: Kind
+        let frame: CGRect
+    }
+
     /// The pair a plan branch commits and hands back: the canvas folds
     /// `error`/`notice` into its own readable state, `snapshot`/
     /// `requester`/`rehoused` into the undo chapter and verification, and
     /// `observed` into the coordinator effects.
     private struct Commit {
-        var refusal: Refusal?
+        var failures: [Failure] = []
         var notice: String?
         var snapshot: [EvictedWindow]?
         var requester: WindowID?
@@ -820,18 +858,9 @@ struct TilingSpace {
         /// record presence.
         var requesterReleased = false
 
-        /// True when nothing failed: neither the placement write nor any
-        /// restore. A restore failure carries a message but no window
-        /// name, so it is a `Refusal` too.
-        var clean: Bool { refusal == nil }
-    }
-
-    /// A refused frame write: the standard message plus the window name
-    /// for the announcement (nil when the failure was a restore, not a
-    /// resize refusal).
-    private struct Refusal {
-        var message: String
-        var windowName: String?
+        /// True when nothing failed: neither a placement write nor any
+        /// restore or reflow write.
+        var clean: Bool { failures.isEmpty }
     }
 
     /// What `place` did: the occupancy committed and the write landed (or
@@ -841,18 +870,16 @@ struct TilingSpace {
     /// from the branch instead of re-reading record presence.
     private enum PlacementResult {
         case placed(deferred: Bool)
-        case refused(Refusal, released: Bool)
+        case refused([Failure], released: Bool)
         case noRecord
     }
 
     /// One window's move in an action: the slot it leaves, the slot it
     /// takes, and the record to put back if the move is rolled back.
     /// `commit` owns the occupancy change and the forward write through the
-    /// one policy; `rollback` owns the reverse write when the forward write
-    /// actually put the target on screen. A refused or deferred forward
-    /// write changed nothing on screen, so its rollback is state-only.
-    /// Callers never write the reverse frame themselves and cannot forget
-    /// to read its result.
+    /// one policy; `rollback` owns the reverse write and appends its
+    /// refusal to the action's failure list. Callers never write the
+    /// reverse frame themselves and cannot drop its outcome.
     private struct MoveAttempt {
         let id: WindowID
         let from: Slot?
@@ -897,25 +924,31 @@ struct TilingSpace {
         /// frame home when the forward write reached the gateway: a
         /// refusal can still be a partial write the app left behind, so
         /// the old frame is reasserted rather than trusted. A deferred
-        /// write never touched the screen and needs no reverse. Returns
-        /// the reverse write's result, nil when no reverse write ran.
-        @discardableResult
+        /// write never touched the screen and needs no reverse. A refused
+        /// reverse write appends itself to `failures`; the caller cannot
+        /// discard it.
         mutating func rollback(
-            in canvas: inout TilingSpace, context: TilingSpace.Context
-        ) -> FrameWriter.Result? {
+            in canvas: inout TilingSpace, context: TilingSpace.Context,
+            failures: inout [Failure]
+        ) {
             let reachedGateway = landing != nil && landing != .deferredOffSpace
-            if let from {
-                canvas.state.commit(window: id, into: from)
-                canvas.records[id] = previousRecord
-            } else {
+            guard let from else {
                 // A refused first tiling has no slot to return to: the
                 // record goes with the occupancy.
                 canvas.forget(id, context: context)
-                return nil
+                return
             }
-            guard reachedGateway, canvas.records[id] != nil else { return nil }
-            return canvas.applyLayout(
-                for: id, context: context, on: space ?? context.space)
+            canvas.state.commit(window: id, into: from)
+            canvas.records[id] = previousRecord
+            guard reachedGateway, canvas.records[id] != nil else { return }
+            guard canvas.applyLayout(
+                for: id, context: context, on: space ?? context.space) == .refused
+            else { return }
+            failures.append(
+                Failure(
+                    windowName: canvas.appName(id, context: context) ?? "A window",
+                    kind: .restore,
+                    frame: canvas.grid.rect(for: from, in: canvas.visibleFrame)))
         }
     }
 
@@ -975,13 +1008,41 @@ struct TilingSpace {
         return head + " Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
     }
 
-    /// The refusal for a failed placement or swap write: names the window
-    /// whose resize was refused, matching the standard wording.
-    private func refusal(for id: WindowID, context: Context) -> Refusal {
-        let name = appName(id, context: context) ?? "That window"
-        return Refusal(
-            message: Self.refusalMessage(windowName: name),
-            windowName: name)
+    /// A refused placement or swap write, named for the announcement and
+    /// carrying the frame the branch meant to write.
+    private func placementFailure(
+        for id: WindowID, slot: Slot, context: Context
+    ) -> Failure {
+        Failure(
+            windowName: appName(id, context: context) ?? "That window",
+            kind: .placement,
+            frame: grid.rect(for: slot, in: visibleFrame))
+    }
+
+    /// The one canvas sentence for an action's failures. Each kind speaks
+    /// once: named placement refusals, counted batch moves, and named
+    /// restores keep their own wording, and a second refusal cannot
+    /// overwrite the first.
+    static func failureMessage(_ failures: [Failure]) -> String? {
+        guard !failures.isEmpty else { return nil }
+        var sentences: [String] = []
+        let placements = failures.filter { $0.kind == .placement }
+        if !placements.isEmpty {
+            sentences.append(
+                placements.count == 1
+                    ? refusalMessage(windowName: placements[0].windowName)
+                    : refusalMessage(count: placements.count))
+        }
+        let moves = failures.filter { $0.kind == .move }
+        if !moves.isEmpty {
+            sentences.append(refusalMessage(count: moves.count))
+        }
+        let restores = failures.filter { $0.kind == .restore }
+        if !restores.isEmpty {
+            sentences.append(
+                MenuText.restoreFailureMessage(restores.map(\.windowName)))
+        }
+        return sentences.joined(separator: " ")
     }
 
     // MARK: Placement helpers
@@ -1007,17 +1068,20 @@ struct TilingSpace {
         if result == .refused {
             // Name the window before the record (the only source of its
             // app name) can go, then let the move restore the slot or
-            // forget a first tiling's record.
-            let failed = refusal(for: id, context: context)
+            // forget a first tiling's record. A refused reverse write
+            // joins the same action's list.
+            var failures = [
+                placementFailure(for: id, slot: slot, context: context)
+            ]
             let released = move.from == nil
-            move.rollback(in: &self, context: context)
+            move.rollback(in: &self, context: context, failures: &failures)
             if let previous = move.from {
                 context.log(
                     "place FAILED win\(id) -> \(slot.rawValue); kept \(previous.rawValue)")
             } else {
                 context.log("place FAILED win\(id) -> \(slot.rawValue)")
             }
-            return .refused(failed, released: released)
+            return .refused(failures, released: released)
         }
         // A deferred off-Space write is not a failure: the occupancy
         // stands and reconciles when the canvas becomes visible. Retain
@@ -1075,24 +1139,20 @@ struct TilingSpace {
         return restored
     }
 
-    /// Restores every window in `ids`, returning the display names of
-    /// those whose pre-tile frame refused to restore.
-    private mutating func restore(_ ids: [WindowID], context: Context) -> [String] {
-        var failures: [String] = []
+    /// Restores every window in `ids`, returning one failure per refused
+    /// pre-tile write. The frame is captured before the restore releases
+    /// the record, so the failure carries the intent that did not land.
+    private mutating func restore(_ ids: [WindowID], context: Context) -> [Failure] {
+        var failures: [Failure] = []
         for evicted in ids {
             let name = appName(evicted, context: context) ?? "A window"
+            let frame = records[evicted]?.preTileFrame ?? .zero
             if !restore(window: evicted, context: context) {
-                failures.append(name)
+                failures.append(
+                    Failure(windowName: name, kind: .restore, frame: frame))
             }
         }
         return failures
-    }
-
-    /// Reports restore failures unless a more relevant refusal (e.g. the
-    /// requested tiling itself failing) already took the slot.
-    private static func reportRestoreFailures(_ failures: [String], refusal: inout Refusal?) {
-        guard !failures.isEmpty, refusal == nil else { return }
-        refusal = Refusal(message: MenuText.restoreFailureMessage(failures), windowName: nil)
     }
 
     /// One reconcile pass over a map of deferred work: attempt every
@@ -1209,6 +1269,15 @@ struct TilingSpace {
 
     // MARK: Reflow
 
+    /// What one reflow pass produced: the undo entries for survivors that
+    /// moved, plus every refused write in the batch. A failed pass rolls
+    /// all survivors back and returns no undo entries; its failures still
+    /// travel to the action that triggered it.
+    struct ReflowResult {
+        var undoEntries: [EvictedWindow] = []
+        var failures: [Failure] = []
+    }
+
     /// Applies reflow on this canvas after a tiled window left it or
     /// freed cells by moving: the one survivor whose cells merge with
     /// the freed cells into a whole slot moves into it, the rightmost
@@ -1216,9 +1285,9 @@ struct TilingSpace {
     /// already removed the leaving window; the requester, evicted, and
     /// expanded windows never grow (the expanded exclusion lives here
     /// now, not with the pure rule). A hole no survivor merges into
-    /// exactly stays empty. Refused writes roll every survivor back and
-    /// the generic refusal message lands on this canvas, so state and
-    /// screen never disagree about who holds the freed cells.
+    /// exactly stays empty. Refused writes roll every survivor back
+    /// through the move transaction and return their failures, so state
+    /// and screen never disagree about who holds the freed cells.
     ///
     /// Returns the undo entries for the survivors that moved: callers
     /// fold them into the triggering event's undo chapter, or start one
@@ -1226,13 +1295,13 @@ struct TilingSpace {
     @discardableResult
     mutating func reflow(
         _ freed: Set<TileCell>, excluding: Set<WindowID> = [], context: Context
-    ) -> [EvictedWindow] {
-        guard !freed.isEmpty else { return [] }
+    ) -> ReflowResult {
+        guard !freed.isEmpty else { return ReflowResult() }
         // Expanded windows keep covering the layout; they never grow.
         let skip = excluding.union(
             Set(state.occupants.filter { expanded[$0.value] != nil }.map(\.value)))
         let placements = state.reflow(freed: freed, excluding: skip)
-        guard !placements.isEmpty else { return [] }
+        guard !placements.isEmpty else { return ReflowResult() }
         // One transaction per survivor: commit writes the grown slot, and
         // rollback owns the old rect when the batch must return to its
         // pre-reflow state.
@@ -1243,55 +1312,58 @@ struct TilingSpace {
                 MoveAttempt(
                     moving: wid, into: target, in: self, space: context.space))
         }
-        guard !moves.isEmpty else { return [] }
+        guard !moves.isEmpty else { return ReflowResult() }
         // A hidden canvas's survivors grow in state now but are written
         // when the user swipes back: sizing an off-Space window can move
         // it onto the visible Space, which would break the independence
         // the layout exists to provide. The FrameWriter defers those
         // writes and marks the canvas stale for the swipe back.
-        var forwardFailures = 0
+        var failures: [Failure] = []
         for index in moves.indices {
-            if moves[index].commit(in: &self, context: context) == .refused {
-                forwardFailures += 1
-            }
+            guard moves[index].commit(in: &self, context: context) == .refused
+            else { continue }
+            failures.append(
+                Failure(
+                    windowName: appName(moves[index].id, context: context) ?? "A window",
+                    kind: .move,
+                    frame: grid.rect(for: moves[index].to, in: visibleFrame)))
         }
-        if forwardFailures > 0 {
+        if !failures.isEmpty {
             // The batch is all-or-nothing: every survivor returns to the
-            // slot it held, and every forward write that stood is reversed.
-            var reverseFailures = 0
+            // slot it held, and every forward write that reached the
+            // gateway is reversed. A refused reverse write joins the same
+            // list instead of being discarded.
             for index in moves.indices {
-                if moves[index].rollback(in: &self, context: context) == .refused {
-                    reverseFailures += 1
-                }
+                moves[index].rollback(
+                    in: &self, context: context, failures: &failures)
             }
-            error = Self.refusalMessage(
-                count: reverseFailures > 0 ? reverseFailures : forwardFailures)
-            return []
+            return ReflowResult(failures: failures)
         }
         context.log("reflow \(moves.map { "win\($0.id)->\($0.to.rawValue)" }.joined(separator: ", "))")
-        return moves.compactMap { move in
-            move.from.flatMap {
-                evictedEntry(for: move.id, slot: $0, space: context.space)
-            }
-        }
+        return ReflowResult(
+            undoEntries: moves.compactMap { move in
+                move.from.flatMap {
+                    evictedEntry(for: move.id, slot: $0, space: context.space)
+                }
+            })
     }
 
     /// One push pass through the shared write policy: the pairs the
     /// gateway actually wrote, which the reassert reads back as achieved
-    /// frames, plus the refusal count reflow rolls back on. A deferred
-    /// (off-Space) write is not a failure: the FrameWriter has already
-    /// marked the canvas stale and the pushed state stands for
+    /// frames, plus every refused write for the action's failure list. A
+    /// deferred (off-Space) write is not a failure: the FrameWriter has
+    /// already marked the canvas stale and the pushed state stands for
     /// reconciliation when the canvas becomes visible — the placement
     /// path's contract, read through the same `Result.stands`.
     private struct WritePass {
         var written: [(id: WindowID, target: CGRect)] = []
-        var failed = 0
+        var failures: [Failure] = []
     }
 
-    /// Performs one push through the shared write policy, counting
-    /// refusals and recording the generic refusal message on this canvas.
-    /// Shared by reflow and the reassert.
-    private mutating func writeRects(_ rects: [WindowID: CGRect], context: Context) -> WritePass {
+    /// Performs one push through the shared write policy, collecting each
+    /// refusal with the frame it meant to write. The caller composes the
+    /// canvas error once for the action.
+    private func writeRects(_ rects: [WindowID: CGRect], context: Context) -> WritePass {
         var pass = WritePass()
         for (id, target) in rects {
             guard let record = records[id] else { continue }
@@ -1300,14 +1372,13 @@ struct TilingSpace {
                 on: context.space, check: .rollback)
             switch result {
             case .written: pass.written.append((id: id, target: target))
-            case .refused: pass.failed += 1
+            case .refused:
+                pass.failures.append(
+                    Failure(
+                        windowName: appName(id, context: context) ?? "A window",
+                        kind: .move, frame: target))
             case .skippedNoOp, .deferredOffSpace: break
             }
-        }
-        // Refusals land on the canvas whose windows refused, not on
-        // whatever happens to be focused when the menu is next read.
-        if pass.failed > 0 {
-            error = Self.refusalMessage(count: pass.failed)
         }
         return pass
     }
@@ -1385,8 +1456,11 @@ struct TilingSpace {
         window id: WindowID, from slot: Slot?, context: Context
     ) -> Outcome {
         forget(id, context: context)
-        let moves = reflow(slot?.cells ?? [], context: context)
-        pushUndo(snapshot: moves, requester: nil)
+        let reflow = reflow(slot?.cells ?? [], context: context)
+        pushUndo(snapshot: reflow.undoEntries, requester: nil)
+        if let message = Self.failureMessage(reflow.failures) {
+            error = message
+        }
         return Outcome(forget: [id], raise: true)
     }
 
@@ -1731,7 +1805,9 @@ struct TilingSpace {
         var plan = reassertPlan(source)
         grid = plan.grid
         seedBaselines(plan.rects, context: context)
+        var failures: [Failure] = []
         var pass = writeRects(plan.rects, context: context)
+        failures += pass.failures
         // A neighbour whose app rounds or insets the frame it is written
         // falls short of the splitter and leaves a gap. Read every
         // written occupant's achieved frame back; a diverged splitter
@@ -1746,6 +1822,12 @@ struct TilingSpace {
             plan = reassertPlan(.grid)
             seedBaselines(plan.rects, context: context)
             pass = writeRects(plan.rects, context: context)
+            failures += pass.failures
+        }
+        // Refusals land on the canvas whose windows refused, not on
+        // whatever happens to be focused when the menu is next read.
+        if let message = Self.failureMessage(failures) {
+            error = message
         }
         return Outcome()
     }

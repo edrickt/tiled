@@ -455,7 +455,11 @@ extension ReflowTests {
         XCTAssertEqual(dWrites, 2, "the recovery rewrite is attempted")
         XCTAssertEqual(canvas.state.slot(of: 4), .sixthRight)
         XCTAssertEqual(gateway.frame(of: d), survivorFrame)
-        XCTAssertNotNil(canvas.error, "the canvas still reports the refusal")
+        XCTAssertEqual(
+            canvas.error,
+            "Couldn't move that window: the app refused to resize it. "
+                + "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.",
+            "the grow refusal and the refused recovery rewrite are both named")
         XCTAssertTrue(canvas.undoStack.isEmpty, "a reflow that did not happen has no chapter")
     }
 

@@ -126,6 +126,30 @@ final class ExpectedWriteTransactionTests: XCTestCase {
                 + "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
     }
 
+    func testRefusedPlacementAndRefusedEvicteeRestoreAreBothNamed() {
+        // One action can fail twice: the evicted window's pre-tile restore
+        // and the requester's placement. The action-scoped failure list
+        // names both instead of letting one refusal outrank the other.
+        let a = harness.addWindow()
+        tile(a, .topLeft)
+        let b = harness.addWindow()
+        tile(b, .bottomLeft)
+        let c = harness.addWindow()
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!)
+        harness.gateway.refuseNextWrites(harness.handle(of: c)!)
+
+        let outcome = harness.apply(slot: .leftHalf, requester: c)
+
+        XCTAssertEqual(outcome.result, .refused(windowName: "TestApp"))
+        XCTAssertNil(space.state.slot(of: a), "the refused evictee was released")
+        XCTAssertNil(space.state.slot(of: b), "the other evictee went home")
+        XCTAssertNil(space.state.slot(of: c), "the refused requester was released")
+        XCTAssertEqual(
+            space.error,
+            "TestApp couldn't be tiled: the app refused to resize it. "
+                + "Couldn't restore \u{201C}TestApp\u{201D}: it may still be sitting in its old tile.")
+    }
+
     func testRefusedUndoRetileKeepsTheSlotAndRecordTheWindowVisiblyHolds() {
         // The chapter asks the window to return to Bottom Right, but it is
         // tiled at Top Left and its app refuses the re-tile. The rollback

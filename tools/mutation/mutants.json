@@ -8,8 +8,8 @@
  [
   "TilingSpace.swift",
   "swap write-home deleted (screen/state diverge)",
-  "            let homeWrite = displacedMove.rollback(in: &self, context: context)",
-  "            let homeWrite: FrameWriter.Result? = nil"
+  "            requesterMove.rollback(in: &self, context: context, failures: &failures)\n            displacedMove.rollback(in: &self, context: context, failures: &failures)",
+  "            requesterMove.rollback(in: &self, context: context, failures: &failures)"
  ],
  [
   "TilingSpace.swift",
@@ -38,8 +38,8 @@
  [
   "TilingSpace.swift",
   "reflow rollback skipped (state keeps grown slot)",
-  "            var reverseFailures = 0\n            for index in moves.indices {\n                if moves[index].rollback(in: &self, context: context) == .refused {\n                    reverseFailures += 1\n                }\n            }",
-  "            let reverseFailures = 0"
+  "            for index in moves.indices {\n                moves[index].rollback(\n                    in: &self, context: context, failures: &failures)\n            }",
+  "            // reflow rollback skipped by mutant"
  ],
  [
   "TilingSpace.swift",
@@ -122,8 +122,8 @@
  [
   "TilingSpace.swift",
   "failed displaced swap write is NOT rolled back",
-  "            displacedMove.rollback(in: &self, context: context)\n            requesterMove.rollback(in: &self, context: context)",
-  "            requesterMove.rollback(in: &self, context: context)"
+  "            displacedMove.rollback(in: &self, context: context, failures: &failures)\n            requesterMove.rollback(in: &self, context: context, failures: &failures)",
+  "            requesterMove.rollback(in: &self, context: context, failures: &failures)"
  ],
  [
   "TilingSpace.swift",
