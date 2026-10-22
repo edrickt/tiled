@@ -3,9 +3,10 @@ import AppKit
 /// Glues the pure `TilingState` + `GridLayout` to real windows through a
 /// `WindowGateway`, never touching AX types directly. All element
 /// identity, coordinate conversion, observation, and activation live
-/// behind the seam; the coordinator keeps focus and handle resolution,
-/// the handle->id table, the visible-frame resolution, and the death
-/// clock.
+/// behind the seam; the coordinator keeps focus and action routing,
+/// `WindowRegister` keeps handle identity, the death clock, and pending
+/// convergence checks, and `CanvasDirectory` keeps display + Space
+/// resolution, the canvas table, visibility, and stale marks.
 ///
 /// Each canvas's state (occupancy, records, expansion, splitters, undo
 /// chapters, notices) lives in `TilingSpace`; this module routes each
@@ -423,7 +424,7 @@ final class TilingController {
 
     /// The collaborators one action needs. A fresh context is built per
     /// action so a re-resolved canvas (a swipe, a focus move) is always
-    /// reflected; the id allocator writes through to the handle table.
+    /// reflected; the id allocator writes through to the register.
     private func placementContext(for key: TilingSpaceKey) -> TilingSpace.Context {
         TilingSpace.Context(
             gateway: gateway,
@@ -763,14 +764,15 @@ final class TilingController {
             noOp: MenuText.nothingToUndoAnnouncement())
     }
 
-    /// Chapter restoration, owned here because the controller is the only
-    /// holder of the canvas table. The canvas supplies the primitive:
-    /// `TilingSpace.restoreEvictees` re-places a group's evictees and
-    /// `TilingSpace.restore` returns the requester, while this one named
-    /// behaviour owns the cross-canvas rules — step-aside admission,
-    /// per-canvas grouping, and the notice/error precedence that lets a
-    /// partial failure surface ahead of the success sentence. Returns
-    /// whether the chapter restored everything it owed.
+    /// Chapter restoration, owned here because the controller routes the
+    /// cross-canvas effects. The directory holds the canvas table; the
+    /// canvas supplies the primitive: `TilingSpace.restoreEvictees`
+    /// re-places a group's evictees and `TilingSpace.restore` returns the
+    /// requester, while this one named behaviour owns the cross-canvas
+    /// rules — step-aside admission, per-canvas grouping, and the
+    /// notice/error precedence that lets a partial failure surface ahead
+    /// of the success sentence. Returns whether the chapter restored
+    /// everything it owed.
     @discardableResult
     private func restoreChapter(
         _ chapter: TilingSpace.UndoChapter, on space: TilingSpaceKey
@@ -870,8 +872,8 @@ final class TilingController {
             for failure in result.failures {
                 recordFailure(failure.handle, name: failure.name)
             }
-            // A restore the canvas refused left no record: clear the
-            // handle table (and death clock) for every id it forgot, not
+            // A restore the canvas refused left no record: forget the
+            // id (and death clock) for every window it released, not
             // just the requester's.
             for window in result.forget {
                 register.forget(window)
@@ -1203,7 +1205,7 @@ final class TilingController {
         // No pre-attach: a window with no slot is not tiled, and handing
         // it a record only for the eviction to find no slot would leave
         // stale ownership behind. The eviction forgets any record it
-        // finds, and this applies that release so the handle table goes
+        // finds, and this applies that release so the register entry goes
         // with it.
         let outcome = directory.withCanvas(key) {
             $0.evict(window: id, context: placementContext(for: key))

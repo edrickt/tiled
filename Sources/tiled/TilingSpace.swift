@@ -3,7 +3,7 @@ import Foundation
 
 /// A managed window's restore record: its gateway handle plus the frame
 /// to restore when untiled. Owned by the canvas the window belongs to;
-/// the coordinator derives `spaceOf(window:)` from these records.
+/// the directory derives canvas ownership from these records.
 struct WindowRecord {
     let handle: WindowHandle
     var preTileFrame: CGRect
@@ -29,12 +29,13 @@ struct EvictedWindow {
 /// splitters, undo chapters, notices, and the placement pipeline (plan,
 /// commit, settle, reflow) for that canvas.
 ///
-/// The coordinator keeps focus and handle resolution, the handle->id
-/// allocation table, observation, the visible-frame resolution, and the
-/// death clock; every piece of per-canvas state lives here. Records being
-/// canvas-owned is
-/// what makes `spaceOf(window:)` derivable: a window's canvas is the one
-/// holding its record, so ownership cannot drift from a second registry.
+/// The `WindowRegister` keeps handle identity, the death clock, and
+/// pending convergence checks; the `CanvasDirectory` keeps display + Space
+/// resolution, the canvas table, visibility, stale marks, and the visible
+/// frame refresh. Every piece of per-canvas state lives here. Records being
+/// canvas-owned is what makes the directory's owner lookup derivable: a
+/// window's canvas is the one holding its record, so ownership cannot
+/// drift from a second registry.
 ///
 /// `notice`/`error` stay readable on the canvas: the placement writes
 /// them as it settles, so the menu surface reads the canvas that acted.
@@ -132,7 +133,7 @@ struct TilingSpace {
         /// canvas this action is running on.
         let space: TilingSpaceKey
         /// Issues a fresh id and hands the window to the coordinator's
-        /// handle->id table. Called when a record must be rebuilt from a
+        /// register. Called when a record must be rebuilt from a
         /// handle alone (a pruned undo entry, an untile-all re-observation).
         let allocateID: (WindowHandle) -> WindowID
         /// Drops `handle`'s deferred pre-tile restore on every canvas.
@@ -169,8 +170,8 @@ struct TilingSpace {
         var focusAfter: WindowID?
         /// Windows the coordinator must now observe (their records landed).
         var observe: [WindowID] = []
-        /// Windows the canvas released: the coordinator clears its handle
-        /// table, death clock, and pending verification for them.
+        /// Windows the canvas released: the coordinator forgets the id,
+        /// death clock, and pending verification for them.
         var forget: [WindowID] = []
         /// Restored windows sit below the arrangement they left.
         var raise: Bool = false
@@ -192,16 +193,16 @@ struct TilingSpace {
         var restored: [WindowID] = []
         var failures: [Failure] = []
         /// Windows the restore released: a refused re-tile forgets the
-        /// record, so the coordinator clears its handle table, death
-        /// clock, and pending verification for them, exactly as it does
-        /// for a tiling request's `forget`.
+        /// record, so the coordinator forgets the id, death clock, and
+        /// pending verification for them, exactly as it does for a tiling
+        /// request's `forget`.
         var forget: [WindowID] = []
     }
 
     // MARK: Records
 
     /// Ensures `id` has a record on this canvas. The coordinator resolves
-    /// the handle->id table and hands the window over before an action
+    /// the register and hands the window over before an action
     /// that needs its restore frame.
     mutating func attach(_ id: WindowID, handle: WindowHandle) {
         if records[id] == nil {
@@ -305,7 +306,7 @@ struct TilingSpace {
     }
 
     /// The placement half of settle: untiled windows give up their
-    /// records (the coordinator clears its handle table), the cells the
+    /// records (the coordinator forgets its register entries), the cells the
     /// event freed reflow into one survivor, restored windows sit below
     /// the arrangement, a swap's displaced window takes focus, and the
     /// event is narrated, verified, and made undoable. One chapter per
