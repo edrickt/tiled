@@ -56,6 +56,9 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   counts only the windows that actually landed, and names evictees a
   retained requester blocks. A refused move no longer puts the requester
   in the undo chapter when it never left its slot.
+- A swap rolled back after the requester's write was refused now also
+  names a failed home write, instead of reporting only the requester's
+  refusal while the displaced window stayed in the vacated tile.
 - A refused write clears its armed convergence expectation and reseeds
   the drag baseline, so a late check cannot evict a window that never
   moved there and an immediate short drag still snaps back.

@@ -85,8 +85,14 @@ final class FakeWindowGateway: WindowGateway {
         return window.frame
     }
 
+    /// Called with each handle before a frame write. Lets a test script a
+    /// refusal at an exact write in a multi-write sequence, where
+    /// `refuseNextWrites` can only target the first.
+    var willWrite: ((WindowHandle) -> Void)?
+
     @discardableResult
     func setFrame(_ handle: WindowHandle, to frame: CGRect) -> Bool {
+        willWrite?(handle)
         guard var window = windows[handle], window.alive else { return false }
         if silentIgnore.contains(handle) { return true }
         if window.refuseNextWrites > 0 {

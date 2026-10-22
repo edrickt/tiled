@@ -632,9 +632,21 @@ struct TilingSpace {
             // never written, so only its occupancy restores.
             state.commit(window: displaced, into: displacedOriginal)
             state.commit(window: id, into: previous)
-            applyLayout(for: displaced, context: context, on: context.space)
+            let requesterRefusal = refusal(for: id, context: context)
+            if applyLayout(for: displaced, context: context, on: context.space) == .refused {
+                // The home write is the second failure of the same swap:
+                // name it too, or the canvas would claim the rollback
+                // succeeded while the displaced window visibly holds the
+                // requester's vacated tile.
+                let name = appName(displaced, context: context) ?? "That window"
+                commit.refusal = Refusal(
+                    message: requesterRefusal.message + " "
+                        + MenuText.restoreFailureMessage([name]),
+                    windowName: requesterRefusal.windowName)
+            } else {
+                commit.refusal = requesterRefusal
+            }
             context.log("place FAILED win\(id) -> \(slot.rawValue); swap rolled back")
-            commit.refusal = refusal(for: id, context: context)
             return commit
         }
         if requesterWrite == .deferredOffSpace { commit.deferred = true }

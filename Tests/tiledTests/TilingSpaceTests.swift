@@ -329,6 +329,32 @@ final class TilingSpaceTests: XCTestCase {
             "the displaced window is written back to its own tile")
     }
 
+    func testSwapRollbackNamesTheDisplacedHomeWriteRefusal() {
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topRight, requester: b)
+        let bHandle = harness.handle(of: b)!
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!)
+        var bWrites = 0
+        harness.gateway.willWrite = { handle in
+            guard handle == bHandle else { return }
+            bWrites += 1
+            if bWrites == 2 {
+                self.harness.gateway.refuseNextWrites(bHandle)
+            }
+        }
+
+        harness.apply(slot: .topRight, requester: a)
+
+        XCTAssertEqual(space.state.slot(of: a), .topLeft)
+        XCTAssertEqual(space.state.slot(of: b), .topRight)
+        let error = space.error ?? ""
+        XCTAssertTrue(
+            error.contains("Couldn't restore"),
+            "the home-write refusal is named beside the requester refusal: \(error)")
+    }
+
     func testStepAsideNoticesAndSnapshotsBothForUndo() {
         let a = harness.addWindow()
         let b = harness.addWindow()
