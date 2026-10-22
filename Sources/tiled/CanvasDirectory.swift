@@ -172,9 +172,11 @@ final class CanvasDirectory {
 
     /// The canvas currently shown on every display, in screen order, plus
     /// each display's withheld-Space canvas when it still holds windows or
-    /// chapters. With no displays, every remembered canvas is enumerated
-    /// (the manage list's historical view); with none remembered, the
-    /// display-less fallback keeps actions working.
+    /// chapters. The named canvases come first — the manage list's order —
+    /// then the withheld fallbacks, one display at a time. With no
+    /// displays, every remembered canvas is enumerated (the manage list's
+    /// historical view); with none remembered, the display-less fallback
+    /// keeps actions working.
     func visibleKeys() -> [TilingSpaceKey] {
         let infos = screens()
         guard !infos.isEmpty else {
@@ -185,10 +187,12 @@ final class CanvasDirectory {
         for info in infos {
             let identified = key(for: info.id)
             if !keys.contains(identified) { keys.append(identified) }
+        }
+        for info in infos {
             // A withheld-Space canvas is visible like the identified one:
             // it is the same display, just unnamed.
             if let fallback = withheldCanvas(on: info.id),
-                fallback != identified, !keys.contains(fallback)
+                !keys.contains(fallback)
             {
                 keys.append(fallback)
             }

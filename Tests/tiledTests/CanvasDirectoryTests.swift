@@ -65,8 +65,23 @@ final class CanvasDirectoryTests: XCTestCase {
         holdAChapter(withheld)
 
         XCTAssertEqual(
-            directory.visibleKeys(), [identified, withheld, otherIdentified],
-            "the withheld canvas follows its display; the other display is untouched")
+            directory.visibleKeys(), [identified, otherIdentified, withheld],
+            "named canvases keep screen order, then the withheld fallbacks")
+    }
+
+    func testBothDisplaysWithheldFallbacksFollowEveryNamedCanvas() {
+        activeSpaces[Self.otherDisplayID] = Self.space
+        let otherIdentified = TilingSpaceKey(
+            screen: Self.otherScreen.id, space: Self.space)
+        let otherWithheld = TilingSpaceKey(
+            screen: Self.otherScreen.id, space: nil)
+        holdAChapter(withheld)
+        holdAChapter(otherWithheld)
+
+        XCTAssertEqual(
+            directory.visibleKeys(),
+            [identified, otherIdentified, withheld, otherWithheld],
+            "the manage list reads named canvases first, then withheld fallbacks")
     }
 
     func testAWithheldCanvasWithNothingLeftIsNotEnumerated() {
