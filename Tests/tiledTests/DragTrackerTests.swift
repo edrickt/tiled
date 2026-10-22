@@ -413,6 +413,22 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertTrue(decisions.isEmpty, "a click commits nothing on its own")
     }
 
+    func testTwoWindowsEdgeDraggingOnOneCanvasBothReassertOnMouseUp() {
+        let size = CGSize(width: 500, height: 400)
+        tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
+        tile(2, .bottomLeft, frame: CGRect(origin: .zero, size: size))
+
+        drag(1, from: CGRect(origin: CGPoint(x: 0, y: 400), size: size),
+             to: CGRect(x: 0, y: 400, width: 500, height: 320), tracker: tracker)
+        drag(2, from: CGRect(origin: .zero, size: size),
+             to: CGRect(x: 0, y: 0, width: 500, height: 320), tracker: tracker)
+        tracker.mouseLifted()
+
+        XCTAssertEqual(
+            decisions, [.resize(1), .resize(2)],
+            "each window's achieved frame reconciles, not only the last drag")
+    }
+
     func testTrailingTickAfterMouseUpDecidesAgainOnTheNextMouseUp() {
         // AX can stream the drag's final frame after the mouse-up fired:
         // that tick re-arms the pending resize (splitter already moved),

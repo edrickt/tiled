@@ -143,12 +143,14 @@ final class DragTracker {
     /// the drag event refreshes this stamp.
     private static let handPressWindow: TimeInterval = 0.5
 
-    /// Edge drags awaiting mouse-up, keyed by canvas. The splitter
-    /// fractions (if any) already committed; the reassert the movement
-    /// implies waits for the click to lift (see `mouseLifted`). A drag
-    /// that moved only a fixed screen edge commits no fraction but still
-    /// marks: the release reassert is what pulls the edge back.
-    private var pendingReasserts: [TilingSpaceKey?: WindowID] = [:]
+    /// Windows whose edge drags await mouse-up. The splitter fractions (if
+    /// any) already committed; the reassert the movement implies waits for
+    /// the click to lift (see `mouseLifted`). A drag that moved only a
+    /// fixed screen edge commits no fraction but still marks: the release
+    /// reassert is what pulls the edge back. One set entry per window, not
+    /// one per canvas: two windows can edge-drag on the same canvas before
+    /// the button lifts, and each needs its own achieved-frame reconcile.
+    private var pendingReasserts: Set<WindowID> = []
 
     /// A settle awaiting proof that the app accepted it, keyed by window:
     /// the gesture's final frame, and how many consecutive ticks have
@@ -282,7 +284,7 @@ final class DragTracker {
     /// release must not reconcile the splitters from the frame that action
     /// imposed. Other windows' pending reasserts stand.
     func clearPendingReassert(_ id: WindowID) {
-        pendingReasserts = pendingReasserts.filter { $0.value != id }
+        pendingReasserts.remove(id)
     }
 
     /// Seeds only the diff baseline for `id`, without arming an echo
@@ -342,6 +344,7 @@ final class DragTracker {
         expectedFrames[id] = nil
         settleOverrides[id] = nil
         clearDrag(id)
+        pendingReasserts.remove(id)
     }
 
     // MARK: Change entry point
@@ -664,7 +667,7 @@ final class DragTracker {
             // but the reassert it implies waits for mouse-up:
             // reasserting tiles while the button is down fights the drag
             // the user is still steering.
-            pendingReasserts[space] = id
+            pendingReasserts.insert(id)
         }
     }
 
@@ -713,8 +716,8 @@ final class DragTracker {
         handPressPoint = nil
         handPressAt = nil
         let pending = pendingReasserts
-        pendingReasserts = [:]
-        for id in pending.values {
+        pendingReasserts = []
+        for id in pending.sorted() {
             // The settle about to be committed can be overridden by the
             // app's own resize session ending just after it; remember the
             // gesture frame so `handleChange` can recognize the override.
