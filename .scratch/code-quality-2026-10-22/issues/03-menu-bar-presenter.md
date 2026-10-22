@@ -27,9 +27,9 @@ P1–P3, P5.
       deleted.
 - [x] Presenter and renderer extracted; AppDelegate keeps launch,
       permission, lifecycle, actions, and receipt presentation.
-- [ ] Gates in `../README.md` all pass. (Build, unit suite, and test-count
-      gates pass; the mutation table is deferred to the coordinator per
-      `AGENTS.md`.)
+- [x] Gates in `../README.md` all pass for build, tests, and the
+      published count. The mutation table is the coordinator's final
+      gate per `AGENTS.md` and was not run here.
 
 ## Comments
 
