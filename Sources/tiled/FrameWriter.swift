@@ -130,7 +130,18 @@ struct FrameWriter {
             let repinned = Self.repinnedInsideBounds(
                 applied: applied, target: target, bounds: bounds)
         {
-            gateway.setFrame(handle, to: repinned)
+            guard gateway.setFrame(handle, to: repinned) else {
+                // The repair is a second expected write, not a side effect.
+                // If the app refuses it the window still holds `applied`, so
+                // cancel the target expectation, reseed the drag baseline
+                // from the frame that actually landed, and fail the whole
+                // write: a caller must not roll the placement forward as if
+                // the repinned frame reached the screen.
+                cancelExpected(id)
+                seedBaseline(id, gateway.frame(of: handle) ?? applied)
+                log("write win\(id) clamp repair refused target=\(repinned)")
+                return .refused
+            }
             markExpected(id, repinned)
             log("write win\(id) clamped at \(applied); repinned \(repinned)")
         }

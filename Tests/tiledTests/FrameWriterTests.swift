@@ -178,6 +178,41 @@ final class FrameWriterTests: XCTestCase {
             "the echo re-arms at the frame the window really has, not the one it was refused")
     }
 
+    func testRefusedClampRepairCancelsTheExpectationAndReportsRefused() {
+        // The repin is a second expected write, not a side effect. When
+        // the app refuses it the window still holds the clamped frame, so
+        // the target expectation is cancelled, the drag baseline is reseeded
+        // from the frame that actually landed, and the caller is told the
+        // write failed instead of trusting the target.
+        let handle = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 533, height: 1000))
+        gateway.writtenFrame = clampWidthToFloor(500)
+        let target = CGRect(x: 1300, y: 0, width: 300, height: 1000)
+        let applied = CGRect(x: 1300, y: 0, width: 500, height: 1000)
+        var writes = 0
+        gateway.willWrite = { [weak self] _ in
+            writes += 1
+            if writes == 2 {
+                self?.gateway.refuseNextWrites(handle)
+            }
+        }
+
+        let result = makeWriter().write(
+            7, handle: handle, to: target, bounds: Self.bounds,
+            on: canvas, check: .rollback)
+
+        XCTAssertEqual(result, .refused)
+        XCTAssertEqual(gateway.writes.count, 1, "the refused repair did not land")
+        XCTAssertEqual(gateway.frame(of: handle), applied)
+        XCTAssertEqual(
+            echoed, [7],
+            "only the target write armed an echo; the refused repair did not")
+        XCTAssertEqual(cancelled, [7], "the refused repair cancels the expectation")
+        XCTAssertEqual(
+            baselines.last?.1, applied,
+            "the baseline is the frame the window still holds, not the repin")
+        XCTAssertTrue(checked.isEmpty, "a refused write schedules no convergence check")
+    }
+
     func testClampedWriteAnchoredOnTheScreenEdgeIsLeftAlone() {
         // Shrinking from the right: the floor keeps the window's origin,
         // which IS the screen edge, so it stopped shrinking in bounds

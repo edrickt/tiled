@@ -69,6 +69,9 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A refused write clears its armed convergence expectation and reseeds
   the drag baseline, so a late check cannot evict a window that never
   moved there and an immediate short drag still snaps back.
+- A refused minimum-size clamp repair now cancels its expectation and
+  reports the write as refused, so a placement cannot claim success while
+  the window still holds the clamped frame.
 - Tiling places a window at its exact slot again: the live AX adapter
   writes the AppKit top-left corner instead of the bottom-left origin, so
   a bottom-row tile no longer lands a full window-height below its slot

@@ -854,7 +854,13 @@
  [
   "FrameWriter.swift",
   "a refused write keeps its armed expectation (the stale check evicts the window)",
-  "            cancelExpected(id)\n",
-  ""
+  "            cancelExpected(id)\n            seedBaseline(id, gateway.frame(of: handle) ?? liveBefore ?? target)",
+  "            seedBaseline(id, gateway.frame(of: handle) ?? liveBefore ?? target)"
+ ],
+ [
+  "FrameWriter.swift",
+  "refused clamp repair reported as written (placement trusts a frame that did not land)",
+  "                seedBaseline(id, gateway.frame(of: handle) ?? applied)\n                log(\"write win\\(id) clamp repair refused target=\\(repinned)\")\n                return .refused",
+  "                seedBaseline(id, gateway.frame(of: handle) ?? applied)\n                log(\"write win\\(id) clamp repair refused target=\\(repinned)\")\n                return .written"
  ]
 ]
