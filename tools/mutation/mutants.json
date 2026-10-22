@@ -8,8 +8,8 @@
  [
   "TilingSpace.swift",
   "swap write-home deleted (screen/state diverge)",
-  "            let requesterRefusal = refusal(for: id, context: context)\n            if applyLayout(for: displaced, context: context, on: context.space) == .refused {",
-  "            let requesterRefusal = refusal(for: id, context: context)\n            if false {"
+  "            let homeWrite = displacedMove.rollback(in: &self, context: context)",
+  "            let homeWrite: FrameWriter.Result? = nil"
  ],
  [
   "TilingSpace.swift",
@@ -122,8 +122,8 @@
  [
   "TilingSpace.swift",
   "failed displaced swap write is NOT rolled back",
-  "            state.commit(window: displaced, into: displacedOriginal)\n            state.commit(window: id, into: previous)\n            context.log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")",
-  "            context.log(\"swap FAILED displaced win\\(displaced) -> \\(previous.rawValue)\")"
+  "            displacedMove.rollback(in: &self, context: context)\n            requesterMove.rollback(in: &self, context: context)",
+  "            requesterMove.rollback(in: &self, context: context)"
  ],
  [
   "TilingSpace.swift",

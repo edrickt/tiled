@@ -331,7 +331,7 @@ struct TilingSpace {
         // coordinator must clear its handle-table entry too: a later
         // request then re-resolves the window from its live frame,
         // landing on whichever display it is actually on.
-        if commit.refusal != nil, records[id] == nil {
+        if commit.requesterReleased {
             outcome.forget.append(id)
         }
         // Reflow: the cells the event freed (eviction remainders, the
@@ -549,28 +549,34 @@ struct TilingSpace {
             snapshotEntry(for: evictedID, fallback: slot, space: context.space)
         }
         let restoreFailures = restore(evicted, context: context)
-        let placeResult = place(
-            window: id, into: slot, context: context, observed: &commit.observed,
-            deferred: &commit.deferred)
-        if records[id] == nil, placeResult == nil {
+        let placement = place(
+            window: id, into: slot, context: context, observed: &commit.observed)
+        switch placement {
+        case .noRecord:
             // `place` bailed (no record): nothing to snapshot. A refused
             // write also drops the record now, but carries its refusal in
-            // `placeResult`, so it falls through to be narrated below.
+            // `placement`, so it falls through to be narrated below.
             Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
-        } else if placeResult == nil, restoreFailures.isEmpty, !evicted.isEmpty {
-            let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
-            // Narrate the event AND the recovery: the notice is the
-            // hotkey user's only record of a mass-untile, and the
-            // undo row may sit below the fold. One sentence, one
-            // cue: no menu-title splicing, just the combo.
-            commit.notice =
-                "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. "
-                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
-            commit.snapshot = snapshot
-            commit.requester = id
-        } else {
-            commit.refusal = placeResult
+        case .refused(let refusal, let released):
+            commit.refusal = refusal
+            commit.requesterReleased = released
             Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
+        case .placed(let deferred):
+            commit.deferred = deferred
+            if restoreFailures.isEmpty, !evicted.isEmpty {
+                let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
+                // Narrate the event AND the recovery: the notice is the
+                // hotkey user's only record of a mass-untile, and the
+                // undo row may sit below the fold. One sentence, one
+                // cue: no menu-title splicing, just the combo.
+                commit.notice =
+                    "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. "
+                    + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+                commit.snapshot = snapshot
+                commit.requester = id
+            } else {
+                Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
+            }
         }
         context.log("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
         return commit
@@ -610,30 +616,39 @@ struct TilingSpace {
         // superseded by the swap.
         deferredRequests[displaced] = nil
         deferredRequests[id] = nil
-        state.commit(window: displaced, into: previous)
+        var displacedMove = MoveAttempt(
+            moving: displaced, into: previous, in: self, space: context.space)
+        // Capture the requester's attempt before the displaced window
+        // occupies the requester's vacated tile: the swap deliberately
+        // double-books that slot for one write, so reading its slot after
+        // the displaced commit would find nil.
+        var requesterMove = MoveAttempt(
+            moving: id, into: slot, in: self, space: context.space)
+        let displacedWrite = displacedMove.commit(in: &self, context: context)
         commit.observed.append(displaced)
-        let displacedWrite = applyLayout(for: displaced, context: context, on: context.space)
         if displacedWrite == .refused {
-            // The refused write moved nothing on screen: the rollback
-            // is state-only, restoring both occupancies.
-            state.commit(window: displaced, into: displacedOriginal)
-            state.commit(window: id, into: previous)
+            // The refused write moved nothing on screen: both attempts roll
+            // back state-only. The displaced commit had already taken the
+            // requester's vacated tile in state, so the requester's
+            // occupancy must be restored alongside it.
+            let failed = refusal(for: displaced, context: context)
+            displacedMove.rollback(in: &self, context: context)
+            requesterMove.rollback(in: &self, context: context)
             context.log("swap FAILED displaced win\(displaced) -> \(previous.rawValue)")
-            commit.refusal = refusal(for: displaced, context: context)
+            commit.refusal = failed
             return commit
         }
         if displacedWrite == .deferredOffSpace { commit.deferred = true }
-        state.commit(window: id, into: slot)
+        let requesterWrite = requesterMove.commit(in: &self, context: context)
         commit.observed.append(id)
-        let requesterWrite = applyLayout(for: id, context: context, on: context.space)
         if requesterWrite == .refused {
             // Roll the whole swap back: the displaced window's frame
-            // visibly moved, so it is written home; the requester was
-            // never written, so only its occupancy restores.
-            state.commit(window: displaced, into: displacedOriginal)
-            state.commit(window: id, into: previous)
+            // visibly moved, so its attempt writes it home; the requester
+            // was refused, so its attempt restores state only.
             let requesterRefusal = refusal(for: id, context: context)
-            if applyLayout(for: displaced, context: context, on: context.space) == .refused {
+            requesterMove.rollback(in: &self, context: context)
+            let homeWrite = displacedMove.rollback(in: &self, context: context)
+            if homeWrite == .refused {
                 // The home write is the second failure of the same swap:
                 // name it too, or the canvas would claim the rollback
                 // succeeded while the displaced window visibly holds the
@@ -713,10 +728,17 @@ struct TilingSpace {
         }
         let restoreFailures = restore(
             evicted.filter { $0 != rehouse?.window }, context: context)
-        let placeResult = place(
-            window: id, into: slot, context: context, observed: &commit.observed,
-            deferred: &commit.deferred)
-        commit.refusal = placeResult
+        let placement = place(
+            window: id, into: slot, context: context, observed: &commit.observed)
+        switch placement {
+        case .noRecord:
+            break
+        case .refused(let refusal, let released):
+            commit.refusal = refusal
+            commit.requesterReleased = released
+        case .placed(let deferred):
+            commit.deferred = deferred
+        }
         Self.reportRestoreFailures(restoreFailures, refusal: &commit.refusal)
         let clean = commit.clean
         if clean, let requesterEntry {
@@ -793,6 +815,11 @@ struct TilingSpace {
         /// state stands, so the event narrates the deferral rather than
         /// an app refusal.
         var deferred = false
+        /// A refused first placement released the requester's record, so
+        /// the coordinator must clear its handle-table entry too. The
+        /// transaction reports this instead of making `settle` re-probe
+        /// record presence.
+        var requesterReleased = false
 
         /// True when nothing failed: neither the placement write nor any
         /// restore. A restore failure carries a message but no window
@@ -806,6 +833,89 @@ struct TilingSpace {
     private struct Refusal {
         var message: String
         var windowName: String?
+    }
+
+    /// What `place` did: the occupancy committed and the write landed (or
+    /// deferred off-Space), the write was refused and rolled back, or the
+    /// window had no record to place. `released` says a refused first
+    /// tiling dropped the requester's record, so the coordinator learns it
+    /// from the branch instead of re-reading record presence.
+    private enum PlacementResult {
+        case placed(deferred: Bool)
+        case refused(Refusal, released: Bool)
+        case noRecord
+    }
+
+    /// One window's move in an action: the slot it leaves, the slot it
+    /// takes, and the record to put back if the move is rolled back.
+    /// `commit` owns the occupancy change and the forward write through the
+    /// one policy; `rollback` owns the reverse write when the forward write
+    /// actually put the target on screen. A refused or deferred forward
+    /// write changed nothing on screen, so its rollback is state-only.
+    /// Callers never write the reverse frame themselves and cannot forget
+    /// to read its result.
+    private struct MoveAttempt {
+        let id: WindowID
+        let from: Slot?
+        let to: Slot
+        let previousRecord: WindowRecord?
+        /// The canvas the write targets. Nil is the display-less fallback
+        /// of a legacy undo snapshot; everything else passes the action's
+        /// canvas.
+        let space: TilingSpaceKey?
+        private var landing: FrameWriter.Result?
+
+        init(
+            moving id: WindowID, into to: Slot, in canvas: TilingSpace,
+            space: TilingSpaceKey? = nil
+        ) {
+            self.id = id
+            self.from = canvas.state.slot(of: id)
+            self.to = to
+            self.previousRecord = canvas.records[id]
+            self.space = space
+        }
+
+        /// Commits the target occupancy and writes it through the shared
+        /// policy. A window with no record still moves in state (the
+        /// reflow batch's defensive case) but has no frame to write.
+        @discardableResult
+        mutating func commit(
+            in canvas: inout TilingSpace, context: TilingSpace.Context
+        ) -> FrameWriter.Result {
+            canvas.state.commit(window: id, into: to)
+            guard canvas.records[id] != nil else {
+                landing = .skippedNoOp
+                return .skippedNoOp
+            }
+            let result = canvas.applyLayout(
+                for: id, context: context, on: space ?? context.space)
+            landing = result
+            return result
+        }
+
+        /// Restores the captured slot and record, then writes the reverse
+        /// frame home when the forward write stood (it was written, or the
+        /// window already held the target). Returns that reverse write's
+        /// result, nil when no reverse write was needed.
+        @discardableResult
+        mutating func rollback(
+            in canvas: inout TilingSpace, context: TilingSpace.Context
+        ) -> FrameWriter.Result? {
+            let targetOnScreen = landing == .written || landing == .skippedNoOp
+            if let from {
+                canvas.state.commit(window: id, into: from)
+                canvas.records[id] = previousRecord
+            } else {
+                // A refused first tiling has no slot to return to: the
+                // record goes with the occupancy.
+                canvas.forget(id, context: context)
+                return nil
+            }
+            guard targetOnScreen, canvas.records[id] != nil else { return nil }
+            return canvas.applyLayout(
+                for: id, context: context, on: space ?? context.space)
+        }
     }
 
     // MARK: Eviction narrative
@@ -875,61 +985,48 @@ struct TilingSpace {
 
     // MARK: Placement helpers
 
-    /// Places `id` into `slot`. Returns the refusal when the gateway write
-    /// fails; nil means placed (or deferred: a deferred off-Space write
-    /// stands, and `deferred` reports it so the event narrates it).
+    /// Places `id` into `slot`. A refusal rolls the occupancy back through
+    /// the move transaction; a deferred off-Space write stands and is
+    /// returned as such so the event narrates the deferral.
     private mutating func place(
         window id: WindowID, into slot: Slot,
-        context: Context, observed: inout [WindowID], deferred: inout Bool
-    ) -> Refusal? {
-        guard var record = records[id] else { return nil }
-        let previous = state.slot(of: id)
-        if previous == nil {
+        context: Context, observed: inout [WindowID]
+    ) -> PlacementResult {
+        guard var record = records[id] else { return .noRecord }
+        var move = MoveAttempt(moving: id, into: slot, in: self)
+        if move.from == nil {
             // First tiling: remember where to restore when untiled.
             // A window moving between overlapping slots (e.g. Left -> BottomLeft)
             // keeps its original pre-tile frame.
             record.preTileFrame = context.gateway.frame(of: record.handle) ?? record.preTileFrame
             records[id] = record
         }
-        state.commit(window: id, into: slot)
+        let result = move.commit(in: &self, context: context)
         observed.append(id)
-        let result = applyLayout(for: id, context: context, on: context.space)
         if result == .refused {
-            // The window refused the frame (some apps ignore AX resizes).
             // Name the window before the record (the only source of its
-            // app name) can go.
+            // app name) can go, then let the move restore the slot or
+            // forget a first tiling's record.
             let failed = refusal(for: id, context: context)
-            if let previous {
-                // The window was already tiled, so it never moved on
-                // screen: the app refused the write and it still occupies
-                // the slot it held. Restore that occupancy. Forgetting it
-                // would leave state and screen disagreeing, and the next
-                // request could claim the visible cells and write over it.
-                state.commit(window: id, into: previous)
+            let released = move.from == nil
+            move.rollback(in: &self, context: context)
+            if let previous = move.from {
                 context.log(
                     "place FAILED win\(id) -> \(slot.rawValue); kept \(previous.rawValue)")
             } else {
-                // A refused first tiling has no previous occupancy to
-                // return to. The record goes with the occupancy: a record
-                // exists only while the window is tiled, so a refused
-                // placement must not leave the window owned by this
-                // canvas. `settle` folds the release into `outcome.forget`,
-                // so the coordinator drops its handle-table entry too.
-                forget(id, context: context)
                 context.log("place FAILED win\(id) -> \(slot.rawValue)")
             }
-            return failed
+            return .refused(failed, released: released)
         }
         // A deferred off-Space write is not a failure: the occupancy
         // stands and reconciles when the canvas becomes visible. Retain
         // the requested slot so the swipe-back reassert re-issues it,
         // exactly as a deferred reflow reconciles.
         if result == .deferredOffSpace {
-            deferred = true
             deferredRequests[id] = .slot(slot: slot)
         }
         context.log("place win\(id) -> \(slot.rawValue)")
-        return nil
+        return .placed(deferred: result == .deferredOffSpace)
     }
 
     /// Drops the window's record, expansion, tracker entries, and
