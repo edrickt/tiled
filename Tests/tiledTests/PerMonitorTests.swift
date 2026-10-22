@@ -348,16 +348,15 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
     }
 
-    func testPerScreenBulkActionsBypassFocus() {
-        // The on-screen overloads act on the named monitor directly:
-        // focus stays wherever it is, and the untouched display keeps
-        // its tiles, splitters, and undo history.
+    func testBulkActionsActOnTheFocusedMonitorOnly() {
+        // Every bulk action follows focus: the focused display's canvas
+        // changes, and the other display keeps its tiles, splitters, and
+        // undo history.
         tileOnLeft()
         controller.handle(slot: .topLeft)
-        tileOnRight()
+        let rightHandle = tileOnRight()
         controller.handle(slot: .topLeft)
         let leftHandle = gateway.issued[0]
-        let rightHandle = gateway.issued[1]
         for handle in [leftHandle, rightHandle] {
             var echo = gateway.frame(of: handle)!
             echo.size.width -= 10
@@ -369,21 +368,20 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertNotEqual(controller.canvas(for: leftID).grid.columnSplit, 0.5)
         XCTAssertNotEqual(controller.canvas(for: rightID).grid.columnSplit, 0.5)
 
-        // Focus stays right; everything below names the left screen.
-        gateway.focused = rightHandle
-        controller.untileAll(on: leftID)
+        gateway.focused = leftHandle
+        controller.untileAll()
         XCTAssertNil(controller.canvas(for: leftID).state.occupant(of: .topLeft))
         XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
-        controller.undoLastDisplacement(on: leftID)
+        controller.undoLastDisplacement()
         XCTAssertNotNil(controller.canvas(for: leftID).state.occupant(of: .topLeft))
         XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
 
-        controller.resetDividers(on: leftID)
+        controller.resetDividers()
         XCTAssertEqual(controller.canvas(for: leftID).grid, GridLayout())
         XCTAssertNotEqual(controller.canvas(for: rightID).grid.columnSplit, 0.5)
-        XCTAssertTrue(controller.restoreSplitters(on: leftID))
+        XCTAssertTrue(controller.restoreSplitters())
         XCTAssertNotEqual(controller.canvas(for: leftID).grid.columnSplit, 0.5)
-        XCTAssertFalse(controller.restoreSplitters(on: leftID))
+        XCTAssertFalse(controller.restoreSplitters())
     }
 
     func testClosedWindowOnOneMonitorLeavesTheOtherAlone() {
@@ -475,24 +473,24 @@ final class PerMonitorTests: XCTestCase {
             "the request lands on the display the window is now on")
     }
 
-    /// A screen-scoped action on the unfocused monitor dissolves that
-    /// monitor's canvas and leaves the focused one alone. The read is
-    /// explicit per canvas: no derived surface reports the actor.
-    func testScreenScopedActionOnTheUnfocusedMonitorLeavesTheFocusedOneAlone() {
-        let left = tileOnLeft()
+    /// A bulk action on the focused monitor dissolves that monitor's
+    /// canvas and leaves the other one alone. The read is explicit per
+    /// canvas: no derived surface reports the actor.
+    func testBulkActionOnTheFocusedMonitorLeavesTheOtherOneAlone() {
+        tileOnLeft()
         controller.handle(slot: .topLeft)
-        tileOnRight()
+        let right = tileOnRight()
         controller.handle(slot: .topLeft)
-        gateway.focused = left
+        gateway.focused = right
 
-        controller.untileAll(on: rightID)
+        controller.untileAll()
 
         XCTAssertTrue(
             controller.canvas(for: rightID).state.occupants.isEmpty,
-            "the named canvas dissolved")
+            "the focused canvas dissolved")
         XCTAssertEqual(
             controller.canvas(for: leftID).state.occupant(of: .topLeft), 1,
-            "the focused canvas is untouched")
+            "the other monitor is untouched")
         XCTAssertNil(controller.canvas(for: rightID).state.occupant(of: .topLeft))
     }
 
@@ -516,8 +514,11 @@ final class PerMonitorTests: XCTestCase {
         gateway.simulateSilentChange(
             b, to: CGRect(x: 1700, y: 100, width: 800, height: 600))
 
-        // A splitter reset re-asserts the canvas under its own frame.
-        controller.resetDividers(on: leftID)
+        // A splitter reset re-asserts the focused canvas (the left
+        // display: focus a, whose live frame still lives there) under its
+        // own frame.
+        gateway.focused = a
+        controller.resetDividers()
 
         let leftBounds = Self.left.visibleFrame
         let leftFrame = GridLayout().rect(for: .leftHalf, in: leftBounds)

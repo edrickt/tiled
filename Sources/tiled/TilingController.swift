@@ -815,17 +815,8 @@ final class TilingController {
     func untileAll() -> ActionReceipt {
         pruneDeadWindows()
         // Untile-all dissolves only the focused canvas: other displays
-        // and Spaces keep their arrangements, so the legacy zero-arg
-        // form resolves the focused canvas.
+        // and Spaces keep their arrangements.
         return untileAll(in: focusedSpaceKey())
-    }
-
-    /// Dissolves one display's currently shown canvas (the screen-based
-    /// form menus and tests use). Other canvases, including other Spaces
-    /// on the same display, are untouched.
-    @discardableResult
-    func untileAll(on screen: ScreenID?) -> ActionReceipt {
-        untileAll(in: tilingKey(for: screen))
     }
 
     /// Dissolves one tiling canvas, leaving every other canvas alone.
@@ -885,13 +876,6 @@ final class TilingController {
         resetDividers(in: focusedSpaceKey())
     }
 
-    /// Snaps one display's currently shown canvas's splitters back to
-    /// defaults and re-tiles its occupants (the screen-based form menus
-    /// and tests use); every other canvas is untouched.
-    func resetDividers(on screen: ScreenID?) {
-        resetDividers(in: tilingKey(for: screen))
-    }
-
     private func resetDividers(in space: TilingSpaceKey) {
         mutateSpace(space) { canvas in
             canvas.visibleFrame = visibleFrame(for: space)
@@ -906,13 +890,6 @@ final class TilingController {
     @discardableResult
     func restoreSplitters() -> Bool {
         restoreSplitters(in: focusedSpaceKey())
-    }
-
-    /// Restores one display's currently shown canvas's parked splitters
-    /// (the screen-based form menus and tests use).
-    @discardableResult
-    func restoreSplitters(on screen: ScreenID?) -> Bool {
-        restoreSplitters(in: tilingKey(for: screen))
     }
 
     private func restoreSplitters(in space: TilingSpaceKey) -> Bool {
@@ -947,14 +924,6 @@ final class TilingController {
     @discardableResult
     func undoLastDisplacement() -> Bool {
         undoReceipt(in: focusedSpaceKey()).performed
-    }
-
-    /// Undoes one display's currently shown canvas's freshest destructive
-    /// action (the screen-based form menus and tests use). Other canvases,
-    /// including other Spaces on the same display, keep their history.
-    @discardableResult
-    func undoLastDisplacement(on screen: ScreenID?) -> Bool {
-        undoReceipt(in: tilingKey(for: screen)).performed
     }
 
     /// The menu and hotkey Undo path: one receipt carrying whether the
@@ -1751,9 +1720,7 @@ final class TilingController {
     private func withheldCanvas(on screen: ScreenID?) -> TilingSpaceKey? {
         guard let screen else { return nil }
         let key = TilingSpaceKey(screen: screen, space: nil)
-        guard let state = spaces[key],
-              !state.state.occupants.isEmpty || !state.undoStack.isEmpty
-        else { return nil }
+        guard let canvas = spaces[key], canvas.holdsAnything else { return nil }
         return key
     }
 
@@ -1763,8 +1730,7 @@ final class TilingController {
     /// withheld period would strand every window tiled during it.
     private func actionSpaceKey(for screen: ScreenID?) -> TilingSpaceKey {
         let identified = tilingKey(for: screen)
-        if let state = spaces[identified],
-           !state.state.occupants.isEmpty || !state.undoStack.isEmpty {
+        if let canvas = spaces[identified], canvas.holdsAnything {
             return identified
         }
         return withheldCanvas(on: identified.screen) ?? identified

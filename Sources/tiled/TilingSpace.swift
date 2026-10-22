@@ -228,6 +228,11 @@ struct TilingSpace {
 
     func handle(of id: WindowID) -> WindowHandle? { records[id]?.handle }
 
+    /// Whether this canvas still holds something a menu or bulk action
+    /// must reach: occupants, or undo chapters whose windows can return.
+    /// An orphaned record (a refused first placement) is not enough.
+    var holdsAnything: Bool { !state.occupants.isEmpty || !undoStack.isEmpty }
+
     /// Whether `id` is currently expanded over the layout.
     func isExpanded(_ id: WindowID) -> Bool { expanded[id] != nil }
 

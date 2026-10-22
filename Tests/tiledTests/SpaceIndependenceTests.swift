@@ -305,7 +305,8 @@ final class SpaceIndependenceTests: XCTestCase {
 
         let w = addFocusedWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
         controller.handle(slot: .topLeft)
-        addFocusedWindow(frame: CGRect(x: 200, y: 200, width: 500, height: 400))
+        let challenger = addFocusedWindow(
+            frame: CGRect(x: 200, y: 200, width: 500, height: 400))
         controller.handle(slot: .topLeft) // evicts w on the first display
 
         // The evicted window is moved to the second display and tiled
@@ -318,8 +319,11 @@ final class SpaceIndependenceTests: XCTestCase {
             "the window is tiled on the second canvas")
 
         // Undoing the eviction returns the window to the canvas it left.
+        // Focus the challenger so the focused-key path names the first
+        // display's canvas; w itself now lives on the second display.
         gateway.clearWrites()
-        controller.undoLastDisplacement(on: Self.display.id)
+        gateway.focused = challenger
+        controller.undoLastDisplacement()
 
         let owners = [origin, other].filter { key in
             controller.canvas(for: key).records.values.contains { $0.handle == w }
@@ -360,7 +364,7 @@ final class SpaceIndependenceTests: XCTestCase {
 
         // A's undo re-observes and retiles w; the re-place claims the
         // handle and must discard B's deferred restore.
-        controller.undoLastDisplacement(on: Self.display.id)
+        controller.undoLastDisplacement()
         let aSlot = GridLayout().rect(for: .topLeft, in: Self.display.visibleFrame)
         XCTAssertEqual(
             controller.canvas(for: keyA).state.occupant(of: .topLeft),
@@ -421,7 +425,7 @@ final class SpaceIndependenceTests: XCTestCase {
         // A's undo re-places w, but its app refuses: w never returned to
         // A, so B's restore is still live and must not be discarded.
         gateway.refuseNextWrites(w)
-        controller.undoLastDisplacement(on: Self.display.id)
+        controller.undoLastDisplacement()
         XCTAssertTrue(
             controller.canvas(for: keyA).state.occupants.isEmpty,
             "the refused re-place did not tile w on A")
