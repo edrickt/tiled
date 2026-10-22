@@ -20,14 +20,27 @@ a precedence rule; `reportRestoreFailures` is that rule.
 findings 1–2; `../slices/02-controller-write.md` S8; F21/F22 in
 `../../quality-audit-followup/report.md`.
 
-**Status:** TODO
+**Status:** DONE (a213afb)
 
-- [ ] Characterization tests pin every current rollback outcome,
+- [x] Characterization tests pin every current rollback outcome,
       including the second-refusal cases added for F21.
-- [ ] `MoveAttempt` lands; every caller migrated; no old rollback body
+- [x] `MoveAttempt` lands; every caller migrated; no old rollback body
       remains.
-- [ ] Failure list composes the canvas error once; the single-`Refusal`
+- [x] Failure list composes the canvas error once; the single-`Refusal`
       precedence rule is deleted.
-- [ ] `FrameWriter`'s clamp repair reads its result and cancels or
+- [x] `FrameWriter`'s clamp repair reads its result and cancels or
       reseeds its expectation.
-- [ ] Gates in `../README.md` all pass.
+- [x] Gates in `../README.md` all pass.
+
+## Comments
+
+Landed in five units: `42f3e6a` pinned the rollback outcomes; `5b0493d`
+moved placement and both swap halves onto `MoveAttempt`; `7faeeea`
+moved undo re-place and the reflow batch onto it; `632b36f` replaced the
+single `Refusal` slot with the action-scoped `[Failure]` list and one
+composition point, so an eviction-restore or reflow-recovery refusal is
+named beside the write that triggered it; `a213afb` read the clamp
+repair through the policy. Gates at each unit: build warnings empty,
+suite green, README count matches; the mutation table finished 144/144
+after adding a mutant for the clamp-repair refusal.
+
