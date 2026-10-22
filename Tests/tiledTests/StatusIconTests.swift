@@ -149,6 +149,24 @@ final class StatusIconTests: XCTestCase {
 }
 
 extension StatusIconTests {
+    // MARK: Renderer
+
+    func testRendererDrawsTheSnapshotAsATemplateImage() {
+        let snapshot = StatusIcon.Snapshot(
+            layout: .quarters,
+            filled: [.topLeft, .topRight],
+            occupiedSlots: 2,
+            displayName: nil)
+
+        let image = StatusIconRenderer.image(for: snapshot)
+
+        XCTAssertEqual(image.size, NSSize(width: 22, height: 16))
+        XCTAssertTrue(image.isTemplate, "the menu bar tints a template image")
+        XCTAssertEqual(
+            image.accessibilityDescription,
+            "Tiled Quarters layout, 2 of 4 slots occupied")
+    }
+
     // MARK: Cell rounding geometry
 
     /// Regression test for the circular bites punched out of every filled
@@ -158,9 +176,9 @@ extension StatusIconTests {
     /// falls outside the path, reading as a white bite on screen.
     func testRoundedCornerHugsItsCorner() {
         let rect = NSRect(x: 0, y: 0, width: 10, height: 10)
-        let all: [AppDelegate.IconCorner] = [.topLeft, .topRight, .bottomLeft, .bottomRight]
+        let all: [StatusIconRenderer.IconCorner] = [.topLeft, .topRight, .bottomLeft, .bottomRight]
         for corner in all {
-            let path = AppDelegate.cellPath(
+            let path = StatusIconRenderer.cellPath(
                 rect: rect, roundedCorners: [corner], radius: 3)
             // Just inside the corner along its diagonal: inside a correct
             // rounding, outside a ballooned (bitten) one.
@@ -216,10 +234,10 @@ extension StatusIconTests {
         // No corners or zero radius: the path is the rect itself.
         let rect = NSRect(x: 2, y: 3, width: 10, height: 8)
         XCTAssertTrue(
-            AppDelegate.cellPath(rect: rect, roundedCorners: [], radius: 3)
+            StatusIconRenderer.cellPath(rect: rect, roundedCorners: [], radius: 3)
                 .contains(NSPoint(x: 2.5, y: 3.5)))
         XCTAssertTrue(
-            AppDelegate.cellPath(
+            StatusIconRenderer.cellPath(
                 rect: rect, roundedCorners: [.topLeft], radius: 0
             ).contains(NSPoint(x: 2.5, y: 10.5)))
     }
