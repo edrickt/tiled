@@ -38,8 +38,8 @@
  [
   "TilingSpace.swift",
   "reflow rollback skipped (state keeps grown slot)",
-  "            var rolled = state\n            for move in moves { rolled.commit(window: move.window, into: move.from) }\n            state = rolled",
-  "            var rolled = state\n            for move in moves { rolled.commit(window: move.window, into: move.from) }"
+  "            var reverseFailures = 0\n            for index in moves.indices {\n                if moves[index].rollback(in: &self, context: context) == .refused {\n                    reverseFailures += 1\n                }\n            }",
+  "            let reverseFailures = 0"
  ],
  [
   "TilingSpace.swift",
@@ -614,8 +614,8 @@
  [
   "TilingSpace.swift",
   "refused requester's previous slot not retained (evictee overwrites it)",
-  "                    state.commit(window: id, into: previous)\n                    records[id] = previousRecord\n                    retained.append(previous)",
-  "                    state.commit(window: id, into: previous)\n                    records[id] = previousRecord\n                    _ = previous"
+  "                    retained.append(previous)",
+  "                    _ = previous"
  ],
  [
   "TilingController.swift",

@@ -482,18 +482,21 @@ struct TilingSpace {
                 id = context.allocateID(entry.handle)
                 beginRecord(id, handle: entry.handle, frame: .zero)
             }
-            guard var record = records[id] else { continue }
-            let previous = state.slot(of: id)
-            let previousRecord = record
-            record.preTileFrame = entry.preTileFrame
-            records[id] = record
-            state.commit(window: id, into: entry.slot)
+            guard let record = records[id] else { continue }
+            // Capture the transaction before the chapter overwrites the
+            // record's pre-tile frame: rollback restores exactly this slot
+            // and record when the re-tile is refused.
+            var move = MoveAttempt(
+                moving: id, into: entry.slot, in: self, space: entry.space)
+            var updated = record
+            updated.preTileFrame = entry.preTileFrame
+            records[id] = updated
             // The shared write policy skips a frame the window already
             // holds (an untile-all chapter still at its pre-tile frames,
             // a settle the gateway applied late) and seeds the drag
             // baseline; a deferred off-Space write stands and reconciles
             // when the canvas becomes visible.
-            if applyLayout(for: id, context: context, on: entry.space).stands {
+            if move.commit(in: &self, context: context).stands {
                 // The re-place landed (or stands deferred): it claims the
                 // handle, so every canvas's older deferred restore for it
                 // is stale.
@@ -502,30 +505,26 @@ struct TilingSpace {
                 result.restored.append(id)
             } else {
                 // The re-tile was refused: name the window before any
-                // record goes. A window that held a slot keeps it, like a
-                // refused move; only an already-untiled window is
-                // forgotten, so the coordinator clears its handle-table
-                // entry (not only the requester's).
+                // record goes, then let the transaction restore the slot
+                // it visibly holds or forget an already-untiled window.
                 let name = appName(id, context: context) ?? "A window"
-                let handle = record.handle
+                let previous = move.from
+                move.rollback(in: &self, context: context)
                 if let previous {
                     // The window still owns a slot on this canvas, so an
                     // older deferred restore elsewhere is stale even
                     // though this particular write was refused.
                     discardDeferredRestore(for: entry.handle)
                     context.discardDeferredRestores(entry.handle)
-                    state.commit(window: id, into: previous)
-                    records[id] = previousRecord
                     retained.append(previous)
                 } else {
                     // The window never returned to this canvas. Its
                     // pre-tile restore on the canvas it came from stays
                     // live: do not claim or discard it on this refusal.
-                    forget(id, context: context)
                     result.forget.append(id)
                 }
                 result.failures.append(
-                    ChapterRestore.Failure(handle: handle, name: name))
+                    ChapterRestore.Failure(handle: record.handle, name: name))
             }
         }
         return result
@@ -895,14 +894,16 @@ struct TilingSpace {
         }
 
         /// Restores the captured slot and record, then writes the reverse
-        /// frame home when the forward write stood (it was written, or the
-        /// window already held the target). Returns that reverse write's
-        /// result, nil when no reverse write was needed.
+        /// frame home when the forward write reached the gateway: a
+        /// refusal can still be a partial write the app left behind, so
+        /// the old frame is reasserted rather than trusted. A deferred
+        /// write never touched the screen and needs no reverse. Returns
+        /// the reverse write's result, nil when no reverse write ran.
         @discardableResult
         mutating func rollback(
             in canvas: inout TilingSpace, context: TilingSpace.Context
         ) -> FrameWriter.Result? {
-            let targetOnScreen = landing == .written || landing == .skippedNoOp
+            let reachedGateway = landing != nil && landing != .deferredOffSpace
             if let from {
                 canvas.state.commit(window: id, into: from)
                 canvas.records[id] = previousRecord
@@ -912,7 +913,7 @@ struct TilingSpace {
                 canvas.forget(id, context: context)
                 return nil
             }
-            guard targetOnScreen, canvas.records[id] != nil else { return nil }
+            guard reachedGateway, canvas.records[id] != nil else { return nil }
             return canvas.applyLayout(
                 for: id, context: context, on: space ?? context.space)
         }
@@ -1232,39 +1233,46 @@ struct TilingSpace {
             Set(state.occupants.filter { expanded[$0.value] != nil }.map(\.value)))
         let placements = state.reflow(freed: freed, excluding: skip)
         guard !placements.isEmpty else { return [] }
-        var moves: [(window: WindowID, from: Slot, to: Slot)] = []
+        // One transaction per survivor: commit writes the grown slot, and
+        // rollback owns the old rect when the batch must return to its
+        // pre-reflow state.
+        var moves: [MoveAttempt] = []
         for (wid, target) in placements.sorted(by: { $0.key < $1.key }) {
-            guard let from = state.slot(of: wid) else { continue }
-            state.commit(window: wid, into: target)
-            moves.append((wid, from, target))
+            guard state.slot(of: wid) != nil else { continue }
+            moves.append(
+                MoveAttempt(
+                    moving: wid, into: target, in: self, space: context.space))
         }
+        guard !moves.isEmpty else { return [] }
         // A hidden canvas's survivors grow in state now but are written
         // when the user swipes back: sizing an off-Space window can move
         // it onto the visible Space, which would break the independence
         // the layout exists to provide. The FrameWriter defers those
         // writes and marks the canvas stale for the swipe back.
-        var rects: [WindowID: CGRect] = [:]
-        for move in moves {
-            if records[move.window] != nil {
-                rects[move.window] = grid.rect(for: move.to, in: visibleFrame)
+        var forwardFailures = 0
+        for index in moves.indices {
+            if moves[index].commit(in: &self, context: context) == .refused {
+                forwardFailures += 1
             }
         }
-        if writeRects(rects, context: context).failed > 0 {
-            var rolled = state
-            for move in moves { rolled.commit(window: move.window, into: move.from) }
-            state = rolled
-            var oldRects: [WindowID: CGRect] = [:]
-            for move in moves {
-                if records[move.window] != nil {
-                    oldRects[move.window] = grid.rect(for: move.from, in: visibleFrame)
+        if forwardFailures > 0 {
+            // The batch is all-or-nothing: every survivor returns to the
+            // slot it held, and every forward write that stood is reversed.
+            var reverseFailures = 0
+            for index in moves.indices {
+                if moves[index].rollback(in: &self, context: context) == .refused {
+                    reverseFailures += 1
                 }
             }
-            _ = writeRects(oldRects, context: context)
+            error = Self.refusalMessage(
+                count: reverseFailures > 0 ? reverseFailures : forwardFailures)
             return []
         }
-        context.log("reflow \(moves.map { "win\($0.window)->\($0.to.rawValue)" }.joined(separator: ", "))")
+        context.log("reflow \(moves.map { "win\($0.id)->\($0.to.rawValue)" }.joined(separator: ", "))")
         return moves.compactMap { move in
-            evictedEntry(for: move.window, slot: move.from, space: context.space)
+            move.from.flatMap {
+                evictedEntry(for: move.id, slot: $0, space: context.space)
+            }
         }
     }
 
