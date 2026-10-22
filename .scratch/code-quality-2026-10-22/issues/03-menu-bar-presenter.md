@@ -19,12 +19,58 @@ so every binding edit bypasses the diff.
 **Findings:** `../report.md` "Still open 3"; `../slices/04-presentation.md`
 P1–P3, P5.
 
-**Status:** TODO
+**Status:** DONE (19f2564)
 
-- [ ] A characterization test pins the current menu/icon output for a
+- [x] A characterization test pins the current menu/icon output for a
       fixed canvas set, including label-only remaps.
-- [ ] `MenuBarSnapshot` carries everything the menu reads; `force:` is
+- [x] `MenuBarSnapshot` carries everything the menu reads; `force:` is
       deleted.
-- [ ] Presenter and renderer extracted; AppDelegate keeps launch,
+- [x] Presenter and renderer extracted; AppDelegate keeps launch,
       permission, lifecycle, actions, and receipt presentation.
-- [ ] Gates in `../README.md` all pass.
+- [ ] Gates in `../README.md` all pass. (Build, unit suite, and test-count
+      gates pass; the mutation table is deferred to the coordinator per
+      `AGENTS.md`.)
+
+## Comments
+
+Commits: `aeb1cef` pins the current menu, submenu, icon, and
+slot/expand announcement output; `3a0d4ed` adds `MenuReads` and reads the
+canvas's own error and warnings once; `8047d2d` puts hotkey labels in the
+snapshot and deletes `refreshMenu(force:)`; `4f5d67b` extracts
+`StatusIconRenderer`; `4449814` extracts `MenuBarPresenter` and
+`MenuBarSnapshot`; `e585d31` returns `ActionReceipt` from slot and expand
+actions and replaces the receipt fields with `NoticePresentation`;
+`19f2564` pins the presenter's label-only snapshot diff.
+
+Shapes: `MenuReads` is one scoped pass over a resolved canvas key (canvas,
+tile error, hotkey warnings, rows, trust, focused-window answer, expand
+state, labels, per-display layouts). `MenuModel.Snapshot` carries
+`[HotkeyAction: String]` labels, so `MenuModel.items(snapshot:)` is pure.
+`MenuBarSnapshot { menu: MenuModel.Snapshot; icon: StatusIcon.Snapshot }`
+is the presenter's one value. `MenuBarPresenter` owns the last snapshot,
+`menuOpen`, NSMenu construction, show/hide, `RefreshPlan`, and
+`NoticePresentation`; it never queries the AX gateway. `StatusIconRenderer`
+takes a snapshot and returns the `NSImage`. `NoticePresentation` owns
+`present`/`clear`/`overlay` plus the action generation.
+
+Behavior preserved: the characterization suite pins literal menu order,
+titles, enabled states, submenu rows, and the literal icon snapshot; every
+refusal, no-op, already-tiled, expand-refusal, and deferral sentence still
+comes from `MenuText`; all five notice-overlay cases are pinned; a silent
+slot/expand success stays silent; a background receipt still overlays the
+focused canvas's menu. A label-only remap now changes snapshot equality
+and rebuilds through the ordinary diff. The cross-canvas warning read is
+gone: a menu pass for a background canvas carries that canvas's tile
+error. Gates run: `swift build` (no warning or error output), `swift test`
+(900 tests, 1 skipped, 0 failures), and `./scripts/check-test-count.sh`
+(README's 900 matches). The mutation table was not run; it is the
+coordinator's final gate.
+
+Design notes: a late silent-ignore convergence rollback has no action
+caller, so it presents through `onLateReceipt` rather than losing its
+spoken refusal. Slot and expand deferrals report `performed: true` because
+a deferral is never a failure. The haptic now follows the receipt's
+announcement (non-nil speaks and haptics, nil stays silent), matching the
+ticket's one-haptic rule; previously only unsuccessful receipt actions
+hapticked. The presenter still uses `AppDelegate.menuWiring` because the
+selectors live on the delegate.
