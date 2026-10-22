@@ -201,7 +201,7 @@ final class MenuBarCharacterizationTests: XCTestCase {
         gateway.focused = mail
         controller.handle(slot: .topRight)
 
-        let icon = AppDelegate.iconSnapshot(
+        let icon = MenuBarPresenter.iconSnapshot(
             space: controller.focusedTilingSpace,
             canvas: { controller.canvas(for: $0) },
             displayName: { _ in nil })

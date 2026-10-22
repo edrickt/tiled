@@ -219,7 +219,7 @@ final class AppDelegateMenuTests: XCTestCase {
             screen: ScreenID(rawValue: 1), space: SpaceID(rawValue: 7))
         var canvasKeys: [TilingSpaceKey] = []
         var nameKeys: [TilingSpaceKey] = []
-        let snapshot = AppDelegate.iconSnapshot(
+        let snapshot = MenuBarPresenter.iconSnapshot(
             space: key,
             canvas: { canvasKeys.append($0); return TilingSpace() },
             displayName: { nameKeys.append($0); return "Built-in" })
@@ -229,30 +229,66 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(snapshot.displayName, "Built-in")
     }
 
-    func testRefreshPassResolvesTheFocusedCanvasOnce() {
+    func testOneSnapshotPassScopesBothHalvesToTheGivenCanvasKey() {
         // The menu-open path and the refresh path share one pass: the
-        // focused canvas key is resolved exactly once and handed to both
-        // the menu and the glyph, so a display change that lands mid-pass
-        // cannot leave them describing different canvases. Counting the
-        // resolver pins the call site, not just the pure icon helper.
-        let key = TilingSpaceKey(
-            screen: ScreenID(rawValue: 1), space: SpaceID(rawValue: 7))
-        var resolutions = 0
-        var menuKeys: [TilingSpaceKey] = []
-        var iconKeys: [TilingSpaceKey] = []
-        let pass = AppDelegate.refreshPass(
-            focusedSpace: { resolutions += 1; return key },
-            menu: { menuKeys.append($0); return self.emptySnapshot() },
-            icon: {
-                iconKeys.append($0)
-                return StatusIcon.snapshot(layout: .quarters, occupants: [:])
-            })
+        // presenter builds the menu and glyph from the key it is handed, so
+        // a display change that lands mid-pass cannot leave them describing
+        // different canvases. A background key with its own error and
+        // display name proves both halves stay scoped to it even when focus
+        // sits elsewhere.
+        let left = ScreenInfo(
+            id: ScreenID(rawValue: 1),
+            frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            name: "Built-in")
+        let right = ScreenInfo(
+            id: ScreenID(rawValue: 2),
+            frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            name: "Studio Display")
+        let gateway = FakeWindowGateway()
+        let controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { [left, right] }, deathConfirmation: 0)
+        controller.onChange = {}
+        let safari = gateway.addWindow(
+            frame: CGRect(x: 2000, y: 100, width: 800, height: 600), appName: "Safari")
+        gateway.focused = safari
+        controller.handle(slot: .topLeft)
+        let mail = gateway.addWindow(
+            frame: CGRect(x: 2000, y: 700, width: 800, height: 300), appName: "Mail")
+        gateway.focused = mail
+        gateway.refuseNextWrites(mail)
+        controller.handle(slot: .bottomLeft)
+        let notes = gateway.addWindow(
+            frame: CGRect(x: 100, y: 100, width: 800, height: 600), appName: "Notes")
+        gateway.focused = notes
+        XCTAssertEqual(controller.focusedTilingSpace.screen, left.id)
 
-        XCTAssertEqual(resolutions, 1, "one focused-canvas resolution per refresh pass")
-        XCTAssertEqual(menuKeys, [key])
-        XCTAssertEqual(iconKeys, [key])
-        XCTAssertEqual(pass.menu, emptySnapshot())
-        XCTAssertEqual(pass.icon, StatusIcon.snapshot(layout: .quarters, occupants: [:]))
+        let presenter = MenuBarPresenter(
+            controller: controller,
+            hotkeyStore: HotkeyStore(
+                defaults: UserDefaults(suiteName: "menu-pass-\(UUID())")!),
+            hotkeyService: { nil },
+            actionTarget: NSObject(),
+            noticeProvider: { $0.canvas.notice })
+        let key = TilingSpaceKey(screen: right.id, space: nil)
+
+        let snapshot = presenter.snapshot(for: key)
+
+        XCTAssertEqual(
+            snapshot.menu.tileError,
+            "Mail couldn't be tiled: the app refused to resize it.",
+            "the menu half describes the key it was handed, not focused Notes")
+        XCTAssertEqual(snapshot.menu.untileCount, 1)
+        XCTAssertEqual(
+            snapshot.icon,
+            StatusIcon.Snapshot(
+                layout: .quarters,
+                filled: [.topLeft],
+                occupiedSlots: 1,
+                displayName: "Studio Display"),
+            "the glyph half names and fills the same passed canvas")
     }
 
     func testMenuNoticeCarriesABackgroundReceipt() {
@@ -334,7 +370,7 @@ final class AppDelegateMenuTests: XCTestCase {
         // move can change the glyph while the menu snapshot is identical.
         // The glyph must not ride the menu diff, or it freezes on the
         // display the user left until the next tiling action.
-        let plan = AppDelegate.refreshPlan(
+        let plan = MenuBarPresenter.refreshPlan(
             menuChanged: false, iconChanged: true, menuOpen: false)
 
         XCTAssertTrue(plan.redrawIcon, "an icon-only change still redraws the glyph")
@@ -344,7 +380,7 @@ final class AppDelegateMenuTests: XCTestCase {
     func testOpenMenuDefersBothHalvesOfTheRefresh() {
         // Rebuilding while the menu is open flickers or dismisses it; the
         // close handler runs a fresh pass.
-        let plan = AppDelegate.refreshPlan(
+        let plan = MenuBarPresenter.refreshPlan(
             menuChanged: true, iconChanged: true, menuOpen: true)
 
         XCTAssertFalse(plan.redrawIcon)
@@ -352,7 +388,7 @@ final class AppDelegateMenuTests: XCTestCase {
     }
 
     func testMenuChangeRebuildsAndRedrawsTheIcon() {
-        let plan = AppDelegate.refreshPlan(
+        let plan = MenuBarPresenter.refreshPlan(
             menuChanged: true, iconChanged: true, menuOpen: false)
 
         XCTAssertTrue(plan.redrawIcon)

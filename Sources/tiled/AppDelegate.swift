@@ -1,7 +1,6 @@
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var statusItem: NSStatusItem?
     private let gateway = LiveWindowGateway()
     private lazy var controller = TilingController(
         gateway: gateway,
@@ -24,10 +23,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The launch permission explainer. Closed automatically by the
     /// permission poll the moment trust arrives.
     private var permissionWindowController: PermissionWindowController?
-    private var menuOpen = false
-    /// Snapshot the current status menu was built from. Diffed on every
-    /// refresh so the menu is rebuilt only when something it reads moved.
-    private var lastMenuSnapshot: MenuModel.Snapshot?
+    /// The status item and its one presentation model. The delegate keeps
+    /// lifecycle, actions, and receipt presentation; the presenter owns the
+    /// snapshot, diff, menu construction, and show/hide.
+    private lazy var menuBar = MenuBarPresenter(
+        controller: controller,
+        hotkeyStore: hotkeyStore,
+        hotkeyService: { [weak self] in self?.hotkeys },
+        actionTarget: self,
+        noticeProvider: { [weak self] reads in
+            guard let self else { return reads.canvas.notice }
+            return Self.menuNotice(
+                canvasNotice: reads.canvas.notice,
+                canvasError: reads.canvas.error,
+                receipt: self.lastActionReceipt,
+                receiptFocusedSpace: self.lastReceiptFocusedSpace,
+                receiptGeneration: self.lastReceiptGeneration,
+                currentGeneration: self.actionGeneration,
+                focusedSpace: reads.space)
+        })
     /// The latest action receipt. The menu carries its notice even when the
     /// action touched a background canvas, so a refusal there is not
     /// spoken once and then absent from the menu. The focus and action
@@ -40,10 +54,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// supersedes the receipt" exact even when the new notice is nil or
     /// happens to repeat the old text.
     private var actionGeneration = 0
-    /// What the status icon currently depicts (layout plus fill), so it
-    /// redraws when windows come and go within one layout, not just when
-    /// the layout itself flips 2×2 ↔ 3×2.
-    private var lastIconSnapshot: StatusIcon.Snapshot?
     /// App activation moves focus, and focus picks the display the status
     /// icon depicts and the window the menu rows describe. The
     /// controller's change callback only runs for tiling actions, so
@@ -61,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMainMenu()
         controller.onChange = { [weak self] in
             self?.actionGeneration += 1
-            self?.refreshMenu()
+            self?.menuBar.refresh()
         }
         controller.onFocusedSpaceChange = { [weak self] in
             // A focus move supersedes a background action receipt. Clear
@@ -70,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.lastActionReceipt = nil
             self?.lastReceiptFocusedSpace = nil
             self?.lastReceiptGeneration = nil
-            self?.refreshFocusedDisplay()
+            self?.menuBar.refreshFocusedDisplay()
         }
         controller.onFeedback = { [weak self] feedback in
             DispatchQueue.main.async { self?.signalFeedback(feedback) }
@@ -78,9 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in self?.refreshMenu() }
+        ) { [weak self] _ in self?.menuBar.refresh() }
         if !settings.hideMenuBarIcon {
-            setupStatusItem()
+            menuBar.showIcon()
         }
 
         // One plan owns the launch branches: start versus permission wait,
@@ -105,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showPermissionWindow()
                 pollForPermission()
             })
-        refreshMenu()
+        menuBar.refresh()
         // First run: land on Welcome so the one demonstrated combo plus
         // lit geometry teaches before the 17-row Shortcuts tab does.
         if plan.showsWelcome {
@@ -188,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the glyph with no tiling action at all. The gateway re-targets
         // as apps activate; this subscribes now that AX is trusted.
         controller.observeFocus()
-        refreshMenu()
+        menuBar.refresh()
         switch AppStartCompletion.make(
             afterPermissionWait: afterPermissionWait,
             didDismissWelcome: settings.didDismissWelcome
@@ -215,220 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if gateway.isTrusted {
                 self.start(afterPermissionWait: true)
             }
-            self.refreshMenu()
+            self.menuBar.refresh()
         }
-    }
-
-    // MARK: Status item / menu
-
-    private func setupStatusItem() {
-        guard statusItem == nil else { return }
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        let snapshot = iconSnapshot()
-        item.button?.image = StatusIconRenderer.image(for: snapshot)
-        lastIconSnapshot = snapshot
-        item.menu = menu()
-        statusItem = item
-    }
-
-    /// One immutable pass over the state the icon reads: the active
-    /// layout plus which icon cells are covered. The focused canvas
-    /// (display plus Mission Control Space) is resolved once and both
-    /// reads scope to it, so focus moving between the two lookups can
-    /// never mix two canvases' geometry and occupancy. Expanded
-    /// windows keep their slot (an expanded window still owns its tile),
-    /// so they still light it. The focused canvas drives the glyph, so
-    /// the icon depicts the layout the next hotkey acts on, whether the
-    /// user got there by focusing another display or swiping Spaces.
-    private func iconSnapshot() -> StatusIcon.Snapshot {
-        Self.iconSnapshot(
-            space: controller.focusedTilingSpace,
-            canvas: { controller.canvas(for: $0) },
-            displayName: { controller.displayName(for: $0) })
-    }
-
-    /// The icon half of a refresh pass that already resolved its one canvas
-    /// key: the glyph is built from that same key, so the menu and the icon
-    /// can never describe different canvases when focus moves mid-pass.
-    private func iconSnapshot(space: TilingSpaceKey) -> StatusIcon.Snapshot {
-        Self.iconSnapshot(
-            space: space,
-            canvas: { controller.canvas(for: $0) },
-            displayName: { controller.displayName(for: $0) })
-    }
-
-    /// Builds one icon pass from an already-resolved canvas key. The key is
-    /// a direct parameter, not a resolver the caller might call twice, and
-    /// both the occupancy map and the spoken display name derive from that
-    /// one key, so a focus move landing mid-pass can never pair one
-    /// canvas's glyph with another canvas's name.
-    static func iconSnapshot(
-        space: TilingSpaceKey,
-        canvas: (TilingSpaceKey) -> TilingSpace,
-        displayName: (TilingSpaceKey) -> String?
-    ) -> StatusIcon.Snapshot {
-        let focused = canvas(space)
-        return StatusIcon.snapshot(
-            layout: focused.state.activeLayout,
-            occupants: focused.state.occupants,
-            displayName: displayName(space))
-    }
-
-    /// One refresh pass over the focused canvas: resolves the key once and
-    /// builds both views from it, so a display or focus change landing
-    /// between the menu and the glyph can never leave them describing
-    /// different canvases. Pure, with the two builders injected, so the
-    /// single resolution is pinned without a live controller.
-    static func refreshPass(
-        focusedSpace: () -> TilingSpaceKey,
-        menu: (TilingSpaceKey) -> MenuModel.Snapshot,
-        icon: (TilingSpaceKey) -> StatusIcon.Snapshot
-    ) -> (menu: MenuModel.Snapshot, icon: StatusIcon.Snapshot) {
-        let space = focusedSpace()
-        return (menu(space), icon(space))
-    }
-
-    /// Renders a snapshot on the status button. Whether to redraw is the
-    /// refresh plan's decision; this only draws. Called from `refreshMenu`
-    /// (every state change) and from `menuNeedsUpdate` as the menu opens.
-    private func drawStatusIcon(_ snapshot: StatusIcon.Snapshot) {
-        guard let button = statusItem?.button else { return }
-        button.image = StatusIconRenderer.image(for: snapshot)
-        lastIconSnapshot = snapshot
-    }
-
-    /// Focus moved between windows, displays, or Mission Control Spaces
-    /// with no tiling action: redraw only the glyph. The menu aggregates
-    /// every canvas and is rebuilt from a fresh snapshot when it opens,
-    /// so there is nothing to push here; rebuilding it from an AX
-    /// callback would be churn. An open menu defers, exactly like
-    /// `refreshPlan`, and `menuDidClose` catches up.
-    private func refreshFocusedDisplay() {
-        guard !menuOpen, statusItem != nil else { return }
-        let icon = iconSnapshot()
-        guard lastIconSnapshot != icon || statusItem?.button?.image == nil else { return }
-        drawStatusIcon(icon)
-    }
-
-    /// Toggles the menu-bar icon live when the Settings checkbox changes.
-    private func setIconHidden(_ hidden: Bool) {
-        if hidden {
-            if let item = statusItem {
-                NSStatusBar.system.removeStatusItem(item)
-                statusItem = nil
-            }
-        } else {
-            setupStatusItem()
-        }
-    }
-
-    /// What one refresh pass must do.
-    ///
-    /// Extracted pure because the two halves are independent, and the
-    /// hazard is in the ordering: the status icon reads focus-scoped state
-    /// (the focused display's occupancy) that the menu snapshot
-    /// deliberately aggregates across every display, so a focus move can
-    /// change the glyph while leaving the menu snapshot equal. The glyph
-    /// must therefore drive its own redraw, never ride the menu diff. An
-    /// icon change alone never justifies rebuilding the menu, and an open
-    /// menu defers both: rebuilding mid-open flickers or dismisses it, and
-    /// the close handler runs a fresh pass.
-    struct RefreshPlan: Equatable {
-        let redrawIcon: Bool
-        let rebuildMenu: Bool
-    }
-
-    static func refreshPlan(
-        menuChanged: Bool, iconChanged: Bool, menuOpen: Bool
-    ) -> RefreshPlan {
-        guard !menuOpen else { return RefreshPlan(redrawIcon: false, rebuildMenu: false) }
-        return RefreshPlan(redrawIcon: iconChanged, rebuildMenu: menuChanged)
-    }
-
-    private func refreshMenu() {
-        // Destructive outcomes stay in the menu (notice + undo row), not
-        // on screen: tiling feedback never pops a panel over the workspace.
-        // Rebuilding the menu while it's open flickers or dismisses it;
-        // the close handler picks up whatever changed meanwhile.
-        //
-        // Diff before building: drag-resize fires change callbacks every
-        // runloop tick, and the permission poll fires once a second, but
-        // the menu only cares about state, warnings, and window rows.
-        // Building an NSMenu with submenus on every tick is pure waste.
-        // One canvas key for the whole pass: the menu and the glyph are two
-        // views of the same canvas, so a focus move landing between building
-        // them can never leave them describing different canvases.
-        let pass = Self.refreshPass(
-            focusedSpace: { self.controller.focusedTilingSpace },
-            menu: { self.menuSnapshot(space: $0) },
-            icon: { self.iconSnapshot(space: $0) })
-        let snapshot = pass.menu
-        let icon = pass.icon
-        let plan = Self.refreshPlan(
-            menuChanged: snapshot != lastMenuSnapshot || statusItem?.menu == nil,
-            iconChanged: lastIconSnapshot != icon || statusItem?.button?.image == nil,
-            menuOpen: menuOpen)
-        if plan.redrawIcon { drawStatusIcon(icon) }
-        guard plan.rebuildMenu else { return }
-        lastMenuSnapshot = snapshot
-        statusItem?.menu = menu(from: snapshot)
-    }
-
-    private func menu() -> NSMenu {
-        let snapshot = menuSnapshot()
-        lastMenuSnapshot = snapshot
-        return menu(from: snapshot)
-    }
-
-    private func menu(from snapshot: MenuModel.Snapshot) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.delegate = self
-        populate(menu, from: snapshot)
-        return menu
-    }
-
-    /// Fills an existing menu from a snapshot. Shared by the build path
-    /// (a fresh NSMenu) and the open path (an in-place update), so the two
-    /// can never render different rows.
-    private func populate(_ menu: NSMenu, from snapshot: MenuModel.Snapshot) {
-        menu.removeAllItems()
-        for model in MenuModel.items(snapshot: snapshot) {
-            menu.addItem(makeItem(model))
-        }
-    }
-
-    /// One immutable pass over the app state the menu reads.
-    /// Fresh destructive-outcome notices (eviction, layout switch) live
-    /// in the menu beside the undo row that reverses them: the canvas's
-    /// `notice` clears on every new action, so the menu carries each
-    /// outcome until the next one replaces it.
-    private func menuSnapshot() -> MenuModel.Snapshot {
-        menuSnapshot(space: controller.focusedTilingSpace)
-    }
-
-    /// Menu snapshot from an already-resolved canvas key. A refresh pass
-    /// resolves the key once and hands the same one to the menu and the
-    /// icon, so the two halves can never describe different canvases.
-    private func menuSnapshot(space: TilingSpaceKey) -> MenuModel.Snapshot {
-        // One scoped read for the whole pass: every unscoped field,
-        // including the tiling error and hotkey warnings, describes the
-        // canvas key the caller resolved.
-        let reads = MenuReads(
-            space: space,
-            controller: controller,
-            failedActions: hotkeys?.failedActions ?? [],
-            binding: { self.hotkeyStore.binding(for: $0) })
-        return MenuModel.Snapshot(
-            reads: reads,
-            notice: Self.menuNotice(
-                canvasNotice: reads.canvas.notice,
-                canvasError: reads.canvas.error,
-                receipt: lastActionReceipt,
-                receiptFocusedSpace: lastReceiptFocusedSpace,
-                receiptGeneration: lastReceiptGeneration,
-                currentGeneration: actionGeneration,
-                focusedSpace: space))
     }
 
     /// The menu's notice row. A receipt from another canvas is the latest
@@ -500,42 +298,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
 
-    /// Maps one model item onto NSMenuItem: selectors, represented
-    /// objects, key equivalents, and submenus, recursively.
-    private func makeItem(_ model: MenuModel.Item) -> NSMenuItem {
-        if model.isSeparator { return .separator() }
-        let item = NSMenuItem(
-            title: model.title, action: nil, keyEquivalent: model.keyEquivalent)
-        item.isEnabled = model.isEnabled
-        if let reason = model.disabledReason, !model.isEnabled {
-            item.toolTip = reason
-            // Tooltips are hover-only: keyboard and VoiceOver users never
-            // reach them. The reason is the whole point of the disabled
-            // row ("the row never reads as broken"), so expose it where
-            // assistive tech looks. Both channels, one string.
-            item.setAccessibilityHelp(reason)
-        }
-        if let action = model.action {
-            let wiring = Self.menuWiring(for: action)
-            item.action = wiring.selector
-            if let represented = wiring.representedObject {
-                item.representedObject = represented
-            }
-            if wiring.targetsSelf {
-                item.target = self
-            }
-        }
-        if let children = model.children {
-            let submenu = NSMenu()
-            submenu.autoenablesItems = false
-            for child in children {
-                submenu.addItem(makeItem(child))
-            }
-            item.submenu = submenu
-        }
-        return item
-    }
-
     // MARK: Actions
 
     @objc private func openShortcuts(_ sender: Any?) {
@@ -565,7 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let controller = SettingsWindowController(
                 settings: settings, hotkeyStore: hotkeyStore)
             controller.onHideIconChange = { [weak self] hidden in
-                self?.setIconHidden(hidden)
+                self?.menuBar.setIconHidden(hidden)
             }
             controller.isTrustedProvider = { [weak self] in self?.gateway.isTrusted ?? false }
             controller.onOpenAccessibilitySettings = { [weak self] in
@@ -575,7 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hotkeys?.reload()
                 // The labels ride in the snapshot, so a label-only remap
                 // is an ordinary diff and rebuilds without a force path.
-                self?.refreshMenu()
+                self?.menuBar.refresh()
             }
             // The Shortcuts tab surfaces cross-app registration failures
             // beside the recorder that accepted the combo, not only in
@@ -681,7 +443,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let announcement = receipt.announcement {
             announce(announcement, fallback: receipt.notice)
         }
-        refreshMenu()
+        menuBar.refresh()
     }
 
     /// VoiceOver announcement for actions whose feedback is otherwise
@@ -693,7 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// announcement-less, either.
     private func announce(_ text: String, fallback noticeText: String? = nil) {
         let element: Any? =
-            statusItem?.button ?? settingsController?.window ?? NSApp
+            menuBar.statusButton ?? settingsController?.window ?? NSApp
         if let element {
             NSAccessibility.post(
                 element: element,
@@ -726,20 +488,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             text = MenuText.refusedAnnouncement(windowName: name)
             noticeFallback = controller.canvas(for: controller.focusedTilingSpace).error
             announce(text, fallback: noticeFallback)
-            refreshMenu()
+            menuBar.refresh()
             return
         case .expandRefused(let name):
             text = MenuText.expandRefusedAnnouncement(windowName: name)
             noticeFallback = controller.canvas(for: controller.focusedTilingSpace).error
             announce(text, fallback: noticeFallback)
-            refreshMenu()
+            menuBar.refresh()
             return
         case .deferred:
             text = MenuText.deferredOffSpaceAnnouncement()
             noticeFallback = "Space isn't visible yet."
         }
         announce(text, fallback: noticeFallback)
-        refreshMenu()
+        menuBar.refresh()
     }
 
     @objc private func undoSwitch(_ sender: NSMenuItem) {
@@ -778,47 +540,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         {
             NSWorkspace.shared.open(url)
         }
-    }
-}
-
-extension AppDelegate: NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) {
-        menuOpen = true
-    }
-
-    /// Refreshes the rows in place as the menu opens.
-    ///
-    /// Focus moves with no tiling action at all (click another window,
-    /// swipe another Space), and the rows' enabled state, undo title, and
-    /// status line all read the focused window; the icon reads the
-    /// focused canvas. Nothing
-    /// else fires on that transition, so the open is the last point where
-    /// the menu can still be made to describe the window the user is
-    /// looking at. Replacing `statusItem.menu` here would be too late —
-    /// AppKit has already retained the menu it is about to show — so the
-    /// same menu is emptied and refilled, which is what this delegate call
-    /// is for (menuWillOpen explicitly must not restructure).
-    ///
-    /// Deliberately not gated on `menuOpen`: AppKit does not document
-    /// whether this runs before or after menuWillOpen, and the update must
-    /// not depend on that order.
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        guard menu === statusItem?.menu else { return }
-        // One canvas key for the whole pass, exactly as `refreshMenu`:
-        // resolving it once and handing it to both the menu and the glyph
-        // is what keeps them from describing different canvases when a
-        // display or focus change lands mid-pass.
-        let pass = Self.refreshPass(
-            focusedSpace: { self.controller.focusedTilingSpace },
-            menu: { self.menuSnapshot(space: $0) },
-            icon: { self.iconSnapshot(space: $0) })
-        populate(menu, from: pass.menu)
-        lastMenuSnapshot = pass.menu
-        if lastIconSnapshot != pass.icon { drawStatusIcon(pass.icon) }
-    }
-
-    func menuDidClose(_ menu: NSMenu) {
-        menuOpen = false
-        refreshMenu()
     }
 }
