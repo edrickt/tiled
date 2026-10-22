@@ -421,6 +421,44 @@ extension ReflowTests {
             "a reflow that did not happen writes no undo chapter")
     }
 
+    func testRefusedReflowGrowAndRecoveryRewriteKeepTheSurvivorOnItsOldFrame() {
+        // The grow write is refused after moving the app's origin, so the
+        // canvas rolls the survivor back and re-writes its old rect.
+        // Refusing that recovery write too must not leave state and screen
+        // disagreeing silently: the survivor keeps its old slot and frame,
+        // and the canvas still reports a refusal.
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .sixthTopLeft)
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        gateway.focused = b
+        controller.handle(slot: .sixthBottomLeft)
+        let c = gateway.addWindow(frame: CGRect(x: 1200, y: 100, width: 500, height: 400))
+        gateway.focused = c
+        controller.handle(slot: .sixthMiddle)
+        let d = gateway.addWindow(frame: CGRect(x: 1300, y: 150, width: 450, height: 350))
+        gateway.focused = d
+        controller.handle(slot: .sixthRight)
+        let survivorFrame = gateway.frame(of: d)!
+        var dWrites = 0
+        gateway.willWrite = { handle in
+            guard handle == d else { return }
+            dWrites += 1
+        }
+        // The app moves the origin but refuses the size, the partial-write
+        // shape the live adapter models.
+        gateway.refuseSizeWrites.insert(d)
+
+        gateway.focused = c
+        controller.handleEvict()
+
+        XCTAssertEqual(dWrites, 2, "the recovery rewrite is attempted")
+        XCTAssertEqual(canvas.state.slot(of: 4), .sixthRight)
+        XCTAssertEqual(gateway.frame(of: d), survivorFrame)
+        XCTAssertNotNil(canvas.error, "the canvas still reports the refusal")
+        XCTAssertTrue(canvas.undoStack.isEmpty, "a reflow that did not happen has no chapter")
+    }
+
     func testEvictHotkeyPrefersRightFlank() {
         // Left, middle, right thirds tiled in order.
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
