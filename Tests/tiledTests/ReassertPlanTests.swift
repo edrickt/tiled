@@ -39,6 +39,22 @@ final class ReassertPlanTests: XCTestCase {
 
     // MARK: Reconcile: the clamp gap
 
+    func testUnreadableAchievedFrameKeepsTheStoredSplittersAndMapsRects() {
+        var grid = GridLayout()
+        grid.sixthsRightSplit = 0.8
+        let canvas = canvas(
+            [(.sixthLeft, 1), (.sixthMiddle, 2), (.sixthRight, 3)], grid: grid)
+
+        let plan = canvas.reassertPlan(.resize(dragged: 2, achieved: nil))
+
+        XCTAssertEqual(
+            plan.grid.sixthsRightSplit, 0.8, accuracy: 0.001,
+            "an unreadable frame leaves the stored splitter alone")
+        XCTAssertEqual(plan.rects.count, 3, "every occupant is still mapped")
+        XCTAssertEqual(plan.rects[3]!.minX, position(0.8), accuracy: 0.5)
+        XCTAssertEqual(plan.rects[2]!.maxX, plan.rects[3]!.minX)
+    }
+
     func testResizeReconcileClosesTheClampedGap() {
         // The middle third was dragged right and the drag committed the
         // splitter at 0.8, but the app refused to shrink below its floor

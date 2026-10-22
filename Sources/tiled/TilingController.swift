@@ -1156,10 +1156,13 @@ final class TilingController {
     private func handleDragEnd(_ decision: DragTracker.DragDecision) {
         switch decision {
         case .resize(let id):
-            guard let handle = handle(of: id), let achieved = gateway.frame(of: handle) else {
-                return
-            }
-            reassert(id, source: .resize(dragged: id, achieved: achieved))
+            guard let handle = handle(of: id) else { return }
+            // An unreadable achieved frame (the lid-close transient) is
+            // not a reason to drop the release: keep the stored splitters
+            // and still map every rect, so neighbours never go stale.
+            reassert(
+                id,
+                source: .resize(dragged: id, achieved: gateway.frame(of: handle)))
         case .snapback(let id):
             reassert(id, source: .grid)
         case .untile(let id):

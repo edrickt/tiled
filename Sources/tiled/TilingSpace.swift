@@ -1531,8 +1531,10 @@ struct TilingSpace {
     enum ReassertSource: Equatable {
         /// An edge resize settled: reconcile the dragged window's
         /// splitters back to the edge the app actually achieved, then map
-        /// every rect under the reconciled grid.
-        case resize(dragged: WindowID, achieved: CGRect)
+        /// every rect under the reconciled grid. A nil achieved frame is
+        /// the unreadable transient: keep the splitters as stored and
+        /// still map every rect, so neighbours never go stale.
+        case resize(dragged: WindowID, achieved: CGRect?)
         /// The splitters are already right: map every rect as they stand.
         case grid
     }
@@ -1571,6 +1573,7 @@ struct TilingSpace {
     /// loop.
     private func reconciledGrid(_ source: ReassertSource) -> GridLayout {
         guard case .resize(let dragged, let achieved) = source,
+            let achieved,
             expanded[dragged] == nil,
             let slot = state.slot(of: dragged)
         else { return grid }

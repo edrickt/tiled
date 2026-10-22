@@ -660,6 +660,30 @@ final class ControllerGatewayTests: XCTestCase {
             "flush: no gap, no overlap")
     }
 
+    func testUnreadableAchievedFrameStillReassertsTheNeighbour() {
+        let middle = tileFocused(.sixthMiddle)
+        let right = tileFocused(.sixthRight)
+        let bounds = Self.screen.visibleFrame
+
+        var echo = gateway.frame(of: middle)!
+        echo.size.width -= 10
+        gateway.simulateChange(middle, to: echo)
+        var dragged = gateway.frame(of: middle)!
+        dragged.size.width = bounds.minX + 0.8 * bounds.width - dragged.minX
+        gateway.simulateChange(middle, to: dragged)
+        gateway.clearWrites()
+
+        gateway.hideFrames.insert(middle)
+        controller.mouseLifted()
+
+        let edge = bounds.minX + 0.8 * bounds.width
+        XCTAssertTrue(
+            gateway.writes.contains {
+                $0.handle == right && abs($0.frame.minX - edge) <= 0.5
+            },
+            "release maps every rect even when the achieved frame is unreadable")
+    }
+
     func testResizeThatEndsOnTheTileIssuesNoWrites() {
         let middle = tileFocused(.sixthMiddle)
         _ = tileFocused(.sixthRight)
