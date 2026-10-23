@@ -61,15 +61,15 @@
  ],
  [
   "Layout.swift",
-  "empty space defaults to quarters",
-  "occupantBySlot.keys.first.map(\\.layout) ?? .sixths",
-  "occupantBySlot.keys.first.map(\\.layout) ?? .quarters"
+  "fresh canvas defaults to quarters",
+  "    init(layout: LayoutKind = .sixths) {",
+  "    init(layout: LayoutKind = .quarters) {"
  ],
  [
   "Layout.swift",
-  "windowsToRestore keeps the requester (self-evicts)",
-  "            return evicting.filter { $0 != requester }",
-  "            return evicting"
+  "plan's blockers include the requester (self-evicts)",
+  "            .filter { $0.value != window && $0.key.overlaps(slot) }",
+  "            .filter { $0.key.overlaps(slot) }"
  ],
  [
   "Layout.swift",
@@ -583,15 +583,15 @@
  ],
  [
   "TilingController.swift",
-  "chapter restoration ignores the other layout when admitting blockers",
-  "            where slot.overlaps(evicted.slot) || slot.layout != evicted.slot.layout {",
-  "            where slot.overlaps(evicted.slot) {"
+  "undo reconciles a canvas that already shows the chapter's layout (untiles bystanders)",
+  "            let current = directory.storedCanvas(for: destination)?.state.layout ?? .sixths\n            guard current != groupLayout else { continue }",
+  "            let current = directory.storedCanvas(for: destination)?.state.layout ?? .sixths\n            guard true else { continue }"
  ],
  [
   "TilingController.swift",
   "undo reports fully restored despite a refused frame",
-  "        return restored > 0 && failures.isEmpty",
-  "        return restored > 0"
+  "        return (restored > 0 || layoutRestored != nil) && failures.isEmpty",
+  "        return restored > 0 || layoutRestored != nil"
  ],
  [
   "TilingController.swift",
@@ -607,9 +607,9 @@
  ],
  [
   "TilingSpace.swift",
-  "restore ignores the requester's retained layout (two layouts on one canvas)",
+  "retained requester's visible slot not respected (evictee overwrites it)",
   "                $0.overlaps(entry.slot) || $0.layout != entry.slot.layout",
-  "                $0.overlaps(entry.slot)"
+  "                _ = $0\n                return false"
  ],
  [
   "TilingSpace.swift",
@@ -862,5 +862,35 @@
   "refused clamp repair reported as written (placement trusts a frame that did not land)",
   "                seedBaseline(id, gateway.frame(of: handle) ?? applied)\n                log(\"write win\\(id) clamp repair refused target=\\(repinned)\")\n                return .refused",
   "                seedBaseline(id, gateway.frame(of: handle) ?? applied)\n                log(\"write win\\(id) clamp repair refused target=\\(repinned)\")\n                return .written"
+ ],
+ [
+  "Layout.swift",
+  "quarters Top Left key maps to Top Right",
+  "            SlotGeometry(layout: .quarters, key: .topLeft, columns: 0..<2, rows: 0..<1)",
+  "            SlotGeometry(layout: .quarters, key: .topRight, columns: 0..<2, rows: 0..<1)"
+ ],
+ [
+  "Layout.swift",
+  "layout writer ignores the new layout",
+  "        layout = new\n    }",
+  "        _ = new\n    }"
+ ],
+ [
+  "TilingController.swift",
+  "switch key targets the layout already shown",
+  "        let target = (directory.storedCanvas(for: space)?.state.layout ?? .sixths).other",
+  "        let target = (directory.storedCanvas(for: space)?.state.layout ?? .sixths)"
+ ],
+ [
+  "TilingSpace.swift",
+  "switch pushes no undo chapter",
+  "        pushUndo(snapshot: snapshot, requester: nil)",
+  "        pushUndo(snapshot: nil, requester: nil)"
+ ],
+ [
+  "TilingController.swift",
+  "inert key reports it performed",
+  "            canvas: space, performed: false, notice: sentence, announcement: sentence)",
+  "            canvas: space, performed: true, notice: sentence, announcement: sentence)"
  ]
 ]

@@ -297,6 +297,33 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertNil(canvas.error)
     }
 
+    func testRefusedFreshRequesterKeepsItsSlotAgainstTheEvictee() {
+        // A fresh requester takes topLeft from A, so B visibly holds a slot
+        // A's chapter also names. B's app refuses undo's pre-tile restore,
+        // so B keeps topLeft; the chapter must not put A back on top of it.
+        harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let requester = harness.addFocusedWindow(
+            frame: CGRect(x: 90, y: 90, width: 700, height: 500))
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(
+            canvas.state.occupant(of: .topLeft).map { canvas.handle(of: $0) }, requester)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1, "the evictee left the board")
+
+        gateway.refuseNextWrites(requester)
+        XCTAssertFalse(
+            controller.undoLastDisplacement(),
+            "the refused requester and the blocked evictee fail the chapter")
+
+        XCTAssertEqual(
+            canvas.state.occupant(of: .topLeft).map { canvas.handle(of: $0) }, requester,
+            "the refused fresh requester keeps the slot it visibly holds")
+        XCTAssertEqual(
+            canvas.state.tiledWindows.count, 1,
+            "the evictee never overwrites the retained requester")
+        XCTAssertNotNil(canvas.error, "the blocked evictee is narrated as a failure")
+    }
+
     func testRefusedRequesterUndoConsumesItsChapterOnce() {
         // The refusal does not leave the chapter on the stack for an
         // implicit retry: the next press reports the empty history and

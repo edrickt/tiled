@@ -93,4 +93,15 @@ enum SlotKey: String, CaseIterable, Hashable {
     static var quartersInert: [SlotKey] {
         allCases.filter { $0.slot(in: .quarters) == nil }
     }
+
+    /// The storage names the retired quarter hotkeys used. The shared keys
+    /// inherit the sixths names (see `storageKey`), so the six old quarter
+    /// names are the only entries a launch must delete: they no longer name
+    /// any action, and leaving them would make a future slot-key storage
+    /// change collide with stale overrides. One-way and idempotent; no
+    /// marker or version key, because a missing entry is already the end
+    /// state.
+    static let retiredQuarterStorageKeys: [String] = [
+        "topLeft", "topRight", "bottomLeft", "bottomRight", "leftHalf", "rightHalf",
+    ]
 }

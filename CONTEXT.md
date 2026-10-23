@@ -9,8 +9,13 @@ A named tile a window can occupy (Top Left, Left Third, …), defined by its set
 _Avoid_: tile, zone, region
 
 **Layout**:
-One of two mutually exclusive geometries per tiling space: quarters (2×2 plus halves) or sixths (3×2 grid plus thirds and two-thirds). Each display's each Space runs its own. A request in the other layout switches the space's layout, untileing every other tiled window (the requester takes its slot), rather than coexisting.
+One of two mutually exclusive geometries per tiling space: quarters (2×2 plus halves) or sixths (3×2 grid plus thirds and two-thirds). Each display's each Space runs its own, stored on the canvas and kept when the board empties. `⌥⇧\` switches it explicitly: every tiled window on that canvas is restored to its pre-tile frame, and one undo returns the windows and the previous layout. A slot request never switches; a key with no slot in the active layout is inert and names the layout that owns the position. Two layouts never coexist on one canvas.
 _Avoid_: mode, grid
+
+**Slot key**:
+One of the eleven physical ⌥⇧ keys (U I O M , . J K L H ;) that selects the matching position in the canvas's active layout. The same key means Top Left in both layouts; the mapping from key to slot lives in `SlotGeometry.key`, and `SlotKey.slot(in:)` resolves it. A key with no slot in the active layout is inert. Its persisted identity is the sixths slot's raw value; the six retired quarter names are deleted at launch.
+_Avoid_: slot shortcut, layout shortcut, quarter key, sixths key (the key is shared)
+_Code_: `SlotKey`, `SlotGeometry.key`
 
 **Space**:
 A macOS Mission Control desktop, identified by its window-server id. A window belongs to one Space on one display; Spaces exist independently per display when "Displays have separate Spaces" is on.
@@ -76,7 +81,7 @@ Keeping an evictee tiled instead of untangling it. Two rules, step-aside checked
 _Avoid_: relocation, re-assignment, re-seat, displacement (the undo chapter, not the move)
 
 **Displacement (undo chapter)**:
-The undo model's whole destructive event: the windows it evicted, moved (a re-house or swap), or grew by reflow, plus a requester that left its slot. A swap displaces without untiling anyone, so the chapter and its undo copy say "displaced", never "evicted".
+The undo model's whole destructive event: the windows it evicted, moved (a re-house or swap), or grew by reflow, plus a requester that left its slot. A swap displaces without untiling anyone, so the chapter and its undo copy say "displaced", never "evicted". A chapter stores no layout: undo derives the restored layout from the chapter's slots, so a switch chapter puts back the previous layout with its windows.
 _Avoid_: switch (undo covers swaps and evictions too), eviction (one cause and one kind of chapter entry)
 _Code_: `TilingSpace.UndoChapter`, `TilingSpace.displacedCount`
 
@@ -97,12 +102,12 @@ The controller's opaque reference to a managed window, issued by the window gate
 _Avoid_: window id (that's the pure-state key), element
 
 **Parked combo**:
-A hotkey binding the Shortcuts tab holds so a later action can restore it. Disable all parks a layout section's current combos and Enable all restores them, except a slot edited while disabled keeps its edit and drops the stale park; Reset Shortcuts parks one whole pre-reset snapshot instead, and Restore Previous Shortcuts applies it as one state, keeping a clash-skipped entry for a retry. The two namespaces never share a key.
+A hotkey binding the Shortcuts tab holds so a later action can restore it. Disable all parks the eleven slot keys' current combos and Enable all restores them; app actions disable one at a time. Reset Shortcuts parks one whole pre-reset snapshot instead, and Restore Previous Shortcuts applies it as one state, keeping a clash-skipped entry for a retry. The two namespaces never share a key.
 _Avoid_: saved shortcut, stored combo
 _Code_: `ShortcutPark` (both namespaces and the footer's two-state answer), `BulkRestorePlan`, `SnapshotRestorePlan`
 
 **Plan execution**:
-Committing a decided plan (tile, swap, or switch): snapshot, restore, place, rollback, and notice logic. Owned by the tiling space's placement pipeline; the controller keeps focus, pruning, and dispatch.
+Committing a decided plan (tile or swap): snapshot, restore, place, rollback, and notice logic. Owned by the tiling space's placement pipeline; the controller keeps focus, pruning, and dispatch. The layout switch is a separate canvas action, not a `TilePlan` branch.
 _Code_: `TilingSpace.execute(decision:)`
 _Avoid_: placement (which is only the place step), commit
 

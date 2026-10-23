@@ -91,35 +91,45 @@ func focus(_ t: String) {
     usleep(150_000)
 }
 
-let keyFor = ["TL": CGKeyCode(32), "TR": CGKeyCode(31), "BL": CGKeyCode(46),
-              "BR": CGKeyCode(47), "LH": CGKeyCode(38), "RH": CGKeyCode(37)]
+/// The eleven shared ⌥⇧ slot keycodes. Both layouts use the same physical
+/// key: quarters simply has no slot for five of them. The `LH`/`RH` aliases
+/// keep the older quarters case names readable beside the sixths names.
+let slotKeyFor: [String: CGKeyCode] = [
+    "TL": CGKeyCode(32), "TM": CGKeyCode(34), "TR": CGKeyCode(31),
+    "BL": CGKeyCode(46), "BM": CGKeyCode(43), "BR": CGKeyCode(47),
+    "LH": CGKeyCode(38), "L": CGKeyCode(38),
+    "M": CGKeyCode(40),
+    "RH": CGKeyCode(37), "R": CGKeyCode(37),
+    "L2": CGKeyCode(4), "R2": CGKeyCode(41),
+]
 
 func hotkey(_ slot: String) {
     let src = CGEventSource(stateID: .hidSystemState)
     for down in [true, false] {
-        let e = CGEvent(keyboardEventSource: src, virtualKey: keyFor[slot]!, keyDown: down)
-        // Quarters are ⌥⇧⌘ + key; ⌥⇧ + the same key is the sixths family,
-        // and both families use these keys. This suite models quarters
-        // only (see `quads` / `gridRect`), so Command is required: without
-        // it the app tiles sixths and every geometry check fails.
-        e?.flags = [.maskAlternate, .maskShift, .maskCommand]
+        let e = CGEvent(keyboardEventSource: src, virtualKey: slotKeyFor[slot]!, keyDown: down)
+        // One modifier set for both layouts: the same key means the same
+        // position whether the canvas is in quarters or sixths.
+        e?.flags = [.maskAlternate, .maskShift]
         post(e)
     }
 }
 
-/// The sixths family is ⌥⇧ + key (quarters are ⌥⇧⌘ + the same keys).
-let sixthKeyFor = ["TL": CGKeyCode(32), "TM": CGKeyCode(34), "TR": CGKeyCode(31),
-                   "BL": CGKeyCode(46), "BM": CGKeyCode(43), "BR": CGKeyCode(47),
-                   "L": CGKeyCode(38), "M": CGKeyCode(40), "R": CGKeyCode(37),
-                   "L2": CGKeyCode(4), "R2": CGKeyCode(41)]
-
-func sixthHotkey(_ slot: String) {
+/// The explicit layout switch, `⌥⇧\`. A slot key never switches; this is
+/// the one action that does.
+func switchLayout() {
     let src = CGEventSource(stateID: .hidSystemState)
     for down in [true, false] {
-        let e = CGEvent(keyboardEventSource: src, virtualKey: sixthKeyFor[slot]!, keyDown: down)
+        let e = CGEvent(keyboardEventSource: src, virtualKey: 42, keyDown: down) // backslash
         e?.flags = [.maskAlternate, .maskShift]
         post(e)
     }
+    usleep(900_000)
+}
+
+/// The sixths family shares the same physical keys and modifiers as
+/// quarters; this alias keeps the sixths cases reading as sixths.
+func sixthHotkey(_ slot: String) {
+    hotkey(slot)
 }
 
 /// Tiles into a sixths slot and records it. Deliberately not `doTile`:
@@ -461,10 +471,51 @@ for w in hostWindows() {
 }
 usleep(400_000)
 
+// A fresh canvas starts in Sixths. Switch it explicitly to Quarters for
+// the quarters family below; a slot key never switches a layout.
+focus("HOSTA")
+switchLayout()
+
 // MARK: S1 - tile four quarters
 
 doTile("HOSTA", "TL"); doTile("HOSTB", "BL"); doTile("HOSTC", "TR"); doTile("HOSTD", "BR")
 verify("S1 tile four quarters")
+
+// MARK: S1b - a sixths-only key is inert on a quarters canvas
+
+// ⌥⇧I names Top Middle in Sixths, which Quarters has no slot for. The
+// press must change neither the layout nor the occupancy: a switch would
+// untile every window, and a stray placement would move one.
+focus("HOSTA")
+hotkey("TM")
+usleep(900_000)
+verify("S1b sixths-only key changed neither layout nor occupancy")
+
+// MARK: S1c - the explicit switch untiles everyone; one undo restores all
+
+// The switch is the newest chapter, so one undo must put back both the
+// four quarter windows and the quarters layout. `preTile` holds each
+// window's setup frame, captured when S1 first tiled it; after the switch
+// the empty `tiled` map makes `verify` assert exactly those frames.
+let quartersBefore = tiled
+switchLayout()
+tiled = [:]
+verify("S1c switch untiled all four windows to their pre-tile frames")
+pressUndo()
+tiled = quartersBefore
+verify("S1d undo restored the four quarter windows and the layout")
+
+// If the undo restored Quarters, a sixths-only key is inert again. If it
+// left Sixths, the key would tile and move the window off its quarter.
+let aAfterUndo = actualFrame("HOSTA")
+focus("HOSTA")
+hotkey("TM")
+usleep(900_000)
+if let aAfterUndo, let aNow = actualFrame("HOSTA"), close(aNow, aAfterUndo) {
+    pass += 1; print("PASS S1e undo restored Quarters: the sixths-only key is inert")
+} else {
+    fail += 1; print(">>>> FAILED S1e undo did not restore Quarters")
+}
 
 // MARK: S2 - column drag via BL right edge
 
@@ -637,14 +688,15 @@ tiled["HOSTA"] = "TL"
 tiled["HOSTB"] = "BL"
 verify("S18c undo returned A and B to their slots and C to its pre-tile frame")
 
-// MARK: S19 - sixths: the switch, the geometry, and per-third rows
+// MARK: S19 - sixths: the explicit switch, the geometry, and per-third rows
 
-// Requesting a sixths slot on a quarters canvas switches that canvas's
-// layout. The board is cleared first so nothing is untiled by the switch
-// and each placement's frame is the only thing under test.
+// The explicit ⌥⇧\ switch changes the layout; a slot press never does. The
+// board is cleared first so nothing is untiled by the switch and each
+// placement's frame is the only thing under test.
 evict("HOSTA"); evict("HOSTB"); evict("HOSTC")
 verify("S19a board cleared before the layout switch")
-doTileSixths("HOSTA", "TL", "sixthTopLeft") // also switches quarters -> sixths
+switchLayout() // quarters -> sixths, explicitly
+doTileSixths("HOSTA", "TL", "sixthTopLeft")
 doTileSixths("HOSTB", "TM", "sixthTopMiddle")
 doTileSixths("HOSTC", "TR", "sixthTopRight")
 verify("S19b switched to sixths: three top sixths at equal thirds")

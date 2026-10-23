@@ -153,6 +153,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // done and it must not linger over the working app.
         permissionWindowController?.close()
         permissionWindowController = nil
+        // Retire the old quarter hotkey namespace once, before the service
+        // reads the store: the shared keys inherit the sixths storage names,
+        // so only the six quarter overrides, section parks, and reset entries
+        // are deleted. One-way and idempotent; no marker or version key.
+        hotkeyStore.removeRetiredSlotBindings()
+        ShortcutPark().removeRetiredSlotParks()
         let service = HotkeyService(store: hotkeyStore)
         // One entry point for every global hotkey, slot or app action. The
         // Carbon router parses and hops; this closure owns the action route,

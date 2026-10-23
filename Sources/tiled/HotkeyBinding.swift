@@ -256,6 +256,15 @@ final class HotkeyStore {
         }
     }
 
+    /// Deletes the retired quarter hotkey overrides. The shared keys persist
+    /// under the sixths storage names, so only the six old quarter names
+    /// are removed; running it again finds nothing and is a no-op.
+    func removeRetiredSlotBindings() {
+        for storageKey in SlotKey.retiredQuarterStorageKeys {
+            defaults.removeObject(forKey: Self.prefix + storageKey)
+        }
+    }
+
     /// Stores `candidate` for `action` unless any other action — slot or
     /// app action — already uses it. Rejected candidates leave the store
     /// untouched so the caller can shake and keep the old binding.

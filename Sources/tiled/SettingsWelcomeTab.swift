@@ -210,7 +210,7 @@ final class WelcomeTab: NSObject {
         if let topLeft {
             stepsField?.stringValue =
                 "1. Click any window to focus it.\n" +
-                "2. Press \(topLeft) to tile it Top Left.\n" +
+                "2. Press \(topLeft) to tile it into the top-left slot.\n" +
                 "3. Press it again; the window stays in its slot.\n" +
                 "Every slot is also in the menu bar → Tile Focused Window."
         } else if failed.contains(.slotKey(.topLeft)) {

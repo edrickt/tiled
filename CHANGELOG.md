@@ -6,6 +6,29 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Eleven shared ⌥⇧ slot keys (U I O M , . J K L H ;) that mean the
+  matching position in whichever layout the canvas is showing, plus ⌥⇧\
+  to switch the focused canvas's layout explicitly. A switch untiles every
+  tiled window there and restores each to its pre-tile frame; one undo
+  returns the windows and the previous layout. The layout is a stored
+  canvas choice, so an empty canvas keeps it, and a key with no slot in the
+  active layout is inert and says where it belongs. Tiled now registers 17
+  hotkeys: 11 slot keys and 6 app actions.
+- The Shortcuts tab shows App Actions (6) and Slot Keys (11), with one bulk
+  Enable/Disable all for the eleven slot keys.
+
+### Changed
+
+- **Breaking:** quarter-specific hotkey overrides and parked combos are
+  retired. The shared keys persist under the sixths slot names, so sixths
+  overrides, parks, and reset backups survive untouched; the six old
+  quarter storage names (topLeft, topRight, bottomLeft, bottomRight,
+  leftHalf, rightHalf) are deleted once at launch. Quarter placements now
+  use the same ⌥⇧ modifiers as sixths rather than ⌥⇧⌘, and a slot press no
+  longer switches layouts.
+
 ### Fixed
 
 - A title-bar drag whose first tick carries a size change the app absorbed

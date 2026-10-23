@@ -114,6 +114,17 @@ final class ShortcutPark {
         anyResetBackup() ? "Restore Previous Shortcuts" : "Reset Shortcuts"
     }
 
+    /// Deletes both park namespaces under the retired quarter storage names.
+    /// The shared slot keys park under the sixths names, which stay
+    /// untouched; running it again finds nothing and is a no-op.
+    func removeRetiredSlotParks() {
+        for storageKey in SlotKey.retiredQuarterStorageKeys {
+            for kind in ParkKind.allCases {
+                store.removeObject(forKey: kind.keyPrefix + storageKey)
+            }
+        }
+    }
+
     /// The Enable-all decision for one section. `actions` is the section's
     /// row list (the app exposes one bulk control, over the eleven slot
     /// keys). `current` is the tab's full binding table (every action), so
