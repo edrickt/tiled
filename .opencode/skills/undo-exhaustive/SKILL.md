@@ -74,8 +74,8 @@ From the repo root:
 TILED_EXHAUSTIVE=1 swift test --filter ExhaustiveUndoTests/testEveryReachableBoardUndoesItsLastDisplacement
 ```
 
-It takes about 7 seconds. Plain `swift test` skips it through the environment
-gate, so the hermetic suite stays at 833 tests and `make check-counts` agrees.
+It takes about 7 seconds. Plain `make check` skips it through the environment
+gate, so the published unit count is unchanged and the count check agrees.
 The check prints:
 
 ```text

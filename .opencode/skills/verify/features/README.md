@@ -7,7 +7,7 @@ This directory is the maintained source for verifying Tiled's user-facing behavi
 - A logged-in GUI session on the machine's console. The live suites post real mouse and keyboard events and cannot run over SSH or in CI.
 - Accessibility permission for the terminal that runs opencode. `doctor.sh` checks it.
 - `/Applications/Tiled.app` is not running. `run-repro.sh` refuses while it is; `run-focus-loop.sh` stops it and loses its in-memory layout state.
-- The checkout builds: `swift test` passes (922 tests at the time of writing, one opt-in check skipped).
+- The checkout builds: `make check` passes (one opt-in check skipped).
 - A display at least about 1512x982, or a run that checks frames before trusting a focus click. The suite parks windows at fixed coordinates: on a 1120x1050 display `HOSTC` and `HOSTD` start partly off-screen and `HOSTB`'s center sits under `HOSTC`.
 - Start every live run through `./scripts/run-repro.sh` or `./scripts/run-focus-loop.sh`. Never drive an instance you did not start.
 

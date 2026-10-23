@@ -15,18 +15,18 @@ windows on a real screen and reading their AX frames back.
 Hermetic gate first, from the repo root:
 
 ```sh
-swift test
+make check
 ```
 
-It runs 833 tests in about 4 seconds with no AX, no window server, and no
+It runs the full suite in about 5 seconds with no AX, no window server, and no
 runloop. One is an opt-in exhaustive check (`TILED_EXHAUSTIVE=1`); plain
-`swift test` skips it. A green unit suite is necessary, not proof of the live adapter.
+`make check` skips it. A green unit suite is necessary, not proof of the live adapter.
 
 For live behavior, start through the repo harness, never by pointing a suite
 at an instance someone else started:
 
 ```sh
-./scripts/run-repro.sh                            # full suite (39 cases)
+./scripts/run-repro.sh                            # full live suite
 ./scripts/run-repro.sh tools/repro/driver.swift   # smaller focused driver
 ./scripts/run-focus-loop.sh tools/repro/window-lifecycle-repro.swift
 ```
@@ -79,7 +79,7 @@ internal setters or test-only endpoints for the hotkey.
 
 Run the suite that covers the feature, not the nearest passing one:
 
-- `./scripts/run-repro.sh` - quarters and sixths end to end, 39 cases.
+- `./scripts/run-repro.sh` - quarters and sixths end to end.
 - `./scripts/run-repro.sh tools/repro/driver.swift` - two windows, one
   shared-edge drag.
 - `./scripts/run-repro.sh tools/repro/multi-display-suite.swift` - two
