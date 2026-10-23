@@ -250,7 +250,8 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (922 tests)
+make check             # unit suite (922 tests) and the published count
+make test              # same suite with the full transcript
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -280,11 +281,13 @@ Quitting Tiled leaves your windows where they are.
 
 ## Testing
 
-Three layers, from hermetic to physical:
+The layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (922 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (922 tests) | `make check` | nothing; ~5s, no AX, no runloop |
+| Focused tests | `swift test --filter <Suite>` | nothing |
+| Full transcript | `make test` | nothing |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; a few minutes for the full table (parallel workers) |
@@ -316,7 +319,8 @@ validation stays in the accompanying manual checklist. Run these before a
 release; they cannot run in CI (they move the real cursor and need a TCC grant).
 
 ```
-swift test                              # the gate for every change
+make check                              # the gate for every change
+swift test --filter <Suite>             # focused inner loop
 swift tools/repro/probe-spaces.swift     # what the live suites can cover here
 ./scripts/run-repro.sh                  # pre-release live check
 ./scripts/run-repro.sh tools/repro/multi-display-suite.swift  # two displays

@@ -18,7 +18,14 @@ differently or the glossary has a real gap.
 
 ### Validation runs
 
-Run `swift build`, `swift test`, and `./scripts/check-test-count.sh`
-after each unit. Run the full mutation table (`python3
-tools/mutation/mutate.py`) once at the end, before push or hand-off,
-not after every unit.
+Run `swift build` and `make check` after each unit. `make check` runs the
+suite once through `scripts/test.sh` and prints only failures and the
+summary. Inside a unit, run `swift test --filter <Suite>`; do not put a
+full suite transcript in context.
+
+Run the full mutation table (`python3 tools/mutation/mutate.py`) once at
+the end, before push or hand-off, not after every unit. `--since <base>`
+scopes a mid-stage run to the sources that stage changed.
+
+This section is the only gate policy. Specs, tickets, and reports point
+here; they do not restate or add gates.
