@@ -16,8 +16,9 @@ final class ControllerBulkOperationTests: XCTestCase {
         visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
         name: "Display 1")
 
-    private var gateway: FakeWindowGateway!
-    private var controller: TilingController!
+    private var harness: ControllerHarness!
+    private var gateway: FakeWindowGateway { harness.gateway }
+    private var controller: TilingController { harness.controller }
     private var changeCount = 0
     /// Block-based observers returned by addObserver(forName:) must be
     /// removed explicitly or they leak for the process lifetime.
@@ -25,14 +26,11 @@ final class ControllerBulkOperationTests: XCTestCase {
 
     /// The canvas the test's single display tiles onto: reads go through
     /// the same accessor actions do.
-    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
+    private var canvas: TilingSpace { harness.canvas }
 
     override func setUp() {
         super.setUp()
-        gateway = FakeWindowGateway()
-        controller = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            screens: { [Self.screen] }, deathConfirmation: 0)
+        harness = ControllerHarness(screens: [Self.screen], deathConfirmation: 0)
         controller.onChange = { [weak self] in self?.changeCount += 1 }
     }
 
@@ -42,15 +40,6 @@ final class ControllerBulkOperationTests: XCTestCase {
         }
         observers = []
         super.tearDown()
-    }
-
-    @discardableResult
-    private func addFocusedWindow(
-        frame: CGRect = CGRect(x: 0, y: 0, width: 800, height: 600)
-    ) -> WindowHandle {
-        let handle = gateway.addWindow(frame: frame)
-        gateway.focused = handle
-        return handle
     }
 
     /// The rect the controller would write for `slot` right now: the live
@@ -63,7 +52,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     // MARK: Untile restores frames
 
     func testUntileRestoresPreTileFrame() {
-        let handle = addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
+        let handle = harness.addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
         let original = gateway.frame(of: handle)!
         controller.handle(slot: .topLeft)
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
@@ -82,7 +71,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testUntileAllRestoresEveryWindow() {
-        let a = addFocusedWindow(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
+        let a = harness.addFocusedWindow(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
         let aOriginal = gateway.frame(of: a)!
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 500, y: 100, width: 700, height: 500))
@@ -101,7 +90,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     // MARK: Layout-switch undo lifecycle
 
     func testUndoLayoutSwitchReturnsEvictedAndUntilesRequester() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         let aOriginal = gateway.frame(of: a)!
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
@@ -140,7 +129,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testUndoIsSingleStep() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
@@ -159,7 +148,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testNewSwitchPushesHistoryInsteadOfReplacingIt() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
@@ -233,7 +222,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testEmptyUndoStackAnswersInsteadOfSilence() {
-        addFocusedWindow()
+        harness.addFocusedWindow()
         XCTAssertTrue(canvas.undoStack.isEmpty)
         let receipt = controller.undoAction()
         XCTAssertFalse(receipt.performed, "an empty undo still answers")
@@ -241,7 +230,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testSwitchingAloneOffersNoUndo() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
 
         // The requester moves; nobody is evicted, so there is nothing to
@@ -256,7 +245,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testUndoAfterRequesterDied() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
@@ -276,7 +265,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testUndoAfterEvicteeDied() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
@@ -295,7 +284,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testPreTileFrameSurvivesLayoutSwitches() {
-        let handle = addFocusedWindow(frame: CGRect(x: 21, y: 43, width: 510, height: 320))
+        let handle = harness.addFocusedWindow(frame: CGRect(x: 21, y: 43, width: 510, height: 320))
         let original = gateway.frame(of: handle)!
         controller.handle(slot: .topLeft)
 
@@ -315,7 +304,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testUntileAllStartsItsOwnUndoChapter() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
@@ -355,7 +344,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testSlotAlreadyTiledReturnsAReceiptThatNamesTheSlot() {
-        addFocusedWindow()
+        harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
 
         let receipt = controller.handle(slot: .topLeft)
@@ -365,7 +354,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testSlotRefusedReturnsAReceiptThatNamesTheWindow() {
-        let handle = addFocusedWindow()
+        let handle = harness.addFocusedWindow()
         gateway.refuseNextWrites(handle)
 
         let receipt = controller.handle(slot: .topLeft)
@@ -377,7 +366,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testUntileWithRefusedRestoreReportsTheWindow() {
-        let handle = addFocusedWindow()
+        let handle = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         gateway.refuseNextWrites(handle)
 
@@ -391,7 +380,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testUntileAllWithRefusedRestoresReportsPlural() {
-        addFocusedWindow()
+        harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
@@ -408,7 +397,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testNoopHotkeyPreservesNotices() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
@@ -428,7 +417,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testFocusBringsWindowForwardAndIgnoresUnknownIDs() {
-        addFocusedWindow()
+        harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
@@ -443,7 +432,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testSilentlyIgnoringAppTilesStatefully() {
-        let handle = addFocusedWindow()
+        let handle = harness.addFocusedWindow()
         let original = gateway.frame(of: handle)!
         gateway.silentIgnore.insert(handle)
 
@@ -458,7 +447,7 @@ final class ControllerBulkOperationTests: XCTestCase {
 
     func testTiledWindowsInfoIsSortedBySlot() {
         // Tile in reverse slot order; presentation must sort by rawValue.
-        addFocusedWindow()
+        harness.addFocusedWindow()
         controller.handle(slot: .topRight)
         let b = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
         gateway.focused = b
@@ -472,7 +461,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     // MARK: Reset dividers
 
     func testResetDividersRestoresDefaultsAndRetiles() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         // Drag TL's right edge (echo tick, then escape) to move columnSplit.
         var echo = gateway.frame(of: a)!
@@ -504,7 +493,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testResetOrRestoreSplittersReturnsOneReceiptAndKeepsTheBackup() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         var echo = gateway.frame(of: a)!
         echo.size.width -= 10
@@ -530,7 +519,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testResetOrRestoreSplittersReportsARefusalAsNotPerformed() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         var echo = gateway.frame(of: a)!
         echo.size.width -= 10
@@ -549,7 +538,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testResetDividersReportsRefusals() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
         gateway.focused = b
@@ -573,7 +562,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testResetDividersReportsRefusalsInPlural() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
         gateway.focused = b
@@ -606,7 +595,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     // MARK: Ghost cleanup & screen changes
 
     func testPruneDropsDeadWindows() {
-        let handle = addFocusedWindow()
+        let handle = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
 
@@ -625,7 +614,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         // The OS's AXUIElementDestroyed notification is the window's own
         // report: run the death check now, and when it agrees, release
         // without waiting for either.
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
         gateway.focused = b
@@ -645,7 +634,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         // elements while the window lives (display changes are the
         // known live case). The notification only accelerates the check;
         // a live verdict must not untile anything.
-        let handle = addFocusedWindow()
+        let handle = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
 
         gateway.simulateDestroyed(handle)
@@ -658,7 +647,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         // mid-teardown and the death standard answers unknown. A
         // destroyed report must not force a prune the standard still
         // calls a maybe.
-        let handle = addFocusedWindow()
+        let handle = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         gateway.busy.insert(handle)
 
@@ -695,7 +684,7 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testScreenChangeReassertsLayout() {
-        let a = addFocusedWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
         gateway.focused = b
