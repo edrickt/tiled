@@ -291,6 +291,30 @@ final class SpaceIndependenceTests: XCTestCase {
             "the glyph key stays on the cursor's display")
     }
 
+    /// The Switch Layout hotkey acts on the cursor's display's canvas,
+    /// not the focused window's: the cursor's display switches even when
+    /// keyboard focus sits on another display, and that display's canvas
+    /// is untouched.
+    func testSwitchLayoutHotkeyFollowsTheCursorDisplay() {
+        let (first, _) = setUpTwoDisplaysWithFocusOnTheFirst()
+        harness.fireCursorMove(to: CGPoint(x: 2500, y: 500))
+        XCTAssertEqual(controller.cursorTilingSpace.screen, Self.otherDisplay.id)
+
+        let receipt = controller.handleSwitchLayout()
+
+        XCTAssertEqual(
+            controller.canvas(for: Self.otherDisplay.id).state.layout, .sixths,
+            "the hotkey switched the cursor's display's canvas")
+        XCTAssertEqual(
+            controller.canvas(for: Self.display.id).state.layout, .quarters,
+            "the focused display's canvas is untouched by the hotkey")
+        XCTAssertEqual(
+            controller.canvas(for: Self.display.id).state.occupant(of: .topLeft),
+            controller.registeredID(for: first),
+            "the focused canvas keeps its occupancy")
+        XCTAssertTrue(receipt.performed)
+    }
+
     func testHiddenSpaceWindowsStayManagedButLeaveTheMenu() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)
