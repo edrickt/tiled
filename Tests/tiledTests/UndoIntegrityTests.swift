@@ -16,12 +16,13 @@ final class UndoIntegrityTests: XCTestCase {
         visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
         name: "Display 1")
 
-    private var gateway: FakeWindowGateway!
-    private var controller: TilingController!
+    private var harness: ControllerHarness!
+    private var gateway: FakeWindowGateway { harness.gateway }
+    private var controller: TilingController { harness.controller }
 
     /// The canvas the test's single display tiles onto: reads go through
     /// the same accessor actions do.
-    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
+    private var canvas: TilingSpace { harness.canvas }
 
     /// One canvas of a controller built inside a test (the setup
     /// controller is not always the one acting).
@@ -31,29 +32,17 @@ final class UndoIntegrityTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        gateway = FakeWindowGateway()
-        controller = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            screens: { [Self.main] }, deathConfirmation: 0)
-    }
-
-    @discardableResult
-    private func focusNewWindow(
-        _ frame: CGRect = CGRect(x: 0, y: 0, width: 800, height: 600)
-    ) -> WindowHandle {
-        let handle = gateway.addWindow(frame: frame)
-        gateway.focused = handle
-        return handle
+        harness = ControllerHarness(screens: [Self.main], deathConfirmation: 0)
     }
 
     /// A swap chapter with one evictee: the requester holds topLeft, the
     /// evictee holds rightHalf, and the requester requests rightHalf.
     private func makeSwapChapter() -> (requester: WindowHandle, evictee: WindowHandle) {
-        let requester = focusNewWindow()
+        let requester = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
-        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+        harness.addFocusedWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         controller.handle(slot: .bottomLeft)
-        let evictee = focusNewWindow(CGRect(x: 900, y: 0, width: 800, height: 600))
+        let evictee = harness.addFocusedWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
         controller.handle(slot: .rightHalf)
         gateway.focused = requester
         controller.handle(slot: .rightHalf)
@@ -65,11 +54,11 @@ final class UndoIntegrityTests: XCTestCase {
     /// refuse or kill.
     @discardableResult
     private func makeSwitchEvictingTwoQuads() -> WindowHandle {
-        let first = focusNewWindow()
+        let first = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
-        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+        harness.addFocusedWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         controller.handle(slot: .topRight)
-        focusNewWindow(CGRect(x: 1200, y: 80, width: 500, height: 400))
+        harness.addFocusedWindow(frame: CGRect(x: 1200, y: 80, width: 500, height: 400))
         controller.handle(slot: .sixthLeft)
         return first
     }
@@ -100,11 +89,11 @@ final class UndoIntegrityTests: XCTestCase {
         // (Before the step-aside rule existed, b's request untiled a
         // and this chapter dance instead pinned undo stepping c aside
         // out of a's returning half.)
-        let a = focusNewWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .leftHalf)
-        let b = focusNewWindow(CGRect(x: 50, y: 50, width: 700, height: 500))
+        let b = harness.addFocusedWindow(frame: CGRect(x: 50, y: 50, width: 700, height: 500))
         controller.handle(slot: .topLeft)
-        let c = focusNewWindow(CGRect(x: 60, y: 60, width: 600, height: 400))
+        let c = harness.addFocusedWindow(frame: CGRect(x: 60, y: 60, width: 600, height: 400))
         controller.handle(slot: .bottomLeft)
 
         controller.undoLastDisplacement()
@@ -122,11 +111,11 @@ final class UndoIntegrityTests: XCTestCase {
     }
 
     func testUndoOfLayoutSwitchDisplacesTheOtherLayoutsOccupants() {
-        let a = focusNewWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft) // quarters
-        let b = focusNewWindow(CGRect(x: 50, y: 50, width: 700, height: 500))
+        let b = harness.addFocusedWindow(frame: CGRect(x: 50, y: 50, width: 700, height: 500))
         controller.handle(slot: .sixthTopLeft) // switch; chapter: a -> topLeft
-        let c = focusNewWindow(CGRect(x: 60, y: 60, width: 600, height: 400))
+        let c = harness.addFocusedWindow(frame: CGRect(x: 60, y: 60, width: 600, height: 400))
         controller.handle(slot: .sixthBottomRight) // sixths, no chapter
 
         controller.undoLastDisplacement()
@@ -150,11 +139,11 @@ final class UndoIntegrityTests: XCTestCase {
         // right third requests the right two-thirds and its app refuses.
         // The re-house must not happen: without the requester's placement
         // there is no room to make and no chapter to promise.
-        focusNewWindow(CGRect(x: 10, y: 10, width: 400, height: 300))
+        harness.addFocusedWindow(frame: CGRect(x: 10, y: 10, width: 400, height: 300))
         controller.handle(slot: .sixthBottomLeft)
-        let middle = focusNewWindow(CGRect(x: 20, y: 20, width: 400, height: 300))
+        let middle = harness.addFocusedWindow(frame: CGRect(x: 20, y: 20, width: 400, height: 300))
         controller.handle(slot: .sixthMiddle)
-        let right = focusNewWindow(CGRect(x: 30, y: 30, width: 400, height: 300))
+        let right = harness.addFocusedWindow(frame: CGRect(x: 30, y: 30, width: 400, height: 300))
         controller.handle(slot: .sixthRight)
 
         gateway.refuseNextWrites(right)
@@ -177,9 +166,9 @@ final class UndoIntegrityTests: XCTestCase {
     }
 
     func testRefusedPlacementAfterEvictionsKeepsTheDestructionUndoable() {
-        let w = focusNewWindow()
+        let w = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
-        let x = focusNewWindow(CGRect(x: 40, y: 40, width: 500, height: 400))
+        let x = harness.addFocusedWindow(frame: CGRect(x: 40, y: 40, width: 500, height: 400))
 
         gateway.refuseNextWrites(x)
         controller.handle(slot: .leftHalf) // evicts w, then refuses x
@@ -248,11 +237,11 @@ final class UndoIntegrityTests: XCTestCase {
         // restore leaves it owning the slot it visibly holds. No evictee
         // may return into that slot or an abandoned layout: the undo is
         // partial, reported as a failure, never as success.
-        focusNewWindow()
+        harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
-        focusNewWindow(CGRect(x: 900, y: 50, width: 600, height: 450))
+        harness.addFocusedWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         controller.handle(slot: .topRight)
-        let requester = focusNewWindow(CGRect(x: 1200, y: 80, width: 500, height: 400))
+        let requester = harness.addFocusedWindow(frame: CGRect(x: 1200, y: 80, width: 500, height: 400))
         controller.handle(slot: .sixthLeft) // switch evicts both quarters windows
 
         gateway.refuseNextWrites(requester)
@@ -337,9 +326,9 @@ final class UndoIntegrityTests: XCTestCase {
         // requests the right two-thirds. After the request the free cells
         // are exactly the left third, so the evicted right sixth should
         // re-house there instead of untangling.
-        let left = focusNewWindow()
+        let left = harness.addFocusedWindow()
         controller.handle(slot: .sixthsLeftTwoThirds)
-        let right = focusNewWindow(CGRect(x: 50, y: 50, width: 500, height: 400))
+        let right = harness.addFocusedWindow(frame: CGRect(x: 50, y: 50, width: 500, height: 400))
         controller.handle(slot: .sixthRight)
         gateway.focused = left
 
@@ -391,12 +380,12 @@ final class UndoIntegrityTests: XCTestCase {
     /// nothing re-adopts the old id.
     func testFailedUndoRestoreClearsThePendingDeathClock() {
         var awake: TimeInterval = 0
-        let localGateway = FakeWindowGateway()
-        let localController = TilingController(
-            gateway: localGateway, pruneInterval: nil,
-            deathConfirmation: 3,
+        let localHarness = ControllerHarness(
+            screens: [Self.main], deathConfirmation: 3,
             now: { Date(timeIntervalSince1970: 0) },
             uptime: { awake })
+        let localGateway = localHarness.gateway
+        let localController = localHarness.controller
         let w = localGateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         localGateway.focused = w
         localController.handle(slot: .topLeft)
@@ -433,9 +422,9 @@ final class UndoIntegrityTests: XCTestCase {
     }
 
     func testUntileAllDropsAChapterItCouldNotRebuild() {
-        let a = focusNewWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
-        let b = focusNewWindow(CGRect(x: 50, y: 50, width: 700, height: 500))
+        let b = harness.addFocusedWindow(frame: CGRect(x: 50, y: 50, width: 700, height: 500))
         controller.handle(slot: .topRight)
         // Every frame read fails: the restore writes still succeed (the
         // stored pre-tile frames are all the restore needs), but no
@@ -463,11 +452,10 @@ final class UndoIntegrityTests: XCTestCase {
             frame: CGRect(x: 1920, y: 0, width: 1920, height: 1080),
             visibleFrame: CGRect(x: 1920, y: 0, width: 1920, height: 1080),
             name: "Display 2")
-        let screens = [left, right]
-        let localGateway = FakeWindowGateway()
-        let localController = TilingController(
-            gateway: localGateway, pruneInterval: nil,
-            screens: { screens }, deathConfirmation: 0)
+        let localHarness = ControllerHarness(
+            screens: [left, right], deathConfirmation: 0)
+        let localGateway = localHarness.gateway
+        let localController = localHarness.controller
         let leftHandle = localGateway.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
         localGateway.focused = leftHandle
         localController.handle(slot: .topLeft)
@@ -493,9 +481,9 @@ final class UndoIntegrityTests: XCTestCase {
     // MARK: Adapter cleanup contract and transient death
 
     func testConfirmedDeathReleasesTheHandleButUntileDoesNot() {
-        focusNewWindow()
+        harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
-        let b = focusNewWindow(CGRect(x: 50, y: 50, width: 700, height: 500))
+        let b = harness.addFocusedWindow(frame: CGRect(x: 50, y: 50, width: 700, height: 500))
         controller.handle(slot: .topRight)
 
         controller.untile(window: 1)
@@ -509,7 +497,7 @@ final class UndoIntegrityTests: XCTestCase {
     }
 
     func testDestroyNotificationReleasesTheHandle() {
-        let a = focusNewWindow()
+        let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         gateway.kill(a)
         gateway.simulateDestroyed(a)
@@ -521,10 +509,11 @@ final class UndoIntegrityTests: XCTestCase {
     func testTransientDeadReadingRecoversBeforeTheConfirmationWindow() {
         var clock = Date(timeIntervalSince1970: 0)
         var awake: TimeInterval = 0
-        let localGateway = FakeWindowGateway()
-        let localController = TilingController(
-            gateway: localGateway, pruneInterval: nil,
-            deathConfirmation: 3, now: { clock }, uptime: { awake })
+        let localHarness = ControllerHarness(
+            screens: [Self.main], deathConfirmation: 3,
+            now: { clock }, uptime: { awake })
+        let localGateway = localHarness.gateway
+        let localController = localHarness.controller
         let a = localGateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         localGateway.focused = a
         localController.handle(slot: .topLeft)
@@ -560,9 +549,9 @@ final class UndoIntegrityTests: XCTestCase {
     // MARK: Partial writes and write counts
 
     func testPartialSizeRefusalLeavesNoCommittedState() {
-        focusNewWindow()
+        harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
-        let x = focusNewWindow(CGRect(x: 40, y: 40, width: 500, height: 400))
+        let x = harness.addFocusedWindow(frame: CGRect(x: 40, y: 40, width: 500, height: 400))
         gateway.refuseSizeWrites.insert(x)
 
         controller.handle(slot: .leftHalf)
@@ -575,7 +564,7 @@ final class UndoIntegrityTests: XCTestCase {
     }
 
     func testRetilingOwnSlotIssuesNoFrameWrite() {
-        focusNewWindow()
+        harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         gateway.clearWrites()
 
@@ -597,14 +586,13 @@ final class UndoIntegrityTests: XCTestCase {
             visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
             name: "Display 1",
             displayID: displayID)
-        let gateway = FakeWindowGateway() // activeSpaces empty: the id is withheld
-        let controller = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            screens: { [screen] }, deathConfirmation: 0)
+        // activeSpaces empty: the id is withheld.
+        let localHarness = ControllerHarness(
+            screens: [screen], deathConfirmation: 0)
         // The canvas windows tiled onto while the Space id was unknown:
         // an explicit key, because the resolved id names a different one.
         let key = TilingSpaceKey(screen: screen.id, space: nil)
-        return (gateway, controller, key, displayID)
+        return (localHarness.gateway, localHarness.controller, key, displayID)
     }
 
     func testWindowTiledWhileTheSpaceWasWithheldStaysReachable() {
@@ -656,11 +644,12 @@ final class UndoIntegrityTests: XCTestCase {
             visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
             name: "Display 1",
             displayID: displayID)
-        let localGateway = FakeWindowGateway()
-        localGateway.activeSpaces = [displayID: spaceA]
-        let localController = TilingController(
-            gateway: localGateway, pruneInterval: nil,
-            screens: { [screen] }, deathConfirmation: 0)
+        let localHarness = ControllerHarness(
+            screens: [screen],
+            activeSpaces: [displayID: spaceA],
+            deathConfirmation: 0)
+        let localGateway = localHarness.gateway
+        let localController = localHarness.controller
         let handle = localGateway.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
         localGateway.focused = handle
         localController.handle(slot: .topLeft)
