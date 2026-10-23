@@ -15,30 +15,18 @@ final class ActionReceiptTests: XCTestCase {
         visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
         name: "Display 1")
 
-    private var gateway: FakeWindowGateway!
-    private var controller: TilingController!
+    private var harness: ControllerHarness!
+    private var gateway: FakeWindowGateway { harness.gateway }
+    private var controller: TilingController { harness.controller }
 
     /// The canvas the test's single display tiles onto: reads go through
     /// the same accessor actions do.
-    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
+    private var canvas: TilingSpace { harness.canvas }
 
     override func setUp() {
         super.setUp()
-        gateway = FakeWindowGateway()
-        controller = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            screens: { [Self.screen] }, deathConfirmation: 0)
+        harness = ControllerHarness(screens: [Self.screen], deathConfirmation: 0)
         controller.onChange = {}
-    }
-
-    @discardableResult
-    private func addFocusedWindow(
-        frame: CGRect = CGRect(x: 0, y: 0, width: 800, height: 600),
-        appName: String? = "TestApp"
-    ) -> WindowHandle {
-        let handle = gateway.addWindow(frame: frame, appName: appName)
-        gateway.focused = handle
-        return handle
     }
 
     private func tiledID(of slot: Slot) -> WindowID {
@@ -53,11 +41,11 @@ final class ActionReceiptTests: XCTestCase {
     /// Left when Mail requests that slot. The evictee keeps its record in
     /// the chapter (not on the canvas), ready for Undo to retile it.
     private func buildEvictionChapter() {
-        addFocusedWindow(appName: "Safari")
+        harness.addFocusedWindow(appName: "Safari")
         controller.handle(slot: .topLeft)
-        addFocusedWindow(appName: "Notes")
+        harness.addFocusedWindow(appName: "Notes")
         controller.handle(slot: .topRight)
-        addFocusedWindow(appName: "Mail")
+        harness.addFocusedWindow(appName: "Mail")
         controller.handle(slot: .topLeft)
         XCTAssertEqual(canvas.displacedCount, 1, "the chapter holds one evictee")
     }
@@ -65,7 +53,7 @@ final class ActionReceiptTests: XCTestCase {
     // MARK: Evict
 
     func testEvictReceiptReportsPerformedWithOneSuccessAnnouncement() {
-        addFocusedWindow(appName: "Safari")
+        harness.addFocusedWindow(appName: "Safari")
         controller.handle(slot: .topLeft)
 
         let receipt = controller.handleEvict()
@@ -87,7 +75,7 @@ final class ActionReceiptTests: XCTestCase {
     }
 
     func testEvictUntiledWindowReceiptAnswersOnce() {
-        addFocusedWindow()
+        harness.addFocusedWindow()
 
         let receipt = controller.handleEvict()
 
@@ -97,7 +85,7 @@ final class ActionReceiptTests: XCTestCase {
     }
 
     func testEvictRefusedRestoreReceiptNamesTheErrorNeverSuccess() {
-        let handle = addFocusedWindow(appName: "Safari")
+        let handle = harness.addFocusedWindow(appName: "Safari")
         controller.handle(slot: .topLeft)
         gateway.refuseNextWrites(handle)
 
@@ -114,9 +102,9 @@ final class ActionReceiptTests: XCTestCase {
     // MARK: Untile All
 
     func testUntileAllReceiptReportsPerformedWithStickyNotice() {
-        addFocusedWindow(appName: "Safari")
+        harness.addFocusedWindow(appName: "Safari")
         controller.handle(slot: .topLeft)
-        addFocusedWindow(appName: "Notes")
+        harness.addFocusedWindow(appName: "Notes")
         controller.handle(slot: .topRight)
 
         let receipt = controller.untileAll()
@@ -139,7 +127,7 @@ final class ActionReceiptTests: XCTestCase {
     }
 
     func testUntileAllRefusedRestoreReceiptNamesTheErrorNeverSuccess() {
-        let handle = addFocusedWindow(appName: "Safari")
+        let handle = harness.addFocusedWindow(appName: "Safari")
         controller.handle(slot: .topLeft)
         gateway.refuseNextWrites(handle)
 
@@ -157,7 +145,7 @@ final class ActionReceiptTests: XCTestCase {
     // MARK: Single-window untile
 
     func testUntileWindowReceiptReportsPerformedWithWindowName() {
-        addFocusedWindow(appName: "Safari")
+        harness.addFocusedWindow(appName: "Safari")
         controller.handle(slot: .topLeft)
         let id = tiledID(of: .topLeft)
 
@@ -170,7 +158,7 @@ final class ActionReceiptTests: XCTestCase {
     }
 
     func testUntileWindowWithoutAppNameUsesWindowFallback() {
-        addFocusedWindow(appName: nil)
+        harness.addFocusedWindow(appName: nil)
         controller.handle(slot: .topLeft)
         let id = tiledID(of: .topLeft)
 
@@ -181,7 +169,7 @@ final class ActionReceiptTests: XCTestCase {
     }
 
     func testUntileWindowOfUntiledWindowReceiptAnswersOnce() {
-        addFocusedWindow(appName: "Safari")
+        harness.addFocusedWindow(appName: "Safari")
 
         let receipt = controller.untile(window: 1)
 
@@ -191,7 +179,7 @@ final class ActionReceiptTests: XCTestCase {
     }
 
     func testUntileWindowOfUntiledWindowLeavesTheStickyNoticeAlone() {
-        addFocusedWindow(appName: "Safari")
+        harness.addFocusedWindow(appName: "Safari")
         controller.handle(slot: .topLeft)
         let id = tiledID(of: .topLeft)
         controller.untileAll()
@@ -207,7 +195,7 @@ final class ActionReceiptTests: XCTestCase {
     }
 
     func testUntileWindowRefusedRestoreReceiptNamesTheErrorNeverSuccess() {
-        let handle = addFocusedWindow(appName: "Safari")
+        let handle = harness.addFocusedWindow(appName: "Safari")
         controller.handle(slot: .topLeft)
         let id = tiledID(of: .topLeft)
         gateway.refuseNextWrites(handle)
@@ -233,10 +221,8 @@ final class ActionReceiptTests: XCTestCase {
             frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
             visibleFrame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
             name: "Display 2")
-        gateway = FakeWindowGateway()
-        controller = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            screens: { [left, right] }, deathConfirmation: 0)
+        harness = ControllerHarness(
+            screens: [left, right], deathConfirmation: 0)
         controller.onChange = {}
 
         // Tile Safari on the second display, then move focus to an untiled
@@ -279,7 +265,7 @@ final class ActionReceiptTests: XCTestCase {
     }
 
     func testUndoEmptyStackReceiptAnswersOnceNeverSuccess() {
-        addFocusedWindow(appName: "Safari")
+        harness.addFocusedWindow(appName: "Safari")
         XCTAssertTrue(canvas.undoStack.isEmpty)
 
         let receipt = controller.undoAction()
@@ -319,7 +305,7 @@ final class ActionReceiptTests: XCTestCase {
     // MARK: Bool seam
 
     func testUndoBoolSeamReturnsFalseOnEmptyStackWithoutFeedback() {
-        addFocusedWindow()
+        harness.addFocusedWindow()
 
         let performed = controller.undoLastDisplacement()
 
