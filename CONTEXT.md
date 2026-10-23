@@ -27,7 +27,7 @@ _Avoid_: monitor space (prose for the display dimension only), screen (AppKit ty
 _Code_: `TilingSpace` (one canvas's occupancy, records, splitters, expansion, visible frame, placement pipeline, and undo chapters), `TilingSpaceKey` (display + Space identity); `TilingController` restores chapters across canvases.
 
 **Canvas directory**:
-The one owner of display plus Space identity: the canvas table, stale marks, the last focused canvas, the last display the cursor was seen on, visibility, the withheld-Space fallback, and the single visible-canvas enumeration. A display action resolves the identified canvas when it holds anything, else that display's withheld canvas; the manage list enumerates both so a withheld canvas's windows stay reachable. The status glyph's canvas resolves from the cursor's display; the Switch Layout hotkey acts on the cursor's display too; every other menu row and action resolves from the focused one.
+The one owner of display plus Space identity: the canvas table, stale marks, the last focused canvas, the last display the cursor was seen on, visibility, the withheld-Space fallback, and the single visible-canvas enumeration. A display action resolves the identified canvas when it holds anything, else that display's withheld canvas; the manage list enumerates both so a withheld canvas's windows stay reachable. The status glyph's canvas resolves from the cursor's display; every menu row and action resolves from the focused one.
 _Avoid_: monitor table, space registry
 _Code_: `CanvasDirectory`
 

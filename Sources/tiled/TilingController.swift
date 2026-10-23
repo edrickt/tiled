@@ -467,14 +467,11 @@ final class TilingController {
             canvas: space, performed: false, notice: sentence, announcement: sentence)
     }
 
-    /// The Switch Layout hotkey: toggles the canvas on the display the
-    /// cursor is on — the display the user is pointing at, whether or not
-    /// a window there holds focus. The menu's targeted row follows focus
-    /// instead (see `handleSwitchLayout(to:)`).
+    /// The Switch Layout hotkey: toggles the focused canvas.
     @discardableResult
     func handleSwitchLayout() -> ActionReceipt {
         pruneDeadWindows()
-        let space = directory.cursorKey()
+        let space = directory.focusedKey()
         let target = (directory.storedCanvas(for: space)?.state.layout ?? .sixths).other
         return switchLayout(to: target, on: space)
     }

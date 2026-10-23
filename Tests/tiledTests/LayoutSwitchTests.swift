@@ -2,10 +2,9 @@ import CoreGraphics
 import XCTest
 @testable import tiled
 
-/// The explicit layout switch: `⌥⇧\` untiles every occupant of the
-/// canvas on the cursor's display, adopts the other layout, and pushes
-/// one undo chapter; the menu's targeted row follows focus instead. A
-/// slot key never switches; the layout sticks on an empty canvas.
+/// The explicit layout switch: `⌥⇧\` untiles every occupant of the focused
+/// canvas, adopts the other layout, and pushes one undo chapter. A slot
+/// key never switches; the layout sticks on an empty canvas.
 final class LayoutSwitchTests: XCTestCase {
     private static let main = ScreenInfo(
         id: ScreenID(rawValue: 1),
@@ -181,10 +180,7 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertNotNil(canvas.state.occupant(of: .topLeft))
     }
 
-    /// The hotkey switches the cursor's display's canvas; the display
-    /// holding focus keeps its layout and windows. The menu's targeted
-    /// row still follows focus even with the cursor elsewhere.
-    func testSwitchIsScopedToTheCursorDisplay() {
+    func testSwitchIsScopedToTheFocusedCanvas() {
         let other = ScreenInfo(
             id: ScreenID(rawValue: 2),
             frame: CGRect(x: 1920, y: 0, width: 1920, height: 1080),
@@ -207,30 +203,18 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertEqual(controller.canvas(for: TilingSpaceKey(screen: left, space: nil)).state.layout, .quarters)
         XCTAssertEqual(controller.canvas(for: TilingSpaceKey(screen: right, space: nil)).state.layout, .sixths)
 
-        harness.fireCursorMove(to: CGPoint(x: 2500, y: 500))
         controller.handleSwitchLayout()
 
         XCTAssertEqual(
             controller.canvas(for: TilingSpaceKey(screen: left, space: nil)).state.layout,
-            .quarters, "the focused display's canvas keeps its layout")
+            .quarters, "the unfocused canvas keeps its layout")
         XCTAssertEqual(
             controller.canvas(for: TilingSpaceKey(screen: right, space: nil)).state.layout,
-            .quarters, "the cursor's display switched")
+            .quarters, "the focused canvas switched")
         XCTAssertTrue(
             controller.canvas(for: TilingSpaceKey(screen: left, space: nil))
                 .state.occupants.isEmpty == false,
-            "the focused display's canvas keeps its windows")
-
-        // The targeted row follows focus even with the cursor elsewhere.
-        gateway.focused = leftHandle
-        controller.handleSwitchLayout(to: .sixths)
-
-        XCTAssertEqual(
-            controller.canvas(for: TilingSpaceKey(screen: left, space: nil)).state.layout,
-            .sixths, "the targeted row follows focus, not the cursor")
-        XCTAssertEqual(
-            controller.canvas(for: TilingSpaceKey(screen: right, space: nil)).state.layout,
-            .quarters, "the targeted row stays scoped to the focused canvas")
+            "the unfocused canvas keeps its windows")
     }
 
     func testSlotKeyNeverSwitchesLayout() {
