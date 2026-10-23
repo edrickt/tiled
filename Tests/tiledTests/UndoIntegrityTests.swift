@@ -33,7 +33,8 @@ final class UndoIntegrityTests: XCTestCase {
         super.setUp()
         gateway = FakeWindowGateway()
         controller = TilingController(
-            gateway: gateway, pruneInterval: nil, deathConfirmation: 0)
+            gateway: gateway, pruneInterval: nil,
+            screens: { [Self.main] }, deathConfirmation: 0)
     }
 
     @discardableResult
