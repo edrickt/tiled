@@ -17,14 +17,18 @@ final class ControllerGatewayTests: XCTestCase {
     /// Screen the fake tiles onto. Every window frame stays inside the
     /// injected rect, so state + written frames are checked against known
     /// bounds, never absolute host pixels.
-    private var gateway: FakeWindowGateway!
-    private var controller: TilingController!
+    private var harness: ControllerHarness!
+    private var gateway: FakeWindowGateway { harness.gateway }
+    private var controller: TilingController { harness.controller }
     /// Drag-end fires captured from the injectable scheduler (latest wins).
-    private var dragEndFires: [() -> Void] = []
+    private var dragEndFires: [() -> Void] { harness.dragEndFires }
     /// Convergence verifications captured from the injectable scheduler.
-    private var verifyFires: [() -> Void] = []
+    private var verifyFires: [() -> Void] {
+        get { harness.verifyFires }
+        set { harness.verifyFires = newValue }
+    }
     /// How many scheduled verifications were cancelled (superseded).
-    private var verifyCancels = 0
+    private var verifyCancels: Int { harness.verifyCancels }
     /// Injectable clock for the death-confirmation window (the transient
     /// tests advance it instead of waiting on real time).
     private var clock: Date = Date()
@@ -34,36 +38,23 @@ final class ControllerGatewayTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        gateway = FakeWindowGateway()
-        dragEndFires = []
-        verifyFires = []
-        verifyCancels = 0
         clock = Date()
         awake = 0
         // No runloop timer: tests drive pruneDeadWindows directly so a
         // live 5-second timer can't fire mid-test. Drag ends and
-        // convergence checks fire via the captured schedulers instead
-        // of the runloop.
-        controller = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            scheduleDragEnd: { [weak self] fire in
-                self?.dragEndFires.append(fire)
-                return {}
-            },
-            scheduleVerify: { [weak self] fire in
-                self?.verifyFires.append(fire)
-                return { self?.verifyCancels += 1 }
-            },
-            screens: { [Self.screen] },
-            // Tests drive death directly: no confirmation window, so a
-            // killed handle prunes on the first call (the transient-death
-            // tests build their own controller with the real window).
+        // convergence checks fire via the harness's captured schedulers
+        // instead of the runloop. Tests drive death directly: no
+        // confirmation window, so a killed handle prunes on the first
+        // call (the transient-death tests build their own harness with
+        // the real window).
+        harness = ControllerHarness(
+            screens: [Self.screen],
             deathConfirmation: 0,
             now: { [self] in clock })
     }
 
     /// The canvas the test's single display tiles onto.
-    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
+    private var canvas: TilingSpace { harness.canvas }
 
     /// One canvas of a controller built inside a test (the setup
     /// controller is not always the one acting).
@@ -452,11 +443,12 @@ final class ControllerGatewayTests: XCTestCase {
         // tiled windows all pruned by one tick during a lid cycle). One
         // dead probe is a maybe; the slot only releases once death is
         // confirmed across the confirmation window.
-        let transient = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            scheduleDragEnd: { _ in {} }, scheduleVerify: { _ in {} },
+        let transient = ControllerHarness(
+            screens: [Self.screen],
+            gateway: gateway,
+            deathConfirmation: 3,
             now: { [self] in clock },
-            uptime: { [self] in awake })
+            uptime: { [self] in awake }).controller
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         transient.handle(slot: .topLeft)
@@ -486,11 +478,12 @@ final class ControllerGatewayTests: XCTestCase {
     func testConfirmedDeathPrunes() {
         // A probe that stays dead across the confirmation window is a
         // real death: the slot releases on the next tick.
-        let timed = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            scheduleDragEnd: { _ in {} }, scheduleVerify: { _ in {} },
+        let timed = ControllerHarness(
+            screens: [Self.screen],
+            gateway: gateway,
+            deathConfirmation: 3,
             now: { [self] in clock },
-            uptime: { [self] in awake })
+            uptime: { [self] in awake }).controller
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         timed.handle(slot: .topLeft)
