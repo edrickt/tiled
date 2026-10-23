@@ -180,31 +180,31 @@
   "    }"
  ],
  [
-  "AppDelegate.swift",
+  "MenuBarPresenter.swift",
   "status icon gated by the menu diff again",
   "        return RefreshPlan(redrawIcon: iconChanged, rebuildMenu: menuChanged)",
   "        return RefreshPlan(redrawIcon: menuChanged && iconChanged, rebuildMenu: menuChanged)"
  ],
  [
-  "TilingController.swift",
+  "CanvasDirectory.swift",
   "canvas key drops the Mission Control Space (Spaces share a layout)",
   "        return TilingSpaceKey(\n            screen: resolved, space: activeSpaceID(on: resolved))",
   "        return TilingSpaceKey(\n            screen: resolved, space: nil)"
  ],
  [
-  "TilingController.swift",
+  "CanvasDirectory.swift",
   "hidden canvas treated as visible (reflow writes off-Space windows)",
-  "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen else { return true }\n        guard screens().contains(where: { $0.id == screen }) else { return false }\n        guard let id = space.space else { return true }\n        // No answer names the visible Space: unknown, not different.\n        // Treat it like the withheld id above rather than a hidden canvas.\n        guard let active = activeSpaceID(on: screen) else { return true }\n        return active == id\n    }",
-  "    private func isVisible(_ space: TilingSpaceKey) -> Bool {\n        true\n    }"
+  "    func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen else { return true }\n        guard screens().contains(where: { $0.id == screen }) else { return false }\n        guard let id = space.space else { return true }\n        // No answer names the visible Space: unknown, not different.\n        guard let active = activeSpaceID(on: screen) else { return true }\n        return active == id\n    }",
+  "    func isVisible(_ space: TilingSpaceKey) -> Bool {\n        true\n    }"
  ],
  [
-  "TilingController.swift",
+  "CanvasDirectory.swift",
   "unnameable active Space treated as hidden (visible canvas deferred)",
   "        guard let active = activeSpaceID(on: screen) else { return true }",
   "        guard let active = activeSpaceID(on: screen) else { return false }"
  ],
  [
-  "TilingController.swift",
+  "CanvasDirectory.swift",
   "unplugged canvas treated as attached (removed display written)",
   "        guard screens().contains(where: { $0.id == screen }) else { return false }",
   "        guard screens().contains(where: { $0.id == screen }) else { return true }"
@@ -260,8 +260,8 @@
  [
   "TilingController.swift",
   "screen canvas read ignores the named display",
-  "        spaces[actionSpaceKey(for: screen)] ?? TilingSpace()",
-  "        spaces[focusedSpaceKey()] ?? TilingSpace()"
+  "        directory.canvas(for: directory.actionKey(for: screen))",
+  "        directory.canvas(for: directory.focusedKey())"
  ],
  [
   "TilingSpace.swift",
@@ -278,8 +278,8 @@
  [
   "TilingController.swift",
   "destroyed notification ignored (slots linger until the prune tick)",
-  "        guard let id = recordID(for: handle) else { return }\n        guard gateway.liveness(of: handle) == .dead else {",
-  "        guard let id = recordID(for: handle) else { return }\n        guard false, gateway.liveness(of: handle) == .dead else {"
+  "        guard let id = register.liveID(for: handle) else { return }\n        guard gateway.liveness(of: handle) == .dead else {",
+  "        guard let id = register.liveID(for: handle) else { return }\n        guard false, gateway.liveness(of: handle) == .dead else {"
  ],
  [
   "FrameWriter.swift",
@@ -312,10 +312,10 @@
   "        guard gateway.setFrame"
  ],
  [
-  "TilingController.swift",
+  "CanvasDirectory.swift",
   "canvas frame ignores the display's visible frame (uses the full frame)",
-  "            return info.visibleFrame\n        }\n        return mainScreenInfo(screens())?.visibleFrame",
-  "            return info.frame\n        }\n        return mainScreenInfo(screens())?.visibleFrame"
+  "            return info.visibleFrame\n        }\n        return screens().first?.visibleFrame",
+  "            return info.frame\n        }\n        return screens().first?.visibleFrame"
  ],
  [
   "Layout.swift",
@@ -492,10 +492,10 @@
   "        guard screens().count > 0 else { return nil }"
  ],
  [
-  "AppDelegate.swift",
+  "MenuBarPresenter.swift",
   "refresh pass re-resolves the canvas key (menu and glyph can mix canvases)",
-  "        let space = focusedSpace()\n        return (menu(space), icon(space))",
-  "        let space = focusedSpace()\n        return (menu(focusedSpace()), icon(space))"
+  "            icon: Self.iconSnapshot(\n                space: space,",
+  "            icon: Self.iconSnapshot(\n                space: controller.focusedTilingSpace,"
  ],
  [
   "TilingSpace.swift",
@@ -510,10 +510,10 @@
   "        let pending: [WindowHandle: DeferredRestore] = [:]\n        deferredRestores = Self.reconcile(pending) { handle, restore in"
  ],
  [
-  "TilingController.swift",
+  "WindowRegister.swift",
   "claimed record not released on the old canvas (one handle, two records)",
-  "        if let existing = windowIDs[handle],\n            let owner = spaceOf(window: existing), owner != key\n        {\n            releaseRecordClaimedByAnotherCanvas(existing, on: owner)\n        }",
-  "        if let existing = windowIDs[handle],\n            let owner = spaceOf(window: existing), false\n        {\n            releaseRecordClaimedByAnotherCanvas(existing, on: owner)\n        }"
+  "        if let existing = liveID(for: handle), let owner = owner(existing) {\n            if owner == key { return existing }\n            releaseForeignClaim(existing, owner)\n        }",
+  "        if let existing = liveID(for: handle), let owner = owner(existing) {\n            if owner == key { return existing }\n            _ = owner\n        }"
  ],
  [
   "TilingSpace.swift",
@@ -536,11 +536,11 @@
  [
   "TilingController.swift",
   "stale mark cleared without real geometry (deferred reassert dropped)",
-  "            if hasGeometry {\n                staleSpaces.remove(key)\n            }",
-  "            if true {\n                staleSpaces.remove(key)\n            }"
+  "            if hasGeometry {\n                directory.clearStale(key)\n            }",
+  "            if true {\n                directory.clearStale(key)\n            }"
  ],
  [
-  "AppDelegate.swift",
+  "MenuReads.swift",
   "manage list double-lists a window emitted from two canvases",
   "        var seen: Set<WindowID> = []\n        let rows = rows.filter { seen.insert($0.id).inserted }",
   "        var seen: Set<WindowID> = []\n        let rows = rows.filter { _ in true }"
@@ -686,8 +686,8 @@
  [
   "HotkeyService.swift",
   "deinit drops tokens without unregistering (hotkeys outlive the service)",
-  "    deinit {\n        retireRegistrations()\n    }",
-  "    deinit {\n        registrations.removeAll()\n    }"
+  "    deinit {\n        retireRegistrations()\n        router.clearHandler(ifOwner: self)\n    }",
+  "    deinit {\n        registrations.removeAll()\n        router.clearHandler(ifOwner: self)\n    }"
  ],
  [
   "AppLaunchPlan.swift",
@@ -734,7 +734,7 @@
  [
   "HotkeyActionRouter.swift",
   "evict route drops the receipt presenter",
-  "    func performEvict() {\n        presentEvict(controller.handleEvict())\n    }",
+  "    func performEvict() {\n        present(controller.handleEvict())\n    }",
   "    func performEvict() {\n        controller.handleExpandToggle()\n    }"
  ],
  [
@@ -746,7 +746,7 @@
  [
   "HotkeyActionRouter.swift",
   "reset-splitters route expands instead",
-  "    func performResetSplitters() {\n        presentSplitter(controller.resetOrRestoreSplitters())\n    }",
+  "    func performResetSplitters() {\n        present(controller.resetOrRestoreSplitters())\n    }",
   "    func performResetSplitters() {\n        controller.handleExpandToggle()\n    }"
  ],
  [
@@ -764,8 +764,8 @@
  [
   "LiveWindowGateway.swift",
   "release keeps the released window's frame access (a forgotten handle still reads)",
-  "        windowFrames[handle] = nil",
-  "        _ = windowFrames[handle]"
+  "        guard let binding = bindings.removeValue(forKey: handle) else { return }",
+  "        guard let binding = bindings[handle] else { return }"
  ],
  [
   "LiveWindowGateway.swift",
@@ -830,8 +830,8 @@
  [
   "LiveWindowGateway.swift",
   "adoption keeps the stale observation key (fresh notifications fall through)",
-  "        registry.forget(key: oldKey, pid: pid)\n        observedKeys[handle] = token",
-  "        registry.forget(key: oldKey, pid: pid)"
+  "            binding.observedKey = token\n            tokenIndex[token] = handle",
+  "            binding.observedKey = token"
  ],
  [
   "HotkeyService.swift",
