@@ -48,9 +48,11 @@ enum ShortcutSection: String {
 /// delegate can re-register hotkeys and refresh the menu.
 final class ShortcutsTab: NSObject {
     private let hotkeyStore: HotkeyStore
-    /// Park/backup/collapse persistence. Injectable so tests can run the
-    /// whole park lifecycle without touching the host's real preferences.
+    /// Collapse persistence, and the UserDefaults the park adapter wraps.
+    /// Injectable so tests can run the whole park lifecycle without
+    /// touching the host's real preferences.
     private let defaults: UserDefaults
+    private let park: ShortcutPark
     var onHotkeysChange: (() -> Void)?
     /// Live Accessibility trust probe: with permission off every recorder
     /// below is a dead end, so this tab leads with the same fix row the
@@ -79,6 +81,15 @@ final class ShortcutsTab: NSObject {
     private var permissionRow: NSStackView?
     private var resetButton: NSButton!
     private weak var window: NSWindow?
+    /// The notice currently painted in `conflictLabel`, and the last text
+    /// identity actually announced. Keeping them apart lets a rebuild show
+    /// a persistent failure again without speaking it again.
+    private var renderedNotice: ShortcutNotice?
+    private var announcedNotice: ShortcutNotice?
+    /// Test seam: receives every text this tab would announce. The real
+    /// sink stays `conflictLabel` plus `NSAccessibility`; this lets a
+    /// hermetic test count notice identity changes without a visible window.
+    var onAnnouncement: ((String) -> Void)?
     /// Last probed trust state, so a visible permission-row flip can be
     /// announced instead of being a silent layout jump.
     private var lastKnownTrusted: Bool?
@@ -92,6 +103,7 @@ final class ShortcutsTab: NSObject {
     init(hotkeyStore: HotkeyStore, defaults: UserDefaults = .standard) {
         self.hotkeyStore = hotkeyStore
         self.defaults = defaults
+        self.park = ShortcutPark(store: UserDefaultsParkStore(defaults: defaults))
     }
 
     func build(size: NSSize, window: NSWindow?) -> NSView {
@@ -145,7 +157,10 @@ final class ShortcutsTab: NSObject {
         // itself must stay legible in both appearances.
         conflictLabel.textColor = .labelColor
         conflictLabel.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        conflictLabel.isHidden = true
+        // A rebuild replaces the label, so seed it from the notice already
+        // rendered; `reload` then sees an equal identity and stays silent.
+        conflictLabel.stringValue = renderedNotice?.text ?? ""
+        conflictLabel.isHidden = renderedNotice == nil
         // No static accessibility label: the message IS the accessible
         // content. A fixed label would mask it on re-navigation; Sam
         // would hear "Shortcut conflict" with no way to re-read which
@@ -212,10 +227,10 @@ final class ShortcutsTab: NSObject {
         footer.alignment = .firstBaseline
         footer.edgeInsets = NSEdgeInsets(top: 12, left: 0, bottom: 0, right: 0)
         resetButton = NSButton(
-            title: anyResetBackup() ? "Restore Previous Shortcuts" : "Reset Shortcuts",
-            target: self, action: #selector(resetShortcuts(_:)))
+            title: "", target: self, action: #selector(resetShortcuts(_:)))
         resetButton.bezelStyle = .rounded
         footer.addArrangedSubview(resetButton)
+        refreshFooter()
         stack.addArrangedSubview(footer)
 
         scroll.documentView = stack
@@ -234,15 +249,36 @@ final class ShortcutsTab: NSObject {
     /// Refreshes every recorder label from the store (called on show and
     /// after any change, so rows always reflect persisted bindings).
     /// Also re-probes trust, so the permission row tracks reality every
-    /// time the tab is shown or its content is rebuilt.
+    /// time the tab is shown or its content is rebuilt. The notice is
+    /// recomputed from the current failure set, never appended to whatever
+    /// used to be on the line.
     func reload() {
+        reload(notice: ShortcutNotice(failures: hotkeyFailureMessages()))
+    }
+
+    private func reload(notice: ShortcutNotice?) {
         for (action, button) in recorderButtons {
             button.showBinding(hotkeyStore.binding(for: action))
         }
         refreshBulkButtons()
+        refreshFooter()
         refreshPermissionState()
-        clearConflict()
-        surfaceHotkeyFailures()
+        render(notice)
+    }
+
+    /// The footer's one two-state answer: Reset when no reset snapshot is
+    /// readable, Restore Previous Shortcuts when one is. Build and reload
+    /// both call this, so a backup created or cleared anywhere can never
+    /// leave the wrong action under the title (T11).
+    private func refreshFooter() {
+        resetButton?.title = park.footerTitle
+    }
+
+    /// The full binding table the pure plans resolve owners against.
+    private func currentBindings() -> [HotkeyAction: HotkeyBinding] {
+        Dictionary(uniqueKeysWithValues: HotkeyAction.allCases.map {
+            ($0, hotkeyStore.binding(for: $0))
+        })
     }
 
     /// Keeps each section's bulk button honest.
@@ -275,21 +311,9 @@ final class ShortcutsTab: NSObject {
                "Disable every \(name) shortcut (parks the current combos; Enable all restores them)")
     }
 
-    /// Surfaces cross-app registration failures beside the recorder rows.
-    /// These are not in-app conflicts, but they are decided here: a combo
-    /// the recorder accepted can still lose the global registration. The
-    /// conflict line doubles as the live region, so the failure is
-    /// announced, not just shown. Probed on every reload, since failures
-    /// can predate this window (set at launch or while it was hidden).
-    private func surfaceHotkeyFailures() {
-        let messages = hotkeyFailureMessages()
-        guard !messages.isEmpty else { return }
-        showConflict(messages.joined(separator: "\n"))
-    }
-
-    /// The registration-failure sentences, shared by the reload surface
-    /// and the restore result. A skipped restore must not erase them:
-    /// both truths compete for the one live-region line.
+    /// The registration-failure sentences, shared by every notice composer.
+    /// A skipped restore must not erase them: both truths compete for the
+    /// one live-region line, and the notice keeps failures first.
     private func hotkeyFailureMessages() -> [String] {
         guard let failedActionsProvider else { return [] }
         return failedActionsProvider().map { action in
@@ -422,59 +446,36 @@ final class ShortcutsTab: NSObject {
         }
     }
 
-    /// Bulk toggle: Disable all parks current combos aside (persisted under
-    /// a defaults key) and disables the section; Enable all restores them.
-    /// Kept out of HotkeyStore: parking is UI state, not the binding model.
-    /// A slot edited while disabled keeps its edit: the park is stale the
-    /// moment the recorder commits, so blindly restoring it would silently
-    /// destroy a deliberate configuration, the only silent data-loss path
-    /// the tab would otherwise have.
+    /// Bulk toggle: Disable all parks current combos aside and disables the
+    /// section; Enable all applies the section's pure restore plan. Parking
+    /// is a settings concern, not the binding model, so `ShortcutPark` owns
+    /// it. A slot edited while disabled keeps its edit: the park is stale
+    /// the moment the recorder commits, so blindly restoring it would
+    /// silently destroy a deliberate configuration, the only silent
+    /// data-loss path the tab would otherwise have.
     @objc private func sectionBulkToggled(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue,
               id.hasPrefix("bulk-"),
               let layout = LayoutKind(rawValue: String(id.dropFirst(5)))
         else { return }
         if sectionHasDisabledSlot(layout) {
-            var keptEdits: [String] = []
-            var clashes: [String] = []
-            for slot in Slot.allCases where slot.layout == layout {
-                let current = hotkeyStore.binding(for: slot)
-                let restored: HotkeyBinding?
-                if let parked = parkedBinding(for: .slot(slot)) {
-                    if current.keyCode != nil, current != parked {
-                        // Edited after the disable: the park is stale,
-                        // the edit wins. Drop the park, keep the combo,
-                        // and say so; the live region exists for this.
-                        clearParkedBinding(for: .slot(slot))
-                        keptEdits.append(SlotPresentation.title(of: slot))
-                        restored = nil
-                    } else {
-                        restored = parked
-                    }
-                } else if current.keyCode == nil {
-                    restored = HotkeyStore.defaultBinding(for: slot)
-                } else {
-                    restored = nil
-                }
-                guard let restored else { continue }
-                // Restores go through the same gate as a recording:
-                // another section may have claimed the combo while this
-                // one was disabled, and storing past the gate would
-                // leave a slot that renders enabled but never registers.
-                switch hotkeyStore.apply(restored, for: slot) {
-                case .applied:
-                    clearParkedBinding(for: .slot(slot))
-                case .duplicate(let owners):
-                    let names = owners.map(\.title).joined(separator: ", ")
-                    clashes.append("\(SlotPresentation.title(of: slot)) (\(names))")
-                }
+            let plan = park.bulkRestorePlan(for: layout, current: currentBindings())
+            for entry in plan.restored {
+                hotkeyStore.set(entry.binding, for: entry.action)
             }
+            for action in plan.clearedParks {
+                park.clear(action, kind: .section)
+            }
+            let clashes = plan.clashes.map { clash in
+                let names = clash.owners.map(\.title).joined(separator: ", ")
+                return "\(clash.action.title) (\(names))"
+            }
+            let keptEdits = plan.keptEdits.map(\.action.title)
             // Registration runs before the rebuild so the fresh rows can
             // surface the slots that failed to register, not the pre-toggle
             // failure set. The bulk button that triggered this lives in
             // the old view, so focus is restored after.
             onHotkeysChange?()
-            rebuildContent(restoringFocusTo: "bulk-\(layout.rawValue)")
             var messages: [String] = []
             if !clashes.isEmpty {
                 messages.append("Not restored, the combo is taken: \(clashes.joined(separator: ", ")).")
@@ -485,12 +486,14 @@ final class ShortcutsTab: NSObject {
                     "\(names) \(keptEdits.count == 1 ? "was" : "were") edited while disabled; " +
                     "kept the new \(keptEdits.count == 1 ? "combo" : "combos").")
             }
-            if !messages.isEmpty { showConflict(messages.joined(separator: " ")) }
+            rebuildContent(
+                restoringFocusTo: "bulk-\(layout.rawValue)",
+                result: messages.isEmpty ? nil : messages.joined(separator: " "))
         } else {
             for slot in Slot.allCases where slot.layout == layout {
                 let current = hotkeyStore.binding(for: slot)
                 if current.keyCode != nil {
-                    parkBinding(current, for: .slot(slot))
+                    park.park(current, for: .slot(slot), kind: .section)
                 }
                 hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: slot)
             }
@@ -519,12 +522,16 @@ final class ShortcutsTab: NSObject {
     ///
     /// Returns the rebuilt view (also delivered via `onContentRebuilt`)
     /// so headless callers (tests included) can drive the tab without
-    /// a shell.
+    /// a shell. `result` joins the registration failures on the one notice
+    /// line when a bulk toggle has something to report.
     @discardableResult
-    private func rebuildContent(restoringFocusTo identifier: String? = nil) -> NSView {
+    private func rebuildContent(
+        restoringFocusTo identifier: String? = nil,
+        result: String? = nil
+    ) -> NSView {
         reset()
         let view = build(size: buildSize, window: window)
-        reload()
+        reload(notice: ShortcutNotice(failures: hotkeyFailureMessages(), result: result))
         onContentRebuilt?(view)
         if let identifier, let window,
            let replacement = Self.descendant(of: view, matching: identifier) {
@@ -543,25 +550,6 @@ final class ShortcutsTab: NSObject {
             if let hit = descendant(of: subview, matching: id) { return hit }
         }
         return nil
-    }
-
-    private func parkedKey(for action: HotkeyAction) -> String {
-        "parkedHotkey.\(action.storageKey)"
-    }
-
-    private func parkedBinding(for action: HotkeyAction) -> HotkeyBinding? {
-        guard let dict = defaults.dictionary(forKey: parkedKey(for: action)),
-            let binding = HotkeyBinding(storedEntry: dict), binding.keyCode != nil
-        else { return nil }
-        return binding
-    }
-
-    private func parkBinding(_ binding: HotkeyBinding, for action: HotkeyAction) {
-        defaults.set(binding.storedEntry, forKey: parkedKey(for: action))
-    }
-
-    private func clearParkedBinding(for action: HotkeyAction) {
-        defaults.removeObject(forKey: parkedKey(for: action))
     }
 
     /// Collapsible section state, persisted so the tab reopens as left.
@@ -601,7 +589,7 @@ final class ShortcutsTab: NSObject {
         // leaves nothing stuck mid-record.
         if sender.isRecording {
             sender.showBinding(hotkeyStore.binding(for: sender.hotkeyAction))
-            clearConflict()
+            renderFailures()
             return
         }
         // End any other in-progress record first: exactly one recorder is
@@ -620,43 +608,36 @@ final class ShortcutsTab: NSObject {
         switch outcome {
         case .cancel:
             button.showBinding(hotkeyStore.binding(for: action))
-            clearConflict()
+            renderFailures()
         case .clear:
             // A stray ⌫ must not silently discard a tuned combo: park the
-            // previous binding first (same keys as Disable-all, so the
-            // next Enable-all restores it), and say what happened; the
+            // previous binding first (the section park namespace, so the
+            // next Enable all restores it), and say what happened; the
             // footer names the owner on clashes; the clear path owes the
             // same courtesy.
             let previous = hotkeyStore.binding(for: action)
             if previous.keyCode != nil {
-                parkBinding(previous, for: action)
+                park.park(previous, for: action, kind: .section)
             }
             hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: action)
             button.showBinding(hotkeyStore.binding(for: action))
-            if let label = previous.label {
-                showConflict(
-                    "\(action.title) disabled: " +
-                    "its old combo (\(label)) is parked; re-record or reset to restore it.")
-            } else {
-                clearConflict()
+            let result = previous.label.map { label in
+                "\(action.title) disabled: " +
+                "its old combo (\(label)) is parked; re-record or reset to restore it."
             }
+            render(ShortcutNotice(failures: hotkeyFailureMessages(), result: result))
             onHotkeysChange?()
         case .binding(let candidate):
             switch hotkeyStore.apply(candidate, for: action) {
             case .applied:
                 button.showBinding(candidate)
-                clearConflict()
                 onHotkeysChange?()
                 // Re-registration may have failed for this action (the
                 // combo is owned by another app): say so here, where the
                 // combo was just recorded, instead of letting the menu be
-                // the only witness.
-                if failedActionsProvider?().contains(action) == true {
-                    showConflict(
-                        MenuText.hotkeyFailureWarning(
-                            label: candidate.label, title: action.title,
-                            recovery: action.registrationRecovery))
-                }
+                // the only witness. A clean registration clears a resolved
+                // conflict without erasing a still-live failure elsewhere.
+                renderFailures()
             case .duplicate(let actions):
                 // Keep the old binding and say, in words, who owns the
                 // combo: a shake alone left users retrying the same combo
@@ -667,7 +648,7 @@ final class ShortcutsTab: NSObject {
                 let message =
                     "\(candidate.label ?? "That combo") is already used by \(owners); " +
                     "\(action.title) kept its old shortcut."
-                showConflict(message)
+                render(ShortcutNotice(failures: hotkeyFailureMessages(), conflict: message))
                 NSLog("Tiled: %@", message)
             }
         }
@@ -678,31 +659,45 @@ final class ShortcutsTab: NSObject {
     }
 
     /// VoiceOver announcement for recorder state changes (arm, silent
-    /// cancel) and permission transitions. Posted against the conflict
-    /// line's view (the Shortcuts tab's live region), consistent with
-    /// duplicate announcements. Silently skipped when the window is
-    /// hidden (announcements against a non-visible element are dropped
-    /// by the system anyway, but the guard keeps the intent explicit).
-    private func announce(_ message: String) {        guard window?.isVisible == true, let label = conflictLabel else { return }
+    /// cancel), permission transitions, and notice identity changes. Posted
+    /// against the conflict line's view (the Shortcuts tab's live region).
+    /// Silently skipped when the window is hidden: the system would drop it
+    /// anyway, but the guard keeps the intent explicit. `onAnnouncement`
+    /// receives the text first so a hermetic test can count identity changes.
+    private func announce(_ message: String) {
+        onAnnouncement?(message)
+        guard window?.isVisible == true, let label = conflictLabel else { return }
         NSAccessibility.post(
             element: label,
             notification: .announcementRequested,
             userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
-    /// Shows a persistent inline conflict message (VoiceOver-announced).
-    private func showConflict(_ message: String) {
-        conflictLabel?.stringValue = message
-        conflictLabel?.isHidden = false
-        NSAccessibility.post(
-            element: conflictLabel as Any,
-            notification: .announcementRequested,
-            userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+    /// The one live-region write. The notice's whole content is its
+    /// identity, so a reload that recomputes the same failure leaves both
+    /// the label and the announcement alone. Clearing is silent; the same
+    /// text appearing later is a new identity and announces again.
+    private func render(_ notice: ShortcutNotice?) {
+        if notice != renderedNotice {
+            renderedNotice = notice
+            conflictLabel?.stringValue = notice?.text ?? ""
+            conflictLabel?.isHidden = notice == nil
+        }
+        guard let notice else {
+            announcedNotice = nil
+            return
+        }
+        guard notice != announcedNotice else { return }
+        announcedNotice = notice
+        announce(notice.text)
     }
 
-    private func clearConflict() {
-        conflictLabel?.stringValue = ""
-        conflictLabel?.isHidden = true
+    /// Recomputes the failure-only notice. Every caller that resolved a
+    /// conflict or cancelled a recording uses this, so a persistent
+    /// registration failure stays visible instead of being cleared by a
+    /// transient result.
+    private func renderFailures() {
+        render(ShortcutNotice(failures: hotkeyFailureMessages()))
     }
 
     @objc private func grantPermissionTapped(_ sender: NSButton) {
@@ -710,30 +705,26 @@ final class ShortcutsTab: NSObject {
     }
 
     @objc private func resetShortcuts(_ sender: NSButton) {
-        // The button is two actions in sequence: first a reversible reset
-        // (backup kept), then a restore of that backup. Reversible beats
-        // "can't be undone", especially when parking infrastructure
-        // already exists for Disable all.
-        if anyResetBackup() {
-            restoreResetBackup(sender)
+        // The footer is one two-state control, not a hidden mode: while a
+        // readable reset snapshot exists the same button says Restore
+        // Previous Shortcuts and this route restores it. Reset is therefore
+        // reachable only with no snapshot, so a second reset can never
+        // overwrite the first one (T11).
+        if park.anyResetBackup() {
+            restoreResetBackup()
         } else {
-            confirmAndReset(sender)
+            confirmAndReset()
         }
     }
 
-    /// Resets everything to factory defaults, keeping the previous combos
-    /// one step away: the reset button becomes Restore Previous Shortcuts
-    /// until the backup is restored (or overwritten by the next reset;
-    /// the dialog says so when a backup already exists, so the second
-    /// reset never silently destroys the first snapshot).
-    private func confirmAndReset(_ sender: NSButton) {
-        // The promise is the outcome's contract: with no backup it names
-        // the recovery ("kept … Restore Previous Shortcuts"); with one it
-        // warns that the snapshot is replaced wholesale.
-        let promise = anyResetBackup()
-            ? "This replaces your previous backup; those combos will be gone. "
-                + "Your current combos become the new backup."
-            : "Your current combos are kept; use Restore Previous Shortcuts to get them back."
+    /// Resets everything to factory defaults, keeping the whole previous
+    /// snapshot one press away. `resetShortcuts` routes to that restore
+    /// whenever `park.anyResetBackup()` is true, so this method only runs
+    /// with no snapshot and the promise can always say the combos are kept.
+    private func confirmAndReset() {
+        // The promise is the outcome's contract: the reset keeps every
+        // current combo, and the footer's next title names the way back.
+        let promise = "Your current combos are kept; use Restore Previous Shortcuts to get them back."
         let confirmed: Bool
         if let confirmReset {
             confirmed = confirmReset(promise)
@@ -747,100 +738,42 @@ final class ShortcutsTab: NSObject {
         }
         guard confirmed else { return }
         for action in HotkeyAction.allCases {
-            parkResetBackup(hotkeyStore.binding(for: action), for: action)
+            park.park(hotkeyStore.binding(for: action), for: action, kind: .resetBackup)
         }
         hotkeyStore.resetAll()
         onHotkeysChange?()
         reload()
-        sender.title = "Restore Previous Shortcuts"
     }
 
-    /// Restores the combos parked by the last reset: an exact snapshot,
-    /// including disabled actions. The snapshot is one prior state, not a
-    /// sequence of independent recordings, so a pair that swapped their
-    /// combos must land as a pair; only a combo owned by an action
-    /// *outside* the snapshot is a clash. A clash-reported entry stays in
-    /// the backup (the Disable-all park's rule) so a later press, once the
-    /// combo is free, brings it back; only applied entries are cleared.
-    private func restoreResetBackup(_ sender: NSButton) {
-        var backups: [HotkeyAction: HotkeyBinding] = [:]
-        for action in HotkeyAction.allCases {
-            if let backup = resetBackupBinding(for: action) {
-                backups[action] = backup
-            }
-        }
-        let snapshot = Set(backups.keys)
-        var accepted: [HotkeyAction: HotkeyBinding] = [:]
-        var skipped: [(action: HotkeyAction, owners: [HotkeyAction])] = []
-        for (action, candidate) in backups {
-            let owners = hotkeyStore.duplicates(of: candidate, ignoring: action)
-                .filter { !snapshot.contains($0) }
-            if owners.isEmpty {
-                accepted[action] = candidate
-            } else {
-                skipped.append((action, owners))
-            }
-        }
-        // A refused entry keeps its current binding, so an accepted entry
-        // must not take the combo that refused entry still visibly holds.
-        var changed = true
-        while changed {
-            changed = false
-            for (action, candidate) in Array(accepted) where candidate.keyCode != nil {
-                if let owner = HotkeyAction.allCases.first(where: { other in
-                    other != action && accepted[other] == nil
-                        && backups[other] != nil
-                        && hotkeyStore.binding(for: other) == candidate
-                }) {
-                    accepted[action] = nil
-                    skipped.append((action, [owner]))
-                    changed = true
-                }
-            }
-        }
-        for (action, binding) in accepted {
+    /// Restores the combos parked by the last reset from one pure snapshot
+    /// plan: an exact snapshot, including disabled actions. The snapshot is
+    /// one prior state, not a sequence of independent recordings, so a pair
+    /// that swapped their combos lands as a pair; only a combo owned by an
+    /// action *outside* the snapshot is a clash. A clash-reported entry
+    /// stays in the backup (the section park's rule) so a later press, once
+    /// the combo is free, brings it back; only applied entries are cleared.
+    private func restoreResetBackup() {
+        let plan = park.snapshotRestorePlan(current: currentBindings())
+        for (action, binding) in plan.accepted {
             hotkeyStore.set(binding, for: action)
-            clearResetBackup(for: action)
+            park.clear(action, kind: .resetBackup)
         }
         onHotkeysChange?()
-        reload()
-        sender.title = anyResetBackup()
-            ? "Restore Previous Shortcuts" : "Reset Shortcuts"
-        if !skipped.isEmpty {
-            let names = skipped
+        let result: String?
+        if plan.skipped.isEmpty {
+            result = nil
+        } else {
+            let names = plan.skipped
                 .sorted { $0.action.title < $1.action.title }
                 .map {
                     "\($0.action.title) (taken by \($0.owners.map(\.title).joined(separator: ", ")))"
                 }
-            // reload() just surfaced the registration failures; joining
-            // them keeps both truths on the one line instead of letting
-            // the restore result overwrite the failure.
-            let messages = ["Not restored: \(names.joined(separator: ", "))."]
-                + hotkeyFailureMessages()
-            showConflict(messages.joined(separator: "\n"))
+            result = "Not restored: \(names.joined(separator: ", "))."
         }
-    }
-
-    /// Reset uses its own backup keys, never the Disable-all park keys:
-    /// resetting must not corrupt a section park mid-flight.
-    private func resetBackupKey(for action: HotkeyAction) -> String {
-        "resetBackupHotkey.\(action.storageKey)"
-    }
-
-    private func resetBackupBinding(for action: HotkeyAction) -> HotkeyBinding? {
-        defaults.dictionary(forKey: resetBackupKey(for: action))
-            .flatMap(HotkeyBinding.init(storedEntry:))
-    }
-
-    private func parkResetBackup(_ binding: HotkeyBinding, for action: HotkeyAction) {
-        defaults.set(binding.storedEntry, forKey: resetBackupKey(for: action))
-    }
-
-    private func clearResetBackup(for action: HotkeyAction) {
-        defaults.removeObject(forKey: resetBackupKey(for: action))
-    }
-
-    private func anyResetBackup() -> Bool {
-        HotkeyAction.allCases.contains { resetBackupBinding(for: $0) != nil }
+        // Registration failures outrank the restore result in the notice
+        // and stay on the line beside it, so a skipped restore can never
+        // erase the failure that the reload just re-read.
+        reload(notice: ShortcutNotice(
+            failures: hotkeyFailureMessages(), result: result))
     }
 }

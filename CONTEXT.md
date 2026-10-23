@@ -96,6 +96,11 @@ _Avoid_: focused window (focus is how it's usually found, not what it is)
 The controller's opaque reference to a managed window, issued by the window gateway.
 _Avoid_: window id (that's the pure-state key), element
 
+**Parked combo**:
+A hotkey binding the Shortcuts tab holds so a later action can restore it. Disable all parks a layout section's current combos and Enable all restores them, except a slot edited while disabled keeps its edit and drops the stale park; Reset Shortcuts parks one whole pre-reset snapshot instead, and Restore Previous Shortcuts applies it as one state, keeping a clash-skipped entry for a retry. The two namespaces never share a key.
+_Avoid_: saved shortcut, stored combo
+_Code_: `ShortcutPark` (both namespaces and the footer's two-state answer), `BulkRestorePlan`, `SnapshotRestorePlan`
+
 **Plan execution**:
 Committing a decided plan (tile, swap, or switch): snapshot, restore, place, rollback, and notice logic. Owned by the tiling space's placement pipeline; the controller keeps focus, pruning, and dispatch.
 _Code_: `TilingSpace.execute(decision:)`

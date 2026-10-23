@@ -201,6 +201,70 @@ final class ShortcutsResetBackupTests: XCTestCase {
             "the registration failure stays visible beside the restore result")
     }
 
+    func testFooterFollowsTheResetSnapshotOnReload() {
+        let tab = makeTab()
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        XCTAssertNotNil(
+            findButton(titled: "Reset Shortcuts", in: view),
+            "no snapshot: the footer offers Reset")
+
+        park(
+            HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_J)),
+            for: .slot(.topLeft))
+        tab.reload()
+        XCTAssertNotNil(
+            findButton(titled: "Restore Previous Shortcuts", in: view),
+            "a snapshot created outside the button still flips the footer on reload")
+
+        defaults.removeObject(
+            forKey: "resetBackupHotkey.\(HotkeyAction.slot(.topLeft).storageKey)")
+        tab.reload()
+        XCTAssertNotNil(
+            findButton(titled: "Reset Shortcuts", in: view),
+            "clearing the snapshot returns the footer to Reset")
+    }
+
+    func testResetControlIsTwoStateAndNeverOffersASecondReset() {
+        let custom = HotkeyBinding(
+            modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_J))
+        store.set(custom, for: .topLeft)
+        let before = HotkeyAction.allCases.map { store.binding(for: $0) }
+
+        let tab = makeTab()
+        var promises: [String] = []
+        tab.confirmReset = { promises.append($0); return true }
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let reset = findButton(titled: "Reset Shortcuts", in: view)
+        else { return XCTFail("expected a Reset Shortcuts button") }
+
+        reset.performClick(nil)
+
+        XCTAssertEqual(promises, [
+            "Your current combos are kept; use Restore Previous Shortcuts to get them back.",
+        ])
+        for (action, kept) in zip(HotkeyAction.allCases, before) {
+            XCTAssertEqual(
+                backup(for: action), kept,
+                "the reset parks one complete snapshot (\(action.title))")
+        }
+        XCTAssertEqual(
+            reset.title, "Restore Previous Shortcuts",
+            "the same control now offers the snapshot, not a second reset")
+
+        reset.performClick(nil)
+
+        XCTAssertEqual(
+            promises.count, 1,
+            "the second press restores; it never asks to overwrite the snapshot")
+        XCTAssertEqual(
+            HotkeyAction.allCases.map { store.binding(for: $0) }, before,
+            "the snapshot restores as the state it was taken from")
+        XCTAssertTrue(
+            HotkeyAction.allCases.allSatisfy { backup(for: $0) == nil },
+            "a fully restored snapshot leaves no backup behind")
+        XCTAssertEqual(reset.title, "Reset Shortcuts")
+    }
+
     func testResetDialogsPromiseHoldsThroughTheRestore() {
         store.set(
             HotkeyBinding(modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_J)),

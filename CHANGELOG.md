@@ -91,6 +91,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keeps clash-skipped entries for a retry, persists the footer across
   reopens, and leaves registration failures visible beside a partial
   restore result.
+- The Shortcuts live region keeps one fixed order — registration
+  failures, then a recorder conflict, then an action result — and
+  VoiceOver hears an unchanged failure once instead of again on every
+  reload or reopen.
 - The reset-splitters hotkey restores a parked splitter backup instead of
   overwriting it with the already-reset grid, and the menu and hotkey now
   speak one receipt; a refused reassert is no longer announced as a
