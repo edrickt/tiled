@@ -7,7 +7,7 @@ This directory is the maintained source for verifying Tiled's user-facing behavi
 - A logged-in GUI session on the machine's console. The live suites post real mouse and keyboard events and cannot run over SSH or in CI.
 - Accessibility permission for the terminal that runs opencode. `doctor.sh` checks it.
 - `/Applications/Tiled.app` is not running. `run-repro.sh` refuses while it is; `run-focus-loop.sh` stops it and loses its in-memory layout state.
-- The checkout builds: `swift test` passes (833 tests at the time of writing, one opt-in check skipped).
+- The checkout builds: `swift test` passes (922 tests at the time of writing, one opt-in check skipped).
 - A display at least about 1512x982, or a run that checks frames before trusting a focus click. The suite parks windows at fixed coordinates: on a 1120x1050 display `HOSTC` and `HOSTD` start partly off-screen and `HOSTB`'s center sits under `HOSTC`.
 - Start every live run through `./scripts/run-repro.sh` or `./scripts/run-focus-loop.sh`. Never drive an instance you did not start.
 
@@ -33,11 +33,11 @@ Each feature file starts with an H1 title and one paragraph of user-visible beha
 
 ## Features
 
-- [Tile into slots](./tile-slots.md) covers quarter and sixth slots, one window per slot, and same-slot no-ops.
+- [Tile into slots](./tile-slots.md) covers shared slot keys, quarter and sixth slots, inert keys, one window per slot, and same-slot no-ops.
 - [Resize shared edges](./edge-resize.md) covers splitter drags, per-column and per-third independence, clamping, and screen edges.
 - [Evict, swap, re-house, and undo](./eviction-swap-undo.md) covers occupancy conflicts and the undo chapter.
 - [Drag out](./drag-out.md) covers long-drag untiling at the drop and short-drag snapback.
-- [Switch layouts](./layout-switch.md) covers quarters-to-sixths switching and the undo of its untiling.
+- [Switch layouts](./layout-switch.md) covers the explicit quarters/sixths switch, its untiling, and the undo that restores both.
 
 ## Also covered by focused probes
 
