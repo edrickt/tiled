@@ -36,6 +36,7 @@ final class ControllerHarness {
     private let screenValues: ScreenValues
     private let dragEndLog = FireLog()
     private let verifyLog = FireLog()
+    private let pruneLog = FireLog()
 
     let gateway: FakeWindowGateway
     let controller: TilingController
@@ -63,6 +64,13 @@ final class ControllerHarness {
     /// How many scheduled verifications were cancelled (superseded).
     var verifyCancels: Int { verifyLog.cancels }
 
+    /// Prune ticks captured from the injectable scheduler. A suite fires
+    /// one instead of waiting out the production interval.
+    var pruneFires: [() -> Void] {
+        get { pruneLog.fires }
+        set { pruneLog.fires = newValue }
+    }
+
     /// The canvas the focused display tiles onto: reads go through the
     /// same accessor actions do.
     var canvas: TilingSpace {
@@ -76,6 +84,7 @@ final class ControllerHarness {
         pruneInterval: TimeInterval? = nil,
         scheduleDragEnd: DragTracker.DragEndScheduler? = nil,
         scheduleVerify: DragTracker.DragEndScheduler? = nil,
+        schedulePrune: TilingController.PruneScheduler? = nil,
         deathConfirmation: TimeInterval = 0,
         now: @escaping () -> Date = Date.init,
         uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
@@ -83,6 +92,7 @@ final class ControllerHarness {
         let values = ScreenValues(screens)
         let dragEnd = dragEndLog
         let verify = verifyLog
+        let prune = pruneLog
         screenValues = values
         self.gateway = gateway
         if let activeSpaces {
@@ -98,6 +108,10 @@ final class ControllerHarness {
             scheduleVerify: scheduleVerify ?? { fire in
                 verify.fires.append(fire)
                 return { verify.cancels += 1 }
+            },
+            schedulePrune: schedulePrune ?? { _, fire in
+                prune.fires.append(fire)
+                return {}
             },
             screens: { values.values },
             deathConfirmation: deathConfirmation,

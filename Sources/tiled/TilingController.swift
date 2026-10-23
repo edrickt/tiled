@@ -17,6 +17,22 @@ import AppKit
 /// decision to the owning canvas, and reads the one effect the pure core
 /// cannot: the dragged window's achieved frame.
 final class TilingController {
+    /// Repeating prune scheduler: schedule one tick, return the cancel.
+    /// Injectable so tests fire the tick instead of waiting on the runloop;
+    /// the production default keeps the 5-second repeating timer in
+    /// `.common` mode so a long-open menu cannot stall cleanup.
+    typealias PruneScheduler = (_ interval: TimeInterval, _ fire: @escaping () -> Void) -> () -> Void
+
+    /// The production prune scheduler: a repeating main-runloop timer that
+    /// also fires while a menu is tracking.
+    static let schedulePruneOnMain: PruneScheduler = { interval, fire in
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            fire()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        return { timer.invalidate() }
+    }
+
     private let gateway: WindowGateway
     /// Drag-end debounce scheduler for the tracker's drag-out loop.
     /// Injectable so tests fire drag ends without waiting on the runloop.
@@ -102,7 +118,8 @@ final class TilingController {
         },
         schedule: scheduleVerify)
 
-    private var pruneTimer: Timer?
+    /// Invalidates the scheduled prune tick, when one exists.
+    private var pruneCancel: (() -> Void)?
     private var screenObserver: NSObjectProtocol?
 
     /// Death must be confirmed across this window before a slot
@@ -162,6 +179,7 @@ final class TilingController {
         pruneInterval: TimeInterval? = 5.0,
         scheduleDragEnd: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleDragEndOnMain,
         scheduleVerify: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleVerifyOnMain,
+        schedulePrune: @escaping PruneScheduler = TilingController.schedulePruneOnMain,
         screens: ScreenProvider? = nil,
         deathConfirmation: TimeInterval = 3.0,
         now: @escaping () -> Date = Date.init,
@@ -179,12 +197,12 @@ final class TilingController {
         self.screens = screens ?? { NSScreen.screens.enumerated().map { ScreenInfo(appKit: $0.element, index: $0.offset) } }
         // Windows closed while tiled otherwise linger as ghosts until the
         // next hotkey; release their slots within seconds instead.
-        // `pruneInterval == nil` schedules no runloop timer: tests pass nil
-        // so no live timer races a test run, and drive `pruneDeadWindows`
-        // directly instead.
+        // `pruneInterval == nil` schedules no tick: tests pass nil so no
+        // live timer races a test run, and drive `pruneDeadWindows`
+        // directly instead. The scheduler seam lets a test capture the tick
+        // and fire it without waiting on wall-clock time.
         if let pruneInterval {
-            let prune = Timer.scheduledTimer(withTimeInterval: pruneInterval, repeats: true) {
-                [weak self] _ in
+            pruneCancel = schedulePrune(pruneInterval) { [weak self] in
                 guard let self else { return }
                 let before = self.allTiledWindows.count
                 self.pruneDeadWindows()
@@ -192,12 +210,8 @@ final class TilingController {
                     self.onChange?()
                 }
             }
-            // Fire in event-tracking modes too, so a long-open menu doesn't
-            // stall cleanup; the menu rebuild is suppressed while open anyway.
-            RunLoop.main.add(prune, forMode: .common)
-            pruneTimer = prune
         } else {
-            pruneTimer = nil
+            pruneCancel = nil
         }
         // Reassert the layout when displays change (unplug, rearrange,
         // resolution): splitter fractions stay valid, pixels don't.
@@ -238,7 +252,7 @@ final class TilingController {
     }
 
     deinit {
-        pruneTimer?.invalidate()
+        pruneCancel?()
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
         }

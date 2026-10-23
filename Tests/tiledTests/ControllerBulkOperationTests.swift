@@ -657,28 +657,26 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testPruneTimerFiresAndReleasesSlots() {
-        // The real 5-second timer, shrunk: the wiring (fire → prune →
-        // onChange when the count changed) is what the nil-interval tests
-        // bypass by driving pruneDeadWindows directly.
-        let gateway = FakeWindowGateway()
+        // The repeating timer, shrunk: the wiring (schedule → fire → prune
+        // → onChange when the count changed) is what the nil-interval tests
+        // bypass by driving pruneDeadWindows directly. The harness captures
+        // the tick instead of the test waiting out a wall-clock interval.
+        harness = ControllerHarness(
+            screens: [Self.screen], pruneInterval: 0.05, deathConfirmation: 0)
         var changes = 0
-        let timed = TilingController(
-            gateway: gateway, pruneInterval: 0.05,
-            screens: { [Self.screen] }, deathConfirmation: 0)
-        timed.onChange = { changes += 1 }
-        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
-        gateway.focused = handle
-        timed.handle(slot: .topLeft)
-        XCTAssertEqual(
-            timed.canvas(for: timed.focusedTilingSpace).state.tiledWindows.count, 1)
+        controller.onChange = { changes += 1 }
+        let handle = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
 
         gateway.kill(handle)
-        let waited = XCTestExpectation(description: "prune timer fired")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { waited.fulfill() }
-        wait(for: [waited], timeout: 1.0)
+        XCTAssertEqual(
+            harness.pruneFires.count, 1,
+            "the controller scheduled one repeating prune tick")
+        harness.pruneFires.last?()
 
         XCTAssertTrue(
-            timed.canvas(for: timed.focusedTilingSpace).state.occupants.isEmpty,
+            canvas.state.occupants.isEmpty,
             "the timer pruned the ghost")
         XCTAssertGreaterThan(changes, 1, "prune announced the change for a menu refresh")
     }
