@@ -239,6 +239,58 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertEqual(gateway.focused, left)
     }
 
+    // MARK: Cursor and glyph scoping
+
+    /// Two displays and a window tiled on each, focus on the first.
+    private func setUpTwoDisplaysWithFocusOnTheFirst() -> (first: WindowHandle, second: WindowHandle) {
+        currentScreens = [Self.display, Self.otherDisplay]
+        gateway.activeSpaces = [
+            Self.displayID: Self.spaceA,
+            Self.otherDisplayID: Self.spaceB,
+        ]
+        let first = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let second = addFocusedWindow(
+            frame: CGRect(x: 2000, y: 100, width: 800, height: 600))
+        controller.handle(slot: .topLeft)
+        gateway.focused = first
+        return (first, second)
+    }
+
+    func testCursorMoveToAnotherDisplayFiresTheGlyphRouteOnly() {
+        setUpTwoDisplaysWithFocusOnTheFirst()
+        var glyphReports = 0
+        var menuReports = 0
+        controller.onCursorDisplayChange = { glyphReports += 1 }
+        controller.onChange = { menuReports += 1 }
+
+        harness.fireCursorMove(to: CGPoint(x: 2500, y: 500))
+        XCTAssertEqual(glyphReports, 1, "the first resolution reports")
+        XCTAssertEqual(menuReports, 0, "a cursor move is never a full-refresh trigger")
+
+        harness.fireCursorMove(to: CGPoint(x: 3000, y: 500))
+        XCTAssertEqual(glyphReports, 1, "a move within one display is silent")
+    }
+
+    func testFocusMoveChangesTheMenuKeyButNeverTheGlyphKey() {
+        setUpTwoDisplaysWithFocusOnTheFirst()
+        harness.fireCursorMove(to: CGPoint(x: 2500, y: 500))
+        XCTAssertEqual(controller.cursorTilingSpace.screen, Self.otherDisplay.id)
+
+        var focusReports = 0
+        var glyphReports = 0
+        controller.onFocusedSpaceChange = { focusReports += 1 }
+        controller.onCursorDisplayChange = { glyphReports += 1 }
+
+        gateway.simulateFocusChange()
+        XCTAssertEqual(focusReports, 1, "the focused canvas moved")
+        XCTAssertEqual(glyphReports, 0, "focus does not drive the glyph route")
+        XCTAssertEqual(controller.focusedTilingSpace.screen, Self.display.id)
+        XCTAssertEqual(
+            controller.cursorTilingSpace.screen, Self.otherDisplay.id,
+            "the glyph key stays on the cursor's display")
+    }
+
     func testHiddenSpaceWindowsStayManagedButLeaveTheMenu() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)

@@ -213,9 +213,9 @@ final class AppDelegateMenuTests: XCTestCase {
 
     func testIconPassDerivesItsReadsFromTheGivenKey() {
         // The glyph takes an already-resolved key and derives both its
-        // occupancy map and its spoken display name from it, so a focus
-        // move can never pair one canvas's glyph with another canvas's
-        // name.
+        // occupancy map and its spoken display name from it, so a cursor
+        // move landing mid-pass can never pair one canvas's glyph with
+        // another canvas's name.
         let key = TilingSpaceKey(
             screen: ScreenID(rawValue: 1), space: SpaceID(rawValue: 7))
         var canvasKeys: [TilingSpaceKey] = []
@@ -230,13 +230,15 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(snapshot.displayName, "Built-in")
     }
 
-    func testOneSnapshotPassScopesBothHalvesToTheGivenCanvasKey() {
+    func testOneSnapshotPassScopesEachHalfToItsOwnKey() {
         // The menu-open path and the refresh path share one pass: the
-        // presenter builds the menu and glyph from the key it is handed, so
-        // a display change that lands mid-pass cannot leave them describing
-        // different canvases. A background key with its own error and
-        // display name proves both halves stay scoped to it even when focus
-        // sits elsewhere.
+        // presenter builds the menu half from the focused key and the
+        // glyph half from the cursor key, each resolved exactly once, so
+        // a display change that lands mid-pass cannot leave either half
+        // describing a crossed canvas. The two keys are deliberately
+        // different here: the menu must describe the right display's
+        // canvas (Mail's refusal) while the glyph describes the focused
+        // left display, proving neither half borrows the other's key.
         let left = ScreenInfo(
             id: ScreenID(rawValue: 1),
             frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
@@ -272,9 +274,11 @@ final class AppDelegateMenuTests: XCTestCase {
                 defaults: UserDefaults(suiteName: "menu-pass-\(UUID())")!),
             hotkeyService: { nil },
             actionTarget: NSObject())
-        let key = TilingSpaceKey(screen: right.id, space: nil)
+        let menuKey = TilingSpaceKey(screen: right.id, space: nil)
+        let iconKey = controller.focusedTilingSpace
+        XCTAssertNotEqual(menuKey, iconKey, "the halves are pinned to different canvases")
 
-        let snapshot = presenter.snapshot(for: key)
+        let snapshot = presenter.snapshot(menu: menuKey, icon: iconKey)
 
         XCTAssertEqual(
             snapshot.menu.tileError,
@@ -284,11 +288,11 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(
             snapshot.icon,
             StatusIcon.Snapshot(
-                layout: .quarters,
-                filled: [.topLeft],
-                occupiedSlots: 1,
-                displayName: "Studio Display"),
-            "the glyph half names and fills the same passed canvas")
+                layout: .sixths,
+                filled: [],
+                occupiedSlots: 0,
+                displayName: "Built-in"),
+            "the glyph half names and fills its own passed canvas, not the menu's")
     }
 
     func testLabelOnlyRemapChangesThePresenterSnapshot() {
@@ -313,12 +317,14 @@ final class AppDelegateMenuTests: XCTestCase {
             hotkeyService: { nil },
             actionTarget: NSObject())
 
-        let before = presenter.snapshot(for: controller.focusedTilingSpace)
+        let before = presenter.snapshot(
+            menu: controller.focusedTilingSpace, icon: controller.focusedTilingSpace)
         store.set(
             HotkeyBinding(
                 modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_Q)),
             for: .topLeft)
-        let after = presenter.snapshot(for: controller.focusedTilingSpace)
+        let after = presenter.snapshot(
+            menu: controller.focusedTilingSpace, icon: controller.focusedTilingSpace)
 
         XCTAssertEqual(store.binding(for: .topLeft).label, "⌥Q")
         XCTAssertEqual(after.menu.labels[.slotKey(.topLeft)], "⌥Q")
@@ -331,6 +337,136 @@ final class AppDelegateMenuTests: XCTestCase {
             .first { $0.title == "Tile Focused Window" }?
             .children?.first { $0.action == .tileSlot(.topLeft) }
         XCTAssertEqual(topLeft?.title, "Top Left Sixth · ⌥Q")
+    }
+
+    // MARK: Glyph follows the cursor (status item paths)
+
+    private static let firstDisplay = ScreenInfo(
+        id: ScreenID(rawValue: 1),
+        frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        name: "Built-in")
+    private static let secondDisplay = ScreenInfo(
+        id: ScreenID(rawValue: 2),
+        frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+        visibleFrame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+        name: "Studio Display")
+
+    /// The live screen store the helper's controller reads, so a test
+    /// can attach the second display after the status item exists.
+    private final class ScreenBox {
+        var values: [ScreenInfo]
+        init(_ values: [ScreenInfo]) { self.values = values }
+    }
+
+    /// A presenter with its status item installed while only the first
+    /// display is attached. `showIcon` seeds the cursor display from the
+    /// live mouse location, which a test cannot control, so keeping the
+    /// second display detached during creation makes the seed resolve to
+    /// — or hold — the first display either way. The second display
+    /// attaches before the helper returns, so the baseline glyph is the
+    /// first display's, now named.
+    private func makeCursorPresenter() -> (
+        presenter: MenuBarPresenter, controller: TilingController, gateway: FakeWindowGateway
+    ) {
+        let gateway = FakeWindowGateway()
+        let screens = ScreenBox([Self.firstDisplay])
+        let controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { screens.values }, deathConfirmation: 0)
+        controller.onChange = {}
+        let presenter = MenuBarPresenter(
+            controller: controller,
+            hotkeyStore: HotkeyStore(
+                defaults: UserDefaults(suiteName: "cursor-glyph-\(UUID())")!),
+            hotkeyService: { nil },
+            actionTarget: NSObject())
+        presenter.showIcon()
+        screens.values = [Self.firstDisplay, Self.secondDisplay]
+        return (presenter, controller, gateway)
+    }
+
+    /// Attaches the second display and moves the cursor onto it.
+    private func moveCursorToSecondDisplay(_ controller: TilingController) {
+        controller.noteCursor(at: CGPoint(x: 2000, y: 500))
+    }
+
+    func testCursorDisplayChangeRedrawsTheGlyphAndThenStaysPut() {
+        let (presenter, controller, _) = makeCursorPresenter()
+        // The second display's attachment alone already changes the
+        // glyph (the display name becomes speakable); settle that first
+        // so the next diff is purely the cursor's move.
+        presenter.refreshCursorDisplay()
+        let builtIn = presenter.statusButton?.image
+        XCTAssertNotNil(builtIn)
+
+        moveCursorToSecondDisplay(controller)
+        presenter.refreshCursorDisplay()
+        let studio = presenter.statusButton?.image
+        XCTAssertNotEqual(
+            studio, builtIn,
+            "the glyph follows the cursor's display even with identical occupancy")
+
+        presenter.refreshCursorDisplay()
+        XCTAssertTrue(
+            presenter.statusButton?.image === studio,
+            "no cursor change, no redraw: the dedupe holds at the pixel level")
+        presenter.hideIcon()
+    }
+
+    func testCursorRedrawDefersWhileTheMenuIsOpenAndCatchesUpOnClose() {
+        let (presenter, controller, _) = makeCursorPresenter()
+        presenter.refreshCursorDisplay()
+        let baseline = presenter.statusButton?.image
+
+        presenter.menuWillOpen(NSMenu())
+        moveCursorToSecondDisplay(controller)
+        presenter.refreshCursorDisplay()
+        XCTAssertTrue(
+            presenter.statusButton?.image === baseline,
+            "an open menu defers the redraw")
+
+        presenter.menuDidClose(NSMenu())
+        XCTAssertFalse(
+            presenter.statusButton?.image === baseline,
+            "the close handler runs a fresh pass and catches up")
+        presenter.hideIcon()
+    }
+
+    func testFocusChangeLeavesTheGlyphAloneAndClearsTheNotice() {
+        let (presenter, controller, gateway) = makeCursorPresenter()
+        presenter.refreshCursorDisplay()
+        let baseline = presenter.statusButton?.image
+
+        // Focus a window on the second display: the focused canvas moves.
+        let second = gateway.addWindow(
+            frame: CGRect(x: 1800, y: 100, width: 800, height: 600), appName: "Mail")
+        gateway.focused = second
+        gateway.simulateFocusChange()
+        XCTAssertEqual(controller.focusedTilingSpace.screen, Self.secondDisplay.id)
+        XCTAssertEqual(controller.cursorTilingSpace.screen, Self.firstDisplay.id)
+
+        presenter.focusDidChange()
+        XCTAssertTrue(
+            presenter.statusButton?.image === baseline,
+            "focus no longer moves the glyph")
+
+        // What survives on the focus route: receipt supersession. A
+        // background receipt sticks to the menu until the next focus
+        // move clears it.
+        let background = TilingSpaceKey(screen: Self.firstDisplay.id, space: nil)
+        presenter.present(ActionReceipt(
+            canvas: background, performed: true,
+            notice: "Untiled.", announcement: nil))
+        let withNotice = presenter.snapshot(
+            menu: controller.focusedTilingSpace, icon: controller.cursorTilingSpace)
+        XCTAssertEqual(withNotice.menu.notice, "Untiled.")
+
+        presenter.focusDidChange()
+        let cleared = presenter.snapshot(
+            menu: controller.focusedTilingSpace, icon: controller.cursorTilingSpace)
+        XCTAssertNil(cleared.menu.notice, "the focus move supersedes the receipt")
+        presenter.hideIcon()
     }
 
     // MARK: Refresh ordering (refreshPlan)

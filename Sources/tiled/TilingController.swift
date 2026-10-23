@@ -159,12 +159,16 @@ final class TilingController {
     var switchLayoutLabelProvider: (() -> String?)?
 
     /// Called when keyboard focus moves to a window on another display
-    /// or another Mission Control Space without any tiling action. Both
-    /// change which canvas the status icon depicts. The menu aggregates
-    /// every canvas, but the icon is scoped to the focused one, so it
-    /// needs this redraw route. A move within one canvas is ignored: the
-    /// glyph's layout and occupancy cannot change.
+    /// or another Mission Control Space without any tiling action. The
+    /// glyph follows the cursor, not focus, so this route only
+    /// supersedes the sticky receipt; the menu rebuilds from a fresh
+    /// snapshot when it opens. A move within one canvas is ignored.
     var onFocusedSpaceChange: (() -> Void)?
+
+    /// The cursor moved to a display other than the last one seen, with
+    /// no tiling action. The status icon follows the cursor; the menu
+    /// follows focus and never rebuilds for this.
+    var onCursorDisplayChange: (() -> Void)?
 
     /// A late outcome with no action caller to return a receipt to: the
     /// silent-ignore convergence rollback. It hands the delegate the same
@@ -192,7 +196,8 @@ final class TilingController {
         uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         observeMouseUp: (@escaping () -> Void) -> Void = { _ in },
         observeMouseDown: (@escaping (CGPoint) -> Void) -> Void = { _ in },
-        observeMouseDragged: (@escaping () -> Void) -> Void = { _ in }
+        observeMouseDragged: (@escaping () -> Void) -> Void = { _ in },
+        observeCursorMove: (@escaping (CGPoint) -> Void) -> Void = { _ in }
     ) {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
@@ -244,6 +249,11 @@ final class TilingController {
         observeMouseDown { [weak self] point in self?.mousePressed(at: point) }
         observeMouseDragged { [weak self] in self?.mouseDragged() }
         observeMouseUp { [weak self] in self?.mouseLifted() }
+        // The cursor's display picks the canvas the status glyph depicts;
+        // see `cursorMoved(to:)`. The no-op default keeps tests from
+        // installing real event monitors; AppDelegate wires the
+        // production registrar.
+        observeCursorMove { [weak self] point in self?.cursorMoved(to: point) }
         // Focus moving to another display or Space changes the status
         // glyph with no tiling action. Subscribe now when AX is already
         // trusted; the permission flow calls `observeFocus()` again
@@ -281,6 +291,32 @@ final class TilingController {
     private func focusedCanvasMayHaveChanged() {
         guard directory.noteFocusedKey(directory.focusedKey()) else { return }
         onFocusedSpaceChange?()
+    }
+
+    // MARK: Cursor observation
+
+    /// One cursor-move event: report only when the resolved display
+    /// changed, so per-event calls at mouse rate never turn into UI
+    /// work while the cursor stays on one display.
+    private func cursorMoved(to point: CGPoint) {
+        guard directory.noteCursor(at: point) else { return }
+        onCursorDisplayChange?()
+    }
+
+    /// Records the cursor's display from an injected point, answering
+    /// whether it moved. The presenter's seam for tests: the live
+    /// registrar path is `cursorMoved(to:)`.
+    func noteCursor(at point: CGPoint) -> Bool {
+        directory.noteCursor(at: point)
+    }
+
+    /// The same question from the live mouse location. The presenter
+    /// seeds at first draw and at menu open: event delivery during menu
+    /// tracking is not guaranteed, so the seed makes the glyph correct
+    /// without trusting the monitors (`NSEvent.mouseLocation` needs no
+    /// accessibility trust).
+    func noteCursorFromMouseLocation() -> Bool {
+        noteCursor(at: NSEvent.mouseLocation)
     }
 
     /// One workspace notification: a swipe changed the Space shown on
@@ -1306,6 +1342,26 @@ final class TilingController {
         }
     }
 
+    /// Production cursor-move registrar: the same global + local pair
+    /// as the left-mouse edges. The dragged variants are load-bearing:
+    /// a held button suppresses mouseMoved, so without them the glyph
+    /// would freeze mid-drag — precisely when windows cross displays.
+    /// Needs the same accessibility permission as AX; pre-trust the
+    /// monitors deliver nothing, and the presenter's seed still works
+    /// because `NSEvent.mouseLocation` needs no trust. The location is
+    /// already in AppKit screen coordinates — the same space the
+    /// screen frames use — so no conversion applies.
+    static func observeCursorMove(_ fire: @escaping (CGPoint) -> Void) {
+        let mask: NSEvent.EventTypeMask = [
+            .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
+        ]
+        NSEvent.addGlobalMonitorForEvents(matching: mask) { _ in fire(NSEvent.mouseLocation) }
+        NSEvent.addLocalMonitorForEvents(matching: mask) { event in
+            fire(NSEvent.mouseLocation)
+            return event
+        }
+    }
+
     /// Registers the gateway's change handler and feeds callbacks to the
     /// tracker. Element identity and dedupe live behind the seam; echo,
     /// edges, splitters, and coalescing live in the tracker. The
@@ -1367,10 +1423,17 @@ final class TilingController {
     /// window's live frame (else its pre-tile frame, else main).
     var focusedScreen: ScreenID? { directory.focusedScreenID() }
 
-    /// The focused tiling canvas (display plus Mission Control Space),
-    /// captured once so a UI pass can read the glyph's layout and
-    /// occupancy consistently even if focus moves between the reads.
+    /// The focused tiling canvas (display plus Mission Control Space) —
+    /// the one the menu's rows and every action resolve, captured once
+    /// so a UI pass reads it consistently even if focus moves between
+    /// the reads. The status glyph follows the cursor instead
+    /// (`cursorTilingSpace`).
     var focusedTilingSpace: TilingSpaceKey { directory.focusedKey() }
+
+    /// The tiling canvas the status glyph depicts: the display the
+    /// cursor is on, captured once per presentation pass like
+    /// `focusedTilingSpace`.
+    var cursorTilingSpace: TilingSpaceKey { directory.cursorKey() }
 
     var tiledWindowsInfo: [TiledWindowInfo] {
         allTiledWindowsInfo()

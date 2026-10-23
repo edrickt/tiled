@@ -6,7 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         gateway: gateway,
         observeMouseUp: TilingController.observeLeftMouseUp,
         observeMouseDown: TilingController.observeLeftMouseDown,
-        observeMouseDragged: TilingController.observeLeftMouseDragged)
+        observeMouseDragged: TilingController.observeLeftMouseDragged,
+        observeCursorMove: TilingController.observeCursorMove)
     /// The global-hotkey observer: forwards routes to the live controller
     /// and delegate. Lazy because it captures both.
     private lazy var hotkeyPerformer = AppHotkeyPerformer(
@@ -50,6 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.onFocusedSpaceChange = { [weak self] in
             self?.menuBar.focusDidChange()
+        }
+        controller.onCursorDisplayChange = { [weak self] in
+            self?.menuBar.refreshCursorDisplay()
         }
         controller.onLateReceipt = { [weak self] receipt in
             self?.present(receipt)
