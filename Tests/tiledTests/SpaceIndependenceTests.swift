@@ -291,10 +291,6 @@ final class SpaceIndependenceTests: XCTestCase {
             "the glyph key stays on the cursor's display")
     }
 
-    /// The Switch Layout hotkey acts on the cursor's display's canvas,
-    /// not the focused window's: the cursor's display switches even when
-    /// keyboard focus sits on another display, and that display's canvas
-    /// is untouched.
     func testSwitchLayoutHotkeyFollowsTheCursorDisplay() {
         let (first, _) = setUpTwoDisplaysWithFocusOnTheFirst()
         harness.fireCursorMove(to: CGPoint(x: 2500, y: 500))
