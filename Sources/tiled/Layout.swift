@@ -47,6 +47,10 @@ extension TileCell {
 /// or its rect the way parallel hand-written tables could.
 struct SlotGeometry: Equatable {
     let layout: LayoutKind
+    /// The physical key that selects this slot in `layout`. Declared on the
+    /// same row as the span so the key mapping and the geometry can never
+    /// drift apart.
+    let key: SlotKey
     /// Refinement strips covered, left to right (0..<4).
     let columns: Range<Int>
     /// Refinement rows covered, top to bottom (0 = top, 1 = bottom).
@@ -76,28 +80,48 @@ enum Slot: String, CaseIterable {
     /// slot; every derived property below reads it.
     var geometry: SlotGeometry {
         switch self {
-        case .topLeft: SlotGeometry(layout: .quarters, columns: 0..<2, rows: 0..<1)
-        case .topRight: SlotGeometry(layout: .quarters, columns: 2..<4, rows: 0..<1)
-        case .bottomLeft: SlotGeometry(layout: .quarters, columns: 0..<2, rows: 1..<2)
-        case .bottomRight: SlotGeometry(layout: .quarters, columns: 2..<4, rows: 1..<2)
-        case .leftHalf: SlotGeometry(layout: .quarters, columns: 0..<2, rows: 0..<2)
-        case .rightHalf: SlotGeometry(layout: .quarters, columns: 2..<4, rows: 0..<2)
-        case .sixthTopLeft: SlotGeometry(layout: .sixths, columns: 0..<1, rows: 0..<1)
-        case .sixthTopMiddle: SlotGeometry(layout: .sixths, columns: 1..<3, rows: 0..<1)
-        case .sixthTopRight: SlotGeometry(layout: .sixths, columns: 3..<4, rows: 0..<1)
-        case .sixthBottomLeft: SlotGeometry(layout: .sixths, columns: 0..<1, rows: 1..<2)
-        case .sixthBottomMiddle: SlotGeometry(layout: .sixths, columns: 1..<3, rows: 1..<2)
-        case .sixthBottomRight: SlotGeometry(layout: .sixths, columns: 3..<4, rows: 1..<2)
-        case .sixthLeft: SlotGeometry(layout: .sixths, columns: 0..<1, rows: 0..<2)
-        case .sixthMiddle: SlotGeometry(layout: .sixths, columns: 1..<3, rows: 0..<2)
-        case .sixthRight: SlotGeometry(layout: .sixths, columns: 3..<4, rows: 0..<2)
-        case .sixthsLeftTwoThirds: SlotGeometry(layout: .sixths, columns: 0..<3, rows: 0..<2)
-        case .sixthsRightTwoThirds: SlotGeometry(layout: .sixths, columns: 1..<4, rows: 0..<2)
+        case .topLeft:
+            SlotGeometry(layout: .quarters, key: .topLeft, columns: 0..<2, rows: 0..<1)
+        case .topRight:
+            SlotGeometry(layout: .quarters, key: .topRight, columns: 2..<4, rows: 0..<1)
+        case .bottomLeft:
+            SlotGeometry(layout: .quarters, key: .bottomLeft, columns: 0..<2, rows: 1..<2)
+        case .bottomRight:
+            SlotGeometry(layout: .quarters, key: .bottomRight, columns: 2..<4, rows: 1..<2)
+        case .leftHalf:
+            SlotGeometry(layout: .quarters, key: .leftColumn, columns: 0..<2, rows: 0..<2)
+        case .rightHalf:
+            SlotGeometry(layout: .quarters, key: .rightColumn, columns: 2..<4, rows: 0..<2)
+        case .sixthTopLeft:
+            SlotGeometry(layout: .sixths, key: .topLeft, columns: 0..<1, rows: 0..<1)
+        case .sixthTopMiddle:
+            SlotGeometry(layout: .sixths, key: .topMiddle, columns: 1..<3, rows: 0..<1)
+        case .sixthTopRight:
+            SlotGeometry(layout: .sixths, key: .topRight, columns: 3..<4, rows: 0..<1)
+        case .sixthBottomLeft:
+            SlotGeometry(layout: .sixths, key: .bottomLeft, columns: 0..<1, rows: 1..<2)
+        case .sixthBottomMiddle:
+            SlotGeometry(layout: .sixths, key: .bottomMiddle, columns: 1..<3, rows: 1..<2)
+        case .sixthBottomRight:
+            SlotGeometry(layout: .sixths, key: .bottomRight, columns: 3..<4, rows: 1..<2)
+        case .sixthLeft:
+            SlotGeometry(layout: .sixths, key: .leftColumn, columns: 0..<1, rows: 0..<2)
+        case .sixthMiddle:
+            SlotGeometry(layout: .sixths, key: .middleColumn, columns: 1..<3, rows: 0..<2)
+        case .sixthRight:
+            SlotGeometry(layout: .sixths, key: .rightColumn, columns: 3..<4, rows: 0..<2)
+        case .sixthsLeftTwoThirds:
+            SlotGeometry(layout: .sixths, key: .leftTwoThirds, columns: 0..<3, rows: 0..<2)
+        case .sixthsRightTwoThirds:
+            SlotGeometry(layout: .sixths, key: .rightTwoThirds, columns: 1..<4, rows: 0..<2)
         }
     }
 
     /// Which layout this slot belongs to.
     var layout: LayoutKind { geometry.layout }
+
+    /// The physical key that selects this slot in its layout.
+    var key: SlotKey { geometry.key }
 
     /// True for the sixths slots that span two thirds of the screen.
     /// Their span hides a one-thirds divider, which is kept centered
