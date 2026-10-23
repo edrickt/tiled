@@ -15,13 +15,16 @@ import XCTest
 /// - every snapshot entry returns to its recorded slot;
 /// - a requester with a snapshot entry returns to that slot;
 /// - a requester without an entry is returned to its pre-tile frame when
-///   the chapter names it as the requester (a layout switch, or a fresh
-///   eviction), and is otherwise left where the request put it (a move
-///   whose only displacement is a reflow);
+///   the chapter names it as the requester (a fresh eviction), and is
+///   otherwise left where the request put it (a move whose only
+///   displacement is a reflow);
+/// - a switch untiles every occupant and its chapter returns the whole
+///   pre-switch board, previous layout included;
 /// - no other window moves.
 ///
-/// The check is opt-in because it explores 652 boards and ~31k edges
-/// (~7 seconds): `TILED_EXHAUSTIVE=1 swift test --filter
+/// The check is opt-in because it explores 653 boards (532 Sixths, 121
+/// Quarters) through 18,818 edges and checks 11,931 chapters (~5 seconds):
+/// `TILED_EXHAUSTIVE=1 swift test --filter
 /// ExhaustiveUndoTests/testEveryReachableBoardUndoesItsLastDisplacement`.
 /// Plain `swift test` skips it.
 final class ExhaustiveUndoTests: XCTestCase {
@@ -55,6 +58,14 @@ final class ExhaustiveUndoTests: XCTestCase {
         }
     }
 
+    /// One user action in a replay path. A placement presses a physical key
+    /// on the named window; a switch presses the explicit layout switch,
+    /// which untiles every occupant and adopts the other layout.
+    private enum Step: Equatable {
+        case place(window: Int, slot: Slot)
+        case switchLayout
+    }
+
     private struct Counterexample {
         var count: Int
         let signature: String
@@ -80,11 +91,21 @@ final class ExhaustiveUndoTests: XCTestCase {
         return Session(controller: controller, gateway: gateway, handles: handles)
     }
 
-    private func replay(_ steps: [(Int, Slot)]) -> Session {
+    private func replay(_ steps: [Step]) -> Session {
         let session = makeSession()
-        for (index, slot) in steps {
-            session.gateway.focused = session.handles[index]
-            session.controller.handle(slot: slot)
+        for step in steps {
+            switch step {
+            case .place(let index, let slot):
+                session.gateway.focused = session.handles[index]
+                session.controller.handle(slot: slot)
+            case .switchLayout:
+                // The switch acts on the focused window's canvas. Always
+                // focus a handle, including on an empty board: its frame
+                // names the display, so the switch lands on the same
+                // canvas the placements did.
+                session.gateway.focused = session.handles[0]
+                session.controller.handleSwitchLayout()
+            }
         }
         return session
     }
@@ -109,7 +130,8 @@ final class ExhaustiveUndoTests: XCTestCase {
         for (index, handle) in session.handles.enumerated() {
             frames[index] = session.gateway.frame(of: handle)
         }
-        return Board(occupants: occupants, frames: frames)
+        return Board(
+            occupants: occupants, layout: canvas.state.layout, frames: frames)
     }
 
     private func key(_ board: Board) -> String {
@@ -120,9 +142,14 @@ final class ExhaustiveUndoTests: XCTestCase {
         return "\(board.layout.rawValue)|\(cells)"
     }
 
-    private func describe(_ path: [(Int, Slot)]) -> String {
+    private func describe(_ path: [Step]) -> String {
         guard !path.isEmpty else { return "empty board" }
-        return path.map { "win\($0.0) -> \($0.1.rawValue)" }.joined(separator: ", ")
+        return path.map { step in
+            switch step {
+            case .place(let window, let slot): "win\(window) -> \(slot.rawValue)"
+            case .switchLayout: "switch"
+            }
+        }.joined(separator: ", ")
     }
 
     private func healthProblem(_ board: Board) -> String? {
@@ -136,6 +163,9 @@ final class ExhaustiveUndoTests: XCTestCase {
         }
         if Set(board.occupants.keys.map(\.layout)).count > 1 {
             return "mixed layouts on one canvas"
+        }
+        if let occupied = board.occupants.keys.first?.layout, occupied != board.layout {
+            return "occupants in \(occupied.rawValue) on a \(board.layout.rawValue) canvas"
         }
         if Set(board.occupants.values).count != board.occupants.count {
             return "one window in two slots"
@@ -175,7 +205,7 @@ final class ExhaustiveUndoTests: XCTestCase {
                 frames[requesterIndex] = preTileFrame
             }
         }
-        return Board(occupants: occupants, frames: frames)
+        return Board(occupants: occupants, layout: after.layout, frames: frames)
     }
 
     private func signature(
@@ -187,7 +217,6 @@ final class ExhaustiveUndoTests: XCTestCase {
         switch plan {
         case .tile(let e): kind = "tile"; evicted = e.count
         case .swap: kind = "swap"; evicted = 1
-        case .switchLayout(let e): kind = "switch"; evicted = e.count
         case .noop: kind = "noop"; evicted = 0
         }
         let requesterHandle = session.handles[requesterIndex]
@@ -233,11 +262,13 @@ final class ExhaustiveUndoTests: XCTestCase {
             "the structural-health check did not notice a window owning overlapping cells")
 
         let start = Date()
-        var paths: [String: [(Int, Slot)]] = ["sixths|": []]
+        var paths: [String: [Step]] = ["sixths|": []]
         var queue = ["sixths|"]
         var edges = 0
         var undoChecks = 0
+        var switches = 0
         var healthProblems: [String] = []
+        var switchProblems: [String] = []
         var counterexamples: [String: Counterexample] = [:]
 
         while !queue.isEmpty {
@@ -251,12 +282,67 @@ final class ExhaustiveUndoTests: XCTestCase {
                 healthProblems.append("\(describe(path)): \(problem)")
             }
 
+            // A switch is a first-class action: from every reachable board,
+            // empty or occupied, it untiles the canvas and adopts the other
+            // layout. An occupied switch pushes one chapter whose undo must
+            // return exactly the pre-switch board, previous layout included.
+            edges += 1
+            switches += 1
+            let switchPath = path + [.switchLayout]
+            let switched = replay(switchPath)
+            let switchedBoard = board(switched)
+            if let problem = healthProblem(switchedBoard) {
+                healthProblems.append("\(describe(switchPath)): \(problem)")
+            }
+            if paths[key(switchedBoard)] == nil {
+                paths[key(switchedBoard)] = switchPath
+                queue.append(key(switchedBoard))
+            }
+            if switchedBoard.layout == baseBoard.layout {
+                switchProblems.append(
+                    "\(describe(path)): a switch kept the \(baseBoard.layout.rawValue) layout")
+            }
+            let switchedCanvas = canvas(switched)
+            if baseBoard.occupants.isEmpty {
+                if switchedCanvas.undoStack.count != beforeDepth {
+                    switchProblems.append(
+                        "\(describe(path)): a zero-window switch pushed a chapter")
+                }
+            } else {
+                let expectedDepth = min(beforeDepth + 1, TilingSpace.undoDepth)
+                if switchedCanvas.undoStack.count != expectedDepth
+                    || switchedCanvas.undoStack.last?.snapshot.count
+                        != baseBoard.occupants.count
+                {
+                    switchProblems.append(
+                        "\(describe(path)): the switch did not push one complete chapter")
+                } else if let chapter = switchedCanvas.undoStack.last {
+                    undoChecks += 1
+                    let performed = switched.controller.undoLastDisplacement()
+                    let undone = board(switched)
+                    assertHealthy(undone, "after undo of a switch from \(describe(path))")
+                    if !performed || undone != baseBoard {
+                        switchProblems.append(
+                            "\(describe(path)): undo of the switch did not return "
+                                + "the pre-switch board\n"
+                                + "  chapter  \(chapterDescription(chapter, session: switched))\n"
+                                + "  expected \(baseBoard.occupants) "
+                                + "\(baseBoard.layout.rawValue)\n"
+                                + "  undone   \(undone.occupants) "
+                                + "\(undone.layout.rawValue)")
+                    }
+                }
+            }
+
             for (index, handle) in base.handles.enumerated() {
                 // An unregistered window is untiled; a sentinel never in
                 // `occupants` gives the same plan answer the controller's
                 // first real ID will give.
                 let id = base.controller.registeredID(for: handle) ?? (-1 - index)
-                for slot in Slot.allCases {
+                // A slot key resolves only inside the canvas's stored
+                // layout. The switch edge above is how the search reaches
+                // the other layout; a slot press itself never switches.
+                for slot in Slot.allCases where slot.layout == baseCanvas.state.layout {
                     let plan = baseCanvas.state.plan(window: id, into: slot)
                     if case .noop = plan { continue }
                     edges += 1
@@ -271,14 +357,15 @@ final class ExhaustiveUndoTests: XCTestCase {
                     } else {
                         preTileFrame = base.gateway.frame(of: handle)
                     }
-                    let next = replay(path + [(index, slot)])
+                    let placedPath = path + [.place(window: index, slot: slot)]
+                    let next = replay(placedPath)
                     let nextBoard = board(next)
                     if let problem = healthProblem(nextBoard) {
                         healthProblems.append(
-                            "\(describe(path + [(index, slot)])): \(problem)")
+                            "\(describe(placedPath)): \(problem)")
                     }
                     if paths[key(nextBoard)] == nil {
-                        paths[key(nextBoard)] = path + [(index, slot)]
+                        paths[key(nextBoard)] = placedPath
                         queue.append(key(nextBoard))
                     }
                     guard beforeDepth < TilingSpace.undoDepth,
@@ -292,7 +379,7 @@ final class ExhaustiveUndoTests: XCTestCase {
                         grid: baseCanvas.grid, visibleFrame: baseCanvas.visibleFrame)
                     let performed = next.controller.undoLastDisplacement()
                     let undone = board(next)
-                    assertHealthy(undone, "after undo of \(describe(path + [(index, slot)]))")
+                    assertHealthy(undone, "after undo of \(describe(placedPath))")
                     guard !performed || undone != expected else { continue }
                     let sig = signature(
                         plan: plan, requesterTiled: requesterTiled, chapter: chapter,
@@ -301,7 +388,7 @@ final class ExhaustiveUndoTests: XCTestCase {
                     counterexamples[sig] = Counterexample(
                         count: (previous?.count ?? 0) + 1,
                         signature: sig,
-                        replay: describe(path + [(index, slot)]),
+                        replay: describe(placedPath),
                         chapter: chapterDescription(chapter, session: next),
                         expected: expected.occupants,
                         undone: undone.occupants,
@@ -312,14 +399,18 @@ final class ExhaustiveUndoTests: XCTestCase {
         }
 
         print(
-            "DONE states=\(paths.count) edges=\(edges) undoChecks=\(undoChecks) "
-                + "signatures=\(counterexamples.count) "
+            "DONE states=\(paths.count) edges=\(edges) switches=\(switches) "
+                + "undoChecks=\(undoChecks) signatures=\(counterexamples.count) "
                 + "elapsed=\(Date().timeIntervalSince(start))")
         XCTAssertGreaterThan(paths.count, 500, "the search explored too little")
         XCTAssertGreaterThan(undoChecks, 1000, "too few displacement chapters were undone")
+        XCTAssertGreaterThan(switches, 0, "the search never exercised a switch")
         XCTAssertTrue(
             healthProblems.isEmpty,
             "Structural health failed:\n" + healthProblems.prefix(5).joined(separator: "\n"))
+        XCTAssertTrue(
+            switchProblems.isEmpty,
+            "Switch undo failed:\n" + switchProblems.prefix(5).joined(separator: "\n"))
 
         if !counterexamples.isEmpty {
             let report = counterexamples.values

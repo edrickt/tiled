@@ -3,6 +3,9 @@ import XCTest
 
 @testable import tiled
 
+/// The Shortcuts tab has exactly two sections: the six app actions and the
+/// eleven shared slot keys. The slot-key section is grouped by physical
+/// position and carries the one bulk control.
 final class ShortcutsGroupingTests: XCTestCase {
     private var suiteName: String!
     private var defaults: UserDefaults!
@@ -27,16 +30,16 @@ final class ShortcutsGroupingTests: XCTestCase {
         [view] + view.subviews.flatMap { descendants(of: $0) }
     }
 
-    func testExpandedLayoutsGroupRecordersLikeTheMenuWithoutChangingBindings() {
+    func testSectionsGroupRecordersWithoutChangingBindings() {
         let custom = HotkeyBinding(modifiers: 0, keyCode: 0)
-        store.set(custom, for: .sixthMiddle)
+        store.set(custom, for: .middleColumn)
         let tab = ShortcutsTab(hotkeyStore: store, defaults: defaults)
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         tab.reload()
-        let headings = Set(["Quads", "Halves", "Corners", "Thirds", "Two-Thirds"])
+        let headings = Set(["Corners", "Thirds", "Two-Thirds"])
         let sequence = descendants(of: view).compactMap { view -> String? in
             if let recorder = view as? RecorderButton {
-                if case .slot(let slot) = recorder.hotkeyAction { return slot.rawValue }
+                if case .slotKey(let key) = recorder.hotkeyAction { return key.rawValue }
                 return recorder.hotkeyAction.title
             }
             if let label = view as? NSTextField, headings.contains(label.stringValue) {
@@ -47,84 +50,86 @@ final class ShortcutsGroupingTests: XCTestCase {
 
         XCTAssertEqual(sequence, [
             "Expand to Fill Screen", "Evict Focused Window", "Reset Splitters",
-            "Open Settings", "Undo Last Displacement",
-            "Quads", "topLeft", "topRight", "bottomLeft", "bottomRight",
-            "Halves", "leftHalf", "rightHalf",
-            "Corners", "sixthTopLeft", "sixthTopMiddle", "sixthTopRight",
-            "sixthBottomLeft", "sixthBottomMiddle", "sixthBottomRight",
-            "Thirds", "sixthLeft", "sixthMiddle", "sixthRight",
-            "Two-Thirds", "sixthsLeftTwoThirds", "sixthsRightTwoThirds",
+            "Switch Layout", "Open Settings", "Undo Last Displacement",
+            "Corners",
+            "topLeft", "topMiddle", "topRight",
+            "bottomLeft", "bottomMiddle", "bottomRight",
+            "Thirds", "leftColumn", "middleColumn", "rightColumn",
+            "Two-Thirds", "leftTwoThirds", "rightTwoThirds",
         ])
-        XCTAssertEqual(store.binding(for: .sixthMiddle), custom)
-        XCTAssertEqual(descendants(of: view).compactMap { $0 as? RecorderButton }
-            .first { $0.hotkeyAction == .slot(.sixthMiddle) }?.accessibilityValue() as? String,
+        XCTAssertEqual(store.binding(for: .middleColumn), custom)
+        XCTAssertEqual(
+            descendants(of: view).compactMap { $0 as? RecorderButton }
+                .first { $0.hotkeyAction == .slotKey(.middleColumn) }?
+                .accessibilityValue() as? String,
             "A")
     }
 
-    func testCollapsingQuartersHidesItsSubgroupsAndKeepsSixthsAsTheFirstRecorder() throws {
+    func testCollapsingSlotKeysHidesItsSubgroupsAndLeavesAppActionsLeading() throws {
         let tab = ShortcutsTab(hotkeyStore: store, defaults: defaults)
         var view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         tab.onContentRebuilt = { view = $0 }
         let header = try XCTUnwrap(descendants(of: view).compactMap { $0 as? NSButton }
-            .first { $0.title == "Quarters (6)" })
+            .first { $0.title == "Slot Keys (11)" })
         header.performClick(nil)
 
         let labels = descendants(of: view).compactMap { ($0 as? NSTextField)?.stringValue }
-        XCTAssertFalse(labels.contains("Quads"))
-        XCTAssertFalse(labels.contains("Halves"))
-        XCTAssertTrue(labels.contains("Corners"))
-        XCTAssertTrue(labels.contains("Thirds"))
-        XCTAssertTrue(labels.contains("Two-Thirds"))
-        // Quarters collapses, but App Actions stays visible above Sixths,
-        // so the first recorder is still the first slot row of Sixths.
-        XCTAssertEqual(tab.firstRecorder?.hotkeyAction, .slot(.sixthTopLeft))
-        XCTAssertEqual(descendants(of: view).compactMap { $0 as? RecorderButton }.count, 16)
+        XCTAssertFalse(labels.contains("Corners"))
+        XCTAssertFalse(labels.contains("Thirds"))
+        XCTAssertFalse(labels.contains("Two-Thirds"))
+        // Slot Keys collapses, but App Actions stays visible, so the first
+        // recorder is Expand.
+        XCTAssertEqual(tab.firstRecorder?.hotkeyAction, .expand)
+        XCTAssertEqual(descendants(of: view).compactMap { $0 as? RecorderButton }.count, 6)
 
-        // Collapse is persisted: a new tab reopens with the same layout hidden.
+        // Collapse is persisted: a new tab reopens with the section hidden.
         let reopened = ShortcutsTab(hotkeyStore: store, defaults: defaults)
         _ = reopened.build(size: NSSize(width: 440, height: 480), window: nil)
-        XCTAssertEqual(reopened.firstRecorder?.hotkeyAction, .slot(.sixthTopLeft))
+        XCTAssertEqual(reopened.firstRecorder?.hotkeyAction, .expand)
     }
 
-    func testCollapsingAppActionsHidesOnlyThoseFiveRows() throws {
+    func testCollapsingAppActionsHidesOnlyThoseSixRows() throws {
         let tab = ShortcutsTab(hotkeyStore: store, defaults: defaults)
         var view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         tab.onContentRebuilt = { view = $0 }
         let header = try XCTUnwrap(descendants(of: view).compactMap { $0 as? NSButton }
-            .first { $0.title == "App Actions (5)" })
+            .first { $0.title == "App Actions (6)" })
         header.performClick(nil)
 
         let labels = descendants(of: view).compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertFalse(labels.contains("Expand to Fill Screen"))
         XCTAssertFalse(labels.contains("Undo Last Displacement"))
-        XCTAssertTrue(labels.contains("Quads"))
-        // Quarters is expanded and starts right after the collapsed
-        // section, so its first recorder leads.
-        XCTAssertEqual(tab.firstRecorder?.hotkeyAction, .slot(.topLeft))
-        XCTAssertEqual(descendants(of: view).compactMap { $0 as? RecorderButton }.count, 17)
+        XCTAssertTrue(labels.contains("Corners"))
+        // Slot Keys is expanded and starts right after the collapsed
+        // section, so its first key leads.
+        XCTAssertEqual(tab.firstRecorder?.hotkeyAction, .slotKey(.topLeft))
+        XCTAssertEqual(descendants(of: view).compactMap { $0 as? RecorderButton }.count, 11)
     }
 
-    func testSixthsBulkActionStillCoversEverySubgroupAndLeavesQuartersAlone() throws {
+    func testBulkActionCoversEverySlotKeyAndLeavesAppActionsAlone() throws {
         let tab = ShortcutsTab(hotkeyStore: store, defaults: defaults)
         var view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         tab.onContentRebuilt = { view = $0 }
-        let previous = Dictionary(uniqueKeysWithValues: Slot.allCases.map { ($0, store.binding(for: $0)) })
+        let slotKeys = SlotKey.allCases.map(HotkeyAction.slotKey)
+        let previousSlots = Dictionary(
+            uniqueKeysWithValues: slotKeys.map { ($0, store.binding(for: $0)) })
+        let previousApps = Dictionary(
+            uniqueKeysWithValues: HotkeyAction.appActions.map { ($0, store.binding(for: $0)) })
         let disable = try XCTUnwrap(descendants(of: view).compactMap { $0 as? NSButton }
             .first { $0.title == "Disable all 11" })
         disable.performClick(nil)
 
-        for slot in Slot.allCases {
-            if slot.layout == .sixths {
-                XCTAssertNil(store.binding(for: slot).keyCode)
-            } else {
-                XCTAssertEqual(store.binding(for: slot), previous[slot])
-            }
+        for action in slotKeys {
+            XCTAssertNil(store.binding(for: action).keyCode)
+        }
+        for action in HotkeyAction.appActions {
+            XCTAssertEqual(store.binding(for: action), previousApps[action])
         }
         let enable = try XCTUnwrap(descendants(of: view).compactMap { $0 as? NSButton }
             .first { $0.title == "Enable all 11" })
         enable.performClick(nil)
-        for slot in Slot.allCases {
-            XCTAssertEqual(store.binding(for: slot), previous[slot])
+        for action in slotKeys {
+            XCTAssertEqual(store.binding(for: action), previousSlots[action])
         }
     }
 }

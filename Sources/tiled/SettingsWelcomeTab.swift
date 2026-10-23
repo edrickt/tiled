@@ -206,14 +206,14 @@ final class WelcomeTab: NSObject {
     func refreshShortcutInstructions() {
         let failed = failedActions
         let topLeft = hotkeyStore.registeredLabel(
-            for: .slot(.topLeft), failedActions: failed)
+            for: .slotKey(.topLeft), failedActions: failed)
         if let topLeft {
             stepsField?.stringValue =
                 "1. Click any window to focus it.\n" +
-                "2. Press \(topLeft) to tile it Top Left.\n" +
+                "2. Press \(topLeft) to tile it into the top-left slot.\n" +
                 "3. Press it again; the window stays in its slot.\n" +
                 "Every slot is also in the menu bar → Tile Focused Window."
-        } else if failed.contains(.slot(.topLeft)) {
+        } else if failed.contains(.slotKey(.topLeft)) {
             // The stored label is not a promise: another app can own the
             // combo, so the keypress does nothing. Teach the menu path and
             // name the failure instead of printing the dead combo.
@@ -230,15 +230,17 @@ final class WelcomeTab: NSObject {
 
     /// The menu route to Top Left, shared by the disabled and failed
     /// registration paths: both must teach the live row, never a combo.
+    /// The same key means the matching position in whichever layout is
+    /// showing; changing layout is its own menu row.
     private func topLeftInstructions(step3: String) -> String {
         "1. Click any window to focus it.\n" +
         "2. Menu bar → Tile Focused Window → Top Left.\n" +
-        "   In Sixths, choose Switch to Quarters instead.\n" +
+        "   To change layouts, choose Switch to Sixths or Switch to Quarters.\n" +
         step3
     }
 
-    /// Rewrites the behavior note from the store, so a remapped expand
-    /// combo teaches itself instead of the stale ⌥⇧⏎ default. A disabled
+    /// Rewrites the behavior note from the store, so a remapped expand or
+    /// switch combo teaches itself instead of the stale default. A disabled
     /// or unregistered combo is not a shortcut the user can press; the
     /// menu row is the live path, so the note teaches that instead.
     private func refreshBehaviorNote(failedActions: [HotkeyAction]) {
@@ -253,9 +255,21 @@ final class WelcomeTab: NSObject {
                 "Menu bar → Expand to Fill Screen expands a window without releasing its slot; " +
                 "the same row returns it."
         }
+        let switchLayout = hotkeyStore.registeredLabel(
+            for: .switchLayout, failedActions: failedActions)
+        let switchSentence: String
+        if let switchLayout {
+            switchSentence =
+                "\(switchLayout) switches the canvas to the other layout and untiles every window; "
+                + "undo puts them back."
+        } else {
+            switchSentence =
+                "Menu bar → Switch to Sixths (or Switch to Quarters) switches the canvas's layout "
+                + "and untiles every window; undo puts them back."
+        }
         behaviorNoteField?.stringValue =
             "Drag a tiled window far and it comes untiled where you drop it; " +
-            "a short drag snaps back into its tile. " + expandSentence
+            "a short drag snaps back into its tile. " + expandSentence + " " + switchSentence
     }
 
     /// Actions whose global hotkey lost registration. A nil provider means

@@ -317,11 +317,11 @@ final class AppDelegateMenuTests: XCTestCase {
         store.set(
             HotkeyBinding(
                 modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_Q)),
-            for: .slot(.sixthTopLeft))
+            for: .topLeft)
         let after = presenter.snapshot(for: controller.focusedTilingSpace)
 
-        XCTAssertEqual(store.binding(for: .slot(.sixthTopLeft)).label, "⌥Q")
-        XCTAssertEqual(after.menu.labels[.slot(.sixthTopLeft)], "⌥Q")
+        XCTAssertEqual(store.binding(for: .topLeft).label, "⌥Q")
+        XCTAssertEqual(after.menu.labels[.slotKey(.topLeft)], "⌥Q")
         XCTAssertTrue(after.menu.isTrusted)
         XCTAssertEqual(after.menu.activeLayout, .sixths)
         XCTAssertNotEqual(
@@ -329,7 +329,7 @@ final class AppDelegateMenuTests: XCTestCase {
             "a label-only remap must be visible to the last-snapshot diff")
         let topLeft = MenuModel.items(snapshot: after.menu)
             .first { $0.title == "Tile Focused Window" }?
-            .children?.first { $0.action == .tileSlot(.sixthTopLeft) }
+            .children?.first { $0.action == .tileSlot(.topLeft) }
         XCTAssertEqual(topLeft?.title, "Top Left Sixth · ⌥Q")
     }
 
@@ -374,14 +374,14 @@ final class AppDelegateMenuTests: XCTestCase {
         // silent no-op row. Selectors pinned by name: the wiring lives
         // on private @objc methods, so #selector is not referable here.
         let cases: [(MenuModel.Action, String, Any?, Bool)] = [
-            (.tileSlot(.topLeft), "tileSlot:", Slot.topLeft.rawValue, true),
+            (.tileSlot(.topLeft), "tileSlot:", SlotKey.topLeft.rawValue, true),
             (.toggleExpand, "expandFocusedWindow:", nil, true),
             (.evictFocusedWindow, "evictFocusedWindow:", nil, true),
-            (.switchToQuarters, "switchToQuarters:", nil, true),
-            (.switchToSixths, "switchToSixths:", nil, true),
+            (.switchLayout(to: .sixths), "switchLayout:", LayoutKind.sixths.rawValue, true),
+            (.switchLayout(to: .quarters), "switchLayout:", LayoutKind.quarters.rawValue, true),
             (.untileWindow(7), "untileTiledWindow:", 7, true),
             (.focusWindow(9), "focusTiledWindow:", 9, true),
-            (.tileHere(.sixthMiddle), "tileFocusedHere:", Slot.sixthMiddle.rawValue, true),
+            (.tileHere(.middleColumn), "tileFocusedHere:", SlotKey.middleColumn.rawValue, true),
             (.undoSwitch, "undoSwitch:", nil, true),
             (.untileAll, "untileAll:", nil, true),
             (.resetDividers, "resetDividers:", nil, true),

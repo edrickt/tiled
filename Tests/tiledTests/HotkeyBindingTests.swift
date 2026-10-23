@@ -2,8 +2,8 @@ import Carbon.HIToolbox
 import XCTest
 @testable import tiled
 
-/// Phase 1: per-slot remappable hotkeys. Bindings persist in UserDefaults;
-/// factory defaults are today's fixed set (Quarters = ⌥⇧⌘, Sixths = ⌥⇧).
+/// Shared ⌥⇧ slot keys: every physical key has one default binding in
+/// both layouts, and app actions keep their original combos.
 final class HotkeyBindingTests: XCTestCase {
     private var suiteName: String { "tiledTests-\(UUID().uuidString)" }
 
@@ -13,31 +13,26 @@ final class HotkeyBindingTests: XCTestCase {
 
     // MARK: Defaults
 
-    func testDefaultsMatchCurrentFixedHotkeys() {
-        // The generated label for every default binding must equal the
-        // hardcoded labels the menu and cheatsheet showed before custom
-        // bindings existed.
-        let expected: [Slot: String] = [
-            .topLeft: "⌥⇧⌘U", .topRight: "⌥⇧⌘O", .bottomLeft: "⌥⇧⌘M",
-            .bottomRight: "⌥⇧⌘.", .leftHalf: "⌥⇧⌘J", .rightHalf: "⌥⇧⌘L",
-            .sixthTopLeft: "⌥⇧U", .sixthTopMiddle: "⌥⇧I",
-            .sixthTopRight: "⌥⇧O", .sixthBottomLeft: "⌥⇧M",
-            .sixthBottomMiddle: "⌥⇧,", .sixthBottomRight: "⌥⇧.",
-            .sixthLeft: "⌥⇧J", .sixthMiddle: "⌥⇧K",
-            .sixthRight: "⌥⇧L", .sixthsLeftTwoThirds: "⌥⇧H",
-            .sixthsRightTwoThirds: "⌥⇧;",
+    func testDefaultsAreTheSharedOptionShiftSet() {
+        // Every slot key uses ⌥⇧ plus its own keycap, in both layouts.
+        let expected: [SlotKey: String] = [
+            .topLeft: "⌥⇧U", .topMiddle: "⌥⇧I", .topRight: "⌥⇧O",
+            .bottomLeft: "⌥⇧M", .bottomMiddle: "⌥⇧,", .bottomRight: "⌥⇧.",
+            .leftColumn: "⌥⇧J", .middleColumn: "⌥⇧K", .rightColumn: "⌥⇧L",
+            .leftTwoThirds: "⌥⇧H", .rightTwoThirds: "⌥⇧;",
         ]
-        for slot in Slot.allCases {
+        XCTAssertEqual(Set(expected.keys), Set(SlotKey.allCases))
+        for key in SlotKey.allCases {
             XCTAssertEqual(
-                HotkeyStore.defaultBinding(for: slot).label, expected[slot],
-                "\(slot.rawValue) default binding drifted")
+                HotkeyStore.defaultBinding(for: key).label, expected[key],
+                "\(key.rawValue) default binding drifted")
         }
     }
 
     func testFreshStoreReturnsDefaults() {
         let store = makeStore()
-        for slot in Slot.allCases {
-            XCTAssertEqual(store.binding(for: slot), HotkeyStore.defaultBinding(for: slot))
+        for key in SlotKey.allCases {
+            XCTAssertEqual(store.binding(for: key), HotkeyStore.defaultBinding(for: key))
         }
     }
 
@@ -136,9 +131,9 @@ final class HotkeyBindingTests: XCTestCase {
     func testDisabledSlotPersists() {
         let defaults = UserDefaults(suiteName: suiteName)!
         HotkeyStore(defaults: defaults).set(
-            HotkeyBinding(modifiers: 0, keyCode: nil), for: .leftHalf)
+            HotkeyBinding(modifiers: 0, keyCode: nil), for: .leftColumn)
         XCTAssertEqual(
-            HotkeyStore(defaults: defaults).binding(for: .leftHalf),
+            HotkeyStore(defaults: defaults).binding(for: .leftColumn),
             HotkeyBinding(modifiers: 0, keyCode: nil))
     }
 
@@ -193,7 +188,7 @@ final class HotkeyBindingTests: XCTestCase {
         let store = makeStore()
         XCTAssertEqual(
             store.apply(HotkeyStore.defaultBinding(for: .topLeft), for: .expand),
-            .duplicate(actions: [.slot(.topLeft)]))
+            .duplicate(actions: [.slotKey(.topLeft)]))
         XCTAssertEqual(
             store.binding(for: .expand), HotkeyService.expandDefaultBinding,
             "rejection leaves the store")
@@ -228,7 +223,7 @@ final class HotkeyBindingTests: XCTestCase {
         let dup = HotkeyStore.defaultBinding(for: .topLeft)
         XCTAssertEqual(
             store.apply(dup, for: .topRight),
-            HotkeyStore.ApplyResult.duplicate(actions: [.slot(.topLeft)]))
+            HotkeyStore.ApplyResult.duplicate(actions: [.slotKey(.topLeft)]))
         XCTAssertEqual(
             store.binding(for: .topRight), HotkeyStore.defaultBinding(for: .topRight))
     }
@@ -245,12 +240,12 @@ final class HotkeyBindingTests: XCTestCase {
         let store = makeStore()
         let dup = HotkeyStore.defaultBinding(for: .topLeft)
         XCTAssertEqual(
-            store.duplicates(of: dup, ignoring: .slot(.topRight)), [.slot(.topLeft)])
+            store.duplicates(of: dup, ignoring: .slotKey(.topRight)), [.slotKey(.topLeft)])
         XCTAssertTrue(
-            store.duplicates(of: dup, ignoring: .slot(.topLeft)).isEmpty)
+            store.duplicates(of: dup, ignoring: .slotKey(.topLeft)).isEmpty)
         XCTAssertTrue(
             store.duplicates(
-                of: HotkeyBinding(modifiers: 0, keyCode: nil), ignoring: .slot(.topLeft)
+                of: HotkeyBinding(modifiers: 0, keyCode: nil), ignoring: .slotKey(.topLeft)
             ).isEmpty)
     }
 
@@ -259,7 +254,7 @@ final class HotkeyBindingTests: XCTestCase {
     func testCorruptEntryFallsBackToDefaults() {
         let name = suiteName // capture once: the property regenerates per access
         UserDefaults(suiteName: name)!.set(
-            ["modifiers": "not-a-number"], forKey: "hotkey.topLeft")
+            ["modifiers": "not-a-number"], forKey: "hotkey.sixthTopLeft")
 
         XCTAssertEqual(
             HotkeyStore(defaults: UserDefaults(suiteName: name)!).binding(for: .topLeft),
@@ -270,7 +265,7 @@ final class HotkeyBindingTests: XCTestCase {
     func testPartialEntryFallsBackToDefaults() {
         let name = suiteName
         UserDefaults(suiteName: name)!.set(
-            ["modifiers": 42], forKey: "hotkey.topLeft") // keyCode missing
+            ["modifiers": 42], forKey: "hotkey.sixthTopLeft") // keyCode missing
 
         XCTAssertEqual(
             HotkeyStore(defaults: UserDefaults(suiteName: name)!).binding(for: .topLeft),
@@ -280,7 +275,7 @@ final class HotkeyBindingTests: XCTestCase {
     func testStoredNegativeKeyCodeMeansDisabled() {
         let name = suiteName
         UserDefaults(suiteName: name)!.set(
-            ["modifiers": Int(optionKey), "keyCode": -1], forKey: "hotkey.topLeft")
+            ["modifiers": Int(optionKey), "keyCode": -1], forKey: "hotkey.sixthTopLeft")
 
         let store = HotkeyStore(defaults: UserDefaults(suiteName: name)!)
         let binding = store.binding(for: .topLeft)
@@ -288,7 +283,7 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertNil(binding.label)
         // A stored disabled binding never collides with a real combo.
         XCTAssertTrue(store.duplicates(
-            of: HotkeyStore.defaultBinding(for: .topLeft), ignoring: .slot(.topRight)).isEmpty)
+            of: HotkeyStore.defaultBinding(for: .topLeft), ignoring: .slotKey(.topRight)).isEmpty)
     }
 
     func testStoredNegativeModifiersFallsBackToDefaults() {
@@ -297,7 +292,7 @@ final class HotkeyBindingTests: XCTestCase {
         // reject the entry wholesale instead of trusting the key code.
         let name = suiteName
         UserDefaults(suiteName: name)!.set(
-            ["modifiers": -5, "keyCode": 6], forKey: "hotkey.topLeft")
+            ["modifiers": -5, "keyCode": 6], forKey: "hotkey.sixthTopLeft")
 
         let store = HotkeyStore(defaults: UserDefaults(suiteName: name)!)
         XCTAssertEqual(

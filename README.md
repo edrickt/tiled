@@ -8,49 +8,52 @@ neighbors sharing the edge resize when the mouse button is released.
 ## Hotkeys
 
 Tile the focused window. Tiling a window into its own tile is a no-op (it
-stays exactly where it is). Every shortcut of the active layout exists as a
-menu item under **Tile Focused Window** in the menu bar menu (the inactive
-layout collapses to a single switch row), and the app actions have their
-own top-level menu rows.
+stays exactly where it is). Every slot key in the active layout exists as a
+menu item under **Tile Focused Window** in the menu bar menu. The explicit
+switch is its own top-level row beside that submenu, and the app actions have
+their own top-level menu rows. A slot key never changes the layout: the
+layout is a stored canvas choice that sticks even when the canvas empties.
 
-### Quarters (hold ⌥⇧⌘)
+### The eleven slot keys (hold ⌥⇧)
 
-| Key    | Tile          |
-|--------|---------------|
-| ⌥⇧⌘U   | Top left      |
-| ⌥⇧⌘O   | Top right     |
-| ⌥⇧⌘M   | Bottom left   |
-| ⌥⇧⌘.   | Bottom right  |
-| ⌥⇧⌘J   | Left half     |
-| ⌥⇧⌘L   | Right half    |
+The same physical key means the same position in both layouts; the active
+layout decides which slot it selects. Five keys have no Quarters slot and are
+inert there (the dashes below); an inert press changes nothing and says which
+layout owns the position.
 
-### Sixths (hold ⌥⇧)
+| Key    | Quarters     | Sixths             |
+|--------|--------------|--------------------|
+| ⌥⇧U   | Top left     | Top left sixth     |
+| ⌥⇧I   | —            | Top middle sixth   |
+| ⌥⇧O   | Top right    | Top right sixth    |
+| ⌥⇧M   | Bottom left  | Bottom left sixth  |
+| ⌥⇧,   | —            | Bottom middle sixth |
+| ⌥⇧.   | Bottom right | Bottom right sixth |
+| ⌥⇧J   | Left half    | Left third         |
+| ⌥⇧K   | —            | Middle third       |
+| ⌥⇧L   | Right half   | Right third        |
+| ⌥⇧H   | —            | Left two-thirds    |
+| ⌥⇧;   | —            | Right two-thirds   |
 
-| Key   | Tile               |
-|-------|--------------------|
-| ⌥⇧U   | Top left sixth     |
-| ⌥⇧I   | Top middle sixth   |
-| ⌥⇧O   | Top right sixth    |
-| ⌥⇧M   | Bottom left sixth  |
-| ⌥⇧,   | Bottom middle sixth |
-| ⌥⇧.   | Bottom right sixth |
-| ⌥⇧J   | Left third         |
-| ⌥⇧K   | Middle third       |
-| ⌥⇧L   | Right third        |
-| ⌥⇧H   | Left two-thirds    |
-| ⌥⇧;   | Right two-thirds   |
+### Switch layout (⌥⇧\)
+
+| Key    | Action |
+|--------|--------|
+| ⌥⇧\   | Switch the focused canvas's layout: untiles every tiled window there (each returns to its pre-tile frame); one undo restores the windows and the previous layout. On an empty canvas it just switches. |
 
 ### App actions
 
-Expand, Evict, and Reset Splitters share the slots' ⌥⇧ modifier; Settings
-and Undo deliberately take all four modifiers (⌃⌥⇧⌘) so they can't collide
-with a slot combo. Every one of them is remappable:
+The six app actions are remappable. Expand, Evict, Reset Splitters, and
+Switch Layout share the slot keys' ⌥⇧ modifier; Settings and Undo
+deliberately take all four modifiers (⌃⌥⇧⌘) so they can't collide with a
+slot combo:
 
 | Key    | Action |
 |--------|--------|
 | ⌥⇧⏎    | Expand the focused window to fill the screen (not fullscreen mode) |
 | ⌥⇧⌫    | Evict the focused window: untile it and restore its pre-tile frame |
 | ⌥⇧R    | Reset Splitters: snap the focused canvas's splitters back to even splits, keeping every window tiled |
+| ⌥⇧\    | Switch the focused canvas's layout (see above) |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden, as long as this shortcut is enabled and registered; otherwise quit and reopen Tiled) |
 | ⌃⌥⇧⌘Z   | Undo the focused canvas's last displacement (a layout switch, an eviction, or a swap — any reflow it caused is undone with it) |
 
@@ -92,22 +95,24 @@ never arms the restore (and a drag after a reset doesn't clear it).
 Windows stay in their slots either way; only the sizes change.
 
 First launch opens Settings on a Welcome tab: focus any window and press the
-Top Left shortcut (⌥⇧⌘U by default), with a miniature preview showing what
-Top Left covers. The guide shows your current binding; if it's disabled or
-couldn't be registered (another app owns the combo), it teaches menu bar →
-Tile Focused Window → Top Left instead (or Switch to Quarters if Sixths is
-active), and the Expand note names the menu row when that combo is not live.
-Dismiss the guide once; reopen it anytime from the menu bar menu → Tiled Guide.
+Top Left slot key (⌥⇧U by default), with a miniature preview showing what the
+top-left slot covers in both layouts. The guide shows your current binding
+and the live switch shortcut; if the slot key is disabled or couldn't be
+registered (another app owns the combo), it teaches menu bar → Tile Focused
+Window → Top Left instead, and the Expand note names the menu row when that
+combo is not live. A slot key never changes the layout: ⌥⇧\ switches it and
+untiles every tiled window (undo restores them). Dismiss the guide once;
+reopen it anytime from the menu bar menu → Tiled Guide.
 
 The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
 
 Shortcuts are remappable: open the Shortcuts tab, click a shortcut, and
-press a new combo. This covers every hotkey Tiled registers — the 17 slot
-shortcuts and the 5 app actions (Expand, Evict, Reset Splitters, Settings,
-Undo). Esc keeps the old one, ⌫ disables that action.
-Disable or re-enable a whole layout at once with the Enable/Disable all
-button beside each layout section header (app actions disable one at a
-time); your combos are parked aside and restored unchanged (re-recording
+press a new combo. This covers every hotkey Tiled registers — the 11 slot
+keys and the 6 app actions (Expand, Evict, Reset Splitters, Switch Layout,
+Settings, Undo). Esc keeps the old one, ⌫ disables that action.
+Disable or re-enable all eleven slot keys at once with the Enable/Disable
+all button beside the Slot Keys section header (app actions disable one at
+a time); your combos are parked aside and restored unchanged (re-recording
 a disabled shortcut keeps the new combo and drops its park).
 
 If two shortcuts use the same combo, the Shortcuts tab names the conflict
@@ -170,11 +175,13 @@ tell you which app took it.
   the canvas that just became visible, even though there was no tiling
   action. Windows parked in hidden Spaces stay tiled and keep their
   history; they simply wait off-menu until you swipe back.
-- Quarters and sixths are mutually exclusive per canvas: requesting a slot
-  in the other layout untiles every other tiled window on that canvas
-  (the requester lands in its slot) and switches that canvas's layout. The
-  menu names the switch and how to undo
-  it ("Switched to Sixths · 3 windows untiled. Press ⌃⌥⇧⌘Z to undo.").
+- Quarters and sixths are mutually exclusive per canvas: ⌥⇧\ switches the
+  focused canvas, untiling every tiled window there and restoring each to
+  its pre-tile frame. One undo returns the windows and the previous layout.
+  A canvas keeps its layout when the board empties. A slot key never
+  switches: a key with no slot in the active layout is inert and says where
+  it belongs. The menu names the effect and how to undo it ("Switched to
+  Sixths · 3 windows untiled. Undo from the Tiled menu.").
 - A display change (unplug, rearrange, resolution) re-asserts every visible
   canvas immediately. Canvas identity follows the physical monitor's
   CoreGraphics display number, so reordering screens never moves a monitor's
@@ -243,7 +250,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-swift test             # hermetic unit suite (913 tests)
+swift test             # hermetic unit suite (922 tests)
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
@@ -277,7 +284,7 @@ Three layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (913 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
+| Unit suite (922 tests) | `swift test` | nothing; ~2s, no AX, no runloop |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
 | Live end-to-end | `./scripts/run-repro.sh` | GUI session + Accessibility permission |
 | Test-quality audit | `python3 tools/mutation/mutate.py` | nothing; a few minutes for the full table (parallel workers) |
@@ -291,7 +298,7 @@ write-pair recovery through fakes, without a grant. Focus resolution itself,
 the element registry fallback, and app-list assembly stay live-only. The
 adapter is exercised end to end by `scripts/run-repro.sh`, which launches
 the app plus a throwaway `host` app and drives real clicks, drags, and
-global hotkeys: 39 cases
+global hotkeys: 40+ cases
 covering the quarters family end to end (tiling, edge drags with
 per-column row independence, clamping, screen edges, eviction, swap,
 re-house, undo, closes) and the sixths family (the layout
@@ -389,7 +396,7 @@ CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
 ## Status / roadmap
 
 - [x] Menu bar app (LSUIElement), Accessibility permission flow
-- [x] 22 global hotkeys (17 slot + 5 app-action, all remappable, Carbon RegisterEventHotKey) + clickable menu equivalents
+- [x] 17 global hotkeys (11 shared slot keys + 6 app actions, all remappable, Carbon RegisterEventHotKey) + clickable menu equivalents
 - [x] In-app keyboard-shortcut reference
 - [x] Pure, unit-tested tiling state with eviction and layout-switch rules
 - [x] Fixed-rect tiling via the Accessibility API

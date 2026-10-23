@@ -76,7 +76,10 @@ enum MenuText {
 
     // MARK: Menu rows
 
-    /// One line of the tiled-windows list: slot, app, and live combo.
+    /// One line of the tiled-windows list: slot, app, and live combo. The
+    /// row names the tile the window holds now ("Left Half" in Quarters,
+    /// "Left Third" in Sixths); the menu's display header carries the
+    /// layout, and the combo comes from the shared physical key.
     static func windowLine(slot: Slot, appName: String?, label: String?) -> String {
         let name = appName ?? "window"
         if let label {
@@ -85,12 +88,20 @@ enum MenuText {
         return "\(SlotPresentation.title(of: slot)) · \(name)"
     }
 
-    /// One clickable equivalent per global hotkey. The shortcut stays in
-    /// the title text rather than a key equivalent: firing both would
-    /// tile-then-untile in one keypress. Disabled slots show no combo.
+    /// One clickable equivalent per global hotkey. The row names the tile
+    /// it places now, not the physical position: the layout's own section
+    /// header supplies the context, and "Left Half" under "Halves" is the
+    /// decision the user is making. Disabled keys show no combo.
     static func tileItemTitle(slot: Slot, label: String?) -> String {
         label.map { "\(SlotPresentation.title(of: slot)) · \($0)" }
             ?? SlotPresentation.title(of: slot)
+    }
+
+    /// The top-level switch row, named for where it lands. The combo is
+    /// user-configurable, so the label comes from the store.
+    static func switchLayoutItemTitle(target: LayoutKind, label: String?) -> String {
+        let combo = label.map { " · \($0)" } ?? ""
+        return "Switch to \(target.title)\(combo)"
     }
 
     // MARK: Placement receipt announcements (haptic + VoiceOver text)
@@ -109,6 +120,67 @@ enum MenuText {
 
     static func alreadyTiledAnnouncement(slot: Slot) -> String {
         "\(SlotPresentation.title(of: slot)): already there."
+    }
+
+    /// A slot key with no slot in the canvas's current layout. Names the
+    /// key's position, the layout that owns it, and the live switch combo
+    /// (or the menu path when the combo is disabled or unavailable). The
+    /// press changes nothing; the sentence is the whole answer.
+    static func inertSlotKeyAnnouncement(
+        key: SlotKey, layout: LayoutKind, switchLabel: String?
+    ) -> String {
+        let target = layout.other
+        let recovery = switchLabel.map { "Press \($0) to switch to \(target.title)." }
+            ?? "Switch to \(target.title) from the Tiled menu."
+        return "“\(key.title)” has no slot in \(layout.title). "
+            + "It belongs to \(target.title). \(recovery)"
+    }
+
+    /// The switch key landed on a canvas already showing `layout`.
+    static func alreadyInLayoutAnnouncement(layout: LayoutKind) -> String {
+        "Already in \(layout.title)."
+    }
+
+    /// The explicit switch's notice. Names the layout and, when windows
+    /// were untiled, the count and the recovery path. A zero-window
+    /// switch is narrated but promises no undo (there is no chapter).
+    static func switchedLayoutNotice(
+        layout: LayoutKind, untiled: Int, undoable: Bool
+    ) -> String {
+        guard untiled > 0 else { return "Switched to \(layout.title)." }
+        let noun = untiled == 1 ? "1 window" : "\(untiled) windows"
+        let recovery = undoable ? " Undo from the Tiled menu." : ""
+        return "Switched to \(layout.title) · \(noun) untiled.\(recovery)"
+    }
+
+    /// The explicit switch's spoken sentence. It names the untiled count
+    /// too: those windows left the screen, and the user needs to hear how
+    /// many. Never names a combo the user may not have.
+    static func switchedLayoutAnnouncement(layout: LayoutKind, untiled: Int) -> String {
+        guard untiled > 0 else { return "Switched to \(layout.title)." }
+        let noun = untiled == 1 ? "1 window" : "\(untiled) windows"
+        return "Switched to \(layout.title); \(noun) untiled."
+    }
+
+    /// Undo's chapter notice. The layout is named when the chapter put it
+    /// back, because a switch chapter's whole point is that the previous
+    /// layout returned with its windows.
+    static func undoDisplacementNotice(
+        restored: Int, layoutRestored: LayoutKind?
+    ) -> String {
+        let windows: String
+        switch restored {
+        case 0: windows = ""
+        case 1: windows = "1 window restored."
+        default: windows = "\(restored) windows restored."
+        }
+        guard let layoutRestored else {
+            return "Undid displacement · \(windows)"
+        }
+        let layout = "back to \(layoutRestored.title)"
+        return windows.isEmpty
+            ? "Undid displacement · \(layout)."
+            : "Undid displacement · \(layout) · \(windows)"
     }
 
     static func refusedAnnouncement(windowName: String?) -> String {

@@ -31,7 +31,6 @@ final class MenuBarCharacterizationTests: XCTestCase {
             activeLayout: .quarters,
             tileError: "Safari couldn't be tiled: the app refused to resize it.",
             hasSplitterBackup: true,
-            hasFocusedWindow: true,
             expandState: .returnsToSlot(.leftHalf),
             tiledWindows: [
                 .init(id: 1, slot: .topLeft, appName: "Safari", screen: leftDisplay),
@@ -51,29 +50,24 @@ final class MenuBarCharacterizationTests: XCTestCase {
 
     /// The live labels for the fixed set, written out literally. Top Left is
     /// deliberately remapped to a combo no default uses, so the pinned title
-    /// proves the menu reads the snapshot's label, not the slot's default.
+    /// proves the menu reads the snapshot's label, not the key's default.
     private func labels(topLeft: String) -> [HotkeyAction: String] {
         [
-            .slot(.topLeft): topLeft,
-            .slot(.topRight): "⌥⇧⌘O",
-            .slot(.bottomLeft): "⌥⇧⌘M",
-            .slot(.bottomRight): "⌥⇧⌘.",
-            .slot(.leftHalf): "⌥⇧⌘J",
-            .slot(.rightHalf): "⌥⇧⌘L",
-            .slot(.sixthTopLeft): "⌥⇧U",
-            .slot(.sixthTopMiddle): "⌥⇧I",
-            .slot(.sixthTopRight): "⌥⇧O",
-            .slot(.sixthBottomLeft): "⌥⇧M",
-            .slot(.sixthBottomMiddle): "⌥⇧,",
-            .slot(.sixthBottomRight): "⌥⇧.",
-            .slot(.sixthLeft): "⌥⇧J",
-            .slot(.sixthMiddle): "⌥⇧K",
-            .slot(.sixthRight): "⌥⇧L",
-            .slot(.sixthsLeftTwoThirds): "⌥⇧H",
-            .slot(.sixthsRightTwoThirds): "⌥⇧;",
+            .slotKey(.topLeft): topLeft,
+            .slotKey(.topMiddle): "⌥⇧I",
+            .slotKey(.topRight): "⌥⇧O",
+            .slotKey(.bottomLeft): "⌥⇧M",
+            .slotKey(.bottomMiddle): "⌥⇧,",
+            .slotKey(.bottomRight): "⌥⇧.",
+            .slotKey(.leftColumn): "⌥⇧J",
+            .slotKey(.middleColumn): "⌥⇧K",
+            .slotKey(.rightColumn): "⌥⇧L",
+            .slotKey(.leftTwoThirds): "⌥⇧H",
+            .slotKey(.rightTwoThirds): "⌥⇧;",
             .expand: "⌥⇧⏎",
             .evict: "⌥⇧⌫",
             .resetSplitters: "⌥⇧R",
+            .switchLayout: "⌥⇧\\",
             .settings: "⌃⌥⇧⌘,",
             .undo: "⌃⌥⇧⌘Z",
         ]
@@ -90,14 +84,15 @@ final class MenuBarCharacterizationTests: XCTestCase {
             "Built-in · Quarters · 2 tiled + Studio Display · Sixths · 1 tiled",
             "",
             "Tile Focused Window",
+            "Switch to Sixths · ⌥⇧\\",
             "Return to Left Half · ⌥⇧⏎",
             "Evict Focused Window · ⌥⇧⌫",
             "",
             "Built-in · Quarters · 2 tiled",
             "Top Left · Safari (⌃⌥Q)",
-            "Left Half · Mail (⌥⇧⌘J)",
+            "Left Half · Mail (⌥⇧J)",
             "Studio Display · Sixths · 1 tiled",
-            "Top Left Sixth · Notes (⌥⇧U)",
+            "Top Left Sixth · Notes (⌃⌥Q)",
             "",
             "Restore 2 Displaced Windows · ⌃⌥⇧⌘Z",
             "Untile 2 Windows",
@@ -110,7 +105,7 @@ final class MenuBarCharacterizationTests: XCTestCase {
         XCTAssertEqual(items.map(\.isEnabled), [
             false, false, true, false, false,
             true,
-            true, true, true,
+            true, true, true, true,
             true,
             false, true, true, false, true,
             true,
@@ -129,17 +124,15 @@ final class MenuBarCharacterizationTests: XCTestCase {
         XCTAssertEqual(tile.children?.map(\.title), [
             "Quarters · Quads",
             "Top Left · ⌃⌥Q",
-            "Top Right · ⌥⇧⌘O",
-            "Bottom Left · ⌥⇧⌘M",
-            "Bottom Right · ⌥⇧⌘.",
+            "Top Right · ⌥⇧O",
+            "Bottom Left · ⌥⇧M",
+            "Bottom Right · ⌥⇧.",
             "Halves",
-            "Left Half · ⌥⇧⌘J",
-            "Right Half · ⌥⇧⌘L",
-            "",
-            "Switch to Sixths (focused window → Top Left Sixth)",
+            "Left Half · ⌥⇧J",
+            "Right Half · ⌥⇧L",
         ])
         XCTAssertEqual(tile.children?.map(\.isEnabled), [
-            false, true, true, true, true, false, true, true, true, true,
+            false, true, true, true, true, false, true, true,
         ])
     }
 
@@ -155,12 +148,12 @@ final class MenuBarCharacterizationTests: XCTestCase {
             .untileWindow(1), .focusWindow(1), .tileHere(.topLeft),
         ])
 
-        let mail = items.first { $0.title == "Left Half · Mail (⌥⇧⌘J)" }!
+        let mail = items.first { $0.title == "Left Half · Mail (⌥⇧J)" }!
         XCTAssertEqual(mail.children?.map(\.title), [
             "Untile This Window", "Focus Mail", "Tile Focused Window Here",
         ])
         XCTAssertEqual(mail.children?.map(\.action), [
-            .untileWindow(2), .focusWindow(2), .tileHere(.leftHalf),
+            .untileWindow(2), .focusWindow(2), .tileHere(.leftColumn),
         ])
     }
 

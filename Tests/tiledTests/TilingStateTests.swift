@@ -10,7 +10,7 @@ final class TilingStateTests: XCTestCase {
     // MARK: Basics
 
     func testTileIntoEmptySlot() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         XCTAssertEqual(state.plan(window: a, into: .topLeft), .tile(evicting: []))
         state.commit(window: a, into: .topLeft)
         XCTAssertEqual(state.occupant(of: .topLeft), a)
@@ -18,7 +18,7 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testSameSlotIsNoop() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         XCTAssertEqual(state.plan(window: a, into: .topLeft), .noop)
         // Nothing committed: the window stays exactly where it was.
@@ -27,7 +27,7 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testSecondWindowIntoOccupiedSlotEvictsFirst() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         XCTAssertEqual(state.plan(window: b, into: .topLeft), .tile(evicting: [a]))
     }
@@ -37,26 +37,26 @@ final class TilingStateTests: XCTestCase {
     func testHalfOverTwoQuadsEvictsBoth() {
         // TL + BL tiled; a fresh window takes the left half. Both quads
         // overlap the target and are evicted.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .bottomLeft)
         XCTAssertEqual(state.plan(window: c, into: .leftHalf), .tile(evicting: [a, b]))
     }
 
     func testQuadOverOccupiedHalfEvictsHalf() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .leftHalf)
         XCTAssertEqual(state.plan(window: b, into: .bottomLeft), .tile(evicting: [a]))
     }
 
     func testQuadOverOccupiedHalfEvictsHalfOtherQuad() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .rightHalf)
         XCTAssertEqual(state.plan(window: b, into: .topRight), .tile(evicting: [a]))
     }
 
     func testDisjointSlotsCoexist() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         XCTAssertEqual(state.plan(window: b, into: .rightHalf), .tile(evicting: []))
         state.commit(window: b, into: .rightHalf)
@@ -65,7 +65,7 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testQuadsInSameColumnCoexist() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         XCTAssertEqual(state.plan(window: b, into: .bottomLeft), .tile(evicting: []))
     }
@@ -77,7 +77,7 @@ final class TilingStateTests: XCTestCase {
         // the right two-thirds a tiled requester is asking for. The
         // blocker has no leftover of its own, so the step-aside cannot
         // fire and the vacated tile still offers a landing: swap stands.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopLeft)
         state.commit(window: b, into: .sixthMiddle)
         state.commit(window: c, into: .sixthBottomLeft)
@@ -91,7 +91,7 @@ final class TilingStateTests: XCTestCase {
         // clean leftover — the top-left sixth — so it steps aside into
         // its own strip instead of trading tiles across the screen: the
         // plan is an eviction the commit re-houses, not a swap.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthLeft)
         state.commit(window: b, into: .sixthMiddle)
         state.commit(window: c, into: .sixthRight)
@@ -99,7 +99,7 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testTiledRequesterIntoExactOccupiedSlotSwaps() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .topRight)
         XCTAssertEqual(state.plan(window: a, into: .topRight), .swap(displaced: b))
@@ -108,7 +108,7 @@ final class TilingStateTests: XCTestCase {
     func testUntiledRequesterOverSingleBlockerStillEvicts() {
         // An untiled requester has no tile to offer, so there is nothing
         // to swap with: eviction stands.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         XCTAssertEqual(state.plan(window: b, into: .topLeft), .tile(evicting: [a]))
     }
@@ -116,7 +116,7 @@ final class TilingStateTests: XCTestCase {
     func testTiledRequesterOverTwoBlockersEvictsBoth() {
         // Only one window can take the requester's old tile; with two in
         // the way the request degrades to an ordinary eviction.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthLeft)
         state.commit(window: b, into: .sixthTopMiddle)
         state.commit(window: c, into: .sixthBottomMiddle)
@@ -129,25 +129,25 @@ final class TilingStateTests: XCTestCase {
         // A swap needs a landing tile disjoint from the target: moving
         // from Top Left to Left Half would stuff the displaced window
         // inside the requester's new half, so eviction stands.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .bottomLeft)
         XCTAssertEqual(state.plan(window: a, into: .leftHalf), .tile(evicting: [b]))
     }
 
     func testSwapRestoresNothing() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .topRight)
         XCTAssertEqual(
-            state.plan(window: a, into: .topRight).windowsToRestore(requester: a), [])
+            state.plan(window: a, into: .topRight).windowsToRestore(), [])
     }
 
     // MARK: Moving within the layout
 
     func testWindowMovingToOverlappingSlotDoesNotEvictItself() {
         // Window in Left requests BL: moves, keeps its pre-tile frame.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .leftHalf)
         XCTAssertEqual(state.plan(window: a, into: .bottomLeft), .tile(evicting: []))
         state.commit(window: a, into: .bottomLeft)
@@ -156,7 +156,7 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testWindowTiledIntoSecondSlotLeavesFirst() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: a, into: .bottomRight)
         XCTAssertNil(state.occupant(of: .topLeft))
@@ -164,7 +164,7 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testRemoveCleansUp() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .leftHalf)
         state.remove(window: a)
         XCTAssertTrue(state.occupants.isEmpty)
@@ -289,7 +289,6 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(Slot.allCases.count, 17)
         for slot in Slot.allCases {
             XCTAssertFalse(SlotPresentation.title(of: slot).isEmpty)
-            XCTAssertNotNil(HotkeyStore.defaultBinding(for: slot).label)
         }
         XCTAssertEqual(SlotPresentation.title(of: .topLeft), "Top Left")
         XCTAssertEqual(SlotPresentation.title(of: .leftHalf), "Left Half")
@@ -300,108 +299,67 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(SlotPresentation.title(of: .sixthsLeftTwoThirds), "Left Two-Thirds")
         XCTAssertEqual(SlotPresentation.title(of: .sixthsRightTwoThirds), "Right Two-Thirds")
         XCTAssertEqual(
-            Set(Slot.allCases.map { HotkeyStore.defaultBinding(for: $0).label }).count,
-            17) // default combos unique
+            Set(SlotKey.allCases.map { $0.defaultBinding.label }).count,
+            11) // one combo per physical key
     }
 
-    func testHotkeyIDRoundTripsEverySlot() {
+    func testHotkeyIDRoundTripsEverySlotKey() {
         // Mirrors the Carbon id scheme: hotkeyID must be a unique dense
         // 1-based index into allCases, and every id must resolve back to
-        // its slot. A duplicate or gap means a hotkey fires the wrong slot
+        // its key. A duplicate or gap means a hotkey fires the wrong key
         // or nothing at all.
-        let ids = Slot.allCases.map(\.hotkeyID)
-        XCTAssertEqual(Set(ids).count, Slot.allCases.count, "duplicate hotkeyID")
-        XCTAssertEqual(Set(ids), Set(1...UInt32(Slot.allCases.count)), "hotkeyID gap")
-        var slotByID: [UInt32: Slot] = [:]
-        for slot in Slot.allCases {
-            slotByID[slot.hotkeyID] = slot
+        let ids = SlotKey.allCases.map(\.hotkeyID)
+        XCTAssertEqual(Set(ids).count, SlotKey.allCases.count, "duplicate hotkeyID")
+        XCTAssertEqual(Set(ids), Set(1...UInt32(SlotKey.allCases.count)), "hotkeyID gap")
+        var keyByID: [UInt32: SlotKey] = [:]
+        for key in SlotKey.allCases {
+            keyByID[key.hotkeyID] = key
         }
-        for slot in Slot.allCases {
+        for key in SlotKey.allCases {
             XCTAssertEqual(
-                slotByID[slot.hotkeyID], slot, "\(slot.rawValue) does not round-trip")
-        }
-    }
-
-    func testSwitchLayoutEvictionListMatchesControllerBehavior() {
-        // The controller untile()s every window in plan's evicting list, so
-        // switchLayout's list must contain EVERY tiled window including the
-        // requester when tiled; otherwise a tiled window would survive a
-        // reset and leave two layouts on screen.
-        for layout in [[Slot.topLeft, Slot.bottomRight], [Slot.sixthLeft, Slot.sixthRight]] {
-            var state = TilingState()
-            var id = 1
-            for slot in layout {
-                state.commit(window: id, into: slot)
-                id += 1
-            }
-            let other: Slot = layout[0].layout == .quarters ? .sixthMiddle : .topLeft
-            for requester in [1, 2, 99] {
-                let plan = state.plan(window: requester, into: other)
-                guard case .switchLayout(let evicting) = plan else {
-                    XCTFail("win\(requester) -> \(other) did not reset")
-                    continue
-                }
-                let tiled = Set(state.tiledWindows)
-                XCTAssertEqual(
-                    Set(evicting), tiled,
-                    "win\(requester) -> \(other): evicting=\(evicting) tiled=\(tiled)")
-                var next = state
-                for evicted in evicting { next.remove(window: evicted) }
-                next.commit(window: requester, into: other)
-                XCTAssertEqual(next.occupants, [other: requester])
-                XCTAssertEqual(next.activeLayout, other.layout)
-            }
+                keyByID[key.hotkeyID], key, "\(key.rawValue) does not round-trip")
         }
     }
 
     func testHotkeys() {
-        // Sixths keep the bare ⌥⇧ keys; quarters add ⌘ on the requested keys.
+        // The shared ⌥⇧ set: one keycap per physical position, no ⌘.
         let shiftOption = UInt32(shiftKey | optionKey)
-        let withCommand = UInt32(shiftKey | optionKey | cmdKey)
-        for slot in Slot.allCases {
-            switch slot.layout {
-            case .quarters: XCTAssertEqual(slot.modifiers, withCommand, "\(slot.rawValue)")
-            case .sixths: XCTAssertEqual(slot.modifiers, shiftOption, "\(slot.rawValue)")
-            }
+        for key in SlotKey.allCases {
+            XCTAssertEqual(key.defaultBinding.modifiers, shiftOption, "\(key.rawValue)")
         }
-        let expected: [(Slot, UInt32)] = [
+        let expected: [(SlotKey, UInt32)] = [
             (.topLeft, UInt32(kVK_ANSI_U)),
-            (.sixthTopLeft, UInt32(kVK_ANSI_U)),
-            (.sixthTopMiddle, UInt32(kVK_ANSI_I)),
+            (.topMiddle, UInt32(kVK_ANSI_I)),
             (.topRight, UInt32(kVK_ANSI_O)),
-            (.sixthTopRight, UInt32(kVK_ANSI_O)),
             (.bottomLeft, UInt32(kVK_ANSI_M)),
-            (.sixthBottomLeft, UInt32(kVK_ANSI_M)),
-            (.sixthBottomMiddle, UInt32(kVK_ANSI_Comma)),
+            (.bottomMiddle, UInt32(kVK_ANSI_Comma)),
             (.bottomRight, UInt32(kVK_ANSI_Period)),
-            (.sixthBottomRight, UInt32(kVK_ANSI_Period)),
-            (.leftHalf, UInt32(kVK_ANSI_J)),
-            (.sixthLeft, UInt32(kVK_ANSI_J)),
-            (.sixthMiddle, UInt32(kVK_ANSI_K)),
-            (.rightHalf, UInt32(kVK_ANSI_L)),
-            (.sixthRight, UInt32(kVK_ANSI_L)),
-            (.sixthsLeftTwoThirds, UInt32(kVK_ANSI_H)),
-            (.sixthsRightTwoThirds, UInt32(kVK_ANSI_Semicolon)),
+            (.leftColumn, UInt32(kVK_ANSI_J)),
+            (.middleColumn, UInt32(kVK_ANSI_K)),
+            (.rightColumn, UInt32(kVK_ANSI_L)),
+            (.leftTwoThirds, UInt32(kVK_ANSI_H)),
+            (.rightTwoThirds, UInt32(kVK_ANSI_Semicolon)),
         ]
-        XCTAssertEqual(expected.count, Slot.allCases.count)
-        for (slot, keyCode) in expected {
-            XCTAssertEqual(slot.keyCode, keyCode, "\(slot.rawValue)")
+        XCTAssertEqual(expected.count, SlotKey.allCases.count)
+        for (key, keyCode) in expected {
+            XCTAssertEqual(key.keyCode, keyCode, "\(key.rawValue)")
         }
-        // The pair that actually fires must be unique: two slots sharing
+        // The pair that actually fires must be unique: two keys sharing
         // (keyCode, modifiers) would both trigger on one keypress.
-        let combos = Slot.allCases.map { ($0.keyCode, $0.modifiers) }
+        let combos = SlotKey.allCases.map { ($0.keyCode, $0.defaultBinding.modifiers) }
         XCTAssertEqual(
-            Set(combos.map { "\($0.0)-\($0.1)" }).count, Slot.allCases.count,
+            Set(combos.map { "\($0.0)-\($0.1)" }).count, SlotKey.allCases.count,
             "hotkey collision: \(combos)")
     }
 
     // MARK: Edge cases
 
     func testPlanIntoEmptySlotEvictsNothing() {
-        // Untouched state: nothing to evict from any slot.
+        // Untouched state: nothing to evict from any slot of either layout.
         for slot in Slot.allCases {
             XCTAssertEqual(
-                TilingState().plan(window: a, into: slot), .tile(evicting: []))
+                TilingState(layout: slot.layout).plan(window: a, into: slot),
+                .tile(evicting: []))
         }
     }
 
@@ -410,7 +368,7 @@ final class TilingStateTests: XCTestCase {
         // when commit order disagrees with it: blockers committed
         // top-right first (id 4), bottom-right second (id 3); the plan
         // must name [3, 4].
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: 4, into: .topRight)
         state.commit(window: 3, into: .bottomRight)
         state.commit(window: 2, into: .bottomLeft)
@@ -420,14 +378,14 @@ final class TilingStateTests: XCTestCase {
 
     func testSameWindowRetilingSameHalfIsNoop() {
         // Already covered for quads; halves noop too.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .leftHalf)
         XCTAssertEqual(state.plan(window: a, into: .leftHalf), .noop)
     }
 
     func testFullScreenOfQuadsThenHalfEvictsColumnOnly() {
         // TL+BL+TR tiled; Left evicts the left column, TR survives.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .bottomLeft)
         state.commit(window: c, into: .topRight)
@@ -443,7 +401,7 @@ final class TilingStateTests: XCTestCase {
     }
 
     func testRemoveUnknownWindowIsNoop() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.remove(window: 999)
         XCTAssertEqual(state.occupant(of: .topLeft), a)
@@ -452,7 +410,7 @@ final class TilingStateTests: XCTestCase {
 
     func testWindowMovesBetweenDisjointSlots() {
         // TL -> RightHalf: leaves the quad, no eviction.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         XCTAssertEqual(state.plan(window: a, into: .rightHalf), .tile(evicting: []))
         state.commit(window: a, into: .rightHalf)
@@ -460,83 +418,82 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(state.occupant(of: .rightHalf), a)
     }
 
-    // MARK: Layout switching
+    // MARK: Layout state
 
-    func testActiveLayoutDefaultsToSixths() {
-        XCTAssertEqual(TilingState().activeLayout, .sixths)
+    func testFreshStateStartsInSixths() {
+        XCTAssertEqual(TilingState().layout, .sixths)
     }
 
-    func testCrossLayoutRequestResetsAndSwitches() {
-        // Two quarters tiled; an untiled window requests a sixths slot:
-        // everything is evicted and the layout switches.
+    func testSetLayoutStoresTheChoiceOnAnEmptyBoard() {
         var state = TilingState()
+        state.setLayout(.quarters)
+        XCTAssertEqual(state.layout, .quarters)
+        XCTAssertTrue(state.occupants.isEmpty)
+        state.setLayout(.sixths)
+        XCTAssertEqual(state.layout, .sixths)
+    }
+
+    func testEmptyBoardKeepsTheChosenLayoutAfterItsWindowsLeave() {
+        // The layout is a canvas choice, not an occupancy side effect: the
+        // last window leaving must not reset it. Otherwise the next slot
+        // key would silently mean a different position.
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .bottomRight)
-        XCTAssertEqual(state.activeLayout, .quarters)
-        XCTAssertEqual(
-            state.plan(window: c, into: .sixthTopLeft),
-            .switchLayout(evicting: [a, b]))
-        if case .switchLayout(let evicting) = state.plan(window: c, into: .sixthTopLeft) {
-            for evicted in evicting { state.remove(window: evicted) }
-        } else {
-            XCTFail("expected a layout switch")
-        }
-        state.commit(window: c, into: .sixthTopLeft)
-        XCTAssertEqual(state.occupants, [.sixthTopLeft: c])
-        XCTAssertEqual(state.activeLayout, .sixths)
+        state.remove(window: a)
+        XCTAssertTrue(state.occupants.isEmpty)
+        XCTAssertEqual(state.layout, .quarters)
+        XCTAssertEqual(state.plan(window: b, into: .bottomRight), .tile(evicting: []))
     }
 
-    func testCrossLayoutRequestBackToQuarters() {
-        var state = TilingState()
-        state.commit(window: a, into: .sixthLeft)
-        state.commit(window: b, into: .sixthRight)
-        XCTAssertEqual(state.activeLayout, .sixths)
-        XCTAssertEqual(
-            state.plan(window: c, into: .topLeft),
-            .switchLayout(evicting: [a, b]))
+    func testCommitNeverAdoptsTheSlotsLayout() {
+        // The slot must already match: commit is a placement, not a layout
+        // writer. A sixths commit on a quarters board is a programming
+        // error the precondition fences, so only same-layout commits are
+        // reachable from the public pipeline.
+        var state = TilingState(layout: .quarters)
+        state.commit(window: a, into: .topLeft)
+        XCTAssertEqual(state.layout, .quarters)
+        state.remove(window: a)
+        state.setLayout(.sixths) // after emptying is the only legal path
+        state.commit(window: b, into: .sixthMiddle)
+        XCTAssertEqual(state.layout, .sixths, "commit left the stored layout alone")
+    }
+
+    func testSlotForKeyResolvesAgainstTheStoredLayout() {
+        var state = TilingState(layout: .quarters)
+        XCTAssertEqual(state.slot(for: .topLeft), .topLeft)
+        XCTAssertEqual(state.slot(for: .leftColumn), .leftHalf)
+        XCTAssertNil(state.slot(for: .topMiddle), "Quarters has no top middle")
+        state.setLayout(.sixths)
+        XCTAssertEqual(state.slot(for: .topLeft), .sixthTopLeft)
+        XCTAssertEqual(state.slot(for: .topMiddle), .sixthTopMiddle)
+        XCTAssertEqual(state.slot(for: .middleColumn), .sixthMiddle)
+        XCTAssertEqual(state.slot(for: .rightTwoThirds), .sixthsRightTwoThirds)
+    }
+
+    func testCapacityChangesWithTheStoredLayout() {
+        // Eight sixths-corner windows cannot coexist in Quarters: the
+        // layout gates which slots exist at all.
+        var state = TilingState(layout: .sixths)
+        let corners: [Slot] = [
+            .sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+            .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight,
+        ]
+        for (index, slot) in corners.enumerated() {
+            state.commit(window: index + 1, into: slot)
+        }
+        XCTAssertEqual(state.tiledWindows.count, 6)
+        XCTAssertEqual(state.layout, .sixths)
     }
 
     func testSameSlotSameWindowIsNoop() {
-        // Same slot, same window: noop wins. Target and occupant share a
-        // layout by definition, so switchLayout must never fire for it.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthLeft)
         XCTAssertEqual(state.plan(window: a, into: .sixthLeft), .noop)
     }
 
-    func testLayoutSwitchEvictionsAreSorted() {
-        var state = TilingState()
-        state.commit(window: c, into: .topLeft)
-        state.commit(window: a, into: .bottomRight)
-        XCTAssertEqual(
-            state.plan(window: b, into: .sixthMiddle),
-            .switchLayout(evicting: [a, c]))
-    }
-
-    func testTiledWindowRequestingOtherLayoutResetsToo() {
-        // Even a tiled window resets when it targets the other layout: it
-        // joins the evicted set rather than moving across layouts.
-        var state = TilingState()
-        state.commit(window: a, into: .topLeft)
-        state.commit(window: b, into: .bottomRight)
-        XCTAssertEqual(
-            state.plan(window: a, into: .sixthTopLeft),
-            .switchLayout(evicting: [a, b]))
-    }
-
-    func testSingleSixthResetsToQuarters() {
-        // One sixths window tiled; a quarters request still resets everything.
-        var state = TilingState()
-        state.commit(window: a, into: .sixthMiddle)
-        XCTAssertEqual(
-            state.plan(window: b, into: .topLeft),
-            .switchLayout(evicting: [a]))
-    }
-
     func testUntiledWindowIntoSingleSixthEvicts() {
-        // Same-layout eviction path with one occupant, for symmetry with the
-        // switch test above.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthMiddle)
         XCTAssertEqual(
             state.plan(window: b, into: .sixthMiddle),
@@ -555,7 +512,7 @@ final class TilingStateTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> TilingState {
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         for (window, slot) in requests {
             switch state.plan(window: window, into: slot) {
             case .noop:
@@ -565,7 +522,7 @@ final class TilingStateTests: XCTestCase {
                     state.commit(window: displaced, into: previous)
                 }
                 state.commit(window: window, into: slot)
-            case .tile(let evicting), .switchLayout(let evicting):
+            case .tile(let evicting):
                 for evicted in evicting { state.remove(window: evicted) }
                 state.commit(window: window, into: slot)
             }
@@ -599,7 +556,7 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(end.occupant(of: .sixthBottomMiddle), b)
         XCTAssertEqual(end.occupant(of: .sixthTopRight), c)
         XCTAssertNil(end.occupant(of: .sixthTopMiddle))
-        XCTAssertEqual(end.activeLayout, .sixths)
+        XCTAssertEqual(end.layout, .sixths)
     }
 
     func testSixthsThirdsFillThenTwoThirdsEvicts() {
@@ -639,22 +596,28 @@ final class TilingStateTests: XCTestCase {
         XCTAssertEqual(end.occupant(of: .sixthTopLeft), c)
         XCTAssertEqual(end.occupant(of: .sixthTopMiddle), b)
         XCTAssertNil(end.slot(of: a))
-        XCTAssertEqual(end.activeLayout, .sixths)
+        XCTAssertEqual(end.layout, .sixths)
     }
 
-    func testSixthsToQuartersAndBack() {
-        // Full sixths session, reset to quarters, tile there, reset back:
-        // each switch leaves exactly the requester behind.
-        let end = drive([
-            (a, .sixthLeft), (b, .sixthMiddle), (c, .sixthRight),
-            (c, .topLeft), // reset to quarters
-            (a, .topRight),
-            (a, .sixthMiddle), // reset to sixths
-        ])
-        XCTAssertEqual(end.occupants, [.sixthMiddle: a])
-        XCTAssertEqual(end.activeLayout, .sixths)
-        XCTAssertNil(end.slot(of: b))
-        XCTAssertNil(end.slot(of: c))
+    func testLayoutSwitchAfterEmptyingKeepsTheNewLayout() {
+        // A switch is an explicit empty-board step now: the canvas untiles
+        // its occupancies, adopts the other layout, and the next placement
+        // lands there. No request crosses layouts.
+        var state = TilingState(layout: .sixths)
+        state.commit(window: a, into: .sixthLeft)
+        state.commit(window: b, into: .sixthMiddle)
+        state.remove(window: a)
+        state.remove(window: b)
+        state.setLayout(.quarters)
+        state.commit(window: c, into: .topLeft)
+        XCTAssertEqual(state.occupants, [.topLeft: c])
+        XCTAssertEqual(state.layout, .quarters)
+
+        state.remove(window: c)
+        state.setLayout(.sixths)
+        state.commit(window: a, into: .sixthMiddle)
+        XCTAssertEqual(state.occupants, [.sixthMiddle: a])
+        XCTAssertEqual(state.layout, .sixths)
     }
 
     func testSixthsExhaustiveReachableStates() {
@@ -668,7 +631,7 @@ final class TilingStateTests: XCTestCase {
             .sixthLeft, .sixthMiddle, .sixthRight,
             .sixthsLeftTwoThirds, .sixthsRightTwoThirds,
         ]
-        var queue: [(TilingState, Int)] = [(TilingState(), 0)]
+        var queue: [(TilingState, Int)] = [(TilingState(layout: .sixths), 0)]
         var visited: Set<String> = []
         var steps = 0
         while !queue.isEmpty {
@@ -684,7 +647,7 @@ final class TilingStateTests: XCTestCase {
                             next.commit(window: displaced, into: previous)
                         }
                         next.commit(window: window, into: target)
-                    case .tile(let evicting), .switchLayout(let evicting):
+                    case .tile(let evicting):
                         for evicted in evicting { next.remove(window: evicted) }
                         next.commit(window: window, into: target)
                     }
@@ -696,7 +659,7 @@ final class TilingStateTests: XCTestCase {
                     var seen: Set<TileCell> = []
                     for (slot, occupant) in next.occupants {
                         XCTAssertEqual(next.slot(of: occupant), slot)
-                        XCTAssertEqual(slot.layout, next.activeLayout)
+                        XCTAssertEqual(slot.layout, next.layout)
                         for cell in slot.cells {
                             XCTAssertFalse(seen.contains(cell), "win\(window) -> \(target)")
                             seen.insert(cell)

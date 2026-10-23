@@ -30,7 +30,7 @@ final class HotkeyRegistrationTests: XCTestCase {
             store: store, registrar: registrar, eventHandlerInstaller: {})
     }
 
-    /// A fresh store has 17 slot bindings plus 5 app-action bindings, all
+    /// A fresh store has 11 slot-key bindings plus 6 app-action bindings, all
     /// enabled. Each must reach the registrar exactly once with its own
     /// live binding, Carbon id, and the 'TILD' signature.
     func testDefaultStoreRegistersEveryEnabledActionOnce() {
@@ -38,19 +38,19 @@ final class HotkeyRegistrationTests: XCTestCase {
         let store = makeStore()
         let service = makeService(store: store, registrar: registrar)
 
-        XCTAssertEqual(Slot.allCases.count, 17)
-        XCTAssertEqual(HotkeyAction.appActions.count, 5)
-        XCTAssertEqual(registrar.requests.count, 22)
-        XCTAssertEqual(registrar.activeTokens.count, 22)
+        XCTAssertEqual(SlotKey.allCases.count, 11)
+        XCTAssertEqual(HotkeyAction.appActions.count, 6)
+        XCTAssertEqual(registrar.requests.count, 17)
+        XCTAssertEqual(registrar.activeTokens.count, 17)
         XCTAssertTrue(service.failedActions.isEmpty)
         XCTAssertEqual(
-            registrar.requests(for: Slot.topLeft.hotkeyID),
+            registrar.requests(for: SlotKey.topLeft.hotkeyID),
             [HotkeyRequest(
                 keyCode: UInt32(kVK_ANSI_U),
-                modifiers: UInt32(shiftKey | optionKey | cmdKey),
-                hotKeyID: Slot.topLeft.hotkeyID,
+                modifiers: UInt32(shiftKey | optionKey),
+                hotKeyID: SlotKey.topLeft.hotkeyID,
                 signature: 0x54_49_4C_44)],
-            "Top Left defaults to ⌥⇧⌘U")
+            "Top Left defaults to ⌥⇧U")
         XCTAssertEqual(
             registrar.requests(for: HotkeyAction.undo.hotkeyID),
             [HotkeyRequest(
@@ -101,18 +101,18 @@ final class HotkeyRegistrationTests: XCTestCase {
         let store = makeStore()
         store.set(
             HotkeyBinding(modifiers: 0, keyCode: nil),
-            for: .slot(.topLeft))
+            for: .slotKey(.topLeft))
         store.set(
             HotkeyBinding(modifiers: 0, keyCode: nil),
             for: .resetSplitters)
         let service = makeService(store: store, registrar: registrar)
 
-        XCTAssertTrue(registrar.requests(for: HotkeyAction.slot(.topLeft).hotkeyID).isEmpty)
+        XCTAssertTrue(registrar.requests(for: HotkeyAction.slotKey(.topLeft).hotkeyID).isEmpty)
         XCTAssertTrue(registrar.requests(for: HotkeyAction.resetSplitters.hotkeyID).isEmpty)
-        XCTAssertEqual(registrar.requests.count, 20)
-        XCTAssertEqual(registrar.activeTokens.count, 20)
+        XCTAssertEqual(registrar.requests.count, 15)
+        XCTAssertEqual(registrar.activeTokens.count, 15)
         XCTAssertTrue(service.failedActions.isEmpty)
-        XCTAssertNotNil(registrar.activeToken(for: HotkeyAction.slot(.topRight).hotkeyID))
+        XCTAssertNotNil(registrar.activeToken(for: HotkeyAction.slotKey(.topRight).hotkeyID))
         XCTAssertNotNil(registrar.activeToken(for: HotkeyAction.undo.hotkeyID))
     }
 
@@ -126,8 +126,8 @@ final class HotkeyRegistrationTests: XCTestCase {
 
         XCTAssertEqual(service.failedActions, [.expand])
         XCTAssertNil(registrar.activeToken(for: HotkeyAction.expand.hotkeyID))
-        XCTAssertEqual(registrar.requests.count, 22)
-        XCTAssertEqual(registrar.activeTokens.count, 21)
+        XCTAssertEqual(registrar.requests.count, 17)
+        XCTAssertEqual(registrar.activeTokens.count, 16)
         XCTAssertNotNil(registrar.activeToken(for: HotkeyAction.undo.hotkeyID))
     }
 
@@ -142,7 +142,7 @@ final class HotkeyRegistrationTests: XCTestCase {
 
         XCTAssertEqual(service.failedActions, [.expand])
         XCTAssertNil(registrar.activeToken(for: HotkeyAction.expand.hotkeyID))
-        XCTAssertEqual(registrar.activeTokens.count, 21)
+        XCTAssertEqual(registrar.activeTokens.count, 16)
     }
 
     /// Reload retires the whole old set before registering the edited
@@ -155,12 +155,12 @@ final class HotkeyRegistrationTests: XCTestCase {
         let service = makeService(store: store, registrar: registrar)
 
         let oldTokens = registrar.activeTokens
-        XCTAssertEqual(oldTokens.count, 21)
+        XCTAssertEqual(oldTokens.count, 16)
         XCTAssertEqual(service.failedActions, [.expand])
 
         let rebound = HotkeyBinding(
             modifiers: UInt32(cmdKey), keyCode: UInt32(kVK_ANSI_A))
-        store.set(rebound, for: .slot(.topLeft))
+        store.set(rebound, for: .slotKey(.topLeft))
         store.set(
             HotkeyBinding(modifiers: 0, keyCode: nil),
             for: .undo)
@@ -168,38 +168,38 @@ final class HotkeyRegistrationTests: XCTestCase {
 
         service.reload()
 
-        XCTAssertEqual(registrar.unregisteredTokens.count, 21)
+        XCTAssertEqual(registrar.unregisteredTokens.count, 16)
         XCTAssertTrue(oldTokens.allSatisfy { !$0.isActive })
         XCTAssertTrue(service.failedActions.isEmpty)
-        XCTAssertEqual(registrar.requests.count, 43)
-        XCTAssertEqual(registrar.activeTokens.count, 21)
-        let reloadEvents = Array(registrar.events.dropFirst(22))
+        XCTAssertEqual(registrar.requests.count, 33)
+        XCTAssertEqual(registrar.activeTokens.count, 16)
+        let reloadEvents = Array(registrar.events.dropFirst(17))
         XCTAssertEqual(
-            reloadEvents.prefix(21).filter { $0.hasPrefix("unregister ") }.count, 21,
+            reloadEvents.prefix(16).filter { $0.hasPrefix("unregister ") }.count, 16,
             "reload retires the whole old set before registering")
         XCTAssertTrue(
-            reloadEvents.dropFirst(21).allSatisfy { $0.hasPrefix("register ") },
+            reloadEvents.dropFirst(16).allSatisfy { $0.hasPrefix("register ") },
             "every new registration follows the teardown")
         XCTAssertNil(registrar.activeToken(for: HotkeyAction.undo.hotkeyID))
         XCTAssertNotNil(registrar.activeToken(for: HotkeyAction.expand.hotkeyID))
         XCTAssertEqual(
-            registrar.requests(for: HotkeyAction.slot(.topLeft).hotkeyID).last,
+            registrar.requests(for: HotkeyAction.slotKey(.topLeft).hotkeyID).last,
             HotkeyRequest(
                 keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey),
-                hotKeyID: HotkeyAction.slot(.topLeft).hotkeyID,
+                hotKeyID: HotkeyAction.slotKey(.topLeft).hotkeyID,
                 signature: 0x54_49_4C_44))
         // The disabled action was not retried on reload.
         XCTAssertEqual(registrar.requests(for: HotkeyAction.undo.hotkeyID).count, 1)
 
-        registrar.statusesByID[HotkeyAction.slot(.topRight).hotkeyID] = OSStatus(-2)
+        registrar.statusesByID[HotkeyAction.slotKey(.topRight).hotkeyID] = OSStatus(-2)
 
         service.reload()
 
-        XCTAssertEqual(registrar.unregisteredTokens.count, 42)
-        XCTAssertEqual(service.failedActions, [.slot(.topRight)])
-        XCTAssertEqual(registrar.activeTokens.count, 20)
+        XCTAssertEqual(registrar.unregisteredTokens.count, 32)
+        XCTAssertEqual(service.failedActions, [.slotKey(.topRight)])
+        XCTAssertEqual(registrar.activeTokens.count, 15)
         XCTAssertNil(
-            registrar.activeToken(for: HotkeyAction.slot(.topRight).hotkeyID))
+            registrar.activeToken(for: HotkeyAction.slotKey(.topRight).hotkeyID))
     }
 
     /// The class comment promises no registration outlives the service;
@@ -210,13 +210,13 @@ final class HotkeyRegistrationTests: XCTestCase {
         var service: HotkeyService? = makeService(store: store, registrar: registrar)
         weak var weakService = service
 
-        XCTAssertEqual(registrar.activeTokens.count, 22)
+        XCTAssertEqual(registrar.activeTokens.count, 17)
 
         service = nil
 
         XCTAssertNil(weakService)
         XCTAssertTrue(registrar.activeTokens.isEmpty)
-        XCTAssertEqual(registrar.unregisteredTokens.count, 22)
+        XCTAssertEqual(registrar.unregisteredTokens.count, 17)
     }
 
     /// F29: the Carbon router is process-wide, but the action handler belongs

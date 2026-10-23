@@ -115,13 +115,13 @@ final class MenuTextTests: XCTestCase {
 
     // MARK: Menu rows
 
-    func testWindowLineWithAndWithoutLabel() {
+    func testWindowLineNamesTheConcreteTileNotThePhysicalKey() {
         XCTAssertEqual(
             MenuText.windowLine(slot: .leftHalf, appName: "Safari", label: "⌥⇧J"),
             "Left Half · Safari (⌥⇧J)")
         XCTAssertEqual(
-            MenuText.windowLine(slot: .leftHalf, appName: "Safari", label: nil),
-            "Left Half · Safari")
+            MenuText.windowLine(slot: .sixthLeft, appName: "Safari", label: nil),
+            "Left Third · Safari")
     }
 
     func testWindowLineFallbackAppName() {
@@ -130,9 +130,71 @@ final class MenuTextTests: XCTestCase {
             "Right Half · window")
     }
 
-    func testTileItemTitleWithAndWithoutLabel() {
+    func testTileItemTitleNamesTheConcreteTileNotThePhysicalKey() {
         XCTAssertEqual(MenuText.tileItemTitle(slot: .topLeft, label: "⌥⇧U"), "Top Left · ⌥⇧U")
-        XCTAssertEqual(MenuText.tileItemTitle(slot: .topLeft, label: nil), "Top Left")
+        XCTAssertEqual(
+            MenuText.tileItemTitle(slot: .sixthTopMiddle, label: "⌥⇧I"),
+            "Top Middle Sixth · ⌥⇧I")
+        XCTAssertEqual(MenuText.tileItemTitle(slot: .leftHalf, label: nil), "Left Half")
+    }
+
+    func testSwitchedLayoutAnnouncementNamesTheCount() {
+        XCTAssertEqual(
+            MenuText.switchedLayoutAnnouncement(layout: .quarters, untiled: 0),
+            "Switched to Quarters.")
+        XCTAssertEqual(
+            MenuText.switchedLayoutAnnouncement(layout: .sixths, untiled: 3),
+            "Switched to Sixths; 3 windows untiled.")
+    }
+
+    func testSwitchLayoutItemTitleNamesTheDestinationAndLiveCombo() {
+        XCTAssertEqual(
+            MenuText.switchLayoutItemTitle(target: .sixths, label: "⌥⇧\\"),
+            "Switch to Sixths · ⌥⇧\\")
+        XCTAssertEqual(
+            MenuText.switchLayoutItemTitle(target: .quarters, label: nil),
+            "Switch to Quarters")
+    }
+
+    func testSwitchedLayoutNoticeNarratesTheLayoutTheCountAndTheRecovery() {
+        XCTAssertEqual(
+            MenuText.switchedLayoutNotice(layout: .quarters, untiled: 0, undoable: false),
+            "Switched to Quarters.")
+        XCTAssertEqual(
+            MenuText.switchedLayoutNotice(layout: .quarters, untiled: 1, undoable: true),
+            "Switched to Quarters · 1 window untiled. Undo from the Tiled menu.")
+        XCTAssertEqual(
+            MenuText.switchedLayoutNotice(layout: .sixths, untiled: 3, undoable: true),
+            "Switched to Sixths · 3 windows untiled. Undo from the Tiled menu.")
+        XCTAssertEqual(
+            MenuText.switchedLayoutNotice(layout: .sixths, untiled: 2, undoable: false),
+            "Switched to Sixths · 2 windows untiled.",
+            "a partial snapshot promises no undo")
+    }
+
+    func testInertSlotKeySentenceNamesTheKeyTheLayoutAndTheLiveSwitch() {
+        XCTAssertEqual(
+            MenuText.inertSlotKeyAnnouncement(
+                key: .topMiddle, layout: .quarters, switchLabel: "⌥⇧\\"),
+            "“Top Middle” has no slot in Quarters. It belongs to Sixths. "
+                + "Press ⌥⇧\\ to switch to Sixths.")
+        XCTAssertEqual(
+            MenuText.inertSlotKeyAnnouncement(
+                key: .middleColumn, layout: .quarters, switchLabel: nil),
+            "“Middle Column” has no slot in Quarters. It belongs to Sixths. "
+                + "Switch to Sixths from the Tiled menu.")
+    }
+
+    func testUndoDisplacementNoticeNamesARestoredLayout() {
+        XCTAssertEqual(
+            MenuText.undoDisplacementNotice(restored: 0, layoutRestored: .quarters),
+            "Undid displacement · back to Quarters.")
+        XCTAssertEqual(
+            MenuText.undoDisplacementNotice(restored: 2, layoutRestored: .sixths),
+            "Undid displacement · back to Sixths · 2 windows restored.")
+        XCTAssertEqual(
+            MenuText.undoDisplacementNotice(restored: 1, layoutRestored: nil),
+            "Undid displacement · 1 window restored.")
     }
 
     // MARK: Feedback announcements

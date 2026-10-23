@@ -82,14 +82,15 @@ final class CanvasSurfaceTests: XCTestCase {
         controller.handle(slot: .topLeft)
         gateway.activeSpaces = [Self.displayID: Self.namedSpace]
         let namedWindow = addFocusedWindow()
-        controller.handle(slot: .topLeft)
+        controller.handle(slotKey: .topLeft)
 
         XCTAssertEqual(
             controller.canvas(for: withheld).state.occupant(of: .topLeft), withheldWindow.id)
         XCTAssertEqual(
-            controller.canvas(for: named).state.occupant(of: .topLeft), namedWindow.id)
+            controller.canvas(for: named).state.occupant(of: .sixthTopLeft), namedWindow.id,
+            "the fresh window resolves the named canvas, whose fresh layout is sixths")
         XCTAssertEqual(
-            controller.canvas(for: Self.screen.id).state.occupant(of: .topLeft),
+            controller.canvas(for: Self.screen.id).state.occupant(of: .sixthTopLeft),
             namedWindow.id,
             "the display action resolves the named canvas once it holds anything")
         XCTAssertEqual(
@@ -120,7 +121,7 @@ final class CanvasSurfaceTests: XCTestCase {
         controller.handle(slot: .topLeft)
         gateway.activeSpaces = [Self.displayID: Self.namedSpace]
         let namedWindow = addFocusedWindow()
-        controller.handle(slot: .topLeft)
+        controller.handle(slotKey: .topLeft)
 
         gateway.focused = namedWindow
         XCTAssertEqual(controller.focusedTilingSpace, named)
@@ -133,12 +134,12 @@ final class CanvasSurfaceTests: XCTestCase {
             controller.canvas(for: withheld).state.occupant(of: .topLeft), withheldWindow.id,
             "the window still owns its record on the withheld canvas")
 
-        controller.handle(slot: .topRight)
+        controller.handle(slotKey: .topRight)
         XCTAssertEqual(
             controller.canvas(for: withheld).state.occupant(of: .topRight), withheldWindow.id,
             "a request from the window resolves the canvas that owns it")
         XCTAssertEqual(
-            controller.canvas(for: named).state.occupant(of: .topLeft), namedWindow.id,
+            controller.canvas(for: named).state.occupant(of: .sixthTopLeft), namedWindow.id,
             "the named canvas is untouched by the window's own request")
     }
 }

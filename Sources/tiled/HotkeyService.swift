@@ -62,43 +62,11 @@ final class CarbonHotkeyRegistrar: HotkeyRegistrar {
     }
 }
 
-extension Slot {
-    /// Modifier set for this slot's hotkey: quarters add ⌘, sixths use ⌥⇧.
-    var modifiers: UInt32 {
-        switch layout {
-        case .quarters: UInt32(shiftKey | optionKey | cmdKey)
-        case .sixths: UInt32(shiftKey | optionKey)
-        }
-    }
-
-    /// HIToolbox virtual keycode for this slot's hotkey.
-    var keyCode: UInt32 {
-        switch self {
-        case .topLeft, .sixthTopLeft: UInt32(kVK_ANSI_U)
-        case .sixthTopMiddle: UInt32(kVK_ANSI_I)
-        case .topRight, .sixthTopRight: UInt32(kVK_ANSI_O)
-        case .bottomLeft, .sixthBottomLeft: UInt32(kVK_ANSI_M)
-        case .sixthBottomMiddle: UInt32(kVK_ANSI_Comma)
-        case .bottomRight, .sixthBottomRight: UInt32(kVK_ANSI_Period)
-        case .leftHalf, .sixthLeft: UInt32(kVK_ANSI_J)
-        case .sixthMiddle: UInt32(kVK_ANSI_K)
-        case .rightHalf, .sixthRight: UInt32(kVK_ANSI_L)
-        case .sixthsLeftTwoThirds: UInt32(kVK_ANSI_H)
-        case .sixthsRightTwoThirds: UInt32(kVK_ANSI_Semicolon)
-        }
-    }
-
-    /// Stable id used in Carbon hotkey events.
-    var hotkeyID: UInt32 {
-        UInt32(Slot.allCases.firstIndex(of: self)!) + 1
-    }
-}
-
 /// Registers the global hotkeys through a `HotkeyRegistrar`; the
 /// production adapter wraps Carbon's RegisterEventHotKey (still the most
-/// reliable global hotkey mechanism on macOS). Every action — slots and
-/// app actions alike — registers from the store, so a user rebinds ⌥⇧R or
-/// ⌃⌥⇧⌘Z exactly like ⌥⇧U.
+/// reliable global hotkey mechanism on macOS). Every action — slot keys
+/// and app actions alike — registers from the store, so a user rebinds
+/// ⌥⇧R or ⌃⌥⇧⌘Z exactly like ⌥⇧U.
 ///
 /// Registration belongs to the service; the Carbon event tap belongs to the
 /// process. `CarbonHotkeyEventRouter` owns that one tap, and a service claims
@@ -106,9 +74,9 @@ extension Slot {
 final class HotkeyService {
     // MARK: App-action Carbon ids
     //
-    // Reserved ids for the five app actions. Slot ids occupy
-    // 1...allCases.count, so 995–999 can never collide with them (or each
-    // other); the id tests pin that.
+    // Reserved ids for the six app actions. Slot-key ids occupy 1...11,
+    // so 994–999 can never collide with them (or each other); the id
+    // tests pin that.
 
     /// Expand toggle (default ⌥⇧⏎).
     static let expandHotkeyID: UInt32 = 998
@@ -116,6 +84,8 @@ final class HotkeyService {
     static let evictHotkeyID: UInt32 = 996
     /// Reset splitters (default ⌥⇧R).
     static let resetSplittersHotkeyID: UInt32 = 995
+    /// Switch the focused canvas to the other layout (default ⌥⇧\).
+    static let switchLayoutHotkeyID: UInt32 = 994
     /// Settings fallback (default ⌃⌥⇧⌘,): opens Settings even when the
     /// menu-bar icon is hidden.
     static let settingsHotkeyID: UInt32 = 999
@@ -126,9 +96,9 @@ final class HotkeyService {
     //
     // The combos the fixed build shipped with. They are defaults now, not
     // constants: the store resolves each action's live binding, and the
-    // Shortcuts tab can change any of them. The expand/evict/reset
-    // combos sit beside the sixths ⌥⇧ set but on keys no slot defaults
-    // to; Settings and undo are deliberately over-modified (all four
+    // Shortcuts tab can change any of them. The expand/evict/reset/switch
+    // combos sit beside the ⌥⇧ slot set but on keys no slot defaults to;
+    // Settings and undo are deliberately over-modified (all four
     // modifiers) so they collide with nothing out of the box.
 
     static let expandModifiers = UInt32(shiftKey | optionKey)
@@ -145,6 +115,11 @@ final class HotkeyService {
     static let resetSplittersKeyCode = UInt32(kVK_ANSI_R)
     static let resetSplittersDefaultBinding = HotkeyBinding(
         modifiers: resetSplittersModifiers, keyCode: resetSplittersKeyCode)
+
+    static let switchLayoutModifiers = UInt32(shiftKey | optionKey)
+    static let switchLayoutKeyCode = UInt32(kVK_ANSI_Backslash)
+    static let switchLayoutDefaultBinding = HotkeyBinding(
+        modifiers: switchLayoutModifiers, keyCode: switchLayoutKeyCode)
 
     static let settingsModifiers = UInt32(controlKey | optionKey | shiftKey | cmdKey)
     static let settingsKeyCode = UInt32(kVK_ANSI_Comma)

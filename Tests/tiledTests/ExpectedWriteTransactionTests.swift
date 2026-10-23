@@ -14,6 +14,9 @@ final class ExpectedWriteTransactionTests: XCTestCase {
     override func setUp() {
         super.setUp()
         harness = TilingSpaceHarness()
+        // This suite's requests are quarters slots; the canvas's layout is
+        // now a stored choice rather than inferred from the request.
+        harness.space.adoptLayout(.quarters)
     }
 
     private var space: TilingSpace { harness.space }

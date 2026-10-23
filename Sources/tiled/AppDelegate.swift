@@ -153,6 +153,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // done and it must not linger over the working app.
         permissionWindowController?.close()
         permissionWindowController = nil
+        // Retire the old quarter hotkey namespace once, before the service
+        // reads the store: the shared keys inherit the sixths storage names,
+        // so only the six quarter overrides, section parks, and reset entries
+        // are deleted. One-way and idempotent; no marker or version key.
+        hotkeyStore.removeRetiredSlotBindings()
+        ShortcutPark().removeRetiredSlotParks()
         let service = HotkeyService(store: hotkeyStore)
         // One entry point for every global hotkey, slot or app action. The
         // Carbon router parses and hops; this closure owns the action route,
@@ -163,6 +169,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             HotkeyActionRouter(performer: self.hotkeyPerformer).dispatch(action)
         }
         hotkeys = service
+        // The inert-key receipt names the live switch combo, and only when
+        // that combo is actually registered; otherwise it teaches the menu
+        // row. Wired here because the provider needs the running service.
+        controller.switchLayoutLabelProvider = { [weak self] in
+            guard let self, let hotkeys = self.hotkeys else { return nil }
+            return self.hotkeyStore.registeredLabel(
+                for: .switchLayout, failedActions: hotkeys.failedActions)
+        }
         // Focus moving to another window can change which display drives
         // the glyph with no tiling action at all. The gateway re-targets
         // as apps activate; this subscribes now that AX is trusted.
@@ -205,12 +219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for action: MenuModel.Action
     ) -> (selector: Selector, representedObject: Any?, targetsSelf: Bool) {
         switch action {
-        case .tileSlot(let slot):
-            return (#selector(AppDelegate.tileSlot(_:)), slot.rawValue, true)
-        case .switchToQuarters:
-            return (#selector(AppDelegate.switchToQuarters(_:)), nil, true)
-        case .switchToSixths:
-            return (#selector(AppDelegate.switchToSixths(_:)), nil, true)
+        case .tileSlot(let key):
+            return (#selector(AppDelegate.tileSlot(_:)), key.rawValue, true)
+        case .switchLayout(let target):
+            return (#selector(AppDelegate.switchLayout(_:)), target.rawValue, true)
         case .toggleExpand:
             return (#selector(AppDelegate.expandFocusedWindow(_:)), nil, true)
         case .evictFocusedWindow:
@@ -219,8 +231,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return (#selector(AppDelegate.untileTiledWindow(_:)), id, true)
         case .focusWindow(let id):
             return (#selector(AppDelegate.focusTiledWindow(_:)), id, true)
-        case .tileHere(let slot):
-            return (#selector(AppDelegate.tileFocusedHere(_:)), slot.rawValue, true)
+        case .tileHere(let key):
+            return (#selector(AppDelegate.tileFocusedHere(_:)), key.rawValue, true)
         case .undoSwitch:
             return (#selector(AppDelegate.undoSwitch(_:)), nil, true)
         case .untileAll:
@@ -309,23 +321,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func tileSlot(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
-              let slot = Slot(rawValue: raw)
+              let key = SlotKey(rawValue: raw)
         else { return }
-        present(controller.handle(slot: slot))
+        present(controller.handle(slotKey: key))
     }
 
-    /// Collapsed layout-switch rows: honest about focus. With a focused
-    /// window this tiles into the destination's top-left, performing the
-    /// switch through the engine's mutual-exclusion rule (identical to
-    /// pressing that layout's own hotkey: same undo notice, same
-    /// reversibility). With no focused window the row is disabled, not a
-    /// no-op: a menu row must not promise a switch it cannot perform.
-    @objc private func switchToQuarters(_ sender: Any?) {
-        present(controller.handle(slot: .topLeft))
-    }
-
-    @objc private func switchToSixths(_ sender: Any?) {
-        present(controller.handle(slot: .sixthTopLeft))
+    /// The explicit switch row: the destination was captured when the
+    /// menu was built (`.other` of the focused canvas then), so the click
+    /// means the layout the title promised.
+    @objc private func switchLayout(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let target = LayoutKind(rawValue: raw)
+        else { return }
+        present(controller.handleSwitchLayout(to: target))
     }
 
     @objc private func expandFocusedWindow(_ sender: Any?) {
@@ -427,9 +435,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func tileFocusedHere(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
-              let slot = Slot(rawValue: raw)
+              let key = SlotKey(rawValue: raw)
         else { return }
-        present(controller.handle(slot: slot))
+        present(controller.handle(slotKey: key))
     }
 
     @objc private func openAccessibilitySettings(_ sender: Any?) {

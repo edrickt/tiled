@@ -163,6 +163,11 @@ struct TilingSpace {
             case nothingToEvict
             /// An expand or retile write was refused.
             case expandRefused(windowName: String?)
+            /// An explicit layout switch untiled `untiled` windows. The
+            /// layout changed even when a restore was refused.
+            case switched(layout: LayoutKind, untiled: Int)
+            /// The canvas already shows the requested layout: strict no-op.
+            case alreadyInLayout(LayoutKind)
         }
         var result: Result = .placed
         /// The window to focus once everything settled: a swap's displaced
@@ -291,9 +296,6 @@ struct TilingSpace {
         case .noop:
             // Unreachable: callers guard noop first.
             return Outcome(result: .alreadyTiled)
-        case .switchLayout:
-            commit = applySwitchLayout(
-                decision, requester: id, slot: slot, context: context)
         case .swap(let displaced):
             commit = applySwap(
                 displaced, decision: decision, requester: id, slot: slot,
@@ -331,7 +333,7 @@ struct TilingSpace {
         // Restored-not-re-housed windows: untiled for good. A re-housed
         // window is the exception: it stayed tiled in the slot the
         // request left free, so its record and observation survive.
-        outcome.forget = decision.windowsToRestore(requester: id)
+        outcome.forget = decision.windowsToRestore()
             .filter { $0 != commit.rehoused }
         // A refused placement releases the requester's record (see
         // `place`). Record presence is the ownership primitive, so the
@@ -361,7 +363,7 @@ struct TilingSpace {
             // request ends up as the right two-thirds, not the bare
             // middle third).
             let skip = Set(
-                ([id] + decision.windowsToRestore(requester: id))
+                ([id] + decision.windowsToRestore())
                     .filter { $0 != commit.rehoused })
             let reflow = reflow(freed, excluding: skip, context: context)
             reflowSnapshot = reflow.undoEntries
@@ -445,7 +447,7 @@ struct TilingSpace {
     /// plus a re-housed evictee when there is one.
     private func verificationWindows(for decision: TilePlan, requester id: WindowID) -> [WindowID] {
         switch decision {
-        case .tile, .switchLayout: [id]
+        case .tile: [id]
         case .swap(let displaced): [id, displaced]
         case .noop: []
         }
@@ -556,56 +558,51 @@ struct TilingSpace {
         return result
     }
 
-    // MARK: Plan branches
+    // MARK: Layout switch
 
-    /// The layout-switch branch: the requester moves rather than evicting,
-    /// so everyone else in the way is restored first (restoring the
-    /// requester would delete its record and the placement would bail).
-    private mutating func applySwitchLayout(
-        _ decision: TilePlan, requester id: WindowID, slot: Slot, context: Context
-    ) -> Commit {
-        var commit = Commit()
-        // The requester moves rather than evicts: restore everyone
-        // else first (restoring it would delete its record, so `place`
-        // would bail and the window would merely untile). Its old tile
-        // is vacated by the commit inside `place`.
-        let evicted = decision.windowsToRestore(requester: id)
-        let snapshot = evicted.compactMap { evictedID in
-            snapshotEntry(for: evictedID, fallback: slot, space: context.space)
+    /// Switches this canvas to `target`, untiling everything first.
+    ///
+    /// The layout is a canvas choice, not an occupancy side effect. Every
+    /// tiled window is restored to its pre-tile frame (an expanded window
+    /// included, to the frame it had before tiling), the board empties,
+    /// and the canvas adopts `target`. The snapshot is taken before the
+    /// restores drop the records, in id order, so undo can put the whole
+    /// pre-switch world back in one chapter. A zero-window switch pushes no
+    /// chapter: the layout change itself is narrated but there is nothing
+    /// destructive to reverse.
+    mutating func switchLayout(to target: LayoutKind, context: Context) -> Outcome {
+        guard target != state.layout else { return Outcome(result: .alreadyInLayout(state.layout)) }
+        error = nil
+        notice = nil
+        let tiled = state.tiledWindows.sorted()
+        let snapshot: [EvictedWindow] = tiled.compactMap { id in
+            guard let slot = state.slot(of: id) else { return nil }
+            return evictedEntry(for: id, slot: slot, space: context.space)
         }
-        let restoreFailures = restore(evicted, context: context)
-        let placement = place(
-            window: id, into: slot, context: context, observed: &commit.observed)
-        switch placement {
-        case .noRecord:
-            // `place` bailed (no record): nothing to snapshot. A refused
-            // write also drops the record now, but carries its refusals in
-            // `placement`, so it falls through to be narrated below.
-            commit.failures += restoreFailures
-        case .refused(let failures, let released):
-            commit.failures += failures
-            commit.requesterReleased = released
-            commit.failures += restoreFailures
-        case .placed(let deferred):
-            commit.deferred = deferred
-            if restoreFailures.isEmpty, !evicted.isEmpty {
-                let noun = evicted.count == 1 ? "1 window" : "\(evicted.count) windows"
-                // Narrate the event AND the recovery: the notice is the
-                // hotkey user's only record of a mass-untile, and the
-                // undo row may sit below the fold. One sentence, one
-                // cue: no menu-title splicing, just the combo.
-                commit.notice =
-                    "Switched to \(slot.layout.title) \u{00B7} \(noun) untiled. "
-                    + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
-                commit.snapshot = snapshot
-                commit.requester = id
-            } else {
-                commit.failures += restoreFailures
-            }
+        primeTracker(for: state.occupants, context: context)
+        let failures = restore(tiled, context: context)
+        adoptLayout(target)
+        pushUndo(snapshot: snapshot, requester: nil)
+        if let message = Self.failureMessage(failures) {
+            error = message
         }
-        context.log("switchLayout win\(id) -> \(slot.rawValue) decision=\(decision)")
-        return commit
+        notice = MenuText.switchedLayoutNotice(
+            layout: target, untiled: tiled.count,
+            undoable: !snapshot.isEmpty && snapshot.count == tiled.count)
+        context.log("switchLayout -> \(target.rawValue) untiled=\(tiled.count)")
+        return Outcome(
+            result: .switched(layout: target, untiled: tiled.count),
+            forget: tiled)
     }
+
+    /// Adopts a layout on this canvas. Callers empty the board first:
+    /// `TilingState.setLayout` is the only writer and refuses a non-empty
+    /// board, so two layouts can never coexist.
+    mutating func adoptLayout(_ new: LayoutKind) {
+        state.setLayout(new)
+    }
+
+    // MARK: Plan branches
 
     /// The swap branch: both windows stay tiled, the displaced one taking
     /// the tile the requester vacates. The displaced window moves first, so
@@ -705,7 +702,7 @@ struct TilingSpace {
         _ decision: TilePlan, requester id: WindowID, slot: Slot, context: Context
     ) -> Commit {
         var commit = Commit()
-        let evicted = decision.windowsToRestore(requester: id)
+        let evicted = decision.windowsToRestore()
         // The eviction notice names the displaced app when known: the
         // user's first question after a surprise eviction is "where did
         // Safari go?"; a count answers bookkeeping, not memory. One
@@ -971,8 +968,8 @@ struct TilingSpace {
     /// One snapshot entry per displaced window, captured before the
     /// restore deletes its record: the handle to find it again, the slot
     /// to return it to, the frame it held before tiling. `fallback` is
-    /// the slot to use when occupancy is already gone by capture time;
-    /// only the switch branch knows the requested slot.
+    /// the branch's requested slot, used when occupancy is already gone by
+    /// capture time.
     private func snapshotEntry(
         for evictedID: WindowID, fallback: Slot, space: TilingSpaceKey?
     ) -> EvictedWindow? {
@@ -1470,6 +1467,20 @@ struct TilingSpace {
         return Outcome(forget: [id], raise: true)
     }
 
+    /// Prime the tracker's intent for the slot rects a following undo will
+    /// write: the live frames are pre-tile settle frames, and the diff must
+    /// measure against where we're going, not where the restore just put
+    /// us. Without this the undo's own writes read as a user drag and the
+    /// grid moves under them. Shared by untile-all and the layout switch.
+    private func primeTracker(
+        for occupants: [Slot: WindowID], context: Context
+    ) {
+        for (slot, id) in occupants where records[id] != nil {
+            let target = grid.rect(for: slot, in: visibleFrame)
+            context.tracker.markExpected(id, target)
+        }
+    }
+
     /// Dissolves every window on this canvas in one undo chapter. The
     /// chapter lists each dissolved (slot, pre-tile frame) pair, and undo
     /// re-applies the slot rect on top of the restored frame: the window
@@ -1485,17 +1496,7 @@ struct TilingSpace {
         if !chapter.isEmpty {
             beginUndoChapter()
             notice = "Untiled \(noun). Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
-            // Prime the tracker's intent for the slot rects the undo will
-            // write: the live frames are pre-tile settle frames, and the
-            // diff must measure against where we're going, not where the
-            // restore just put us. Without this the undo's own writes
-            // read as a user drag and the grid moves under them.
-            for (slot, id) in chapter {
-                if records[id] != nil {
-                    let target = grid.rect(for: slot, in: visibleFrame)
-                    context.tracker.markExpected(id, target)
-                }
-            }
+            primeTracker(for: chapter, context: context)
         }
         // Handles first: the restore clears each record, so resolve every
         // handle while the canvas still knows them.

@@ -94,15 +94,15 @@ final class SettingsPermissionButtonTests: XCTestCase {
         controller.failedActionsProvider = { failed }
         controller.showWelcomeAgain()
         var instructions = try XCTUnwrap(textLabels(in: view).first { $0.hasPrefix("1.") })
-        XCTAssertTrue(instructions.contains("Press ⌥⇧⌘U"))
+        XCTAssertTrue(instructions.contains("Press ⌥⇧U"))
 
-        failed = [.slot(.topLeft)]
+        failed = [.slotKey(.topLeft)]
         controller.showWelcomeAgain()
         instructions = try XCTUnwrap(textLabels(in: view).first { $0.hasPrefix("1.") })
 
         XCTAssertTrue(instructions.contains("Menu bar → Tile Focused Window → Top Left"))
         XCTAssertFalse(
-            instructions.contains("Press ⌥⇧⌘U"),
+            instructions.contains("Press ⌥⇧U"),
             "The controller must forward failed registrations into the guide.")
     }
 

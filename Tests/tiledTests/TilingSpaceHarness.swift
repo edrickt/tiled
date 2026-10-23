@@ -119,6 +119,7 @@ final class TilingSpaceHarness {
     /// Runs one already-decided plan through the canvas's execute seam.
     @discardableResult
     func run(_ decision: TilePlan, requester: WindowID, slot: Slot) -> TilingSpace.Outcome {
+        adoptLayoutIfNeeded(for: slot)
         attachRequester(requester)
         return space.execute(
             decision: decision, requester: requester, slot: slot, context: context())
@@ -127,8 +128,22 @@ final class TilingSpaceHarness {
     /// Runs one placement request through the canvas (plan included).
     @discardableResult
     func apply(slot: Slot, requester: WindowID) -> TilingSpace.Outcome {
+        adoptLayoutIfNeeded(for: slot)
         attachRequester(requester)
         return space.apply(slot: slot, requester: requester, context: context())
+    }
+
+    /// Test spelling of the old one-step cross-layout request: when the
+    /// slot belongs to the canvas's other layout, switch first (the
+    /// explicit user step in the shipped model), then place. Suites that
+    /// pin the new switch contract drive `space.switchLayout` directly.
+    private func adoptLayoutIfNeeded(for slot: Slot) {
+        guard space.state.layout != slot.layout else { return }
+        if space.state.occupants.isEmpty {
+            space.adoptLayout(slot.layout)
+        } else {
+            _ = space.switchLayout(to: slot.layout, context: context())
+        }
     }
 
     /// One chapter group through the primitive the controller drives:

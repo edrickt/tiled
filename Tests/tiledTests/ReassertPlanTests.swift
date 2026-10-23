@@ -21,6 +21,9 @@ final class ReassertPlanTests: XCTestCase {
         var canvas = TilingSpace()
         canvas.visibleFrame = bounds
         canvas.grid = grid
+        // The canvas's layout is stored: seed it from the occupancy the
+        // test is building, so the commit precondition is satisfied.
+        canvas.state = TilingState(layout: occupants.first?.0.layout ?? .sixths)
         for (slot, id) in occupants { canvas.state.commit(window: id, into: slot) }
         for id in expanded { canvas.expanded[id] = .zero }
         return canvas

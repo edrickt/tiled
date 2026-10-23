@@ -910,6 +910,36 @@ final class ControllerGatewayTests: XCTestCase {
             "the second check judges the second (also ignored) write")
     }
 
+    func testInertSlotKeyChangesNothingAndNamesItsLayout() {
+        let handle = harness.addFocusedWindow()
+        controller.handleSwitchLayout(to: .quarters)
+        controller.handle(slotKey: .topLeft)
+        let before = canvas.state
+        let id = controller.registeredID(for: handle)
+
+        let receipt = controller.handle(slotKey: .topMiddle)
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement,
+            "“Top Middle” has no slot in Quarters. It belongs to Sixths. "
+                + "Switch to Sixths from the Tiled menu.",
+            "no live provider in this harness, so the menu path is the fallback")
+        XCTAssertEqual(canvas.state, before, "an inert key changes no occupancy or layout")
+        XCTAssertEqual(controller.registeredID(for: handle), id, "the key claims no window")
+        XCTAssertEqual(canvas.notice, receipt.announcement, "the sentence is the canvas notice")
+    }
+
+    func testSwitchLayoutWithNoFocusedWindowSwitchesTheEmptyCanvas() {
+        XCTAssertNil(gateway.focused)
+
+        let receipt = controller.handleSwitchLayout()
+
+        XCTAssertTrue(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "Switched to Quarters.")
+        XCTAssertEqual(canvas.state.layout, .quarters)
+    }
+
     func testUntileBeforeVerificationCancelsTheCheck() {
         // The window is untiled before its check fires: the forget path
         // cancels, so the late fire is a safe no-op, not a stray error.
@@ -925,6 +955,4 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertNil(canvas.error)
     }
-
-
 }

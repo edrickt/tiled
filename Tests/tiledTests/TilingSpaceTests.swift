@@ -114,23 +114,23 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertNotNil(space.error)
     }
 
-    func testRefusedMoveDuringLayoutSwitchKeepsTheOriginalSlotAndLayout() {
+    func testRefusedRestoreDuringLayoutSwitchIsAFailureButTheLayoutStillChanges() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
         harness.apply(slot: .topRight, requester: b)
-        XCTAssertEqual(space.state.activeLayout, .quarters)
+        XCTAssertEqual(space.state.layout, .quarters)
         harness.gateway.refuseNextWrites(harness.handle(of: a)!)
 
-        let outcome = harness.apply(slot: .sixthTopLeft, requester: a)
+        let outcome = space.switchLayout(to: .sixths, context: harness.context())
 
-        XCTAssertEqual(outcome.result, .refused(windowName: "TestApp"))
-        XCTAssertEqual(space.state.slot(of: a), .topLeft)
-        XCTAssertNil(
-            space.state.slot(of: b),
-            "the switch already restored the other window before the refused placement")
-        XCTAssertEqual(space.state.activeLayout, .quarters)
-        XCTAssertNotNil(space.records[a])
+        XCTAssertEqual(outcome.result, .switched(layout: .sixths, untiled: 2))
+        XCTAssertEqual(space.state.layout, .sixths, "the layout changes despite the refusal")
+        XCTAssertNil(space.state.slot(of: a), "the board empties even on a refused restore")
+        XCTAssertNil(space.state.slot(of: b))
+        XCTAssertNil(space.records[a], "every occupant's record is forgotten")
+        XCTAssertNotNil(space.error, "the refused restore is narrated, not swallowed")
+        XCTAssertEqual(space.undoStack.count, 1, "the captured chapter still offers the recovery")
     }
 
     func testTileOnAHiddenCanvasDefersAndStands() {
@@ -187,6 +187,7 @@ final class TilingSpaceTests: XCTestCase {
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
         harness.gateway.setFrame(harness.handle(of: a)!, to: original)
         space.records[a]?.preTileFrame = original
+        space.adoptLayout(.quarters)
         space.state.commit(window: a, into: .topLeft)
         let b = harness.addWindow()
 
@@ -201,6 +202,7 @@ final class TilingSpaceTests: XCTestCase {
 
     func testPlainTileEvictionNoticesAndSnapshotsForUndo() {
         let a = harness.addWindow()
+        space.adoptLayout(.quarters)
         space.state.commit(window: a, into: .topLeft)
         let b = harness.addWindow()
 
@@ -425,44 +427,49 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .topLeft, requester: a)
         harness.apply(slot: .topRight, requester: b)
 
-        harness.apply(slot: .sixthLeft, requester: b)
+        let outcome = space.switchLayout(to: .sixths, context: harness.context())
 
+        XCTAssertEqual(outcome.result, .switched(layout: .sixths, untiled: 2))
         XCTAssertEqual(
             space.notice,
-            "Switched to Sixths \u{00B7} 1 window untiled. "
-                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
+            "Switched to Sixths · 2 windows untiled. Undo from the Tiled menu.")
     }
 
-    func testSwitchSnapshotsEvictedAndNotices() {
+    func testSwitchSnapshotsEveryOccupant() {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
         harness.apply(slot: .topRight, requester: b)
 
-        harness.apply(slot: .sixthLeft, requester: b)
+        space.switchLayout(to: .sixths, context: harness.context())
 
         XCTAssertNil(space.error)
         XCTAssertNotNil(space.notice)
-        XCTAssertEqual(space.undoStack.last?.snapshot.count, 1, "requester moves, not evicted")
-        XCTAssertEqual(space.undoStack.last?.requester, b)
-        XCTAssertEqual(space.state.slot(of: b), .sixthLeft)
+        XCTAssertEqual(space.undoStack.last?.snapshot.count, 2, "the switch names every occupant")
+        XCTAssertNil(space.undoStack.last?.requester, "a switch has no requester")
+        XCTAssertEqual(space.state.layout, .sixths)
         XCTAssertNil(space.state.slot(of: a), "evicted window restored (untiled)")
+        XCTAssertNil(space.state.slot(of: b), "evicted window restored (untiled)")
     }
 
-    func testRestoreFailureLosesToNothingButWinsOverSilence() {
+    func testSwitchRestoreFailureSurfacesAndStillPushesTheChapter() {
         let a = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
         // Poison a's pre-tile frame restore: the gateway refuses the write.
         space.records[a]?.preTileFrame = CGRect(x: 10, y: 10, width: 100, height: 100)
         harness.gateway.refuseNextWrites(harness.handle(of: a)!)
         let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
 
-        harness.apply(slot: .sixthLeft, requester: b)
+        space.switchLayout(to: .sixths, context: harness.context())
 
         XCTAssertNotNil(space.error, "failed restore surfaces instead of silence")
-        XCTAssertTrue(space.undoStack.isEmpty, "no undo when the switch didn't cleanly land")
-        XCTAssertNil(space.notice)
-        XCTAssertEqual(space.state.slot(of: b), .sixthLeft, "requester still lands in its slot")
+        XCTAssertNotNil(space.notice, "the layout change is still narrated")
+        XCTAssertEqual(space.state.layout, .sixths)
+        XCTAssertEqual(
+            space.undoStack.last?.snapshot.count, 2,
+            "the captured chapter still offers the recovery")
+        XCTAssertTrue(space.state.occupants.isEmpty)
     }
 
     // MARK: Re-house
@@ -968,10 +975,9 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
-        harness.apply(slot: .sixthLeft, requester: b)
+        harness.apply(slot: .topLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
-            return XCTFail("switch should snapshot")
+            return XCTFail("the eviction should snapshot")
         }
 
         let result = harness.restoreEvictees(snapshot)
@@ -981,7 +987,7 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(
             space.state.occupant(of: .topLeft).flatMap { space.records[$0]?.handle },
             harness.handle(of: a),
-            "evicted window returns to its slot (under a fresh id; its record was pruned at switch)")
+            "evicted window returns to its slot under a fresh id")
     }
 
     func testRestoreEvicteesAttemptsRestoreForBusyWindows() {
@@ -990,12 +996,11 @@ final class TilingSpaceTests: XCTestCase {
         // maybe-alive window. (With the pre-tri-state `isAlive`, a transient
         // probe failure read as dead and the window was skipped entirely.)
         let a = harness.addWindow()
-        let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
-        harness.apply(slot: .sixthLeft, requester: b)
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
-            return XCTFail("switch should snapshot")
+            return XCTFail("the eviction should snapshot")
         }
         harness.gateway.busy.insert(harness.handle(of: a)!)
 
@@ -1011,21 +1016,20 @@ final class TilingSpaceTests: XCTestCase {
 
     func testRestoreEvicteesSkipsDeadHandles() {
         let a = harness.addWindow()
-        let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
-        harness.apply(slot: .sixthLeft, requester: b)
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
-            return XCTFail("switch should snapshot")
+            return XCTFail("the eviction should snapshot")
         }
-        XCTAssertEqual(snapshot.count, 1, "requester moves, not evicted")
+        XCTAssertEqual(snapshot.count, 1, "the eviction names its one victim")
         harness.gateway.kill(harness.handle(of: a)!)
 
         let result = harness.restoreEvictees(snapshot)
 
         XCTAssertTrue(result.restored.isEmpty)
         XCTAssertTrue(result.failures.isEmpty)
-        XCTAssertNil(space.state.occupant(of: .topLeft), "the dead evictee is skipped")
+        XCTAssertEqual(space.state.occupant(of: .topLeft), b, "the dead evictee is skipped")
     }
 
     func testRestoreEvicteesRestoresEveryEvictee() {
@@ -1033,10 +1037,10 @@ final class TilingSpaceTests: XCTestCase {
         let b = harness.addWindow()
         let c = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
-        harness.apply(slot: .sixthLeft, requester: c)
+        harness.apply(slot: .bottomLeft, requester: b)
+        harness.apply(slot: .leftHalf, requester: c)
         guard let snapshot = space.undoStack.last?.snapshot else {
-            return XCTFail("switch should snapshot")
+            return XCTFail("the eviction should snapshot")
         }
         XCTAssertEqual(snapshot.count, 2)
 
@@ -1050,10 +1054,9 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
-        harness.apply(slot: .sixthLeft, requester: b)
+        harness.apply(slot: .topLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
-            return XCTFail("switch should snapshot")
+            return XCTFail("the eviction should snapshot")
         }
         harness.gateway.refuseNextWrites(harness.handle(of: a)!)
 
@@ -1063,7 +1066,7 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertTrue(result.restored.isEmpty)
         XCTAssertEqual(result.forget.count, 1)
         XCTAssertNil(space.state.occupant(of: .topLeft),
-            "a refused re-tile releases the slot so state and screen agree")
+            "a refused re-tile releases the slot it briefly claimed")
         XCTAssertFalse(
             space.records.values.contains { $0.handle == harness.handle(of: a) },
             "the refused window's fresh record is dropped, not left dangling")
@@ -1073,10 +1076,9 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow()
         let b = harness.addWindow()
         harness.apply(slot: .topLeft, requester: a)
-        harness.apply(slot: .topRight, requester: b)
-        harness.apply(slot: .sixthLeft, requester: b)
+        harness.apply(slot: .topLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
-            return XCTFail("switch should snapshot")
+            return XCTFail("the eviction should snapshot")
         }
         // At undo time a's live frame is its restored pre-tile frame; the
         // re-tile target derives from the grid evaluated in the injected
@@ -1102,10 +1104,9 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow(frame: topLeft)
         harness.apply(slot: .topLeft, requester: a)
         let b = harness.addWindow()
-        harness.apply(slot: .topRight, requester: b)
-        harness.apply(slot: .sixthLeft, requester: b)
+        harness.apply(slot: .topLeft, requester: b)
         guard let snapshot = space.undoStack.last?.snapshot else {
-            return XCTFail("switch should snapshot")
+            return XCTFail("the eviction should snapshot")
         }
 
         // Put the evictee back exactly where the undo will retile it:
@@ -1406,7 +1407,7 @@ final class TilingSpaceTests: XCTestCase {
         for ((window, slot), want) in zip(script, expected) {
             harness.apply(slot: slot, requester: window)
             XCTAssertEqual(space.state.occupants, want, "after win\(window) -> \(slot.rawValue)")
-            XCTAssertEqual(space.state.activeLayout, slot.layout)
+            XCTAssertEqual(space.state.layout, slot.layout)
             assertHealthy("win\(window) -> \(slot.rawValue)")
         }
     }
@@ -1421,12 +1422,12 @@ final class TilingSpaceTests: XCTestCase {
         for (id, slot) in [(w1, Slot.topLeft), (w2, .topRight), (w3, .bottomLeft)] {
             harness.apply(slot: slot, requester: id)
         }
-        XCTAssertEqual(space.state.activeLayout, .quarters)
+        XCTAssertEqual(space.state.layout, .quarters)
         XCTAssertEqual(space.state.tiledWindows.sorted(), [w1, w2, w3])
 
         harness.apply(slot: .sixthLeft, requester: w4)
         XCTAssertEqual(space.state.occupants, [.sixthLeft: w4])
-        XCTAssertEqual(space.state.activeLayout, .sixths)
+        XCTAssertEqual(space.state.layout, .sixths)
         for evicted in [w1, w2, w3] { XCTAssertNil(space.state.slot(of: evicted)) }
 
         for (id, slot) in [(w5, Slot.sixthMiddle), (w6, .sixthRight)] {
@@ -1437,7 +1438,7 @@ final class TilingSpaceTests: XCTestCase {
 
         harness.apply(slot: .leftHalf, requester: w5)
         XCTAssertEqual(space.state.occupants, [.leftHalf: w5])
-        XCTAssertEqual(space.state.activeLayout, .quarters)
+        XCTAssertEqual(space.state.layout, .quarters)
         XCTAssertNil(space.state.slot(of: w4))
         XCTAssertNil(space.state.slot(of: w6))
 
@@ -1460,7 +1461,7 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .bottomLeft, requester: w1)
 
         XCTAssertEqual(space.state.occupants, [.bottomLeft: w1])
-        XCTAssertEqual(space.state.activeLayout, .quarters)
+        XCTAssertEqual(space.state.layout, .quarters)
         XCTAssertEqual(
             space.records[w1]?.preTileFrame,
             CGRect(x: 0, y: 0, width: 800, height: 600),
@@ -1493,26 +1494,26 @@ final class TilingSpaceTests: XCTestCase {
         for (id, slot) in zip(ids, corners) {
             harness.apply(slot: slot, requester: id)
         }
-        XCTAssertEqual(space.state.activeLayout, .sixths)
+        XCTAssertEqual(space.state.layout, .sixths)
 
         // Occupied corner takeover by a fresh window: the blocker is
         // evicted (its cells are the requester's new tile, so no whole
         // slot is left free), never a layout reset.
         harness.apply(slot: .sixthTopLeft, requester: ids[6])
-        XCTAssertEqual(space.state.activeLayout, .sixths, "no reset for a same-layout request")
+        XCTAssertEqual(space.state.layout, .sixths, "no reset for a same-layout request")
         XCTAssertEqual(space.state.occupant(of: .sixthTopLeft), ids[6])
         XCTAssertNil(space.state.slot(of: ids[0]))
 
         // Tiled window moving between same-layout slots: a tile, not a reset.
         harness.apply(slot: .sixthMiddle, requester: ids[1])
-        XCTAssertEqual(space.state.activeLayout, .sixths)
+        XCTAssertEqual(space.state.layout, .sixths)
         XCTAssertEqual(space.state.slot(of: ids[1]), .sixthMiddle)
         XCTAssertNil(space.state.slot(of: ids[4]), "the bottom-middle blocker was evicted")
         assertHealthy("same-layout session")
     }
 
     /// Structural health after any transition: no ghosts, at most one
-    /// layout on screen, no cell double-booked, activeLayout agrees.
+    /// layout on screen, no cell double-booked, layout agrees.
     private func assertHealthy(
         _ context: String, file: StaticString = #filePath, line: UInt = #line
     ) {
@@ -1526,8 +1527,8 @@ final class TilingSpaceTests: XCTestCase {
             file: file, line: line)
         if let only = state.occupants.keys.first {
             XCTAssertEqual(
-                state.activeLayout, only.layout,
-                "\(context): activeLayout disagrees", file: file, line: line)
+                state.layout, only.layout,
+                "\(context): layout disagrees", file: file, line: line)
         }
         var seen: Set<TileCell> = []
         for slot in state.occupants.keys {

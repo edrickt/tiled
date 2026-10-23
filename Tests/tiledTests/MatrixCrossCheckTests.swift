@@ -23,7 +23,6 @@ final class MatrixCrossCheckTests: XCTestCase {
 
     /// The contract of one plan, asserted on the canvas that executed it:
     /// - `.noop`: nothing changed.
-    /// - `.switchLayout`: exactly the requester remains.
     /// - `.swap`: the two windows trade tiles, nobody else moves.
     /// - `.tile`: the requester lands, every evictee either re-houses
     ///   into the one whole slot the request freed (`rehousingHome`) or
@@ -38,10 +37,6 @@ final class MatrixCrossCheckTests: XCTestCase {
         switch plan {
         case .noop:
             XCTAssertEqual(canvas.state, model, "\(context): noop changed the state")
-        case .switchLayout:
-            XCTAssertEqual(
-                canvas.state.occupants, [target: requester],
-                "\(context): a switch leaves exactly the requester")
         case .swap(let displaced):
             guard let previous = model.slot(of: requester),
                 let displacedSlot = model.slot(of: displaced)
@@ -110,15 +105,55 @@ final class MatrixCrossCheckTests: XCTestCase {
         case tiled
     }
 
+    private static var quartersConfigs: [[Slot]] {
+        [
+            [.topLeft],
+            [.bottomRight],
+            [.leftHalf],
+            [.rightHalf],
+            [.topLeft, .bottomRight],
+            [.leftHalf, .topRight],
+            [.leftHalf, .rightHalf],
+            [.topLeft, .bottomLeft],
+            [.topLeft, .topRight, .bottomLeft, .bottomRight],
+            [.leftHalf, .topRight, .bottomRight],
+            [.rightHalf, .topLeft, .bottomLeft],
+        ]
+    }
+
+    private static var sixthsConfigs: [[Slot]] {
+        [
+            [.sixthTopLeft],
+            [.sixthTopMiddle],
+            [.sixthMiddle],
+            [.sixthsLeftTwoThirds],
+            [.sixthLeft, .sixthRight],
+            [.sixthTopLeft, .sixthBottomRight],
+            [.sixthLeft, .sixthMiddle, .sixthRight],
+            [.sixthsLeftTwoThirds, .sixthRight],
+            [.sixthsRightTwoThirds, .sixthLeft],
+            [.sixthTopLeft, .sixthTopMiddle, .sixthTopRight],
+            [
+                .sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
+                .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight,
+            ],
+            [.sixthLeft, .sixthTopMiddle, .sixthTopRight,
+             .sixthBottomMiddle, .sixthBottomRight],
+        ]
+    }
+
     private func runMatrix(requester kind: RequesterKind) {
         let matrices: [(layout: LayoutKind, configs: [[Slot]])] = [
-            (.quarters, LayoutSwitchTests.quartersConfigs),
-            (.sixths, LayoutSwitchTests.sixthsConfigs),
+            (.quarters, Self.quartersConfigs),
+            (.sixths, Self.sixthsConfigs),
         ]
         for (layout, configs) in matrices {
             for config in configs {
-                for target in Slot.allCases {
+                for target in Slot.allCases where target.layout == layout {
                     let harness = TilingSpaceHarness()
+                    // The canvas's layout is a stored choice; the matrix
+                    // only asks for slots inside it.
+                    harness.space.adoptLayout(layout)
                     // Tile the occupancy shape: ids 1...count, in order.
                     // Configs are pairwise disjoint, so every setup tile
                     // is a plain placement.
@@ -136,7 +171,7 @@ final class MatrixCrossCheckTests: XCTestCase {
                     }
 
                     // The model over the same occupancy.
-                    var model = TilingState()
+                    var model = TilingState(layout: layout)
                     for (index, slot) in config.enumerated() {
                         model.commit(window: index + 1, into: slot)
                     }
@@ -164,27 +199,18 @@ final class MatrixCrossCheckTests: XCTestCase {
     /// it through a fresh canvas, assert the structural invariants after
     /// EVERY step, and extend only sequences that reach a new occupancy.
     /// The plans come from the canvas's own pure state; the canvas
-    /// executes them. Switches must occur in both directions, or the
-    /// sweep proved nothing.
+    /// executes them. Every sequence stays inside the canvas's sixths
+    /// layout; the switch path is covered by the controller suites.
     func testShortRequestSequencesKeepTheCanvasInvariants() {
         var queue: [[(WindowID, Slot)]] = [[]]
         var visited: Set<String> = []
         var steps = 0
-        var quartersToSixths = 0
-        var sixthsToQuarters = 0
+        let sixthsSlots = Slot.allCases.filter { $0.layout == .sixths }
         while !queue.isEmpty {
             let path = queue.removeFirst()
             let harness = TilingSpaceHarness()
             let ids = (0..<3).map { _ in harness.addWindow() }
             for (window, slot) in path {
-                let plan = harness.space.state.plan(window: window, into: slot)
-                if case .switchLayout = plan {
-                    if slot.layout == .sixths {
-                        quartersToSixths += 1
-                    } else {
-                        sixthsToQuarters += 1
-                    }
-                }
                 harness.apply(slot: slot, requester: window)
                 steps += 1
                 assertHealthy(
@@ -195,14 +221,12 @@ final class MatrixCrossCheckTests: XCTestCase {
             let key = occupancyKey(harness.space.state.occupants)
             guard visited.insert(key).inserted else { continue }
             for window in ids {
-                for slot in Slot.allCases {
+                for slot in sixthsSlots {
                     queue.append(path + [(window, slot)])
                 }
             }
         }
         XCTAssertGreaterThan(steps, 1000, "BFS explored too little")
-        XCTAssertGreaterThan(quartersToSixths, 0, "BFS never switched quarters -> sixths")
-        XCTAssertGreaterThan(sixthsToQuarters, 0, "BFS never switched sixths -> quarters")
     }
 
     private func occupancyKey(_ occupants: [Slot: WindowID]) -> String {

@@ -27,12 +27,12 @@ final class ShortcutsGuidanceTests: XCTestCase {
             let recorderRect = first.convert(first.bounds, to: scroll.documentView)
 
             XCTAssertLessThanOrEqual(hintRect.maxY, recorderRect.minY,
-                                     "Instructions must precede the first recorder, not follow all 22.")
+                                     "Instructions must precede the first recorder, not follow all 17.")
             XCTAssertTrue(scroll.documentVisibleRect.contains(hintRect),
                           "Instructions must be readable without scrolling at \(size).")
             XCTAssertTrue(hint.stringValue.contains("Esc"))
             XCTAssertTrue(hint.stringValue.contains("⌫"))
-            XCTAssertEqual(views.compactMap { $0 as? RecorderButton }.count, 22)
+            XCTAssertEqual(views.compactMap { $0 as? RecorderButton }.count, 17)
         }
     }
 }

@@ -111,11 +111,11 @@ final class SpaceIndependenceTests: XCTestCase {
         addFocusedWindow()
         controller.handle(slot: .sixthTopLeft)
 
-        XCTAssertEqual(controller.canvas(for: Self.display.id).state.activeLayout, .sixths)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.layout, .sixths)
         switchTo(Self.spaceA)
 
         XCTAssertEqual(
-            controller.canvas(for: Self.display.id).state.activeLayout, .quarters,
+            controller.canvas(for: Self.display.id).state.layout, .quarters,
             "the first Space kept quarters while the second used sixths")
         XCTAssertNotNil(controller.canvas(for: Self.display.id).state.occupant(of: .topLeft))
         XCTAssertNil(controller.canvas(for: Self.display.id).state.occupant(of: .sixthTopLeft))
@@ -133,20 +133,23 @@ final class SpaceIndependenceTests: XCTestCase {
         controller.handle(slot: .topLeft)
         let d = addFocusedWindow()
         controller.handle(slot: .topRight)
-        // The cross-layout request resets only this canvas: d is untiled,
-        // c retiles into the new layout, and the other Space is untouched.
+        // An explicit switch resets only this canvas: d is untiled, then c
+        // re-tiles into the new layout, and the other Space is untouched.
         gateway.focused = c
-        controller.handle(slot: .sixthTopLeft)
-
-        XCTAssertEqual(controller.canvas(for: Self.display.id).state.activeLayout, .sixths)
-        XCTAssertEqual(controller.canvas(for: Self.display.id).state.slot(of: c.id), .sixthTopLeft)
-        XCTAssertNil(
-            controller.canvas(for: Self.display.id).state.slot(of: d.id),
-            "the layout switch untiled only this Space's other window")
+        controller.handleSwitchLayout(to: .sixths)
         XCTAssertNotNil(controller.canvas(for: Self.display.id).notice)
+        controller.handle(slotKey: .topLeft)
+
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.layout, .sixths)
+        let cID = controller.registeredID(for: c)!
+        XCTAssertEqual(
+            controller.canvas(for: Self.display.id).state.slot(of: cID), .sixthTopLeft)
+        XCTAssertNil(
+            controller.registeredID(for: d),
+            "the layout switch untiled only this Space's other window")
 
         switchTo(Self.spaceA)
-        XCTAssertEqual(controller.canvas(for: Self.display.id).state.activeLayout, .quarters)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.layout, .quarters)
         XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupant(of: .topLeft), a.id)
         XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupant(of: .topRight), b.id)
     }
@@ -172,8 +175,8 @@ final class SpaceIndependenceTests: XCTestCase {
         // display's same-id canvas alone.
         gateway.focused = right
         controller.handle(slot: .sixthTopLeft)
-        XCTAssertEqual(controller.canvas(for: Self.otherDisplay.id).state.activeLayout, .sixths)
-        XCTAssertEqual(controller.canvas(for: Self.display.id).state.activeLayout, .quarters)
+        XCTAssertEqual(controller.canvas(for: Self.otherDisplay.id).state.layout, .sixths)
+        XCTAssertEqual(controller.canvas(for: Self.display.id).state.layout, .quarters)
         XCTAssertEqual(controller.canvas(for: Self.display.id).state.occupant(of: .topLeft), left.id)
     }
 
@@ -189,7 +192,7 @@ final class SpaceIndependenceTests: XCTestCase {
         switchTo(Self.spaceB)
         XCTAssertEqual(reports, 1, "the first callback resolves the starting canvas")
         XCTAssertEqual(
-            controller.canvas(for: controller.focusedTilingSpace).state.activeLayout, .sixths,
+            controller.canvas(for: controller.focusedTilingSpace).state.layout, .sixths,
             "the focused canvas follows the newly visible Space")
         XCTAssertTrue(
             controller.canvas(for: controller.focusedTilingSpace).state.occupants.isEmpty)
@@ -200,7 +203,7 @@ final class SpaceIndependenceTests: XCTestCase {
         switchTo(Self.spaceA)
         XCTAssertEqual(reports, 2, "swiping back redraws the glyph for the other layout")
         XCTAssertEqual(
-            controller.canvas(for: controller.focusedTilingSpace).state.activeLayout, .quarters)
+            controller.canvas(for: controller.focusedTilingSpace).state.layout, .quarters)
         XCTAssertNotNil(
             controller.canvas(for: controller.focusedTilingSpace).state.occupant(of: .topLeft))
     }

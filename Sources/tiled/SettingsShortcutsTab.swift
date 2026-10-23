@@ -1,45 +1,41 @@
 import AppKit
 
-/// The Shortcuts tab's collapsible sections: the five app actions, then
-/// the two tiling layouts. Raw values persist in the
+/// The Shortcuts tab's collapsible sections: the six app actions, then the
+/// eleven shared slot keys. Raw values persist in the
 /// "collapsedShortcutSections" defaults array.
 enum ShortcutSection: String {
     case appActions
-    case quarters
-    case sixths
+    case slotKeys
 
     var title: String {
         switch self {
         case .appActions: "App Actions"
-        case .quarters: "Quarters"
-        case .sixths: "Sixths"
+        case .slotKeys: "Slot Keys"
         }
     }
 
     var rowCount: Int {
         switch self {
         case .appActions: HotkeyAction.appActions.count
-        case .quarters: Slot.allCases.filter { $0.layout == .quarters }.count
-        case .sixths: Slot.allCases.filter { $0.layout == .sixths }.count
+        case .slotKeys: SlotKey.allCases.count
         }
     }
 
-    /// The layout a section covers, nil for App Actions (whose rows
-    /// disable one at a time; no bulk button).
-    var layout: LayoutKind? {
+    /// The actions a bulk Enable/Disable all covers, nil for App Actions
+    /// (whose rows disable one at a time; no bulk button).
+    var bulkActions: [HotkeyAction]? {
         switch self {
         case .appActions: nil
-        case .quarters: .quarters
-        case .sixths: .sixths
+        case .slotKeys: SlotKey.allCases.map(HotkeyAction.slotKey)
         }
     }
 }
 
-/// The Shortcuts tab: one recorder row per configurable hotkey — the 17
-/// tiling slots grouped under collapsible layout headers (mirroring the
-/// Tile Focused Window submenu so the two never disagree about grouping),
-/// plus an App Actions section for the global combos (expand, evict,
-/// reset splitters, Settings, undo).
+/// The Shortcuts tab: one recorder row per configurable hotkey — the
+/// eleven shared slot keys under one collapsible section (grouped by
+/// physical position so it mirrors the tile submenu), plus an App Actions
+/// section for the global combos (expand, evict, reset splitters, switch
+/// layout, Settings, undo).
 ///
 /// Owns rows, sections, parked bindings, collapse state, the recorder
 /// lifecycle, and conflict display + announcements. The shell reads
@@ -74,9 +70,10 @@ final class ShortcutsTab: NSObject {
     private var recorderButtons: [HotkeyAction: RecorderButton] = [:]
     /// The per-section bulk buttons, so a binding change that does not
     /// rebuild the view (the recorder's clear or a recorded combo) can
-    /// still refresh their labels. See `refreshBulkButtons`. Layout
-    /// sections only: the App Actions rows disable one at a time.
-    private var bulkButtons: [LayoutKind: NSButton] = [:]
+    /// still refresh their labels. See `refreshBulkButtons`. The slot-key
+    /// section is the only one with a bulk control; the App Actions rows
+    /// disable one at a time.
+    private var bulkButtons: [ShortcutSection: NSButton] = [:]
     private var conflictLabel: NSTextField!
     private var permissionRow: NSStackView?
     private var resetButton: NSButton!
@@ -179,11 +176,12 @@ final class ShortcutsTab: NSObject {
         stack.setCustomSpacing(12, after: hint)
 
         // Headers show row counts so a collapsed section still communicates
-        // its size. Bulk enable/disable lives in the small button beside
-        // each layout header, deliberately separate from the disclosure
-        // control, which only collapses. App Actions leads: the five
-        // global combos are the fewest-used but hardest-to-discover rows.
-        for section in [ShortcutSection.appActions, .quarters, .sixths] {
+        // its size. The slot-key section carries one bulk enable/disable
+        // button beside its header, deliberately separate from the
+        // disclosure control, which only collapses. App Actions leads: the
+        // six global combos are the fewest-used but hardest-to-discover
+        // rows.
+        for section in [ShortcutSection.appActions, .slotKeys] {
             let header = sectionHeader(for: section)
             stack.addArrangedSubview(header)
             if !collapsedSections.contains(section) {
@@ -193,14 +191,15 @@ final class ShortcutsTab: NSObject {
                     for action in HotkeyAction.appActions {
                         stack.addArrangedSubview(shortcutRow(for: action))
                     }
-                case .quarters, .sixths:
-                    let layout = section == .quarters ? LayoutKind.quarters : .sixths
-                    let groups: [(title: String, slots: [Slot])] = layout == .quarters
-                        ? [("Quads", SlotPresentation.quartersQuads),
-                           ("Halves", SlotPresentation.quartersHalves)]
-                        : [("Corners", SlotPresentation.sixthsCorners),
-                           ("Thirds", SlotPresentation.sixthsThirds),
-                           ("Two-Thirds", SlotPresentation.sixthsTwoThirds)]
+                case .slotKeys:
+                    // Derive the groups from the sixths geometry table, so
+                    // the Settings grouping can never drift from the slots
+                    // it describes; only the physical key names show.
+                    let groups: [(title: String, keys: [SlotKey])] = [
+                        ("Corners", SlotPresentation.sixthsCorners.map(\.key)),
+                        ("Thirds", SlotPresentation.sixthsThirds.map(\.key)),
+                        ("Two-Thirds", SlotPresentation.sixthsTwoThirds.map(\.key)),
+                    ]
                     for (index, group) in groups.enumerated() {
                         if index > 0, let previous = stack.arrangedSubviews.last {
                             stack.setCustomSpacing(12, after: previous)
@@ -209,10 +208,16 @@ final class ShortcutsTab: NSObject {
                         label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
                         label.textColor = .secondaryLabelColor
                         stack.addArrangedSubview(label)
-                        for slot in group.slots {
-                            stack.addArrangedSubview(shortcutRow(for: .slot(slot)))
+                        for key in group.keys {
+                            stack.addArrangedSubview(shortcutRow(for: .slotKey(key)))
                         }
                     }
+                    let caption = NSTextField(wrappingLabelWithString: slotKeyCaption())
+                    caption.textColor = .secondaryLabelColor
+                    caption.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+                    stack.addArrangedSubview(caption)
+                    caption.trailingAnchor.constraint(
+                        equalTo: stack.trailingAnchor, constant: -24).isActive = true
                 }
             }
             if section == .appActions {
@@ -290,8 +295,8 @@ final class ShortcutsTab: NSObject {
     /// slot with ⌫ adds a disabled slot to the section, and recording
     /// into the last disabled one removes it.
     private func refreshBulkButtons() {
-        for (layout, button) in bulkButtons {
-            let presentation = bulkPresentation(for: layout)
+        for (section, button) in bulkButtons {
+            let presentation = bulkPresentation(for: section)
             button.title = presentation.title
             button.toolTip = presentation.toolTip
         }
@@ -301,14 +306,30 @@ final class ShortcutsTab: NSObject {
     /// state. One source for the two places that render it (the header
     /// build and the refresh), so a refreshed button can never disagree
     /// with a freshly built one.
-    private func bulkPresentation(for layout: LayoutKind) -> (title: String, toolTip: String) {
-        let name = layout == .quarters ? "Quarters" : "Sixths"
-        let count = Slot.allCases.filter { $0.layout == layout }.count
-        return sectionHasDisabledSlot(layout)
+    private func bulkPresentation(for section: ShortcutSection) -> (title: String, toolTip: String) {
+        let actions = section.bulkActions ?? []
+        let count = actions.count
+        return sectionHasDisabled(actions)
             ? ("Enable all \(count)",
-               "Restores parked combos; slots edited while disabled keep their edits")
+               "Restores parked combos; keys edited while disabled keep their edits")
             : ("Disable all \(count)",
-               "Disable every \(name) shortcut (parks the current combos; Enable all restores them)")
+               "Disable every slot key (parks the current combos; Enable all restores them)")
+    }
+
+    /// The one-line caption naming the five keys Quarters has no slot for.
+    /// Derived from the same mapping the engine uses, so it cannot list a
+    /// key that actually works (or miss one that does not).
+    private func slotKeyCaption() -> String {
+        let names = SlotKey.quartersInert.map { "“\($0.title)”" }
+        let list: String
+        switch names.count {
+        case 0: list = ""
+        case 1: list = names[0]
+        case 2: list = "\(names[0]) and \(names[1])"
+        default: list = names.dropLast().joined(separator: ", ") + ", and " + names.last!
+        }
+        return "Quarters has no slot for \(list); those \(names.count) keys do nothing while "
+            + "Quarters is showing. Switch layouts from the Tiled menu."
     }
 
     /// The registration-failure sentences, shared by every notice composer.
@@ -424,42 +445,41 @@ final class ShortcutsTab: NSObject {
         // Rounded bezel, not inline: beside the bold borderless header,
         // unbordered gray text reads disabled, but this is the section's
         // second live control, and it must look like one.
-        if let layout = section.layout {
+        if section.bulkActions != nil {
             let bulk = NSButton(
-                title: bulkPresentation(for: layout).title,
+                title: bulkPresentation(for: section).title,
                 target: self, action: #selector(sectionBulkToggled(_:)))
             bulk.bezelStyle = .rounded
             bulk.controlSize = .small
             bulk.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            bulk.identifier = NSUserInterfaceItemIdentifier("bulk-\(layout.rawValue)")
-            bulk.toolTip = bulkPresentation(for: layout).toolTip
-            bulkButtons[layout] = bulk
+            bulk.identifier = NSUserInterfaceItemIdentifier("bulk-\(section.rawValue)")
+            bulk.toolTip = bulkPresentation(for: section).toolTip
+            bulkButtons[section] = bulk
             row.addArrangedSubview(bulk)
         }
         return row
     }
 
-    /// True when any slot in the section is currently disabled.
-    private func sectionHasDisabledSlot(_ layout: LayoutKind) -> Bool {
-        Slot.allCases.contains {
-            $0.layout == layout && hotkeyStore.binding(for: $0).keyCode == nil
-        }
+    /// True when any action in the section is currently disabled.
+    private func sectionHasDisabled(_ actions: [HotkeyAction]) -> Bool {
+        actions.contains { hotkeyStore.binding(for: $0).keyCode == nil }
     }
 
     /// Bulk toggle: Disable all parks current combos aside and disables the
     /// section; Enable all applies the section's pure restore plan. Parking
     /// is a settings concern, not the binding model, so `ShortcutPark` owns
-    /// it. A slot edited while disabled keeps its edit: the park is stale
+    /// it. A key edited while disabled keeps its edit: the park is stale
     /// the moment the recorder commits, so blindly restoring it would
     /// silently destroy a deliberate configuration, the only silent
     /// data-loss path the tab would otherwise have.
     @objc private func sectionBulkToggled(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue,
               id.hasPrefix("bulk-"),
-              let layout = LayoutKind(rawValue: String(id.dropFirst(5)))
+              let section = ShortcutSection(rawValue: String(id.dropFirst(5))),
+              let actions = section.bulkActions
         else { return }
-        if sectionHasDisabledSlot(layout) {
-            let plan = park.bulkRestorePlan(for: layout, current: currentBindings())
+        if sectionHasDisabled(actions) {
+            let plan = park.bulkRestorePlan(for: actions, current: currentBindings())
             for entry in plan.restored {
                 hotkeyStore.set(entry.binding, for: entry.action)
             }
@@ -472,7 +492,7 @@ final class ShortcutsTab: NSObject {
             }
             let keptEdits = plan.keptEdits.map(\.action.title)
             // Registration runs before the rebuild so the fresh rows can
-            // surface the slots that failed to register, not the pre-toggle
+            // surface the keys that failed to register, not the pre-toggle
             // failure set. The bulk button that triggered this lives in
             // the old view, so focus is restored after.
             onHotkeysChange?()
@@ -487,20 +507,20 @@ final class ShortcutsTab: NSObject {
                     "kept the new \(keptEdits.count == 1 ? "combo" : "combos").")
             }
             rebuildContent(
-                restoringFocusTo: "bulk-\(layout.rawValue)",
+                restoringFocusTo: "bulk-\(section.rawValue)",
                 result: messages.isEmpty ? nil : messages.joined(separator: " "))
         } else {
-            for slot in Slot.allCases where slot.layout == layout {
-                let current = hotkeyStore.binding(for: slot)
+            for action in actions {
+                let current = hotkeyStore.binding(for: action)
                 if current.keyCode != nil {
-                    park.park(current, for: .slot(slot), kind: .section)
+                    park.park(current, for: action, kind: .section)
                 }
-                hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: slot)
+                hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: action)
             }
             // Registration first: the rebuilt rows read the fresh
             // failedActions, not the pre-toggle set.
             onHotkeysChange?()
-            rebuildContent(restoringFocusTo: "bulk-\(layout.rawValue)")
+            rebuildContent(restoringFocusTo: "bulk-\(section.rawValue)")
         }
     }
 
@@ -553,9 +573,9 @@ final class ShortcutsTab: NSObject {
     }
 
     /// Collapsible section state, persisted so the tab reopens as left.
-    /// Raw values are stable strings: "quarters"/"sixths" were the
-    /// original LayoutKind raw values, so earlier builds' stored state
-    /// still resolves.
+    /// Raw values are stable strings; the pre-shared-key "quarters"/"sixths"
+    /// entries simply no longer resolve now that one slot-key section
+    /// replaces them.
     private var collapsedSections: Set<ShortcutSection> {
         get {
             let raw = defaults.stringArray(forKey: "collapsedShortcutSections") ?? []
