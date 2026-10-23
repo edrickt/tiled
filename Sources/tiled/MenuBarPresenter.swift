@@ -1,8 +1,11 @@
 import AppKit
 
 /// One refresh pass's whole presentation model: the menu rows and the
-/// status glyph, both derived from the same resolved canvas key. Equatable
-/// so the presenter can diff one value instead of two drifting ones.
+/// status glyph. The halves describe different canvases by design — the
+/// menu follows keyboard focus, the glyph follows the cursor — and each
+/// half derives its canvas, notice, occupancy, and display name from its
+/// own key alone. Equatable so the presenter can diff one value instead
+/// of two drifting ones.
 struct MenuBarSnapshot: Equatable {
     var menu: MenuModel.Snapshot
     var icon: StatusIcon.Snapshot
@@ -11,19 +14,20 @@ struct MenuBarSnapshot: Equatable {
 /// Owns the status item and its menu: the last snapshot rendered, the
 /// open-menu deferral, NSMenu construction, and show/hide. The delegate
 /// keeps launch, permissions, the settings/hotkey lifecycle, action
-/// selectors, and receipt presentation; this type reads the controller and
-/// store but never the AX gateway, so a refresh pass resolves one canvas
-/// key and derives both views from it.
+/// selectors, and receipt presentation; this type reads the controller
+/// and store but never the AX gateway, so a refresh pass resolves the
+/// focused key for the menu and the cursor key for the glyph, each
+/// exactly once, and derives each view from its own key.
 final class MenuBarPresenter: NSObject, NSMenuDelegate {
-    /// What one refresh pass must do. Extracted pure because the two halves
-    /// are independent, and the hazard is in the ordering: the status icon
-    /// reads focus-scoped state that the menu snapshot deliberately
-    /// aggregates across every display, so a focus move can change the glyph
-    /// while leaving the menu snapshot equal. The glyph must therefore drive
-    /// its own redraw, never ride the menu diff. An icon change alone never
-    /// justifies rebuilding the menu, and an open menu defers both:
-    /// rebuilding mid-open flickers or dismisses it, and the close handler
-    /// runs a fresh pass.
+    /// What one refresh pass must do. Extracted pure because the two
+    /// halves are independent, and the hazard is in the ordering: the
+    /// icon follows the cursor and the menu follows focus — different
+    /// canvases by design — so a cursor move can change the glyph while
+    /// leaving the menu snapshot equal. The glyph must therefore drive
+    /// its own redraw, never ride the menu diff. An icon change alone
+    /// never justifies rebuilding the menu, and an open menu defers
+    /// both: rebuilding mid-open flickers or dismisses it, and the
+    /// close handler runs a fresh pass.
     struct RefreshPlan: Equatable {
         let redrawIcon: Bool
         let rebuildMenu: Bool
@@ -69,11 +73,11 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         refresh()
     }
 
-    /// Focus moved: supersede any background receipt, then redraw the
-    /// glyph. The menu is rebuilt in place when it opens.
+    /// Focus moved: supersede any background receipt. The menu rebuilds
+    /// from a fresh snapshot when it opens, and the glyph follows the
+    /// cursor, so nothing else refreshes here.
     func focusDidChange() {
         notices.clear()
-        refreshFocusedDisplay()
     }
 
     /// Presents one action's receipt: the menu carries its notice even when
@@ -101,8 +105,14 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
 
     func showIcon() {
         guard statusItem == nil else { return }
+        // Seed the cursor display before the first draw: no mouse-move
+        // event may have arrived yet, and the glyph must depict the
+        // display the cursor is on from the start.
+        controller.noteCursorFromMouseLocation()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        let snapshot = snapshot(for: controller.focusedTilingSpace)
+        let snapshot = snapshot(
+            menu: controller.focusedTilingSpace,
+            icon: controller.cursorTilingSpace)
         item.button?.image = StatusIconRenderer.image(for: snapshot.icon)
         item.menu = makeMenu(from: snapshot.menu)
         statusItem = item
@@ -115,12 +125,14 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         statusItem = nil
     }
 
-    /// One refresh pass over the focused canvas: resolves the key once and
-    /// builds both views from it, so a display or focus change landing
-    /// between the menu and the glyph can never leave them describing
-    /// different canvases.
+    /// One refresh pass: resolves the focused key for the menu and the
+    /// cursor key for the glyph, each exactly once, so a display, focus,
+    /// or cursor change landing between the reads can never cross the
+    /// halves' canvases.
     func refresh() {
-        let snapshot = snapshot(for: controller.focusedTilingSpace)
+        let snapshot = snapshot(
+            menu: controller.focusedTilingSpace,
+            icon: controller.cursorTilingSpace)
         // Destructive outcomes stay in the menu (notice + undo row), not
         // on screen: a tiling outcome never pops a panel over the workspace.
         // Rebuilding the menu while it's open flickers or dismisses it;
@@ -142,15 +154,15 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         if !menuOpen { lastSnapshot = snapshot }
     }
 
-    /// Focus moved between windows, displays, or Mission Control Spaces
-    /// with no tiling action: redraw only the glyph. The menu aggregates
-    /// every canvas and is rebuilt from a fresh snapshot when it opens, so
-    /// there is nothing to push here; rebuilding it from an AX callback
-    /// would be churn. An open menu defers, exactly like `refresh`, and
-    /// `menuDidClose` catches up.
-    func refreshFocusedDisplay() {
+    /// The cursor moved to another display: redraw only the glyph, which
+    /// follows the cursor. The menu follows focus and stays as it is.
+    /// An open menu defers, exactly like `refresh`, and `menuDidClose`
+    /// catches up.
+    func refreshCursorDisplay() {
         guard !menuOpen, statusItem != nil else { return }
-        let snapshot = snapshot(for: controller.focusedTilingSpace)
+        let snapshot = snapshot(
+            menu: controller.focusedTilingSpace,
+            icon: controller.cursorTilingSpace)
         guard lastSnapshot?.icon != snapshot.icon
             || statusItem?.button?.image == nil
         else { return }
@@ -158,12 +170,15 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         lastSnapshot?.icon = snapshot.icon
     }
 
-    /// Builds one presentation snapshot from an already-resolved canvas
-    /// key. The key is a direct parameter, not a resolver the caller might
-    /// call twice, so the menu and glyph cannot pair two canvases.
-    func snapshot(for space: TilingSpaceKey) -> MenuBarSnapshot {
+    /// Builds one presentation snapshot from two already-resolved canvas
+    /// keys. Both are direct parameters, not resolvers the caller might
+    /// call twice: the menu half derives its canvas, notice, occupancy,
+    /// and display name from `focus` alone, the icon half from `cursor`
+    /// alone, so a focus or cursor move landing mid-pass can never pair
+    /// one canvas's rows with another canvas's glyph.
+    func snapshot(menu focus: TilingSpaceKey, icon cursor: TilingSpaceKey) -> MenuBarSnapshot {
         let reads = MenuReads(
-            space: space,
+            space: focus,
             controller: controller,
             failedActions: hotkeyService()?.failedActions ?? [],
             binding: { self.hotkeyStore.binding(for: $0) })
@@ -173,9 +188,9 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
                 notice: notices.overlay(
                     canvasNotice: reads.canvas.notice,
                     canvasError: reads.canvas.error,
-                    focusedSpace: space)),
+                    focusedSpace: focus)),
             icon: Self.iconSnapshot(
-                space: space,
+                space: cursor,
                 canvas: { self.controller.canvas(for: $0) },
                 displayName: { self.controller.displayName(for: $0) }))
     }
@@ -183,7 +198,7 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     /// Builds one icon pass from an already-resolved canvas key. The key is
     /// a direct parameter, not a resolver the caller might call twice, and
     /// both the occupancy map and the spoken display name derive from that
-    /// one key, so a focus move landing mid-pass can never pair one
+    /// one key, so a cursor move landing mid-pass can never pair one
     /// canvas's glyph with another canvas's name.
     static func iconSnapshot(
         space: TilingSpaceKey,
@@ -265,25 +280,31 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     ///
     /// Focus moves with no tiling action at all (click another window,
     /// swipe another Space), and the rows' enabled state, undo title, and
-    /// status line all read the focused window; the icon reads the
-    /// focused canvas. Nothing else fires on that transition, so the open
-    /// is the last point where the menu can still be made to describe the
-    /// window the user is looking at. Replacing `statusItem.menu` here
-    /// would be too late — AppKit has already retained the menu it is
-    /// about to show — so the same menu is emptied and refilled, which is
-    /// what this delegate call is for (menuWillOpen explicitly must not
-    /// restructure).
+    /// status line all read the focused window; the glyph reads the
+    /// cursor's canvas. Nothing else fires on that transition, so the
+    /// open is the last point where the menu can still be made to
+    /// describe the window the user is looking at. Replacing
+    /// `statusItem.menu` here would be too late — AppKit has already
+    /// retained the menu it is about to show — so the same menu is
+    /// emptied and refilled, which is what this delegate call is for
+    /// (menuWillOpen explicitly must not restructure).
     ///
     /// Deliberately not gated on `menuOpen`: AppKit does not document
     /// whether this runs before or after menuWillOpen, and the update must
     /// not depend on that order.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusItem?.menu else { return }
-        // One canvas key for the whole pass, exactly as `refresh`:
-        // resolving it once and handing it to both the menu and the glyph
-        // is what keeps them from describing different canvases when a
-        // display or focus change lands mid-pass.
-        let snapshot = snapshot(for: controller.focusedTilingSpace)
+        // Event delivery during menu tracking is not guaranteed to reach
+        // the monitors, so seed the cursor display from the live mouse
+        // location before resolving the glyph's key.
+        controller.noteCursorFromMouseLocation()
+        // One pair of canvas keys for the whole pass, exactly as
+        // `refresh`: resolving each once and handing it to its own half
+        // is what keeps the menu and the glyph from describing crossed
+        // canvases when a display, focus, or cursor change lands mid-pass.
+        let snapshot = snapshot(
+            menu: controller.focusedTilingSpace,
+            icon: controller.cursorTilingSpace)
         populate(menu, from: snapshot.menu)
         if lastSnapshot?.icon != snapshot.icon || statusItem?.button?.image == nil {
             draw(snapshot.icon)
