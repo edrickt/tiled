@@ -315,6 +315,33 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertTrue(receipt.performed)
     }
 
+    /// The cursor's display needs no window for the hotkey to act: the
+    /// canvas is established on demand and switched, and the display
+    /// holding focus is untouched.
+    func testSwitchLayoutHotkeyActsOnAWindowlessCursorDisplay() {
+        currentScreens = [Self.display, Self.otherDisplay]
+        gateway.activeSpaces = [
+            Self.displayID: Self.spaceA,
+            Self.otherDisplayID: Self.spaceB,
+        ]
+        let first = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        harness.fireCursorMove(to: CGPoint(x: 2500, y: 500))
+
+        let receipt = controller.handleSwitchLayout()
+
+        XCTAssertEqual(
+            controller.canvas(for: Self.otherDisplay.id).state.layout, .quarters,
+            "the windowless cursor display's fresh canvas starts on sixths and toggles")
+        XCTAssertEqual(
+            controller.canvas(for: Self.display.id).state.layout, .quarters,
+            "the focused display's canvas is untouched by the hotkey")
+        XCTAssertEqual(
+            controller.canvas(for: Self.display.id).state.occupant(of: .topLeft),
+            controller.registeredID(for: first))
+        XCTAssertTrue(receipt.performed)
+    }
+
     func testHiddenSpaceWindowsStayManagedButLeaveTheMenu() {
         let a = addFocusedWindow()
         controller.handle(slot: .topLeft)
