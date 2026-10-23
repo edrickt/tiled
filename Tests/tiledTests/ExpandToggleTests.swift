@@ -16,20 +16,19 @@ final class ExpandToggleTests: XCTestCase {
         visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
         name: "Display 1")
 
-    private var gateway: FakeWindowGateway!
-    private var controller: TilingController!
+    private var harness: ControllerHarness!
+    private var gateway: FakeWindowGateway { harness.gateway }
+    private var controller: TilingController { harness.controller }
 
     /// The canvas the test's single display tiles onto: reads go through
     /// the same accessor actions do.
-    private var canvas: TilingSpace { controller.canvas(for: controller.focusedTilingSpace) }
+    private var canvas: TilingSpace { harness.canvas }
 
     override func setUp() {
         super.setUp()
-        gateway = FakeWindowGateway()
         // No runloop timer: tests drive pruneDeadWindows directly.
-        controller = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            screens: { [Self.screen] })
+        harness = ControllerHarness(
+            screens: [Self.screen], deathConfirmation: 3)
         controller.onChange = {}
     }
 
@@ -396,9 +395,10 @@ final class ExpandToggleTests: XCTestCase {
             frame: CGRect(x: 0, y: 0, width: 800, height: 600),
             visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 600),
             name: "Display 1")
-        let gateway = FakeWindowGateway()
-        let controller = TilingController(
-            gateway: gateway, pruneInterval: nil, screens: { [screen] })
+        let localHarness = ControllerHarness(
+            screens: [screen], deathConfirmation: 3)
+        let gateway = localHarness.gateway
+        let controller = localHarness.controller
 
         let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = a
