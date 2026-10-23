@@ -2,8 +2,9 @@ import AppKit
 import CoreGraphics
 
 /// The one owner of display + Mission Control Space identity: the canvas
-/// table, the stale marks, the last focused canvas, visibility, the
-/// withheld-Space fallback, and the one visible-canvas enumeration.
+/// table, the stale marks, the last focused canvas, the last display the
+/// cursor was seen on, visibility, the withheld-Space fallback, and the
+/// one visible-canvas enumeration.
 ///
 /// Every surface that used to answer "which canvas is this display
 /// showing" resolved it privately and some disagreed. This type is that
@@ -38,6 +39,13 @@ final class CanvasDirectory {
     /// switch never turns into UI work.
     private var lastFocusedSpace: TilingSpaceKey?
     private var hasResolvedFocusedSpace = false
+    /// Last display the cursor was resolved on. The first resolution
+    /// always reports; later events on one display are filtered, and a
+    /// point over no display is ignored — never stored — so the last
+    /// depiction holds until the cursor is seen again. The dedupe
+    /// baseline and the depicted display are this one value.
+    private var lastCursorScreen: ScreenID?
+    private var hasResolvedCursorScreen = false
 
     init(
         screens: @escaping ScreenProvider,
@@ -290,6 +298,32 @@ final class CanvasDirectory {
         return true
     }
 
+    // MARK: Cursor tracking
+
+    /// Records the display the cursor is on, returning whether it moved
+    /// from the last resolved one. The first resolution always reports;
+    /// a point over no display (a seam gap, Mission Control zoom, a
+    /// mid-rearrange) is ignored and never stored.
+    func noteCursor(at point: CGPoint) -> Bool {
+        let infos = screens()
+        guard
+            let index = Self.containingScreenIndex(frames: infos.map(\.frame), for: point),
+            !hasResolvedCursorScreen || infos[index].id != lastCursorScreen
+        else { return false }
+        hasResolvedCursorScreen = true
+        lastCursorScreen = infos[index].id
+        return true
+    }
+
+    /// The canvas the status glyph depicts: the stored cursor display
+    /// clamped to the attached set at read time — a detached display
+    /// resolves to the main one — then through the same action fallback
+    /// as every display-scoped read, so the withheld-Space fallback
+    /// applies exactly as for actions. Never mutates state.
+    func cursorKey() -> TilingSpaceKey {
+        actionKey(for: isDisplayAttached(lastCursorScreen) ? lastCursorScreen : nil)
+    }
+
     // MARK: Private resolution
 
     private func activeSpaceID(on screen: ScreenID?) -> SpaceID? {
@@ -356,5 +390,14 @@ final class CanvasDirectory {
     static func midpointScreenIndex(frames: [CGRect], for frame: CGRect) -> Int? {
         let point = CGPoint(x: frame.midX, y: frame.midY)
         return frames.firstIndex { $0.contains(point) }
+    }
+
+    /// Index of the screen whose frame contains `point`, for cursor
+    /// resolution. Nil when the point is over no display; the caller
+    /// holds the last depiction rather than guessing. Ties (an edge
+    /// shared by adjacent displays) resolve to the first screen that
+    /// contains the point.
+    static func containingScreenIndex(frames: [CGRect], for point: CGPoint) -> Int? {
+        frames.firstIndex { $0.contains(point) }
     }
 }

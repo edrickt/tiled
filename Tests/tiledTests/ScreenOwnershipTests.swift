@@ -144,4 +144,34 @@ final class ScreenOwnershipTests: XCTestCase {
         XCTAssertNil(
             CanvasDirectory.midpointScreenIndex(frames: [], for: Self.left))
     }
+
+    // MARK: Point containment (cursor resolution)
+
+    private func containing(of point: CGPoint) -> Int? {
+        CanvasDirectory.containingScreenIndex(frames: Self.frames, for: point)
+    }
+
+    func testContainingScreenPicksTheScreenUnderThePoint() {
+        XCTAssertEqual(containing(of: CGPoint(x: 500, y: 500)), 0)
+        XCTAssertEqual(containing(of: CGPoint(x: 2500, y: 500)), 1)
+    }
+
+    func testContainingScreenResolvesToTheFirstScreenHoldingThePoint() {
+        // Overlapping frames: first containment wins, deterministically.
+        let overlapping = [
+            CGRect(x: 0, y: 0, width: 100, height: 100),
+            CGRect(x: 50, y: 0, width: 100, height: 100),
+        ]
+        XCTAssertEqual(
+            CanvasDirectory.containingScreenIndex(
+                frames: overlapping, for: CGPoint(x: 75, y: 50)), 0)
+    }
+
+    func testContainingPointOverNoScreenYieldsNil() {
+        XCTAssertNil(containing(of: CGPoint(x: 5000, y: 5000)))
+    }
+
+    func testContainingPointOverEmptyFramesYieldsNil() {
+        XCTAssertNil(CanvasDirectory.containingScreenIndex(frames: [], for: CGPoint(x: 500, y: 500)))
+    }
 }

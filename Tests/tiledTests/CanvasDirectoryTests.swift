@@ -133,6 +133,73 @@ final class CanvasDirectoryTests: XCTestCase {
         XCTAssertFalse(directory.noteFocusedKey(withheld))
     }
 
+    // MARK: Cursor tracking
+
+    private func moveCursorToFirstDisplay() {
+        XCTAssertTrue(directory.noteCursor(at: CGPoint(x: 500, y: 500)))
+    }
+
+    private func moveCursorToSecondDisplay() {
+        XCTAssertTrue(directory.noteCursor(at: CGPoint(x: 2500, y: 500)))
+    }
+
+    func testCursorTrackingReportsTheFirstResolutionAndEveryDisplayChange() {
+        moveCursorToFirstDisplay()
+        XCTAssertFalse(
+            directory.noteCursor(at: CGPoint(x: 900, y: 900)),
+            "a move within one display is silent")
+        moveCursorToSecondDisplay()
+        XCTAssertFalse(
+            directory.noteCursor(at: CGPoint(x: 3000, y: 900)),
+            "the second event on the same display is silent too")
+    }
+
+    func testCursorOverNoDisplayIsIgnoredAndNeverStored() {
+        moveCursorToFirstDisplay()
+        XCTAssertFalse(
+            directory.noteCursor(at: CGPoint(x: 5000, y: 5000)),
+            "a nil resolution never reports")
+        XCTAssertFalse(directory.noteCursor(at: CGPoint(x: 5000, y: 5000)))
+        XCTAssertEqual(
+            directory.cursorKey().screen, Self.screen.id,
+            "the last depiction holds while the cursor is over no display")
+    }
+
+    func testCursorKeyWithoutAStoredResolutionNamesTheMainDisplay() {
+        XCTAssertEqual(
+            directory.cursorKey(), identified,
+            "no cursor seen yet falls back to the main display, like actions")
+    }
+
+    func testCursorKeyRoutesThroughTheWithheldFallbackExactlyLikeActions() {
+        moveCursorToFirstDisplay()
+        XCTAssertEqual(directory.cursorKey(), identified)
+
+        holdAChapter(withheld)
+        XCTAssertEqual(
+            directory.cursorKey(), withheld,
+            "the glyph reaches the withheld canvas while the named one is empty")
+
+        holdAChapter(identified)
+        XCTAssertEqual(directory.cursorKey(), identified)
+    }
+
+    func testCursorKeyClampsADetachedStoredDisplayToTheAttachedSet() {
+        moveCursorToSecondDisplay()
+        XCTAssertEqual(directory.cursorKey(), otherIdentified)
+
+        screens = [Self.screen]
+        XCTAssertEqual(
+            directory.cursorKey(), identified,
+            "a detached display resolves to the main one at read time")
+
+        moveCursorToFirstDisplay()
+        screens = [Self.screen, Self.otherScreen]
+        XCTAssertEqual(
+            directory.cursorKey(), identified,
+            "the new resolution is stored, not the clamped fallback")
+    }
+
     func testVisibilityTreatsAWithheldCanvasAsTheDisplayTheUserSees() {
         XCTAssertTrue(directory.isVisible(identified))
         XCTAssertTrue(directory.isVisible(withheld), "a withheld Space id is not a hidden canvas")
