@@ -305,6 +305,27 @@ func doTile(_ t: String, _ slot: String) {
     }
     let blockers = tiled.filter { $0.key != t && overlaps($0.value, slot) }
 
+    // Step-aside: a lone blocker whose slot minus the target is exactly one
+    // whole free slot moves there instead of being untiled, and that wins
+    // over a swap. The app checks this in `plan` before choosing a swap.
+    if blockers.count == 1, let evictee = blockers.first?.key,
+        let current = tiled[evictee]
+    {
+        let leftover = quads[current]!.subtracting(quads[slot]!)
+        if !leftover.isEmpty, leftover.count < quads[current]!.count,
+            let aside = quadSlots.first(where: { quads[$0]! == leftover }),
+            !tiled.contains(where: { other, s in
+                other != t && other != evictee
+                    && !quads[s]!.isDisjoint(with: leftover)
+            })
+        {
+            if !wasTiled, let f = preFrame, !isOnGrid(f) { preTile[t] = f }
+            tiled[evictee] = aside
+            tiled[t] = slot
+            return
+        }
+    }
+
     // Swap: the requester is already tiled, exactly one window blocks the
     // target, and the tile it vacates is disjoint from the target. Nobody
     // is untiled: the blocker takes the vacated tile and focus follows it.
@@ -596,7 +617,9 @@ simulateMove("HOSTA", by: CGSize(width: 60, height: 40))
 // the app's frame to the rect the current splitters imply can fail; the
 // old mirror-to-itself comparison could not.
 dragEdge("HOSTC", "left", 30)
-if let aFrame = actualFrame("HOSTA"), close(aFrame, gridRect("TL")) {
+if let slot = tiled["HOSTA"], let aFrame = actualFrame("HOSTA"),
+    close(aFrame, gridRect(slot))
+{
     pass += 1; print("PASS S11a title-bar move did not move splitters; A snapped back")
 } else {
     fail += 1; print(">>>> FAILED S11a")
