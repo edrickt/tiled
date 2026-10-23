@@ -258,11 +258,11 @@ final class MenuModelTests: XCTestCase {
         let model = MenuModel.items(snapshot: snap)
         let tile = model.first { $0.title == "Tile Focused Window" }!
         let topLeft = tile.children!.first { $0.title.contains("Top Left") }!
-        XCTAssertEqual(topLeft.title, "Top Left · ⌥Q")
+        XCTAssertEqual(topLeft.title, "Top Left Sixth · ⌥Q")
         XCTAssertEqual(topLeft.action, .tileSlot(.topLeft))
         // A disabled key (nil label) still renders, without a combo.
-        let disabled = tile.children!.first { $0.title.contains("Right Column") }!
-        XCTAssertEqual(disabled.title, "Right Column")
+        let disabled = tile.children!.first { $0.title.contains("Right Third") }!
+        XCTAssertEqual(disabled.title, "Right Third")
     }
 
     // MARK: Manage section
@@ -271,8 +271,8 @@ final class MenuModelTests: XCTestCase {
         let model = items(snapshot(tiledWindows: [
             .init(id: 7, slot: .leftHalf, appName: "Safari"),
         ]))
-        let row = model.first { $0.title.contains("Left Column") }!
-        XCTAssertEqual(row.title, "Left Column · Safari (⌥⇧J)")
+        let row = model.first { $0.title.contains("Left Half") }!
+        XCTAssertEqual(row.title, "Left Half · Safari (⌥⇧J)")
         XCTAssertEqual(row.action, nil, "the row itself doesn't act")
         XCTAssertEqual(row.children?.map(\.title), [
             "Untile This Window", "Focus Safari", "Tile Focused Window Here",
@@ -286,7 +286,7 @@ final class MenuModelTests: XCTestCase {
         let model = items(snapshot(tiledWindows: [
             .init(id: 3, slot: .sixthRight, appName: nil),
         ]))
-        XCTAssertEqual(model.first { $0.title.contains("Right Column") }?.children?
+        XCTAssertEqual(model.first { $0.title.contains("Right Third") }?.children?
             .first { $0.title.hasPrefix("Focus") }?.title, "Focus Window")
     }
 

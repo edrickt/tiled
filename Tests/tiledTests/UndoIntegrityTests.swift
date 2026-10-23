@@ -293,7 +293,7 @@ final class UndoIntegrityTests: XCTestCase {
 
         XCTAssertEqual(
             canvas.notice,
-            "Undid displacement · Quarters restored. 1 window restored.")
+            "Undid displacement · back to Quarters · 1 window restored.")
         XCTAssertNil(canvas.error)
     }
 

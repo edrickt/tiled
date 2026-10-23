@@ -77,7 +77,7 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertEqual(canvas.state.layout, .sixths)
         XCTAssertTrue(canvas.state.occupants.isEmpty, "every tiled window was untiled")
         XCTAssertEqual(canvas.grid, fractions, "a switch never moves a splitter")
-        XCTAssertEqual(receipt.announcement, "Switched to Sixths.")
+        XCTAssertEqual(receipt.announcement, "Switched to Sixths; 3 windows untiled.")
         XCTAssertEqual(
             canvas.notice,
             "Switched to Sixths · 3 windows untiled. Undo from the Tiled menu.")
@@ -125,7 +125,7 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertNotNil(canvas.state.occupant(of: .topLeft))
         XCTAssertNotNil(canvas.state.occupant(of: .topRight))
         XCTAssertTrue(
-            canvas.notice?.contains("Quarters restored") == true,
+            canvas.notice?.contains("back to Quarters") == true,
             "the notice names the layout that came back: \(canvas.notice ?? "nil")")
         XCTAssertTrue(
             canvas.notice?.contains("2 windows restored") == true,

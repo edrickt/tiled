@@ -264,7 +264,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertNil(canvas.state.occupant(of: .sixthLeft))
         XCTAssertEqual(
             canvas.notice,
-            "Undid displacement · Quarters restored. 1 window restored.")
+            "Undid displacement · back to Quarters · 1 window restored.")
     }
 
     func testUndoAfterEvicteeDied() {

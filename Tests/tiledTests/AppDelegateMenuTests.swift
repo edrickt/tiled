@@ -330,7 +330,7 @@ final class AppDelegateMenuTests: XCTestCase {
         let topLeft = MenuModel.items(snapshot: after.menu)
             .first { $0.title == "Tile Focused Window" }?
             .children?.first { $0.action == .tileSlot(.topLeft) }
-        XCTAssertEqual(topLeft?.title, "Top Left · ⌥Q")
+        XCTAssertEqual(topLeft?.title, "Top Left Sixth · ⌥Q")
     }
 
     // MARK: Refresh ordering (refreshPlan)

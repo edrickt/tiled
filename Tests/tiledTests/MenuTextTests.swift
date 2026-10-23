@@ -115,24 +115,36 @@ final class MenuTextTests: XCTestCase {
 
     // MARK: Menu rows
 
-    func testWindowLineWithAndWithoutLabel() {
+    func testWindowLineNamesTheConcreteTileNotThePhysicalKey() {
         XCTAssertEqual(
-            MenuText.windowLine(slotKey: .leftColumn, appName: "Safari", label: "⌥⇧J"),
-            "Left Column · Safari (⌥⇧J)")
+            MenuText.windowLine(slot: .leftHalf, appName: "Safari", label: "⌥⇧J"),
+            "Left Half · Safari (⌥⇧J)")
         XCTAssertEqual(
-            MenuText.windowLine(slotKey: .leftColumn, appName: "Safari", label: nil),
-            "Left Column · Safari")
+            MenuText.windowLine(slot: .sixthLeft, appName: "Safari", label: nil),
+            "Left Third · Safari")
     }
 
     func testWindowLineFallbackAppName() {
         XCTAssertEqual(
-            MenuText.windowLine(slotKey: .rightColumn, appName: nil, label: nil),
-            "Right Column · window")
+            MenuText.windowLine(slot: .rightHalf, appName: nil, label: nil),
+            "Right Half · window")
     }
 
-    func testTileItemTitleWithAndWithoutLabel() {
-        XCTAssertEqual(MenuText.tileItemTitle(slotKey: .topLeft, label: "⌥⇧U"), "Top Left · ⌥⇧U")
-        XCTAssertEqual(MenuText.tileItemTitle(slotKey: .topLeft, label: nil), "Top Left")
+    func testTileItemTitleNamesTheConcreteTileNotThePhysicalKey() {
+        XCTAssertEqual(MenuText.tileItemTitle(slot: .topLeft, label: "⌥⇧U"), "Top Left · ⌥⇧U")
+        XCTAssertEqual(
+            MenuText.tileItemTitle(slot: .sixthTopMiddle, label: "⌥⇧I"),
+            "Top Middle Sixth · ⌥⇧I")
+        XCTAssertEqual(MenuText.tileItemTitle(slot: .leftHalf, label: nil), "Left Half")
+    }
+
+    func testSwitchedLayoutAnnouncementNamesTheCount() {
+        XCTAssertEqual(
+            MenuText.switchedLayoutAnnouncement(layout: .quarters, untiled: 0),
+            "Switched to Quarters.")
+        XCTAssertEqual(
+            MenuText.switchedLayoutAnnouncement(layout: .sixths, untiled: 3),
+            "Switched to Sixths; 3 windows untiled.")
     }
 
     func testSwitchLayoutItemTitleNamesTheDestinationAndLiveCombo() {
@@ -176,10 +188,10 @@ final class MenuTextTests: XCTestCase {
     func testUndoDisplacementNoticeNamesARestoredLayout() {
         XCTAssertEqual(
             MenuText.undoDisplacementNotice(restored: 0, layoutRestored: .quarters),
-            "Undid displacement · Quarters restored.")
+            "Undid displacement · back to Quarters.")
         XCTAssertEqual(
             MenuText.undoDisplacementNotice(restored: 2, layoutRestored: .sixths),
-            "Undid displacement · Sixths restored. 2 windows restored.")
+            "Undid displacement · back to Sixths · 2 windows restored.")
         XCTAssertEqual(
             MenuText.undoDisplacementNotice(restored: 1, layoutRestored: nil),
             "Undid displacement · 1 window restored.")

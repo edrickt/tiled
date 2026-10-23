@@ -76,23 +76,25 @@ enum MenuText {
 
     // MARK: Menu rows
 
-    /// One line of the tiled-windows list: position, app, and live combo.
-    /// The row names the physical position (`SlotKey.title`), matching the
-    /// hotkey the user pressed; the menu's section header carries the
-    /// layout that position currently means.
-    static func windowLine(slotKey: SlotKey, appName: String?, label: String?) -> String {
+    /// One line of the tiled-windows list: slot, app, and live combo. The
+    /// row names the tile the window holds now ("Left Half" in Quarters,
+    /// "Left Third" in Sixths); the menu's display header carries the
+    /// layout, and the combo comes from the shared physical key.
+    static func windowLine(slot: Slot, appName: String?, label: String?) -> String {
         let name = appName ?? "window"
         if let label {
-            return "\(slotKey.title) · \(name) (\(label))"
+            return "\(SlotPresentation.title(of: slot)) · \(name) (\(label))"
         }
-        return "\(slotKey.title) · \(name)"
+        return "\(SlotPresentation.title(of: slot)) · \(name)"
     }
 
-    /// One clickable equivalent per global hotkey. The shortcut stays in
-    /// the title text rather than a key equivalent: firing both would
-    /// tile-then-untile in one keypress. Disabled keys show no combo.
-    static func tileItemTitle(slotKey: SlotKey, label: String?) -> String {
-        label.map { "\(slotKey.title) · \($0)" } ?? slotKey.title
+    /// One clickable equivalent per global hotkey. The row names the tile
+    /// it places now, not the physical position: the layout's own section
+    /// header supplies the context, and "Left Half" under "Halves" is the
+    /// decision the user is making. Disabled keys show no combo.
+    static func tileItemTitle(slot: Slot, label: String?) -> String {
+        label.map { "\(SlotPresentation.title(of: slot)) · \($0)" }
+            ?? SlotPresentation.title(of: slot)
     }
 
     /// The top-level switch row, named for where it lands. The combo is
@@ -151,10 +153,13 @@ enum MenuText {
         return "Switched to \(layout.title) · \(noun) untiled.\(recovery)"
     }
 
-    /// The explicit switch's spoken sentence: short, and never a combo the
-    /// user may not have.
-    static func switchedLayoutAnnouncement(layout: LayoutKind) -> String {
-        "Switched to \(layout.title)."
+    /// The explicit switch's spoken sentence. It names the untiled count
+    /// too: those windows left the screen, and the user needs to hear how
+    /// many. Never names a combo the user may not have.
+    static func switchedLayoutAnnouncement(layout: LayoutKind, untiled: Int) -> String {
+        guard untiled > 0 else { return "Switched to \(layout.title)." }
+        let noun = untiled == 1 ? "1 window" : "\(untiled) windows"
+        return "Switched to \(layout.title); \(noun) untiled."
     }
 
     /// Undo's chapter notice. The layout is named when the chapter put it
@@ -172,10 +177,10 @@ enum MenuText {
         guard let layoutRestored else {
             return "Undid displacement · \(windows)"
         }
-        let layout = "\(layoutRestored.title) restored."
+        let layout = "back to \(layoutRestored.title)"
         return windows.isEmpty
-            ? "Undid displacement · \(layout)"
-            : "Undid displacement · \(layout) \(windows)"
+            ? "Undid displacement · \(layout)."
+            : "Undid displacement · \(layout) · \(windows)"
     }
 
     static func refusedAnnouncement(windowName: String?) -> String {

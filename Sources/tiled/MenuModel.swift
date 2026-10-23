@@ -176,11 +176,11 @@ enum MenuModel {
                 // with the other layout.
                 tileChildren.append(Item(title: "Quarters · Quads", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.quartersQuads {
-                    tileChildren.append(tileItem(slot.key, snapshot))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
                 tileChildren.append(Item(title: "Halves", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.quartersHalves {
-                    tileChildren.append(tileItem(slot.key, snapshot))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
             } else {
                 // Sixths sub-groups mirror the thirds/two-thirds naming in
@@ -188,15 +188,15 @@ enum MenuModel {
                 // of action, so chunk them into corners, thirds, two-thirds.
                 tileChildren.append(Item(title: "Sixths · Corners", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsCorners {
-                    tileChildren.append(tileItem(slot.key, snapshot))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
                 tileChildren.append(Item(title: "Thirds", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsThirds {
-                    tileChildren.append(tileItem(slot.key, snapshot))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
                 tileChildren.append(Item(title: "Two-Thirds", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsTwoThirds {
-                    tileChildren.append(tileItem(slot.key, snapshot))
+                    tileChildren.append(tileItem(slot, snapshot))
                 }
             }
             items.append(Item(title: "Tile Focused Window", children: tileChildren))
@@ -302,14 +302,16 @@ enum MenuModel {
     }
 
     /// One clickable equivalent per global hotkey: the shortcut stays in
-    /// the title text, since firing both would tile-then-untile.
+    /// the title text, since firing both would tile-then-untile. The title
+    /// names the concrete tile the row places; the action carries the
+    /// shared physical key, so a stale menu cannot commit a foreign slot.
     private static func tileItem(
-        _ key: SlotKey, _ snapshot: Snapshot
+        _ slot: Slot, _ snapshot: Snapshot
     ) -> Item {
         Item(
             title: MenuText.tileItemTitle(
-                slotKey: key, label: snapshot.label(for: .slotKey(key))),
-            action: .tileSlot(key))
+                slot: slot, label: snapshot.label(for: .slotKey(slot.key))),
+            action: .tileSlot(slot.key))
     }
 
     /// One row of the tiled-windows list: a submenu wearing the window's
@@ -320,7 +322,7 @@ enum MenuModel {
     ) -> Item {
         Item(
             title: MenuText.windowLine(
-                slotKey: window.slot.key, appName: window.appName,
+                slot: window.slot, appName: window.appName,
                 label: snapshot.label(for: .slotKey(window.slot.key))),
             children: [
                 Item(title: "Untile This Window", action: .untileWindow(window.id)),

@@ -90,9 +90,9 @@ final class MenuBarCharacterizationTests: XCTestCase {
             "",
             "Built-in · Quarters · 2 tiled",
             "Top Left · Safari (⌃⌥Q)",
-            "Left Column · Mail (⌥⇧J)",
+            "Left Half · Mail (⌥⇧J)",
             "Studio Display · Sixths · 1 tiled",
-            "Top Left · Notes (⌃⌥Q)",
+            "Top Left Sixth · Notes (⌃⌥Q)",
             "",
             "Restore 2 Displaced Windows · ⌃⌥⇧⌘Z",
             "Untile 2 Windows",
@@ -128,8 +128,8 @@ final class MenuBarCharacterizationTests: XCTestCase {
             "Bottom Left · ⌥⇧M",
             "Bottom Right · ⌥⇧.",
             "Halves",
-            "Left Column · ⌥⇧J",
-            "Right Column · ⌥⇧L",
+            "Left Half · ⌥⇧J",
+            "Right Half · ⌥⇧L",
         ])
         XCTAssertEqual(tile.children?.map(\.isEnabled), [
             false, true, true, true, true, false, true, true,
@@ -148,7 +148,7 @@ final class MenuBarCharacterizationTests: XCTestCase {
             .untileWindow(1), .focusWindow(1), .tileHere(.topLeft),
         ])
 
-        let mail = items.first { $0.title == "Left Column · Mail (⌥⇧J)" }!
+        let mail = items.first { $0.title == "Left Half · Mail (⌥⇧J)" }!
         XCTAssertEqual(mail.children?.map(\.title), [
             "Untile This Window", "Focus Mail", "Tile Focused Window Here",
         ])

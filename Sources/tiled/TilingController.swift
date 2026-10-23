@@ -459,15 +459,16 @@ final class TilingController {
         onChange?()
         let error = directory.storedCanvas(for: space)?.error
         switch outcome.result {
-        case .switched(let layout, _):
+        case .switched(let layout, let untiled):
+            let spoken = MenuText.switchedLayoutAnnouncement(
+                layout: layout, untiled: untiled)
             return receipt(
                 canvas: space, performed: error == nil, failure: error,
-                success: MenuText.switchedLayoutAnnouncement(layout: layout),
-                noOp: MenuText.switchedLayoutAnnouncement(layout: layout))
+                success: spoken, noOp: spoken)
         case .alreadyInLayout(let layout):
             return receipt(
                 canvas: space, performed: false, failure: nil,
-                success: MenuText.switchedLayoutAnnouncement(layout: layout),
+                success: MenuText.switchedLayoutAnnouncement(layout: layout, untiled: 0),
                 noOp: MenuText.alreadyInLayoutAnnouncement(layout: layout))
         default:
             return ActionReceipt(
@@ -523,10 +524,11 @@ final class TilingController {
             return ActionReceipt(
                 canvas: space, performed: false, notice: notice,
                 announcement: nil)
-        case .switched(let layout, _):
+        case .switched(let layout, let untiled):
             return ActionReceipt(
                 canvas: space, performed: true, notice: notice,
-                announcement: MenuText.switchedLayoutAnnouncement(layout: layout))
+                announcement: MenuText.switchedLayoutAnnouncement(
+                    layout: layout, untiled: untiled))
         case .alreadyInLayout(let layout):
             return ActionReceipt(
                 canvas: space, performed: false, notice: notice,
