@@ -33,10 +33,18 @@ final class ControllerHarness {
         var cancels = 0
     }
 
+    /// The same capture for handlers that carry an argument.
+    private final class FireLogOf<T> {
+        var fires: [(T) -> Void] = []
+    }
+
     private let screenValues: ScreenValues
     private let dragEndLog = FireLog()
     private let verifyLog = FireLog()
     private let pruneLog = FireLog()
+    /// Cursor-move handlers captured from the injectable registrar, in
+    /// registration order. A suite fires one through `fireCursorMove(to:)`.
+    private let cursorLog = FireLogOf<CGPoint>()
 
     let gateway: FakeWindowGateway
     let controller: TilingController
@@ -93,6 +101,7 @@ final class ControllerHarness {
         let dragEnd = dragEndLog
         let verify = verifyLog
         let prune = pruneLog
+        let cursor = cursorLog
         screenValues = values
         self.gateway = gateway
         if let activeSpaces {
@@ -116,7 +125,14 @@ final class ControllerHarness {
             screens: { values.values },
             deathConfirmation: deathConfirmation,
             now: now,
-            uptime: uptime)
+            uptime: uptime,
+            observeCursorMove: { fire in cursor.fires.append(fire) })
+    }
+
+    /// Delivers one cursor-move event to the controller through the
+    /// captured registrar, exactly as the production monitors would.
+    func fireCursorMove(to point: CGPoint) {
+        cursorLog.fires.forEach { $0(point) }
     }
 
     /// Hands a fresh window to the gateway and focuses it, the setup every
