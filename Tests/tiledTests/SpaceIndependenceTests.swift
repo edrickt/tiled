@@ -31,28 +31,29 @@ final class SpaceIndependenceTests: XCTestCase {
     private static let spaceB = SpaceID(rawValue: 102)
     private static let spaceC = SpaceID(rawValue: 103)
 
-    private var gateway: FakeWindowGateway!
-    private var controller: TilingController!
-    private var currentScreens: [ScreenInfo] = []
+    private var harness: ControllerHarness!
+    private var gateway: FakeWindowGateway { harness.gateway }
+    private var controller: TilingController { harness.controller }
+    private var currentScreens: [ScreenInfo] {
+        get { harness.screens }
+        set { harness.screens = newValue }
+    }
 
     override func setUp() {
         super.setUp()
-        gateway = FakeWindowGateway()
-        currentScreens = [Self.display]
-        gateway.activeSpaces = [Self.displayID: Self.spaceA]
-        controller = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            screens: { [self] in currentScreens },
+        harness = ControllerHarness(
+            screens: [Self.display],
+            activeSpaces: [Self.displayID: Self.spaceA],
             deathConfirmation: 0)
     }
 
+    /// This suite's windows start on the display's first slot; the harness
+    /// owns the gateway/focus mechanics.
     @discardableResult
     private func addFocusedWindow(
         frame: CGRect = CGRect(x: 100, y: 100, width: 800, height: 600)
     ) -> WindowHandle {
-        let handle = gateway.addWindow(frame: frame)
-        gateway.focused = handle
-        return handle
+        harness.addFocusedWindow(frame: frame)
     }
 
     /// Swipes to `space` on `display`, as the workspace notification
