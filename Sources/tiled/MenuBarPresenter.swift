@@ -192,7 +192,7 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     ) -> StatusIcon.Snapshot {
         let focused = canvas(space)
         return StatusIcon.snapshot(
-            layout: focused.state.activeLayout,
+            layout: focused.state.layout,
             occupants: focused.state.occupants,
             displayName: displayName(space))
     }

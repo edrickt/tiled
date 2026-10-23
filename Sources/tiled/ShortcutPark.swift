@@ -114,15 +114,17 @@ final class ShortcutPark {
         anyResetBackup() ? "Restore Previous Shortcuts" : "Reset Shortcuts"
     }
 
-    /// The Enable-all decision for one layout. `current` is the tab's full
-    /// binding table (every action), so a combo claimed outside the section
-    /// is a clash even when the section's own store is disabled.
+    /// The Enable-all decision for one section. `actions` is the section's
+    /// row list (the app exposes one bulk control, over the eleven slot
+    /// keys). `current` is the tab's full binding table (every action), so
+    /// a combo claimed outside the section is a clash even when the
+    /// section's own store is disabled.
     func bulkRestorePlan(
-        for layout: LayoutKind,
+        for actions: [HotkeyAction],
         current: [HotkeyAction: HotkeyBinding]
     ) -> BulkRestorePlan {
         BulkRestorePlan.make(
-            actions: Slot.allCases.filter { $0.layout == layout }.map(HotkeyAction.slot),
+            actions: actions,
             current: current,
             parks: bindings(kind: .section))
     }

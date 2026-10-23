@@ -152,6 +152,12 @@ final class TilingController {
     /// Called after any state change (for menu refresh).
     var onChange: (() -> Void)?
 
+    /// Live label of the Switch Layout hotkey, used by the inert-key
+    /// receipt to teach the real recovery. Nil when the action is
+    /// disabled, its registration failed, or hotkeys are not running;
+    /// the receipt then names the menu row instead.
+    var switchLayoutLabelProvider: (() -> String?)?
+
     /// Called when keyboard focus moves to a window on another display
     /// or another Mission Control Space without any tiling action. Both
     /// change which canvas the status icon depicts. The menu aggregates
@@ -307,15 +313,18 @@ final class TilingController {
     // MARK: Hotkey entry point
 
     /// The requester for a slot hotkey and the canvas the request belongs
-    /// to: prunes dead windows first, then resolves the focused window to
-    /// its registry id. Nil when nothing is focused; the caller's receipt
-    /// answers that case.
-    private func requesterAndCanvas(
-        for slot: Slot
-    ) -> (id: WindowID, handle: WindowHandle, key: TilingSpaceKey)? {
+    /// to: prunes dead windows first, then resolves the focused window's
+    /// handle, its live registry id (nil when not yet claimed), and the
+    /// canvas its frame belongs to. Nil when nothing is focused; the
+    /// caller's receipt answers that case. Does not claim the id: resolution
+    /// against the canvas's layout happens first, and an inert key must
+    /// leave the window unclaimed.
+    private func focusedTarget()
+        -> (handle: WindowHandle, liveID: WindowID?, key: TilingSpaceKey)?
+    {
         pruneDeadWindows()
         guard let handle = gateway.focusedWindow() else {
-            dbg("no focused window for \(slot.rawValue)")
+            dbg("no focused window")
             return nil
         }
         let liveID = register.liveID(for: handle)
@@ -323,19 +332,40 @@ final class TilingController {
             owned: liveID.flatMap { directory.owner(of: $0) },
             frame: gateway.frame(of: handle),
             preTileFrame: liveID.flatMap { record(of: $0)?.preTileFrame })
-        let id = liveID ?? register.claim(handle, on: key)
-        return (id, handle, key)
+        return (handle, liveID, key)
     }
 
-    /// One tiling request, answered with the one receipt every surface
-    /// presents. A landed placement stays silent (the canvas's notice
-    /// carries it); a no-op, refusal, or deferral names itself once.
+    /// One slot-key request, answered with the one receipt every surface
+    /// presents. The key resolves against the requesting canvas's own
+    /// layout, never keyboard focus: a key with no slot in that layout is
+    /// inert and says where it belongs. A landed placement stays silent
+    /// (the canvas's notice carries it); a no-op, refusal, or deferral
+    /// names itself once.
     @discardableResult
-    func handle(slot: Slot) -> ActionReceipt {
+    func handle(slotKey key: SlotKey) -> ActionReceipt {
         let focusedSpace = directory.focusedKey()
-        guard let (id, handle, key) = requesterAndCanvas(for: slot) else {
+        guard let target = focusedTarget() else {
+            let layout = directory.storedCanvas(for: focusedSpace)?.state.layout ?? .sixths
+            if key.slot(in: layout) == nil {
+                return inertReceipt(key: key, layout: layout, on: focusedSpace)
+            }
             return noFocusedWindowReceipt(on: focusedSpace)
         }
+        let layout = directory.storedCanvas(for: target.key)?.state.layout ?? .sixths
+        guard let slot = key.slot(in: layout) else {
+            return inertReceipt(key: key, layout: layout, on: target.key)
+        }
+        // Claim only once the key has a slot in the requester's canvas:
+        // an inert press must not hand a strange window to this canvas.
+        let id = target.liveID ?? register.claim(target.handle, on: target.key)
+        return place(slot: slot, requester: target.handle, id: id, on: target.key)
+    }
+
+    /// The old slot-request body: an expanded window comes back to earth,
+    /// the canvas plans and settles, and the receipt names the result.
+    private func place(
+        slot: Slot, requester handle: WindowHandle, id: WindowID, on key: TilingSpaceKey
+    ) -> ActionReceipt {
         let hadSlot = directory.storedCanvas(for: key)?.state.slot(of: id) != nil
         let context = placementContext(for: key)
         // An expanded window getting a slot hotkey comes back to earth
@@ -357,7 +387,7 @@ final class TilingController {
         switch outcome.result {
         case .placed, .alreadyTiled, .deferred: claimed = true
         case .refused: claimed = hadSlot
-        case .nothingToEvict, .expandRefused: claimed = false
+        case .nothingToEvict, .expandRefused, .switched, .alreadyInLayout: claimed = false
         }
         if claimed { discardDeferredRestores(for: handle) }
         let collapsed = collapse != nil
@@ -382,6 +412,68 @@ final class TilingController {
         onChange?()
         return placementReceipt(
             outcome.result, slot: slot, collapse: collapse?.result, on: key)
+    }
+
+    /// A slot key pressed in a layout that has no such position. The
+    /// sentence is written to the acting canvas and spoken unchanged; the
+    /// key performs nothing and claims no window.
+    private func inertReceipt(
+        key: SlotKey, layout: LayoutKind, on space: TilingSpaceKey
+    ) -> ActionReceipt {
+        let sentence = MenuText.inertSlotKeyAnnouncement(
+            key: key, layout: layout, switchLabel: switchLayoutLabelProvider?())
+        directory.withCanvas(space) {
+            $0.error = nil
+            $0.notice = sentence
+        }
+        onChange?()
+        return ActionReceipt(
+            canvas: space, performed: false, notice: sentence, announcement: sentence)
+    }
+
+    /// The Switch Layout hotkey: toggles the focused canvas.
+    @discardableResult
+    func handleSwitchLayout() -> ActionReceipt {
+        pruneDeadWindows()
+        let space = directory.focusedKey()
+        let target = (directory.storedCanvas(for: space)?.state.layout ?? .sixths).other
+        return switchLayout(to: target, on: space)
+    }
+
+    /// The menu's targeted switch: the row captured the destination when
+    /// the menu was built, so it still means "go to Sixths" even if the
+    /// focused canvas changed while the menu sat open.
+    @discardableResult
+    func handleSwitchLayout(to target: LayoutKind) -> ActionReceipt {
+        pruneDeadWindows()
+        return switchLayout(to: target, on: directory.focusedKey())
+    }
+
+    /// One canvas switch: call, apply, refresh, answer. A refused restore
+    /// is a failure receipt; the layout itself still changed.
+    private func switchLayout(to target: LayoutKind, on space: TilingSpaceKey) -> ActionReceipt {
+        let outcome = directory.withCanvas(space) {
+            $0.switchLayout(to: target, context: placementContext(for: space))
+        }
+        apply(outcome, on: space)
+        onChange?()
+        let error = directory.storedCanvas(for: space)?.error
+        switch outcome.result {
+        case .switched(let layout, _):
+            return receipt(
+                canvas: space, performed: error == nil, failure: error,
+                success: MenuText.switchedLayoutAnnouncement(layout: layout),
+                noOp: MenuText.switchedLayoutAnnouncement(layout: layout))
+        case .alreadyInLayout(let layout):
+            return receipt(
+                canvas: space, performed: false, failure: nil,
+                success: MenuText.switchedLayoutAnnouncement(layout: layout),
+                noOp: MenuText.alreadyInLayoutAnnouncement(layout: layout))
+        default:
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: error, announcement: error)
+        }
     }
 
     /// One receipt for a hotkey or menu action that found no focused
@@ -431,6 +523,14 @@ final class TilingController {
             return ActionReceipt(
                 canvas: space, performed: false, notice: notice,
                 announcement: nil)
+        case .switched(let layout, _):
+            return ActionReceipt(
+                canvas: space, performed: true, notice: notice,
+                announcement: MenuText.switchedLayoutAnnouncement(layout: layout))
+        case .alreadyInLayout(let layout):
+            return ActionReceipt(
+                canvas: space, performed: false, notice: notice,
+                announcement: MenuText.alreadyInLayoutAnnouncement(layout: layout))
         case .placed:
             if case .expandRefused(let windowName)? = collapse {
                 let announcement = MenuText.expandRefusedAnnouncement(windowName: windowName)
@@ -475,7 +575,7 @@ final class TilingController {
                 canvas: space, performed: false,
                 notice: canvas?.error ?? announcement,
                 announcement: announcement)
-        case .nothingToEvict, .alreadyTiled:
+        case .nothingToEvict, .alreadyTiled, .switched, .alreadyInLayout:
             return ActionReceipt(
                 canvas: space, performed: false, notice: notice,
                 announcement: nil)
@@ -862,13 +962,20 @@ final class TilingController {
 
     /// Chapter restoration, owned here because the controller routes the
     /// cross-canvas effects. The directory holds the canvas table; the
-    /// canvas supplies the primitive: `TilingSpace.restoreEvictees`
-    /// re-places a group's evictees and `TilingSpace.restore` returns the
-    /// requester, while this one named behaviour owns the cross-canvas
-    /// rules — step-aside admission, per-canvas grouping, and the
-    /// notice/error precedence that lets a partial failure surface ahead
-    /// of the success sentence. Returns whether the chapter restored
-    /// everything it owed.
+    /// canvas supplies the primitives: `TilingSpace.restore` returns a
+    /// window and `restoreEvictees` re-places a group. This one named
+    /// behaviour owns the cross-canvas rules — layout reconciliation, the
+    /// per-canvas grouping, the requester's barrier, and the notice/error
+    /// precedence that lets a partial failure surface ahead of the success
+    /// sentence. Returns whether the chapter restored everything it owed.
+    ///
+    /// A chapter's layout comes from its entries, not a stored field. When
+    /// the destination canvas now shows another layout (the user switched,
+    /// or re-tiled in it after the chapter was pushed), every current
+    /// occupant is first restored to its pre-tile frame and forgotten —
+    /// chapter members included — and the canvas adopts the chapter's
+    /// layout. Only then do the entries land, so undo can never leave two
+    /// layouts on one canvas or trap on a cross-layout commit.
     @discardableResult
     private func restoreChapter(
         _ chapter: TilingSpace.UndoChapter, on space: TilingSpaceKey
@@ -885,17 +992,65 @@ final class TilingController {
             failures.append(name)
         }
         var restored = 0
+        var layoutRestored: LayoutKind?
+
+        var orderedSnapshot = chapter.snapshot
+        let requesterHandle = chapter.requester.flatMap { handle(of: $0) }
+        if let requesterHandle,
+            let index = orderedSnapshot.firstIndex(where: { $0.handle == requesterHandle })
+        {
+            orderedSnapshot.insert(orderedSnapshot.remove(at: index), at: 0)
+        }
+        // Group the chapter by destination canvas: each window returns to
+        // the canvas it left (legacy untagged entries restore into the
+        // undone canvas). Grouping is the first decision because the
+        // canvas's layout must match the entries before anything lands.
+        var order: [TilingSpaceKey] = []
+        var bySpace: [TilingSpaceKey: [EvictedWindow]] = [:]
+        for evicted in orderedSnapshot {
+            let destination = evicted.space ?? space
+            if bySpace[destination] == nil { order.append(destination) }
+            bySpace[destination, default: []].append(evicted)
+        }
+        // Reconcile each destination's layout: a canvas showing the other
+        // layout is emptied (its occupants restored to their pre-tile
+        // frames, chapter members included) and adopts the chapter's.
+        // Refusals are recorded, not hidden; the entry itself is not
+        // restored here, so the ordinary group pass below still runs.
+        for destination in order {
+            guard let group = bySpace[destination],
+                let groupLayout = group.first?.slot.layout
+            else { continue }
+            let current = directory.storedCanvas(for: destination)?.state.layout ?? .sixths
+            guard current != groupLayout else { continue }
+            let occupants = (directory.storedCanvas(for: destination)?.state.occupants ?? [:])
+                .sorted { $0.key.rawValue < $1.key.rawValue }
+            for (_, id) in occupants {
+                let occupantHandle = handle(of: id)
+                let name = appName(for: id) ?? "A window"
+                let refused = directory.withCanvas(destination) { canvas -> Bool in
+                    !canvas.restore(
+                        window: id, context: placementContext(for: destination))
+                }
+                if refused, let occupantHandle {
+                    recordFailure(occupantHandle, name: name)
+                }
+                register.forget(id)
+            }
+            directory.withCanvas(destination) { $0.adoptLayout(groupLayout) }
+            layoutRestored = groupLayout
+        }
         // Restore the requester first, in the canvas owning its record:
-        // its pre-tile frame wherever it sits — frames, not spaces,
-        // decide that. (Its record may already be gone; the restore is a
-        // no-op then.) Doing this before step-aside admission means a
+        // its pre-tile frame wherever it sits — frames, not spaces, decide
+        // that. (Reconciliation may already have untiled it; the restore
+        // is a no-op then.) Doing this before step-aside admission means a
         // fresh requester is restored by the requester path, not untiled
         // as a blocker, so its refusal is narrated rather than absorbed.
         var retainedRequester: (space: TilingSpaceKey, slot: Slot)?
-        let requesterHandle = chapter.requester.flatMap { handle(of: $0) }
+        let requesterPairedHandle = chapter.requester.flatMap { handle(of: $0) }
         if let requester = chapter.requester {
             let requesterSpace = directory.owner(of: requester) ?? space
-            let handle = requesterHandle
+            let handle = requesterPairedHandle
             let name = appName(for: requester) ?? "A window"
             let hasChapterEntry = handle.map { handle in
                 chapter.snapshot.contains { $0.handle == handle }
@@ -924,9 +1079,10 @@ final class TilingController {
         }
         // Step-aside admission: every remaining occupant the restoration
         // would land on (overlapping cells) or contradict (the other
-        // layout) is untiled to its pre-tile frame first, so undo can
-        // never double-book a cell or leave two layouts on one canvas.
-        // The requester is already handled above and stays exempt.
+        // layout) is untiled to its pre-tile frame first. After layout
+        // reconciliation the contradiction case can only come from a
+        // destination that kept its layout, exactly as before. The
+        // requester is already handled above and stays exempt.
         let handled: Set<WindowID> = chapter.requester.map { [$0] } ?? []
         for blocker in blockers(of: chapter, on: space, excluding: handled).sorted() {
             let handle = handle(of: blocker)
@@ -935,21 +1091,10 @@ final class TilingController {
                 recordFailure(handle, name: name)
             }
         }
-        // Group the chapter by destination canvas: each window returns
-        // to the canvas it left (legacy untagged entries restore into
-        // the undone canvas). The requester's entry goes first, so a
-        // refused move back becomes the barrier the rest respect.
-        var orderedSnapshot = chapter.snapshot
-        if let requesterHandle,
-            let index = orderedSnapshot.firstIndex(where: { $0.handle == requesterHandle })
-        {
-            orderedSnapshot.insert(orderedSnapshot.remove(at: index), at: 0)
-        }
-        var bySpace: [TilingSpaceKey: [EvictedWindow]] = [:]
-        for evicted in orderedSnapshot {
-            bySpace[evicted.space ?? space, default: []].append(evicted)
-        }
-        for (destination, group) in bySpace {
+        // Restore each group's evictees; the requester's entry goes first
+        // so a refused move back becomes the barrier the rest respect.
+        for destination in order {
+            guard let group = bySpace[destination] else { continue }
             let retainedSlots: [Slot]
             if let retainedRequester, retainedRequester.space == destination {
                 retainedSlots = [retainedRequester.slot]
@@ -977,15 +1122,17 @@ final class TilingController {
         }
         // The chapter's story, told once here: any refused frame surfaces
         // ahead of the success sentence, so a partial failure can never
-        // hide behind "N windows restored".
+        // hide behind "N windows restored". A layout restore counts as
+        // performed even when zero windows came back, and the notice names
+        // the layout that returned.
         if !failures.isEmpty {
             directory.withCanvas(space) {
                 $0.error = MenuText.restoreFailureMessage(failures)
             }
-        } else if restored > 0 {
-            let noun = restored == 1 ? "1 window" : "\(restored) windows"
+        } else if restored > 0 || layoutRestored != nil {
             directory.withCanvas(space) {
-                $0.notice = "Undid displacement \u{00B7} \(noun) restored."
+                $0.notice = MenuText.undoDisplacementNotice(
+                    restored: restored, layoutRestored: layoutRestored)
             }
         } else {
             // Nothing restored and nothing refused (a chapter whose
@@ -997,7 +1144,7 @@ final class TilingController {
         // A refused frame means the chapter did not fully restore: report
         // not-performed so a caller cannot speak a success sentence over
         // the canvas's refusal.
-        return restored > 0 && failures.isEmpty
+        return (restored > 0 || layoutRestored != nil) && failures.isEmpty
     }
 
     /// The current occupants that must step aside before `chapter`
@@ -1419,7 +1566,8 @@ final class TilingController {
             if expandedNow != wasExpanded { discardDeferredRestores(for: handle) }
         case .deferred:
             discardDeferredRestores(for: handle)
-        case .refused, .alreadyTiled, .nothingToEvict, .expandRefused:
+        case .refused, .alreadyTiled, .nothingToEvict, .expandRefused,
+            .switched, .alreadyInLayout:
             break
         }
         onChange?()
@@ -1476,13 +1624,6 @@ final class TilingController {
     }
 
     var isTrusted: Bool { gateway.isTrusted }
-
-    /// Whether a window has keyboard focus right now. The menu's collapsed
-    /// switch rows read this from the controller instead of having the
-    /// presenter post its own AX query, so one refresh pass stays one read.
-    var hasFocusedWindow: Bool {
-        gateway.isTrusted && gateway.focusedWindow() != nil
-    }
 
     // MARK: Per-canvas spaces
 

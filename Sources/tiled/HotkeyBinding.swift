@@ -214,9 +214,9 @@ final class HotkeyStore {
         action.defaultBinding
     }
 
-    /// The factory default for a slot: its layout's modifiers + key.
-    static func defaultBinding(for slot: Slot) -> HotkeyBinding {
-        HotkeyBinding(modifiers: slot.modifiers, keyCode: slot.keyCode)
+    /// The factory default for a slot key: the shared ⌥⇧ binding.
+    static func defaultBinding(for key: SlotKey) -> HotkeyBinding {
+        key.defaultBinding
     }
 
     func binding(for action: HotkeyAction) -> HotkeyBinding {
@@ -226,8 +226,8 @@ final class HotkeyStore {
         return binding
     }
 
-    func binding(for slot: Slot) -> HotkeyBinding {
-        binding(for: HotkeyAction.slot(slot))
+    func binding(for key: SlotKey) -> HotkeyBinding {
+        binding(for: HotkeyAction.slotKey(key))
     }
 
     /// The display label to advertise for `action`, or nil when the action
@@ -245,8 +245,8 @@ final class HotkeyStore {
         defaults.set(binding.storedEntry, forKey: Self.key(for: action))
     }
 
-    func set(_ binding: HotkeyBinding, for slot: Slot) {
-        set(binding, for: HotkeyAction.slot(slot))
+    func set(_ binding: HotkeyBinding, for key: SlotKey) {
+        set(binding, for: HotkeyAction.slotKey(key))
     }
 
     /// Drops every override; all actions return to factory defaults.
@@ -268,10 +268,10 @@ final class HotkeyStore {
         return .applied
     }
 
-    /// Convenience for slot call sites: same gate, same refusal.
+    /// Convenience for slot-key call sites: same gate, same refusal.
     @discardableResult
-    func apply(_ candidate: HotkeyBinding, for slot: Slot) -> ApplyResult {
-        apply(candidate, for: HotkeyAction.slot(slot))
+    func apply(_ candidate: HotkeyBinding, for key: SlotKey) -> ApplyResult {
+        apply(candidate, for: HotkeyAction.slotKey(key))
     }
 
     /// Actions (other than `ignored`) whose stored binding equals

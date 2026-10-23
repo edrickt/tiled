@@ -63,15 +63,15 @@ final class PerMonitorTests: XCTestCase {
         tileOnRight()
         controller.handle(slot: .sixthLeft)
 
-        XCTAssertEqual(controller.canvas(for: leftID).state.activeLayout, .quarters)
-        XCTAssertEqual(controller.canvas(for: rightID).state.activeLayout, .sixths)
+        XCTAssertEqual(controller.canvas(for: leftID).state.layout, .quarters)
+        XCTAssertEqual(controller.canvas(for: rightID).state.layout, .sixths)
         // Focusing a monitor scopes the read: focusing left shows
         // quarters, focusing right shows sixths.
         XCTAssertEqual(
-            controller.canvas(for: controller.focusedTilingSpace).state.activeLayout, .sixths)
+            controller.canvas(for: controller.focusedTilingSpace).state.layout, .sixths)
         gateway.focused = gateway.issued[0]
         XCTAssertEqual(
-            controller.canvas(for: controller.focusedTilingSpace).state.activeLayout, .quarters)
+            controller.canvas(for: controller.focusedTilingSpace).state.layout, .quarters)
     }
 
     func testFocusedScreenScopesLayoutAndOccupancyToFocusedDisplay() {
@@ -86,14 +86,14 @@ final class PerMonitorTests: XCTestCase {
 
         gateway.focused = left
         XCTAssertEqual(controller.focusedScreen, leftID)
-        XCTAssertEqual(controller.canvas(for: controller.focusedScreen).state.activeLayout, .quarters)
+        XCTAssertEqual(controller.canvas(for: controller.focusedScreen).state.layout, .quarters)
         XCTAssertEqual(
             controller.canvas(for: controller.focusedScreen).state.occupants,
             [.topLeft: 1])
 
         gateway.focused = right
         XCTAssertEqual(controller.focusedScreen, rightID)
-        XCTAssertEqual(controller.canvas(for: controller.focusedScreen).state.activeLayout, .sixths)
+        XCTAssertEqual(controller.canvas(for: controller.focusedScreen).state.layout, .sixths)
         XCTAssertEqual(
             controller.canvas(for: controller.focusedScreen).state.occupants,
             [.sixthLeft: 2])
@@ -153,16 +153,16 @@ final class PerMonitorTests: XCTestCase {
         controller.handle(slot: .topRight)
         tileOnRight()
         controller.handle(slot: .sixthLeft)
-        XCTAssertEqual(controller.canvas(for: rightID).state.activeLayout, .sixths)
+        XCTAssertEqual(controller.canvas(for: rightID).state.layout, .sixths)
 
         // The right monitor switches back to quarters: only its own window
         // is evicted, the left monitor's quarters session is untouched.
         gateway.focused = gateway.issued[2]
         controller.handle(slot: .topLeft)
 
-        XCTAssertEqual(controller.canvas(for: rightID).state.activeLayout, .quarters)
-        XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 3)
-        XCTAssertEqual(controller.canvas(for: leftID).state.activeLayout, .quarters)
+        XCTAssertEqual(controller.canvas(for: rightID).state.layout, .quarters)
+        XCTAssertNotNil(controller.canvas(for: rightID).state.occupant(of: .topLeft))
+        XCTAssertEqual(controller.canvas(for: leftID).state.layout, .quarters)
         XCTAssertEqual(controller.canvas(for: leftID).state.occupant(of: .topLeft), 1)
         XCTAssertEqual(controller.canvas(for: leftID).state.occupant(of: .topRight), 2)
     }

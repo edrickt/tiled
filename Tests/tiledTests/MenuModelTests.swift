@@ -13,9 +13,8 @@ final class MenuModelTests: XCTestCase {
         warnings: [String] = [],
         notice: String? = nil,
         layoutTitle: String = "Quarters",
-        activeLayout: LayoutKind = .quarters,
+        layout: LayoutKind = .quarters,
         tileError: String? = nil,
-        hasFocusedWindow: Bool = true,
         hasSplitterBackup: Bool = false,
         expandState: ExpandToggleState = .expands,
         tiledWindows: [MenuModel.Snapshot.TiledWindow] = [],
@@ -28,10 +27,9 @@ final class MenuModelTests: XCTestCase {
             warnings: warnings,
             notice: notice,
             layoutTitle: layoutTitle,
-            activeLayout: activeLayout,
+            activeLayout: layout,
             tileError: tileError,
             hasSplitterBackup: hasSplitterBackup,
-            hasFocusedWindow: hasFocusedWindow,
             expandState: expandState,
             tiledWindows: tiledWindows,
             canUndoDisplacement: canUndoDisplacement,
@@ -161,55 +159,63 @@ final class MenuModelTests: XCTestCase {
 
     // MARK: Tile submenu
 
-    func testTileSubmenuListsOnlyTheActiveLayoutPlusASwitchRow() {
-        // Quarters on screen: quads + halves + one row to Sixths.
-        let quarters = tileSubmenu(items(snapshot(activeLayout: .quarters)))!
+    func testTileSubmenuListsTheActiveLayoutsKeys() {
+        // Quarters on screen: quads + halves, each row carrying its shared
+        // physical key. The switch is a top-level row, not a child.
+        let quarters = tileSubmenu(items(snapshot(layout: .quarters)))!
         let qChildren = quarters.children!
         let qHeaders = qChildren.filter(\.isHeader).map(\.title)
         XCTAssertEqual(qHeaders, ["Quarters · Quads", "Halves"])
         let qSlots = qChildren.compactMap {
-            if case .tileSlot(let slot)? = $0.action { return slot }
+            if case .tileSlot(let key)? = $0.action { return key }
             return nil
         }
         XCTAssertEqual(qSlots, [
             .topLeft, .topRight, .bottomLeft, .bottomRight,
-            .leftHalf, .rightHalf,
+            .leftColumn, .rightColumn,
         ])
-        let qSwitch = qChildren.first { $0.action == .switchToSixths }
-        XCTAssertEqual(qSwitch?.title, "Switch to Sixths (focused window → Top Left Sixth)")
-        XCTAssertTrue(qSwitch?.isEnabled == true, "focused window in the test harness")
+        XCTAssertTrue(
+            qChildren.allSatisfy {
+                if let action = $0.action, case .tileSlot = action { return true }
+                return $0.action == nil // headers carry no action
+            },
+            "the tile submenu holds only the active layout's tile rows")
 
-        // No focused window: the switch row disables and states its
-        // precondition instead of no-op-ing on click.
-        let unfocused = items(snapshot(activeLayout: .quarters, hasFocusedWindow: false))
-        let uTile = tileSubmenu(unfocused)!
-        let uSwitch = uTile.children!.first { $0.action == .switchToSixths }
-        XCTAssertEqual(uSwitch?.isEnabled, false)
-        XCTAssertEqual(
-            uSwitch?.disabledReason, "Needs a focused window: click a window first.")
-
-        // Sixths on screen: corners + thirds + two-thirds + one row back.
-        let sixths = tileSubmenu(items(snapshot(activeLayout: .sixths)))!
+        // Sixths on screen: corners + thirds + two-thirds.
+        let sixths = tileSubmenu(items(snapshot(layout: .sixths)))!
         let sChildren = sixths.children!
         let sHeaders = sChildren.filter(\.isHeader).map(\.title)
         XCTAssertEqual(sHeaders, ["Sixths · Corners", "Thirds", "Two-Thirds"])
         let sSlots = sChildren.compactMap {
-            if case .tileSlot(let slot)? = $0.action { return slot }
+            if case .tileSlot(let key)? = $0.action { return key }
             return nil
         }
         XCTAssertEqual(sSlots, [
-            .sixthTopLeft, .sixthTopMiddle, .sixthTopRight,
-            .sixthBottomLeft, .sixthBottomMiddle, .sixthBottomRight,
-            .sixthLeft, .sixthMiddle, .sixthRight,
-            .sixthsLeftTwoThirds, .sixthsRightTwoThirds,
+            .topLeft, .topMiddle, .topRight,
+            .bottomLeft, .bottomMiddle, .bottomRight,
+            .leftColumn, .middleColumn, .rightColumn,
+            .leftTwoThirds, .rightTwoThirds,
         ])
-        let sSwitch = sChildren.first { $0.action == .switchToQuarters }
-        XCTAssertEqual(sSwitch?.title, "Switch to Quarters (focused window → Top Left)")
+    }
+
+    func testSwitchLayoutIsATopLevelTargetedRowThatNeverNeedsFocus() {
+        let quarters = items(snapshot(layout: .quarters))
+        let qSwitch = quarters.first { $0.action == .switchLayout(to: .sixths) }
+        XCTAssertEqual(qSwitch?.title, "Switch to Sixths · ⌥⇧\\")
+        XCTAssertEqual(qSwitch?.isEnabled, true, "an empty canvas can switch too")
+
+        // The unfocused snapshot renders the same enabled row: the switch
+        // is a canvas action, not a focused-window tile.
+        let unfocused = items(snapshot(layout: .sixths))
+        let sSwitch = unfocused.first { $0.action == .switchLayout(to: .quarters) }
+        XCTAssertEqual(sSwitch?.title, "Switch to Quarters · ⌥⇧\\")
+        XCTAssertEqual(sSwitch?.isEnabled, true)
+        XCTAssertEqual(sSwitch?.disabledReason, nil)
     }
 
     // MARK: Expand item
 
-    func testExpandItemSitsBetweenTileSubmenuAndWindowRows() {
+    func testExpandItemSitsAfterTheSwitchRow() {
         let model = items(snapshot(tiledWindows: [
             .init(id: 1, slot: .topLeft, appName: "Safari"),
         ]))
@@ -217,7 +223,10 @@ final class MenuModelTests: XCTestCase {
         XCTAssertNotNil(expandIndex)
         XCTAssertEqual(model[expandIndex!].title, "Expand to Fill Screen · ⌥⇧⏎")
         let tileIndex = model.firstIndex { $0.title == "Tile Focused Window" }!
-        XCTAssertEqual(expandIndex, tileIndex + 1, "the expand row follows the tile submenu")
+        XCTAssertEqual(
+            model[tileIndex + 1].action, .switchLayout(to: .sixths),
+            "the switch row sits after the tile submenu and before Expand")
+        XCTAssertEqual(expandIndex, tileIndex + 2, "the expand row follows the switch row")
     }
 
     func testExpandItemHiddenWhenUntrusted() {
@@ -239,21 +248,21 @@ final class MenuModelTests: XCTestCase {
         XCTAssertFalse(items(snapshot(isTrusted: false)).contains { $0.action == .evictFocusedWindow })
     }
 
-    /// The tile submenu lists the active layout only, so the custom-label
-    /// test forces sixths (the disabled slot under test is a sixth).
+    /// The tile submenu lists the active layout's keys, so the custom-label
+    /// test forces sixths (the disabled key under test is a third).
     func testTileItemsCarryLiveLabelsFromTheStore() {
-        var snap = snapshot(activeLayout: .sixths)
-        snap.labels[.slot(.sixthTopLeft)] =
+        var snap = snapshot(layout: .sixths)
+        snap.labels[.slotKey(.topLeft)] =
             HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_Q)).label
-        snap.labels[.slot(.sixthRight)] = nil // disabled slot
+        snap.labels[.slotKey(.rightColumn)] = nil // disabled key
         let model = MenuModel.items(snapshot: snap)
         let tile = model.first { $0.title == "Tile Focused Window" }!
-        let topLeft = tile.children!.first { $0.title.contains("Top Left Sixth") }!
-        XCTAssertEqual(topLeft.title, "Top Left Sixth · ⌥Q")
-        XCTAssertEqual(topLeft.action, .tileSlot(.sixthTopLeft))
-        // A disabled slot (nil label) still renders, without a combo.
-        let disabled = tile.children!.first { $0.title.contains("Right Third") }!
-        XCTAssertEqual(disabled.title, "Right Third")
+        let topLeft = tile.children!.first { $0.title.contains("Top Left") }!
+        XCTAssertEqual(topLeft.title, "Top Left · ⌥Q")
+        XCTAssertEqual(topLeft.action, .tileSlot(.topLeft))
+        // A disabled key (nil label) still renders, without a combo.
+        let disabled = tile.children!.first { $0.title.contains("Right Column") }!
+        XCTAssertEqual(disabled.title, "Right Column")
     }
 
     // MARK: Manage section
@@ -262,14 +271,14 @@ final class MenuModelTests: XCTestCase {
         let model = items(snapshot(tiledWindows: [
             .init(id: 7, slot: .leftHalf, appName: "Safari"),
         ]))
-        let row = model.first { $0.title.contains("Left Half") }!
-        XCTAssertEqual(row.title, "Left Half · Safari (⌥⇧⌘J)")
+        let row = model.first { $0.title.contains("Left Column") }!
+        XCTAssertEqual(row.title, "Left Column · Safari (⌥⇧J)")
         XCTAssertEqual(row.action, nil, "the row itself doesn't act")
         XCTAssertEqual(row.children?.map(\.title), [
             "Untile This Window", "Focus Safari", "Tile Focused Window Here",
         ])
         XCTAssertEqual(row.children?.map(\.action), [
-            .untileWindow(7), .focusWindow(7), .tileHere(.leftHalf),
+            .untileWindow(7), .focusWindow(7), .tileHere(.leftColumn),
         ])
     }
 
@@ -277,7 +286,7 @@ final class MenuModelTests: XCTestCase {
         let model = items(snapshot(tiledWindows: [
             .init(id: 3, slot: .sixthRight, appName: nil),
         ]))
-        XCTAssertEqual(model.first { $0.title.contains("Right Third") }?.children?
+        XCTAssertEqual(model.first { $0.title.contains("Right Column") }?.children?
             .first { $0.title.hasPrefix("Focus") }?.title, "Focus Window")
     }
 

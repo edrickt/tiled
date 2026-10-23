@@ -13,7 +13,6 @@ struct MenuReads {
     let tileError: String?
     let hotkeyWarnings: [String]
     let rows: [TilingController.TiledWindowInfo]
-    let hasFocusedWindow: Bool
     let expandState: ExpandToggleState
     /// The live combo label for every action that has one; absent means
     /// disabled. Labels are part of the snapshot so a remap is an ordinary
@@ -43,23 +42,22 @@ struct MenuReads {
         }
         let rows = controller.tiledWindowsInfo
         self.rows = rows
-        self.hasFocusedWindow = controller.hasFocusedWindow
         self.expandState = controller.focusedExpandState
         var labels: [HotkeyAction: String] = [:]
         for action in HotkeyAction.allCases {
             if let label = binding(action).label { labels[action] = label }
         }
         self.labels = labels
-        var layouts: [ScreenID?: LayoutKind] = [nil: canvas.state.activeLayout]
+        var layouts: [ScreenID?: LayoutKind] = [nil: canvas.state.layout]
         for row in rows {
             guard let screen = row.screen else { continue }
-            layouts[screen] = controller.canvas(for: screen).state.activeLayout
+            layouts[screen] = controller.canvas(for: screen).state.layout
         }
         self.layoutByScreen = layouts
     }
 
     func layout(for screen: ScreenID?) -> LayoutKind {
-        layoutByScreen[screen] ?? canvas.state.activeLayout
+        layoutByScreen[screen] ?? canvas.state.layout
     }
 
     /// Pure multi-display grouping for the manage list. The grouping key is

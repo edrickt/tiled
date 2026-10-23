@@ -131,3 +131,20 @@ final class ControllerHarness {
         return handle
     }
 }
+
+extension TilingController {
+    /// Test spelling for a slot request under the shared-key model: when
+    /// the requested `Slot` belongs to the canvas's other layout, switch
+    /// first (the explicit user step), then press the physical key. Suites
+    /// that pin the new contract call `handle(slotKey:)` and
+    /// `handleSwitchLayout(to:)` directly instead.
+    @discardableResult
+    func handle(slot: Slot) -> ActionReceipt {
+        let space = focusedTilingSpace
+        if canvas(for: space).state.layout != slot.layout {
+            let switched = handleSwitchLayout(to: slot.layout)
+            guard canvas(for: space).state.layout == slot.layout else { return switched }
+        }
+        return handle(slotKey: slot.key)
+    }
+}

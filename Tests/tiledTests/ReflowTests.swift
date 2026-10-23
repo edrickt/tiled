@@ -93,7 +93,7 @@ final class ReflowTests: XCTestCase {
         // Left half moving to top left frees the bottom-left quarter, and
         // the left half is the only slot covering both: the requester must
         // be excluded or it would undo the move it just made.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         XCTAssertEqual(
             state.reflow(freed: Slot.bottomLeft.cells, excluding: [a]),
@@ -121,7 +121,7 @@ final class ReflowTests: XCTestCase {
     }
 
     func testQuartersColumnMateGrowsIntoHalf() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .bottomLeft)
         state.remove(window: b)
@@ -131,7 +131,7 @@ final class ReflowTests: XCTestCase {
     }
 
     func testQuartersEvictTopRightGrowsBottomRightUp() {
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .topRight)
         state.commit(window: c, into: .bottomRight)
@@ -160,7 +160,7 @@ final class ReflowTests: XCTestCase {
         // quads tiled, evicting the top-left frees its quarter — and the
         // bottom-right cannot merge with it without covering the
         // top-right quarter nobody vacated. Nothing grows.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: c, into: .bottomRight)
         state.remove(window: a)
@@ -234,7 +234,7 @@ final class ReflowTests: XCTestCase {
         // Evicting the bottom-right quad for a top-left requester leaves
         // BOTH the top-right and bottom-left quads free — not one whole
         // slot, so there is no unambiguous home and no re-house.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .bottomRight)
         XCTAssertEqual(
             state.rehousingHome(evicting: a, for: .topLeft),
@@ -248,7 +248,7 @@ final class ReflowTests: XCTestCase {
         // left free happen to form exactly one whole slot (here the
         // bottom-right quad the evictee itself holds): re-housing it
         // would move a window that never stood in the requester's way.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .bottomRight)
         state.commit(window: b, into: .topRight)
         state.commit(window: c, into: .bottomLeft)
@@ -296,7 +296,7 @@ final class ReflowTests: XCTestCase {
     func testHalfBlockerReHousesIntoTheOppositeQuad() {
         // Quarters: a left half blocking a top-left quad request steps
         // down into the bottom-left quad.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .leftHalf)
         XCTAssertEqual(
             state.rehousingHome(evicting: a, for: .topLeft),
@@ -348,7 +348,7 @@ final class ReflowTests: XCTestCase {
         // The left half request over top-left, top-right, bottom-left
         // evicts the bottom-left quad; the cells left free are exactly
         // the bottom-right quad, so the victim re-tiles there.
-        var state = TilingState()
+        var state = TilingState(layout: .quarters)
         state.commit(window: a, into: .topLeft)
         state.commit(window: b, into: .topRight)
         state.commit(window: c, into: .bottomLeft)

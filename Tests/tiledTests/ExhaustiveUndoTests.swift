@@ -187,7 +187,6 @@ final class ExhaustiveUndoTests: XCTestCase {
         switch plan {
         case .tile(let e): kind = "tile"; evicted = e.count
         case .swap: kind = "swap"; evicted = 1
-        case .switchLayout(let e): kind = "switch"; evicted = e.count
         case .noop: kind = "noop"; evicted = 0
         }
         let requesterHandle = session.handles[requesterIndex]
@@ -256,7 +255,10 @@ final class ExhaustiveUndoTests: XCTestCase {
                 // `occupants` gives the same plan answer the controller's
                 // first real ID will give.
                 let id = base.controller.registeredID(for: handle) ?? (-1 - index)
-                for slot in Slot.allCases {
+                // A slot key resolves only inside the canvas's stored
+                // layout; the cross-layout case is an explicit switch, and
+                // `LayoutSwitchTests` owns those edges.
+                for slot in Slot.allCases where slot.layout == baseCanvas.state.layout {
                     let plan = baseCanvas.state.plan(window: id, into: slot)
                     if case .noop = plan { continue }
                     edges += 1

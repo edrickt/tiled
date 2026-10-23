@@ -10,22 +10,24 @@ import XCTest
 final class HotkeyActionRouterTests: XCTestCase {
     private final class FakePerformer: HotkeyActionPerformer {
         enum Call: Equatable {
-            case tile(Slot)
+            case tile(SlotKey)
             case expand
             case evict
             case settings
             case undo
             case resetSplitters
+            case switchLayout
         }
 
         private(set) var calls: [Call] = []
 
-        func tile(slot: Slot) { calls.append(.tile(slot)) }
+        func tile(slotKey: SlotKey) { calls.append(.tile(slotKey)) }
         func performExpandToggle() { calls.append(.expand) }
         func performEvict() { calls.append(.evict) }
         func performSettings() { calls.append(.settings) }
         func performUndo() { calls.append(.undo) }
         func performResetSplitters() { calls.append(.resetSplitters) }
+        func performSwitchLayout() { calls.append(.switchLayout) }
     }
 
     func testEveryActionRoutesToItsIntendedPerformerCall() {
@@ -35,15 +37,16 @@ final class HotkeyActionRouterTests: XCTestCase {
             HotkeyActionRouter(performer: performer).dispatch(action)
 
             // Independent of the dispatcher: spell out what each action
-            // must do, including every slot's own argument.
+            // must do, including every slot key's own argument.
             let expected: FakePerformer.Call
             switch action {
-            case .slot(let slot): expected = .tile(slot)
+            case .slotKey(let key): expected = .tile(key)
             case .expand: expected = .expand
             case .evict: expected = .evict
             case .settings: expected = .settings
             case .undo: expected = .undo
             case .resetSplitters: expected = .resetSplitters
+            case .switchLayout: expected = .switchLayout
             }
 
             XCTAssertEqual(
@@ -100,12 +103,23 @@ final class AppHotkeyPerformerTests: XCTestCase {
     func testTileRoutesToTheControllerAndPresentsItsReceipt() throws {
         addFocusedWindow()
 
-        performer.tile(slot: .topLeft)
+        performer.tile(slotKey: .topLeft)
 
-        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .sixthTopLeft)
         let receipt = try XCTUnwrap(presentedReceipts.last)
         XCTAssertTrue(receipt.performed)
         XCTAssertNil(receipt.announcement, "a landed placement stays silent")
+    }
+
+    func testSwitchLayoutRoutesToTheControllerAndPresentsItsReceipt() throws {
+        addFocusedWindow()
+
+        performer.performSwitchLayout()
+
+        XCTAssertEqual(canvas.state.layout, .quarters)
+        let receipt = try XCTUnwrap(presentedReceipts.last)
+        XCTAssertTrue(receipt.performed)
+        XCTAssertEqual(receipt.announcement, "Switched to Quarters.")
     }
 
     func testExpandRoutesToTheControllerAndPresentsItsReceipt() throws {

@@ -2,9 +2,11 @@ import CoreGraphics
 
 /// Which tiling geometry a slot belongs to.
 ///
-/// Layouts are mutually exclusive on screen: requesting a slot in a layout
-/// other than the active one resets the space (evicts every tiled window)
-/// and switches to the requested layout. See `TilingState.plan(window:into:)`.
+/// Layouts are mutually exclusive on a canvas. A canvas stores its choice
+/// (`TilingState.layout`), and `⌥⇧\` switches it explicitly: every tiled
+/// window is restored to its pre-tile frame and the canvas adopts the other
+/// layout. A slot request never switches; a key with no slot in the active
+/// layout is inert.
 enum LayoutKind: String {
     case quarters
     case sixths
@@ -13,6 +15,14 @@ enum LayoutKind: String {
         switch self {
         case .quarters: "Quarters"
         case .sixths: "Sixths"
+        }
+    }
+
+    /// The layout an explicit switch targets.
+    var other: LayoutKind {
+        switch self {
+        case .quarters: .sixths
+        case .sixths: .quarters
         }
     }
 }
@@ -490,43 +500,49 @@ enum TilePlan: Equatable {
     /// instead): the two swap tiles, the displaced window moves into the
     /// slot the requester vacates; nobody is untiled or restored.
     case swap(displaced: WindowID)
-    /// The request targets a different layout than the active one: every
-    /// tiled window is untiled (restored), the layout switches, and the
-    /// requesting window is placed into the target slot.
-    case switchLayout(evicting: [WindowID])
     /// The window already occupies the slot; nothing happens.
     case noop
 }
 
 extension TilePlan {
     /// Windows the controller must restore (untile) before committing this
-    /// plan for `requester`.
+    /// plan.
     ///
-    /// `.switchLayout`'s eviction set names every tiled window, including
-    /// the requester itself when it is already tiled, but the requester
-    /// is moving, not being evicted: its old tile is vacated by the
-    /// subsequent commit, and its record (and pre-tile frame) must survive
-    /// until `place` runs. Restoring it first would delete its record, so
-    /// `place` would bail and the window would merely untile instead of
-    /// landing in its new tile. `.tile` never names the requester
-    /// (blockers exclude it by construction), so the filter is a no-op
-    /// there; `.noop` restores nothing.
-    func windowsToRestore(requester: WindowID) -> [WindowID] {
+    /// `.tile` never names the requester (blockers exclude it by
+    /// construction); `.swap` and `.noop` restore nothing.
+    func windowsToRestore() -> [WindowID] {
         switch self {
-        case .tile(let evicting), .switchLayout(let evicting):
-            return evicting.filter { $0 != requester }
+        case .tile(let evicting):
+            return evicting
         case .swap, .noop:
             return []
         }
     }
 }
 
-/// Pure tiling state: which window occupies which slot.
-/// No AppKit, no AX; fully unit-testable.
+/// Pure tiling state: which window occupies which slot, and which layout
+/// the canvas is showing. No AppKit, no AX; fully unit-testable.
 struct TilingState: Equatable {
     private(set) var occupantBySlot: [Slot: WindowID] = [:]
+    /// The layout on screen. Stored, not derived from occupancy: an empty
+    /// canvas keeps the user's choice, so the next slot key means the same
+    /// position it did before the windows left. `setLayout` is the only
+    /// writer, and it refuses a non-empty board: switching is an explicit
+    /// canvas action (`TilingSpace.switchLayout`), never a side effect of
+    /// a placement.
+    private(set) var layout: LayoutKind
 
-    init() {}
+    init(layout: LayoutKind = .sixths) {
+        self.layout = layout
+    }
+
+    /// Adopts `new` on an empty board; the one layout writer. A non-empty
+    /// board must be untiled first (the canvas's switch does that), so two
+    /// layouts can never coexist on one canvas.
+    mutating func setLayout(_ new: LayoutKind) {
+        precondition(occupantBySlot.isEmpty, "setLayout requires an empty board")
+        layout = new
+    }
 
     func occupant(of slot: Slot) -> WindowID? { occupantBySlot[slot] }
 
@@ -534,18 +550,15 @@ struct TilingState: Equatable {
         occupantBySlot.first(where: { $0.value == window })?.key
     }
 
+    /// The slot `key` names in the active layout, or nil when this layout
+    /// has no such position.
+    func slot(for key: SlotKey) -> Slot? {
+        key.slot(in: layout)
+    }
+
     var occupants: [Slot: WindowID] { occupantBySlot }
 
     var tiledWindows: [WindowID] { Array(Set(occupantBySlot.values)) }
-
-    /// The layout currently on screen: the layout of any tiled window, or
-    /// sixths when the space is empty — the layout a fresh space starts
-    /// in (its hotkeys tile without a reset on first use; a quarters
-    /// request on the empty space is still a plain tile: nothing to
-    /// leave).
-    var activeLayout: LayoutKind {
-        occupantBySlot.keys.first.map(\.layout) ?? .sixths
-    }
 
     /// Decides what happens when `window` requests `slot`: the requester
     /// owns `slot` after the move. A tiled requester swaps with a single
@@ -556,11 +569,13 @@ struct TilingState: Equatable {
     /// steps aside into its own strip instead of trading tiles.
     /// Otherwise every overlapping window is evicted (restored to its
     /// pre-tile frame).
+    ///
+    /// The target must belong to this canvas's layout: a caller resolves
+    /// a `SlotKey` against `layout` first, so a cross-layout request is
+    /// unreachable here and is a programming error, not a plan.
     func plan(window: WindowID, into slot: Slot) -> TilePlan {
+        precondition(slot.layout == layout, "plan target must match the stored layout")
         if occupantBySlot[slot] == window { return .noop }
-        if !occupantBySlot.isEmpty, slot.layout != activeLayout {
-            return .switchLayout(evicting: tiledWindows.sorted())
-        }
         let blockers = occupantBySlot
             .filter { $0.value != window && $0.key.overlaps(slot) }
             .map(\.value)
@@ -588,6 +603,7 @@ struct TilingState: Equatable {
     /// occupant from state (the gateway write decides the truth on
     /// screen; callers roll back on refusal, as `place` does).
     mutating func commit(window: WindowID, into slot: Slot) {
+        precondition(slot.layout == layout, "commit target must match the stored layout")
         for s in Slot.allCases where occupantBySlot[s] == window {
             occupantBySlot[s] = nil
         }

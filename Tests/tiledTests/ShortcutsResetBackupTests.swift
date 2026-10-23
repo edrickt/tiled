@@ -77,8 +77,8 @@ final class ShortcutsResetBackupTests: XCTestCase {
         let topRight = HotkeyBinding(
             modifiers: UInt32(cmdKey | optionKey | shiftKey),
             keyCode: UInt32(kVK_ANSI_U))
-        park(topLeft, for: .slot(.topLeft))
-        park(topRight, for: .slot(.topRight))
+        park(topLeft, for: .slotKey(.topLeft))
+        park(topRight, for: .slotKey(.topRight))
 
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
@@ -93,17 +93,17 @@ final class ShortcutsResetBackupTests: XCTestCase {
         XCTAssertEqual(
             store.binding(for: .topRight), topRight,
             "the snapshot's Top Right combo lands even though Top Left still holds it")
-        XCTAssertNil(backup(for: .slot(.topLeft)), "the applied entry is cleared")
-        XCTAssertNil(backup(for: .slot(.topRight)), "the applied entry is cleared")
+        XCTAssertNil(backup(for: .slotKey(.topLeft)), "the applied entry is cleared")
+        XCTAssertNil(backup(for: .slotKey(.topRight)), "the applied entry is cleared")
     }
 
     func testRestoreKeepsTheBackupEntryWhenTheComboWasClaimed() {
-        let claimed = HotkeyAction.slot(.topLeft)
-        let claimer = HotkeyAction.slot(.sixthTopLeft)
+        let claimed = HotkeyAction.slotKey(.topLeft)
+        let claimer = HotkeyAction.expand
         let combo = HotkeyBinding(
             modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_J))
         park(combo, for: claimed)
-        XCTAssertEqual(store.apply(combo, for: .sixthTopLeft), .applied)
+        XCTAssertEqual(store.apply(combo, for: .expand), .applied)
 
         let tab = makeTab()
         tab.confirmReset = { _ in
@@ -120,11 +120,11 @@ final class ShortcutsResetBackupTests: XCTestCase {
             store.binding(for: .topLeft), HotkeyStore.defaultBinding(for: .topLeft),
             "the claimed combo is not restored past the gate")
         XCTAssertEqual(
-            store.binding(for: .sixthTopLeft), combo,
+            store.binding(for: .expand), combo,
             "the action that claimed the combo keeps it")
         XCTAssertEqual(
             label(containing: "Not restored", in: view),
-            "Not restored: Top Left (taken by Top Left Sixth).",
+            "Not restored: Top Left (taken by Expand to Fill Screen).",
             "the partial restore names the clash")
         XCTAssertEqual(
             backup(for: claimed), combo,
@@ -134,7 +134,7 @@ final class ShortcutsResetBackupTests: XCTestCase {
             "the button keeps offering the restore while a backup remains")
 
         // Free the combo and press again: the retained entry is the retry.
-        store.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: .sixthTopLeft)
+        store.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: .expand)
         restore.performClick(nil)
 
         XCTAssertEqual(store.binding(for: .topLeft), combo)
@@ -145,7 +145,7 @@ final class ShortcutsResetBackupTests: XCTestCase {
     func testCorruptResetBackupModifiersAreIgnoredInsteadOfTrapping() {
         defaults.set(
             ["modifiers": -1, "keyCode": Int(kVK_ANSI_J)],
-            forKey: "resetBackupHotkey.\(HotkeyAction.slot(.topLeft).storageKey)")
+            forKey: "resetBackupHotkey.\(HotkeyAction.slotKey(.topLeft).storageKey)")
 
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
@@ -159,30 +159,30 @@ final class ShortcutsResetBackupTests: XCTestCase {
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         guard let disable = findButton(titled: "Disable all 11", in: view)
-        else { return XCTFail("expected the sixths bulk button") }
+        else { return XCTFail("expected the slot-key bulk button") }
         disable.performClick(nil)
         defaults.set(
             ["modifiers": -1, "keyCode": Int(kVK_ANSI_J)],
-            forKey: "parkedHotkey.\(HotkeyAction.slot(.sixthTopLeft).storageKey)")
+            forKey: "parkedHotkey.\(HotkeyAction.slotKey(.topLeft).storageKey)")
         let rebuilt = tab.build(size: NSSize(width: 440, height: 480), window: nil)
 
         guard let enable = findButton(titled: "Enable all 11", in: rebuilt)
-        else { return XCTFail("expected the sixths bulk button to flip") }
+        else { return XCTFail("expected the slot-key bulk button to flip") }
         enable.performClick(nil)
 
         XCTAssertEqual(
-            store.binding(for: .sixthTopLeft),
-            HotkeyStore.defaultBinding(for: .sixthTopLeft),
+            store.binding(for: .topLeft),
+            HotkeyStore.defaultBinding(for: .topLeft),
             "the corrupt park falls back to the factory default")
     }
 
     func testRestoreClashKeepsTheRegistrationFailureVisible() {
-        let claimed = HotkeyAction.slot(.topLeft)
-        let claimer = HotkeyAction.slot(.sixthTopLeft)
+        let claimed = HotkeyAction.slotKey(.topLeft)
+        let claimer = HotkeyAction.expand
         let combo = HotkeyBinding(
             modifiers: UInt32(controlKey | optionKey), keyCode: UInt32(kVK_ANSI_J))
         park(combo, for: claimed)
-        XCTAssertEqual(store.apply(combo, for: .sixthTopLeft), .applied)
+        XCTAssertEqual(store.apply(combo, for: .expand), .applied)
 
         let tab = makeTab()
         tab.failedActionsProvider = { [.expand] }
@@ -194,7 +194,7 @@ final class ShortcutsResetBackupTests: XCTestCase {
 
         let message = label(containing: "Not restored", in: view) ?? ""
         XCTAssertTrue(
-            message.contains("Not restored: Top Left (taken by Top Left Sixth)."),
+            message.contains("Not restored: Top Left (taken by Expand to Fill Screen)."),
             "the partial restore names the clash")
         XCTAssertTrue(
             message.contains("Expand to Fill Screen") && message.contains("could not be registered"),
@@ -210,14 +210,14 @@ final class ShortcutsResetBackupTests: XCTestCase {
 
         park(
             HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_J)),
-            for: .slot(.topLeft))
+            for: .slotKey(.topLeft))
         tab.reload()
         XCTAssertNotNil(
             findButton(titled: "Restore Previous Shortcuts", in: view),
             "a snapshot created outside the button still flips the footer on reload")
 
         defaults.removeObject(
-            forKey: "resetBackupHotkey.\(HotkeyAction.slot(.topLeft).storageKey)")
+            forKey: "resetBackupHotkey.\(HotkeyAction.slotKey(.topLeft).storageKey)")
         tab.reload()
         XCTAssertNotNil(
             findButton(titled: "Reset Shortcuts", in: view),

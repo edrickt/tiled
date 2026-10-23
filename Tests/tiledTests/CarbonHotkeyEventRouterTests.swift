@@ -11,7 +11,7 @@ final class CarbonHotkeyEventRouterTests: XCTestCase {
         let delivered = expectation(description: "action delivered")
         var actions: [HotkeyAction] = []
 
-        let status = router.dispatch(hotKeyID: Slot.bottomRight.hotkeyID) { action in
+        let status = router.dispatch(hotKeyID: SlotKey.bottomRight.hotkeyID) { action in
             actions.append(action)
             delivered.fulfill()
         }
@@ -19,7 +19,7 @@ final class CarbonHotkeyEventRouterTests: XCTestCase {
         XCTAssertEqual(status, noErr, "a recognized id is handled")
         XCTAssertTrue(actions.isEmpty, "the handler runs after the main-queue hop")
         wait(for: [delivered], timeout: 1)
-        XCTAssertEqual(actions, [.slot(.bottomRight)])
+        XCTAssertEqual(actions, [.slotKey(.bottomRight)])
     }
 
     func testDispatchRejectsAnUnknownHotkeyIDWithoutDelivering() {

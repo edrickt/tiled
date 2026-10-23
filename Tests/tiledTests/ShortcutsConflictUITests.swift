@@ -34,12 +34,12 @@ final class ShortcutsConflictUITests: XCTestCase {
         return tab
     }
 
-    private func findRecorder(slot: Slot, in view: NSView) -> RecorderButton? {
-        if let button = view as? RecorderButton, button.hotkeyAction == .slot(slot) {
+    private func findRecorder(key: SlotKey, in view: NSView) -> RecorderButton? {
+        if let button = view as? RecorderButton, button.hotkeyAction == .slotKey(key) {
             return button
         }
         for subview in view.subviews {
-            if let hit = findRecorder(slot: slot, in: subview) { return hit }
+            if let hit = findRecorder(key: key, in: subview) { return hit }
         }
         return nil
     }
@@ -81,7 +81,7 @@ final class ShortcutsConflictUITests: XCTestCase {
     func testDuplicateRecordingKeepsTheOldBindingAndNamesTheOwner() {
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
-        guard let recorder = findRecorder(slot: .topLeft, in: view)
+        guard let recorder = findRecorder(key: .topLeft, in: view)
         else { return XCTFail("expected a Top Left recorder") }
         let old = store.binding(for: .topLeft)
         let owner = store.binding(for: .topRight)
@@ -102,9 +102,9 @@ final class ShortcutsConflictUITests: XCTestCase {
     func testFailedRegistrationSurfacesBesideTheRecording() {
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
-        guard let recorder = findRecorder(slot: .topLeft, in: view)
+        guard let recorder = findRecorder(key: .topLeft, in: view)
         else { return XCTFail("expected a Top Left recorder") }
-        tab.failedActionsProvider = { [.slot(.topLeft)] }
+        tab.failedActionsProvider = { [.slotKey(.topLeft)] }
         let fresh = HotkeyBinding(
             modifiers: UInt32(controlKey | optionKey | shiftKey | cmdKey),
             keyCode: UInt32(kVK_ANSI_Y))
@@ -123,12 +123,12 @@ final class ShortcutsConflictUITests: XCTestCase {
     func testAValidRecordingClearsTheConflictLine() {
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
-        guard let recorder = findRecorder(slot: .topLeft, in: view)
+        guard let recorder = findRecorder(key: .topLeft, in: view)
         else { return XCTFail("expected a Top Left recorder") }
         record(store.binding(for: .topRight), recorder: recorder)
         XCTAssertNotNil(
             visibleLabel(
-                "⌥⇧⌘O is already used by Top Right; Top Left kept its old shortcut.",
+                "⌥⇧O is already used by Top Right; Top Left kept its old shortcut.",
                 in: view))
 
         let resolved = HotkeyBinding(
@@ -139,7 +139,7 @@ final class ShortcutsConflictUITests: XCTestCase {
         XCTAssertEqual(store.binding(for: .topLeft), resolved)
         XCTAssertNil(
             visibleLabel(
-                "⌥⇧⌘O is already used by Top Right; Top Left kept its old shortcut.",
+                "⌥⇧O is already used by Top Right; Top Left kept its old shortcut.",
                 in: view),
             "a resolved conflict no longer occupies the live region")
     }

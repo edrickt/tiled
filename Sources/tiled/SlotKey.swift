@@ -86,4 +86,11 @@ enum SlotKey: String, CaseIterable, Hashable {
     var hotkeyID: UInt32 {
         UInt32(Self.allCases.firstIndex(of: self)!) + 1
     }
+
+    /// The keys Quarters has no slot for: the two middles, the middle
+    /// column, and the two two-thirds. Derived from the one slot mapping
+    /// so the Settings caption can never drift from the engine.
+    static var quartersInert: [SlotKey] {
+        allCases.filter { $0.slot(in: .quarters) == nil }
+    }
 }

@@ -2,12 +2,13 @@
 /// implements it against the live controller; tests stand in a fake and
 /// pin every route.
 protocol HotkeyActionPerformer: AnyObject {
-    func tile(slot: Slot)
+    func tile(slotKey: SlotKey)
     func performExpandToggle()
     func performEvict()
     func performSettings()
     func performUndo()
     func performResetSplitters()
+    func performSwitchLayout()
 }
 
 /// The one routing table from a registered `HotkeyAction` to its performer
@@ -18,12 +19,13 @@ struct HotkeyActionRouter {
 
     func dispatch(_ action: HotkeyAction) {
         switch action {
-        case .slot(let slot): performer.tile(slot: slot)
+        case .slotKey(let key): performer.tile(slotKey: key)
         case .expand: performer.performExpandToggle()
         case .evict: performer.performEvict()
         case .settings: performer.performSettings()
         case .undo: performer.performUndo()
         case .resetSplitters: performer.performResetSplitters()
+        case .switchLayout: performer.performSwitchLayout()
         }
     }
 }
@@ -49,8 +51,8 @@ final class AppHotkeyPerformer: HotkeyActionPerformer {
         self.performUndoAction = performUndo
     }
 
-    func tile(slot: Slot) {
-        present(controller.handle(slot: slot))
+    func tile(slotKey: SlotKey) {
+        present(controller.handle(slotKey: slotKey))
     }
 
     func performExpandToggle() {
@@ -71,5 +73,9 @@ final class AppHotkeyPerformer: HotkeyActionPerformer {
 
     func performResetSplitters() {
         present(controller.resetOrRestoreSplitters())
+    }
+
+    func performSwitchLayout() {
+        present(controller.handleSwitchLayout())
     }
 }

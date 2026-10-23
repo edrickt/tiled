@@ -121,7 +121,7 @@ final class UndoIntegrityTests: XCTestCase {
         controller.undoLastDisplacement()
 
         XCTAssertEqual(
-            canvas.state.activeLayout, .quarters,
+            canvas.state.layout, .quarters,
             "the restored chapter's layout owns the canvas again")
         XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "a returns")
         XCTAssertNil(canvas.state.occupant(of: .sixthBottomRight))
@@ -232,11 +232,10 @@ final class UndoIntegrityTests: XCTestCase {
             "the vacated-slot entry did not leave a phantom occupancy behind")
     }
 
-    func testRefusedFreshRequesterKeepsItsVisibleSlot() {
-        // A fresh requester has no chapter entry, so a refused pre-tile
-        // restore leaves it owning the slot it visibly holds. No evictee
-        // may return into that slot or an abandoned layout: the undo is
-        // partial, reported as a failure, never as success.
+    func testRefusedRestoreDuringUndoFailsTheChapterButTheLayoutReturns() {
+        // A refused restore while the chapter's layout is reconciled fails
+        // the undo, but the layout still returns and the chapter's own
+        // windows come back: the refusal is narrated, never a success.
         harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         harness.addFocusedWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
@@ -249,26 +248,21 @@ final class UndoIntegrityTests: XCTestCase {
             controller.undoLastDisplacement(),
             "a refused frame means the chapter did not fully restore")
 
-        XCTAssertNil(canvas.notice, "a refused requester is never narrated as success")
+        XCTAssertNil(canvas.notice, "a refused restore is never narrated as success")
         XCTAssertEqual(
             canvas.error,
-            "Couldn't restore 3 windows: they may still be sitting in their old tiles.",
-            "the requester and the two evictees it blocked are all named in the count")
+            "Couldn't restore “TestApp”: it may still be sitting in its old tile.")
         XCTAssertEqual(
-            canvas.state.occupant(of: .sixthLeft).map { canvas.handle(of: $0) }, requester,
-            "the refused requester keeps the slot it visibly holds")
+            canvas.state.layout, .quarters,
+            "the chapter's layout still returns despite the refusal")
+        XCTAssertNotNil(canvas.state.occupant(of: .topLeft))
+        XCTAssertNotNil(canvas.state.occupant(of: .topRight))
         XCTAssertNil(
-            canvas.state.occupant(of: .topLeft),
-            "the overlapping evictee cannot return into the requester's retained slot")
+            canvas.state.occupant(of: .sixthLeft),
+            "the refused window was untiled during reconciliation")
         XCTAssertNil(
-            canvas.state.occupant(of: .topRight),
-            "the other-layout evictee cannot return beside the sixths requester")
-        XCTAssertEqual(
-            canvas.state.activeLayout, .sixths,
-            "the retained requester's layout remains the only one on the canvas")
-        XCTAssertNotNil(
             controller.registeredID(for: requester),
-            "the retained requester keeps its ownership record")
+            "the refused window released its record")
     }
 
     func testPartialUndoFailureIsNarratedAsFailure() {
@@ -297,7 +291,9 @@ final class UndoIntegrityTests: XCTestCase {
 
         XCTAssertTrue(controller.undoLastDisplacement())
 
-        XCTAssertEqual(canvas.notice, "Undid displacement \u{00B7} 1 window restored.")
+        XCTAssertEqual(
+            canvas.notice,
+            "Undid displacement · Quarters restored. 1 window restored.")
         XCTAssertNil(canvas.error)
     }
 

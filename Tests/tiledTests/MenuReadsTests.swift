@@ -74,8 +74,7 @@ final class MenuReadsTests: XCTestCase {
             pass.tileError,
             "Mail couldn't be tiled: the app refused to resize it.",
             "the pass describes its canvas, not the focused canvas's Notes refusal")
-        XCTAssertEqual(pass.canvas.state.activeLayout, .quarters)
-        XCTAssertEqual(pass.hasFocusedWindow, true)
+        XCTAssertEqual(pass.canvas.state.layout, .quarters)
         XCTAssertEqual(
             pass.rows.map(\.id), [safari.id],
             "the aggregate rows still see Safari on the background display")
@@ -110,16 +109,21 @@ final class MenuReadsTests: XCTestCase {
         ])
     }
 
-    func testHasFocusedWindowIsOneControllerRead() {
-        XCTAssertFalse(reads(for: controller.focusedTilingSpace).hasFocusedWindow)
+    func testReadsCarryTheCanvasLayoutWithNoFocusedWindow() {
+        // The switch row no longer needs focus, so the reads carry the
+        // canvas layout rather than a focus flag.
+        XCTAssertEqual(reads(for: controller.focusedTilingSpace).canvas.state.layout, .sixths)
 
         let safari = gateway.addWindow(
             frame: CGRect(x: 0, y: 0, width: 800, height: 600), appName: "Safari")
         gateway.focused = safari
+        controller.handleSwitchLayout(to: .quarters)
 
-        XCTAssertTrue(reads(for: controller.focusedTilingSpace).hasFocusedWindow)
+        XCTAssertEqual(reads(for: controller.focusedTilingSpace).canvas.state.layout, .quarters)
 
         gateway.focused = nil
-        XCTAssertFalse(reads(for: controller.focusedTilingSpace).hasFocusedWindow)
+        XCTAssertEqual(
+            reads(for: controller.focusedTilingSpace).canvas.state.layout, .quarters,
+            "an empty switched canvas keeps its layout with nothing focused")
     }
 }

@@ -7,18 +7,15 @@ enum MenuModel {
     /// What a clickable item does when chosen. `AppDelegate` maps each
     /// case to its @objc selector and representedObject.
     enum Action: Equatable {
-        case tileSlot(Slot)
+        case tileSlot(SlotKey)
         case toggleExpand
         case evictFocusedWindow
-        /// Layout-switch rows: collapsed replacement for the inactive
-        /// layout's whole section. Tiling the focused window into the
-        /// destination's top-left performs the switch through the engine's
-        /// own mutual-exclusion rule, with the usual undo notice.
-        case switchToQuarters
-        case switchToSixths
+        /// One top-level row inside the trusted block: the explicit layout
+        /// switch. Always enabled, because an empty canvas can switch too.
+        case switchLayout(to: LayoutKind)
         case untileWindow(WindowID)
         case focusWindow(WindowID)
-        case tileHere(Slot)
+        case tileHere(SlotKey)
         case undoSwitch
         case untileAll
         case resetDividers
@@ -60,11 +57,8 @@ enum MenuModel {
         var notice: String?
         var layoutTitle: String
         /// The layout currently on screen. The tile submenu lists only
-        /// the *active* layout's slots; the inactive one collapses to a
-        /// single switch row. Switching is destructive (it untiles
-        /// everything) and rare, while the current layout's slots are
-        /// the everyday decision set: one submenu, one layout's worth
-        /// of scanning.
+        /// the *active* layout's slot keys, labelled by physical position;
+        /// the other layout is one explicit switch row.
         var activeLayout: LayoutKind
         /// A one-off tiling refusal (an app that wouldn't resize), kept
         /// separate from hotkey failures: rendering a refusal under a
@@ -74,10 +68,6 @@ enum MenuModel {
         /// Whether a splitter backup is parked: the manage row reads
         /// "Restore Previous Splitters" instead of "Reset Splitters".
         var hasSplitterBackup: Bool
-        /// Whether a window is focused right now. The collapsed switch
-        /// rows need one to tile: disabled (with their reason stated)
-        /// when nothing is focused, never a silent no-op.
-        var hasFocusedWindow: Bool
         /// What the focused window's expand toggle does right now,
         /// driving the expand row's stateful title.
         var expandState: ExpandToggleState
@@ -182,53 +172,42 @@ enum MenuModel {
             var tileChildren: [Item] = []
             if snapshot.activeLayout == .quarters {
                 // The everyday decision set: quads + halves, never the
-                // sixths 11. The inactive layout is one switch row, not
-                // a section.
+                // sixths 11. Each row carries the physical key it shares
+                // with the other layout.
                 tileChildren.append(Item(title: "Quarters · Quads", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.quartersQuads {
-                    tileChildren.append(tileItem(slot, snapshot))
+                    tileChildren.append(tileItem(slot.key, snapshot))
                 }
                 tileChildren.append(Item(title: "Halves", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.quartersHalves {
-                    tileChildren.append(tileItem(slot, snapshot))
+                    tileChildren.append(tileItem(slot.key, snapshot))
                 }
-                tileChildren.append(.separator())
-                // Honest switch row: enabled only with a focused window to
-                // tile, and titled for what it does: the focused window
-                // moves into the destination's top-left as the switch
-                // happens. The disabled form names its own precondition, so
-                // the row never reads as broken. (The "…" stays off: no
-                // dialog follows; the row acts immediately when ready.)
-                tileChildren.append(Item(
-                    title: "Switch to Sixths (focused window → Top Left Sixth)",
-                    isEnabled: snapshot.hasFocusedWindow,
-                    action: .switchToSixths,
-                    disabledReason: snapshot.hasFocusedWindow
-                        ? nil : "Needs a focused window: click a window first."))            } else {
+            } else {
                 // Sixths sub-groups mirror the thirds/two-thirds naming in
                 // Settings: 11 flat items exceed working memory at the moment
                 // of action, so chunk them into corners, thirds, two-thirds.
                 tileChildren.append(Item(title: "Sixths · Corners", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsCorners {
-                    tileChildren.append(tileItem(slot, snapshot))
+                    tileChildren.append(tileItem(slot.key, snapshot))
                 }
                 tileChildren.append(Item(title: "Thirds", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsThirds {
-                    tileChildren.append(tileItem(slot, snapshot))
+                    tileChildren.append(tileItem(slot.key, snapshot))
                 }
                 tileChildren.append(Item(title: "Two-Thirds", isEnabled: false, isHeader: true))
                 for slot in SlotPresentation.sixthsTwoThirds {
-                    tileChildren.append(tileItem(slot, snapshot))
+                    tileChildren.append(tileItem(slot.key, snapshot))
                 }
-                tileChildren.append(.separator())
-                tileChildren.append(Item(
-                    title: "Switch to Quarters (focused window → Top Left)",
-                    isEnabled: snapshot.hasFocusedWindow,
-                    action: .switchToQuarters,
-                    disabledReason: snapshot.hasFocusedWindow
-                        ? nil : "Needs a focused window: click a window first."))
             }
             items.append(Item(title: "Tile Focused Window", children: tileChildren))
+            // The explicit switch sits beside the everyday tile rows and
+            // never needs focus: an empty canvas can switch too. Named for
+            // where it lands, with the live combo.
+            let switchTarget = snapshot.activeLayout.other
+            items.append(Item(
+                title: MenuText.switchLayoutItemTitle(
+                    target: switchTarget, label: snapshot.label(for: .switchLayout)),
+                action: .switchLayout(to: switchTarget)))
             items.append(Item(
                 title: MenuText.expandItemTitle(
                     label: snapshot.label(for: .expand),
@@ -325,12 +304,12 @@ enum MenuModel {
     /// One clickable equivalent per global hotkey: the shortcut stays in
     /// the title text, since firing both would tile-then-untile.
     private static func tileItem(
-        _ slot: Slot, _ snapshot: Snapshot
+        _ key: SlotKey, _ snapshot: Snapshot
     ) -> Item {
         Item(
             title: MenuText.tileItemTitle(
-                slot: slot, label: snapshot.label(for: .slot(slot))),
-            action: .tileSlot(slot))
+                slotKey: key, label: snapshot.label(for: .slotKey(key))),
+            action: .tileSlot(key))
     }
 
     /// One row of the tiled-windows list: a submenu wearing the window's
@@ -341,12 +320,12 @@ enum MenuModel {
     ) -> Item {
         Item(
             title: MenuText.windowLine(
-                slot: window.slot, appName: window.appName,
-                label: snapshot.label(for: .slot(window.slot))),
+                slotKey: window.slot.key, appName: window.appName,
+                label: snapshot.label(for: .slotKey(window.slot.key))),
             children: [
                 Item(title: "Untile This Window", action: .untileWindow(window.id)),
                 Item(title: "Focus \(window.appName ?? "Window")", action: .focusWindow(window.id)),
-                Item(title: "Tile Focused Window Here", action: .tileHere(window.slot)),
+                Item(title: "Tile Focused Window Here", action: .tileHere(window.slot.key)),
             ])
     }
 }
@@ -364,10 +343,9 @@ extension MenuModel.Snapshot {
             warnings: reads.hotkeyWarnings,
             notice: notice,
             layoutTitle: presentation.statusLine,
-            activeLayout: reads.canvas.state.activeLayout,
+            activeLayout: reads.canvas.state.layout,
             tileError: reads.tileError,
             hasSplitterBackup: reads.canvas.hasSplitterBackup,
-            hasFocusedWindow: reads.hasFocusedWindow,
             expandState: reads.expandState,
             tiledWindows: presentation.tiledWindows,
             canUndoDisplacement: !reads.canvas.undoStack.isEmpty,

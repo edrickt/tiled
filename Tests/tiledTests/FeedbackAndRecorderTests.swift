@@ -10,12 +10,12 @@ import XCTest
 /// distinguishable controls, not seventeen anonymous buttons.
 final class RecorderButtonAccessibilityTests: XCTestCase {
     func testInitLabelsTheSlot() {
-        let button = RecorderButton(action: .slot(.topLeft))
+        let button = RecorderButton(action: .slotKey(.topLeft))
         XCTAssertEqual(button.accessibilityLabel(), "Top Left shortcut")
     }
 
     func testValueCarriesTheBinding() {
-        let button = RecorderButton(action: .slot(.topLeft))
+        let button = RecorderButton(action: .slotKey(.topLeft))
         // keyCode 0 is kVK_ANSI_A: the value must carry the rendered label,
         // not just any non-nil string (e.g. "disabled").
         button.showBinding(HotkeyBinding(modifiers: 0, keyCode: 0))
@@ -27,21 +27,21 @@ final class RecorderButtonAccessibilityTests: XCTestCase {
     func testValueCarriesAModifiedArrowKeycap() {
         // VoiceOver reads the same rendered label the menu shows: a
         // modified arrow must not become "⌥0x7C".
-        let button = RecorderButton(action: .slot(.topLeft))
+        let button = RecorderButton(action: .slotKey(.topLeft))
         button.showBinding(
             HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_RightArrow)))
         XCTAssertEqual(button.accessibilityValue() as? String, "⌥→")
     }
 
     func testBeginRecordingMarksTheValueAsRecording() {
-        let button = RecorderButton(action: .slot(.leftHalf))
+        let button = RecorderButton(action: .slotKey(.leftColumn))
         button.beginRecording { _ in }
         XCTAssertEqual(button.accessibilityValue() as? String, "recording")
         button.showBinding(HotkeyBinding(modifiers: 0, keyCode: nil))
     }
 
     func testDisabledInitRendersDisabledValue() {
-        let button = RecorderButton(action: .slot(.sixthRight))
+        let button = RecorderButton(action: .slotKey(.rightColumn))
         XCTAssertEqual(button.accessibilityValue() as? String, "disabled")
     }
 }
@@ -69,7 +69,7 @@ final class RecorderButtonRoutingTests: XCTestCase {
     }
 
     func testDecisiveKeyFiresCompletionExactlyOnceAndDisarms() {
-        let button = RecorderButton(action: .slot(.topLeft))
+        let button = RecorderButton(action: .slotKey(.topLeft))
         button.showBinding(HotkeyBinding(modifiers: 0, keyCode: nil))
         var outcomes: [HotkeyRecorder.Outcome] = []
         button.beginRecording { outcomes.append($0) }
@@ -93,7 +93,7 @@ final class RecorderButtonRoutingTests: XCTestCase {
     }
 
     func testNonDecisiveKeyIsSwallowedAndStaysArmed() {
-        let button = RecorderButton(action: .slot(.leftHalf))
+        let button = RecorderButton(action: .slotKey(.leftColumn))
         var fired = 0
         button.beginRecording { _ in fired += 1 }
 
@@ -106,7 +106,7 @@ final class RecorderButtonRoutingTests: XCTestCase {
     }
 
     func testPassThroughKeySilentlyCancels() {
-        let button = RecorderButton(action: .slot(.sixthMiddle))
+        let button = RecorderButton(action: .slotKey(.middleColumn))
         let stored = HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_K))
         button.showBinding(stored)
         var silentCancels: [HotkeyAction] = []
@@ -121,7 +121,7 @@ final class RecorderButtonRoutingTests: XCTestCase {
         XCTAssertNotNil(passed, "navigation keys pass through")
         XCTAssertEqual(fired, 0, "the pending completion is dropped, not fired")
         XCTAssertFalse(button.isRecording)
-        XCTAssertEqual(silentCancels, [.slot(.sixthMiddle)])
+        XCTAssertEqual(silentCancels, [.slotKey(.middleColumn)])
         XCTAssertEqual(
             button.accessibilityValue() as? String, "⌥K",
             "the label reverts to the stored binding")
@@ -130,13 +130,13 @@ final class RecorderButtonRoutingTests: XCTestCase {
     func testArmingAnnouncesAndDisarmRevertsTheDisabledLabel() {
         // Armed → silent cancel with no stored binding reverts to the
         // disabled label, and onArmed announced the capture window.
-        let button = RecorderButton(action: .slot(.bottomRight))
+        let button = RecorderButton(action: .slotKey(.bottomRight))
         var armed: [HotkeyAction] = []
         button.onArmed = { armed.append($0) }
         button.showBinding(HotkeyBinding(modifiers: 0, keyCode: nil))
 
         button.beginRecording { _ in }
-        XCTAssertEqual(armed, [.slot(.bottomRight)], "arming announces the capture window")
+        XCTAssertEqual(armed, [.slotKey(.bottomRight)], "arming announces the capture window")
         XCTAssertEqual(button.accessibilityValue() as? String, "recording")
 
         _ = button.routeRecordedEvent(keyDown(keyCode: UInt16(kVK_Tab)))
@@ -147,7 +147,7 @@ final class RecorderButtonRoutingTests: XCTestCase {
 /// The Enable-all bulk path must never silently destroy combos recorded
 /// while the section was disabled: a stale park loses to a fresh edit,
 /// and the tab says which slots it kept. Drives the real bulk button
-/// (identifier "bulk-quarters") so the test covers the same path the
+/// (identifier "bulk-slotKeys") so the test covers the same path the
 /// user clicks, including the rebuild that swaps the button itself.
 /// Everything runs against a throwaway defaults suite: the park keys live
 /// outside the store, so the tab's persistence is injected too; a leak
@@ -191,10 +191,10 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         return nil
     }
 
-    private func findRecorder(slot: Slot, in view: NSView) -> RecorderButton? {
-        if let button = view as? RecorderButton, button.hotkeyAction == .slot(slot) { return button }
+    private func findRecorder(key: SlotKey, in view: NSView) -> RecorderButton? {
+        if let button = view as? RecorderButton, button.hotkeyAction == .slotKey(key) { return button }
         for subview in view.subviews {
-            if let hit = findRecorder(slot: slot, in: subview) { return hit }
+            if let hit = findRecorder(key: key, in: subview) { return hit }
         }
         return nil
     }
@@ -213,9 +213,9 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         let tab = makeTab()
         var view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
 
-        // Disable the whole quarters section via its real bulk button.
+        // Disable the whole slot-key section via its real bulk button.
         guard let disable = findButton(
-            identifier: "bulk-quarters", titledPrefix: "Disable all", in: view)
+            identifier: "bulk-slotKeys", titledPrefix: "Disable all", in: view)
         else { return XCTFail("expected a Disable-all bulk button") }
         disable.performClick(nil)
 
@@ -226,13 +226,13 @@ final class ShortcutsBulkEnableTests: XCTestCase {
             store.binding(for: .topLeft).keyCode, nil,
             "section disabled: Top Left has no combo")
 
-        // Record a fresh combo into the disabled slot (legitimate edit).
+        // Record a fresh combo into the disabled key (legitimate edit).
         let fresh = HotkeyBinding(modifiers: 0, keyCode: 6)
         XCTAssertEqual(store.apply(fresh, for: .topLeft), .applied)
 
         // Enable the section via its real bulk button.
         guard let enable = findButton(
-            identifier: "bulk-quarters", titledPrefix: "Enable all", in: view)
+            identifier: "bulk-slotKeys", titledPrefix: "Enable all", in: view)
         else { return XCTFail("expected an Enable-all bulk button after disabling") }
         enable.performClick(nil)
 
@@ -240,40 +240,40 @@ final class ShortcutsBulkEnableTests: XCTestCase {
             store.binding(for: .topLeft), fresh,
             "the fresh edit wins over the stale park; no silent data loss")
         XCTAssertNil(
-            defaults.dictionary(forKey: "parkedHotkey.topLeft"),
+            defaults.dictionary(forKey: "parkedHotkey.sixthTopLeft"),
             "the stale park is dropped, not left to strike later")
     }
 
     func testEnableAllKeepsDisabledWhenTheParkedComboWasClaimed() {
-        // A combo parked by Disable all can be claimed by another
-        // section's edit while this one is disabled. Enable all must not
-        // store it past the duplicate gate: the slot would render as
+        // A combo parked by Disable all can be claimed by another key's
+        // edit while the section is disabled. Enable all must not
+        // store it past the duplicate gate: the key would render as
         // enabled and never register.
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         guard let disable = findButton(
-            identifier: "bulk-quarters", titledPrefix: "Disable all", in: view)
+            identifier: "bulk-slotKeys", titledPrefix: "Disable all", in: view)
         else { return XCTFail("expected a Disable-all bulk button") }
         let parked = store.binding(for: .topLeft)
         disable.performClick(nil)
 
-        // Another section claims the parked combo while quarters is off.
-        XCTAssertEqual(store.apply(parked, for: .sixthTopLeft), .applied)
+        // Another key claims the parked combo while the section is disabled.
+        XCTAssertEqual(store.apply(parked, for: .topMiddle), .applied)
 
         let view2 = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         guard let enable = findButton(
-            identifier: "bulk-quarters", titledPrefix: "Enable all", in: view2)
+            identifier: "bulk-slotKeys", titledPrefix: "Enable all", in: view2)
         else { return XCTFail("expected an Enable-all bulk button") }
         enable.performClick(nil)
 
         XCTAssertNil(
             store.binding(for: .topLeft).keyCode,
-            "the claimed combo is not restored; the slot stays disabled")
+            "the claimed combo is not restored; the key stays disabled")
         XCTAssertEqual(
-            store.binding(for: .sixthTopLeft), parked,
+            store.binding(for: .topMiddle), parked,
             "the edit that claimed the combo keeps it")
         XCTAssertNotNil(
-            defaults.dictionary(forKey: "parkedHotkey.topLeft"),
+            defaults.dictionary(forKey: "parkedHotkey.sixthTopLeft"),
             "the park survives for when the clash is resolved")
     }
 
@@ -283,7 +283,7 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         guard let disable = findButton(
-            identifier: "bulk-quarters", titledPrefix: "Disable all", in: view)
+            identifier: "bulk-slotKeys", titledPrefix: "Disable all", in: view)
         else { return XCTFail("expected a Disable-all bulk button") }
         let before = store.binding(for: .topRight)
         disable.performClick(nil)
@@ -291,7 +291,7 @@ final class ShortcutsBulkEnableTests: XCTestCase {
 
         let view2 = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         guard let enable = findButton(
-            identifier: "bulk-quarters", titledPrefix: "Enable all", in: view2)
+            identifier: "bulk-slotKeys", titledPrefix: "Enable all", in: view2)
         else { return XCTFail("expected an Enable-all bulk button") }
         enable.performClick(nil)
         XCTAssertEqual(
@@ -307,9 +307,9 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         guard let bulk = findButton(
-            identifier: "bulk-quarters", titledPrefix: "Disable all", in: view)
+            identifier: "bulk-slotKeys", titledPrefix: "Disable all", in: view)
         else { return XCTFail("expected a Disable-all bulk button") }
-        guard let recorder = findRecorder(slot: .topLeft, in: view)
+        guard let recorder = findRecorder(key: .topLeft, in: view)
         else { return XCTFail("expected a Top Left recorder") }
 
         // ⌫ while recording disables the slot: the same edit the bulk
@@ -324,7 +324,7 @@ final class ShortcutsBulkEnableTests: XCTestCase {
             "the installed bulk button must state the action it will take, got \(bulk.title)")
         XCTAssertEqual(
             bulk.toolTip,
-            "Restores parked combos; slots edited while disabled keep their edits")
+            "Restores parked combos; keys edited while disabled keep their edits")
 
         // The label is not just cosmetic: the click it is about to
         // receive really does enable.
@@ -335,16 +335,16 @@ final class ShortcutsBulkEnableTests: XCTestCase {
     }
 
     func testRecordingIntoTheLastDisabledSlotFlipsTheBulkButtonToDisable() {
-        // Top Left is the only disabled Quarters slot, so the section
-        // reads "Enable all 6". Recording a combo into it leaves no
+        // Top Left is the only disabled slot key, so the section
+        // reads "Enable all 11". Recording a combo into it leaves no
         // disabled slot, and the installed button must flip the other way.
         store.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: .topLeft)
         let tab = makeTab()
         let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
         guard let bulk = findButton(
-            identifier: "bulk-quarters", titledPrefix: "Enable all", in: view)
+            identifier: "bulk-slotKeys", titledPrefix: "Enable all", in: view)
         else { return XCTFail("expected an Enable-all bulk button") }
-        guard let recorder = findRecorder(slot: .topLeft, in: view)
+        guard let recorder = findRecorder(key: .topLeft, in: view)
         else { return XCTFail("expected a Top Left recorder") }
 
         recorder.performClick(nil)
@@ -357,6 +357,6 @@ final class ShortcutsBulkEnableTests: XCTestCase {
             "no disabled slot remains, so the installed button must offer Disable, got \(bulk.title)")
         XCTAssertEqual(
             bulk.toolTip,
-            "Disable every Quarters shortcut (parks the current combos; Enable all restores them)")
+            "Disable every slot key (parks the current combos; Enable all restores them)")
     }
 }

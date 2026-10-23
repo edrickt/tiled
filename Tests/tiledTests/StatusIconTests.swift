@@ -35,6 +35,32 @@ final class StatusIconTests: XCTestCase {
             StatusIcon.filledCells(layout: .sixths, occupants: [:]), [])
     }
 
+    func testEmptySwitchedCanvasKeepsItsChosenLayoutInTheGlyph() {
+        // The layout is a stored canvas choice now: an empty canvas that
+        // switched to Quarters renders the four-cell Quarters glyph, not a
+        // fallback to sixths.
+        let screen = ScreenInfo(
+            id: ScreenID(rawValue: 1),
+            frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            name: "Display 1")
+        let controller = TilingController(
+            gateway: FakeWindowGateway(), pruneInterval: nil,
+            screens: { [screen] }, deathConfirmation: 0)
+        controller.handleSwitchLayout(to: .quarters)
+
+        let icon = MenuBarPresenter.iconSnapshot(
+            space: controller.focusedTilingSpace,
+            canvas: { controller.canvas(for: $0) },
+            displayName: { _ in nil })
+
+        XCTAssertEqual(icon, StatusIcon.Snapshot(
+            layout: .quarters, filled: [], occupiedSlots: 0, displayName: nil))
+        XCTAssertEqual(
+            StatusIcon.accessibilityDescription(icon),
+            "Tiled Quarters layout, 0 of 4 slots occupied")
+    }
+
     // MARK: Quarters occupancy
 
     func testQuartersQuadFillsItsOwnCellOnly() {
