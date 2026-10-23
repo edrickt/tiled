@@ -18,15 +18,14 @@ final class PerMonitorTests: XCTestCase {
         visibleFrame: CGRect(x: 1920, y: 0, width: 1920, height: 1080),
         name: "Display 2")
 
-    private var gateway: FakeWindowGateway!
-    private var controller: TilingController!
+    private var harness: ControllerHarness!
+    private var gateway: FakeWindowGateway { harness.gateway }
+    private var controller: TilingController { harness.controller }
 
     override func setUp() {
         super.setUp()
-        gateway = FakeWindowGateway()
-        controller = TilingController(
-            gateway: gateway, pruneInterval: nil,
-            screens: { [Self.left, Self.right] }, deathConfirmation: 0)
+        harness = ControllerHarness(
+            screens: [Self.left, Self.right], deathConfirmation: 0)
     }
 
     private var leftID: ScreenID { Self.left.id }
@@ -34,16 +33,12 @@ final class PerMonitorTests: XCTestCase {
 
     @discardableResult
     private func tileOnLeft(frame: CGRect = CGRect(x: 100, y: 100, width: 800, height: 600)) -> WindowHandle {
-        let handle = gateway.addWindow(frame: frame)
-        gateway.focused = handle
-        return handle
+        harness.addFocusedWindow(frame: frame)
     }
 
     @discardableResult
     private func tileOnRight(frame: CGRect = CGRect(x: 2000, y: 100, width: 800, height: 600)) -> WindowHandle {
-        let handle = gateway.addWindow(frame: frame)
-        gateway.focused = handle
-        return handle
+        harness.addFocusedWindow(frame: frame)
     }
 
     // MARK: Independent occupancy and layouts
@@ -145,9 +140,8 @@ final class PerMonitorTests: XCTestCase {
             controller.displayName(for: TilingSpaceKey(screen: rightID, space: nil)),
             "Display 2")
 
-        let single = TilingController(
-            gateway: FakeWindowGateway(), pruneInterval: nil,
-            screens: { [Self.left] }, deathConfirmation: 0)
+        let single = ControllerHarness(
+            screens: [Self.left], deathConfirmation: 0).controller
         XCTAssertNil(single.displayName(for: TilingSpaceKey(screen: leftID, space: nil)))
     }
 
