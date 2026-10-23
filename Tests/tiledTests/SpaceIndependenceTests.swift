@@ -273,10 +273,6 @@ final class SpaceIndependenceTests: XCTestCase {
     }
 
     func testFocusMoveChangesTheMenuKeyButNeverTheGlyphKey() {
-        // The feature's premise: the glyph follows the cursor, the menu
-        // follows focus. A focus move across displays reports the focus
-        // route and leaves the cursor display — the canvas the glyph
-        // derives from — exactly where the cursor left it.
         setUpTwoDisplaysWithFocusOnTheFirst()
         harness.fireCursorMove(to: CGPoint(x: 2500, y: 500))
         XCTAssertEqual(controller.cursorTilingSpace.screen, Self.otherDisplay.id)

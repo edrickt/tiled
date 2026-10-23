@@ -39,11 +39,9 @@ final class CanvasDirectory {
     /// switch never turns into UI work.
     private var lastFocusedSpace: TilingSpaceKey?
     private var hasResolvedFocusedSpace = false
-    /// Last display the cursor was resolved on. The first resolution
-    /// always reports; later events on one display are filtered, and a
-    /// point over no display is ignored — never stored — so the last
-    /// depiction holds until the cursor is seen again. The dedupe
-    /// baseline and the depicted display are this one value.
+    /// Last display the cursor was resolved on, mirroring the focus pair's
+    /// first-report contract. This one value is both the dedupe baseline
+    /// and the depicted display.
     private var lastCursorScreen: ScreenID?
     private var hasResolvedCursorScreen = false
 
@@ -316,10 +314,8 @@ final class CanvasDirectory {
     }
 
     /// The canvas the status glyph depicts: the stored cursor display
-    /// clamped to the attached set at read time — a detached display
-    /// resolves to the main one — then through the same action fallback
-    /// as every display-scoped read, so the withheld-Space fallback
-    /// applies exactly as for actions. Never mutates state.
+    /// through the same `actionKey` fallback as every display-scoped read,
+    /// so the withheld-Space fallback applies identically.
     func cursorKey() -> TilingSpaceKey {
         actionKey(for: isDisplayAttached(lastCursorScreen) ? lastCursorScreen : nil)
     }
