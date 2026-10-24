@@ -235,17 +235,12 @@ final class DragTracker {
     /// the button lifts, and each needs its own achieved-frame reconcile.
     private var pendingReasserts: Set<WindowID> = []
 
-    /// A settle awaiting proof that the app accepted it, keyed by window:
-    /// the gesture's final frame, and how many consecutive ticks have
-    /// re-reported that frame since. A settle write can lose a race with
-    /// the app's own resize session, two ways, both observed live: the
-    /// session's finale lands over a write that never took (the gesture
-    /// frame repeats while the echo trail never settles), or it reverts a
-    /// write that applied (a single escape from the settled trail). A
-    /// departing animation matches the gesture frame once and moves on,
-    /// so the repeated-frame shape needs two sightings; the
-    /// settled-revert shape is proof by itself. Either way the settle is
-    /// re-issued once as a grid re-write (see `handleChange`).
+    /// The frame the app's own resize session lands over our reassert
+    /// write, keyed by window: the gesture's final frame, and how many
+    /// consecutive ticks have re-reported it. A departing animation matches
+    /// that frame once and moves on, so the repeated-frame shape needs two
+    /// sightings, while a settled write that escapes straight back to it is
+    /// proof by itself (see `echoMatch`).
     private struct SettleOverride {
         let gesture: CGRect
         var sightings: Int
@@ -444,163 +439,168 @@ final class DragTracker {
     func handleChange(id: WindowID, frame: CGRect) {
         guard context.slotOf(id) != nil else { return }
         log("notif win\(id) frame=\(frame)")
+        guard !recordSettleSighting(id: id, frame: frame) else { return }
 
-        // A tick back at the frame the settle was decided at, right after
-        // that settle: the app's resize session's finale landing over our
-        // reassert write (the write is not refused; the frame just
-        // reverts). One sighting is not proof — a departing animation
-        // matches the gesture frame on its first step — so this shape
-        // waits for the second; then the session has demonstrably ended
-        // and the settle is re-issued as a plain grid re-write. One shot:
-        // the arm is consumed here.
-        if var arm = settleOverrides[id] {
-            if Self.framesClose(arm.gesture, frame, tolerance: Self.settleOverrideTolerance) {
-                arm.sightings += 1
-                if arm.sightings >= 2 {
-                    settleOverrides[id] = nil
-                    expectedFrames[id] = nil
-                    lastKnownFrames[id] = frame
-                    log("echo win\(id) settle OVERRIDDEN; re-issuing")
-                    onDragEnd(.snapback(id))
-                    return
-                }
-                // fall through to the echo trail: the first sighting is
-                // swallowed (or read live when the write has not
-                // registered yet)
-            } else {
-                // A match followed by a different frame is a departing
-                // animation, not a stuck session: start the count over.
-                arm.sightings = 0
+        switch echoMatch(id: id, frame: frame) {
+        case .overridden:
+            reissueSettle(id: id, frame: frame)
+        case .echo(let tracksOrigin):
+            let previous = lastKnownFrames[id]
+            lastKnownFrames[id] = frame
+            // A pure-origin drift is a hand on the title bar, not animation
+            // settling, which moves edges; track it, or a grab that starts
+            // the instant a write lands leaves the window offset from its
+            // tile with no drag to snap back.
+            if tracksOrigin, let previous, previous.size == frame.size,
+                previous.origin != frame.origin
+            {
+                processMove(windowID: id, from: previous, to: frame)
             }
+        case .live:
+            // Diff against the previous frame of ANY kind. Drags that change
+            // a window's origin arrive as Moved+Resized pairs with identical
+            // frames; comparing Resized against the paired Moved would
+            // silently drop every left/top/corner drag. Origin-only changes
+            // are title-bar moves: left off-grid until the next layout
+            // assertion.
+            let previous = lastKnownFrames[id]
+            lastKnownFrames[id] = frame
+            guard let previous, previous != frame else { return }
+            // Classify each axis by its two edge deltas, then aggregate. A
+            // size change alone is not proof of a grab: apps absorb writes
+            // silently, rounding frames to their own grid, so the first live
+            // tick after a placement can carry an absorbed size. The noise
+            // bound keeps that absorption out of the decision, and the
+            // dominance ratio keeps a genuinely led edge a resize even when
+            // the opposite edge drifts.
+            let horizontal = TickShape.classify(
+                frame.minX - previous.minX,
+                frame.maxX - previous.maxX,
+                noise: Self.tickNoiseBound,
+                dominance: Self.tickDominanceRatio,
+                pinned: Self.edgeMoveThreshold)
+            let vertical = TickShape.classify(
+                frame.minY - previous.minY,
+                frame.maxY - previous.maxY,
+                noise: Self.tickNoiseBound,
+                dominance: Self.tickDominanceRatio,
+                pinned: Self.edgeMoveThreshold)
+            switch TickShape.intent(horizontal, vertical) {
+            case .translation:
+                processMove(windowID: id, from: previous, to: frame)
+            case .resize:
+                clearDrag(id)
+                processResize(windowID: id, from: previous, to: frame)
+            }
+        }
+    }
+
+    // MARK: Echo suppression
+
+    /// What one incoming frame means for the tracker.
+    private enum EchoMatch {
+        /// Our own write or its animation tail: record the frame and decide
+        /// nothing. `tracksOrigin` marks a pure-origin drift inside the
+        /// target radius, which no settling animation produces.
+        case echo(tracksOrigin: Bool)
+        /// The frame reverted to a settled write's gesture frame, so the
+        /// app's own resize session landed over the write.
+        case overridden
+        /// No write explains the frame, so it is the user's.
+        case live
+    }
+
+    /// Counts one sighting of a frame that reverted to the settle's gesture
+    /// frame, and returns true when it re-issues the settle. One sighting is
+    /// not proof, because a departing animation matches the gesture frame on
+    /// its first step, so this waits for the second.
+    private func recordSettleSighting(id: WindowID, frame: CGRect) -> Bool {
+        guard var arm = settleOverrides[id] else { return false }
+        guard Self.framesClose(arm.gesture, frame, tolerance: Self.settleOverrideTolerance)
+        else {
+            // A match followed by a different frame is a departing animation,
+            // not a stuck session: start the count over.
+            arm.sightings = 0
             settleOverrides[id] = arm
+            return false
         }
-
-        // Echo suppression: our writes apply (often animated) as a stream of
-        // notifications converging on the requested frame. Swallow them; a
-        // tick that moves AWAY from the target means a real user drag took
-        // over, so we clear the entry and process it.
-        if var entry = expectedFrames[id] {
-            if Self.framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
-                if entry.settled,
-                    context.now().timeIntervalSince(entry.date) > Self.settleWindow
-                {
-                    // Settling over, but this tick already proved close:
-                    // swallow it against the target rather than falling
-                    // into the escape check below, whose stale
-                    // lastDistance would misread any tail offset as a
-                    // takeover. A pure-origin drift is still a hand on
-                    // the title bar (a tiny drag can arrive as exactly
-                    // one tick, so "the next tick goes live" never
-                    // comes): track it, or the mouse-up finds no drag
-                    // and the window is left offset from its tile.
-                    expectedFrames[id] = nil
-                    let previous = lastKnownFrames[id]
-                    lastKnownFrames[id] = frame
-                    if let previous, previous.size == frame.size,
-                        previous.origin != frame.origin
-                    {
-                        processMove(windowID: id, from: previous, to: frame)
-                    }
-                    log("echo win\(id) settle-expired")
-                    return
-                } else {
-                    let wasSettled = entry.settled
-                    if !wasSettled {
-                        // Write converged: keep swallowing close ticks
-                        // through the settle window instead of going live:
-                        // the animation tail is still in flight, and its
-                        // absolute positions must never reach the splitters.
-                        entry.settled = true
-                        entry.date = context.now()
-                        entry.lastDistance = 0
-                        expectedFrames[id] = entry
-                        log("echo win\(id) consumed")
-                    } else {
-                        log("echo win\(id) settling")
-                    }
-                    // A pure-origin drift inside the radius is a hand on
-                    // the title bar, not animation settling (settling moves
-                    // edges): track the drag so snapback/untile still work
-                    // for grabs that start the instant a write lands.
-                    // Splitters stay untouched: processMove never moves
-                    // them, and the snapback rect is the grid truth.
-                    if wasSettled, let previous = lastKnownFrames[id],
-                        previous.size == frame.size, previous.origin != frame.origin
-                    {
-                        lastKnownFrames[id] = frame
-                        processMove(windowID: id, from: previous, to: frame)
-                        return
-                    }
-                    lastKnownFrames[id] = frame
-                    return
-                }
-            } else if entry.settled {
-                expectedFrames[id] = nil // left the radius; live below
-                log("echo win\(id) settle-end")
-            }
-            let distance = Self.frameDistance(entry.frame, frame)
-            if distance > entry.lastDistance + 1 {
-                expectedFrames[id] = nil // user took over
-                log("echo win\(id) ESCAPE dist=\(distance) last=\(entry.lastDistance)")
-                // A settled write whose frame then reverts to the
-                // settle's gesture frame is the app's own resize session
-                // overriding it (observed live: the revert lands ~10 ms
-                // after the applied write). The session has now ended;
-                // re-issue the settle once as a grid re-write.
-                if entry.settled, let arm = settleOverrides[id],
-                    Self.framesClose(arm.gesture, frame, tolerance: Self.settleOverrideTolerance)
-                {
-                    settleOverrides[id] = nil
-                    lastKnownFrames[id] = frame
-                    log("echo win\(id) settle OVERRIDDEN; re-issuing")
-                    onDragEnd(.snapback(id))
-                    return
-                }
-            } else if context.now().timeIntervalSince(entry.date) > Self.staleWrite {
-                expectedFrames[id] = nil // write never applied; stop waiting
-                log("echo win\(id) stale")
-            } else {
-                entry.lastDistance = distance
-                expectedFrames[id] = entry
-                lastKnownFrames[id] = frame
-                log("echo win\(id) converging dist=\(distance)")
-                return
-            }
+        arm.sightings += 1
+        guard arm.sightings >= 2 else {
+            settleOverrides[id] = arm
+            return false
         }
+        reissueSettle(id: id, frame: frame)
+        return true
+    }
 
-        // Diff against the previous frame of ANY kind. Drags that change a
-        // window's origin arrive as Moved+Resized pairs with identical
-        // frames; comparing Resized against the paired Moved would silently
-        // drop every left/top/corner drag. Origin-only changes are title-bar
-        // moves: left off-grid until the next layout assertion.
-        let previous = lastKnownFrames[id]
+    /// Re-issues a settle that the app's own resize session overrode, once.
+    /// The override is consumed here, so a further reversion cannot loop.
+    private func reissueSettle(id: WindowID, frame: CGRect) {
+        expectedFrames[id] = nil
+        settleOverrides[id] = nil
         lastKnownFrames[id] = frame
-        guard let previous, previous != frame else { return }
-        // Classify each axis by its two edge deltas, then aggregate. A size
-        // change alone is not proof of a grab: apps absorb writes silently,
-        // rounding frames to their own grid, so the first live tick after a
-        // placement can carry an absorbed size. The noise bound keeps that
-        // absorption out of the decision, and the dominance ratio keeps a
-        // genuinely led edge a resize even when the opposite edge drifts.
-        let horizontal = TickShape.classify(
-            frame.minX - previous.minX,
-            frame.maxX - previous.maxX,
-            noise: Self.tickNoiseBound,
-            dominance: Self.tickDominanceRatio,
-            pinned: Self.edgeMoveThreshold)
-        let vertical = TickShape.classify(
-            frame.minY - previous.minY,
-            frame.maxY - previous.maxY,
-            noise: Self.tickNoiseBound,
-            dominance: Self.tickDominanceRatio,
-            pinned: Self.edgeMoveThreshold)
-        switch TickShape.intent(horizontal, vertical) {
-        case .translation:
-            processMove(windowID: id, from: previous, to: frame)
-        case .resize:
-            clearDrag(id)
-            processResize(windowID: id, from: previous, to: frame)
+        log("echo win\(id) settle OVERRIDDEN; re-issuing")
+        onDragEnd(.snapback(id))
+    }
+
+    /// Matches one incoming frame against the write the tracker waits for.
+    /// Order matters: a tick inside the target radius is an echo even when
+    /// the write has gone stale, and only a tick that moves away from the
+    /// target can escape.
+    private func echoMatch(id: WindowID, frame: CGRect) -> EchoMatch {
+        guard var entry = expectedFrames[id] else { return .live }
+
+        if Self.framesClose(entry.frame, frame, tolerance: Self.echoTolerance) {
+            if entry.settled, context.now().timeIntervalSince(entry.date) > Self.settleWindow {
+                // Settling is over, but this tick already proved close:
+                // swallow it against the target rather than falling into the
+                // escape check below, whose stale lastDistance would misread
+                // any tail offset as a takeover.
+                expectedFrames[id] = nil
+                log("echo win\(id) settle-expired")
+                return .echo(tracksOrigin: true)
+            }
+            let wasSettled = entry.settled
+            if wasSettled {
+                log("echo win\(id) settling")
+            } else {
+                // Write converged: keep swallowing close ticks through the
+                // settle window instead of going live, because the animation
+                // tail is still in flight and its absolute positions must
+                // never reach the splitters.
+                entry.settled = true
+                entry.date = context.now()
+                entry.lastDistance = 0
+                expectedFrames[id] = entry
+                log("echo win\(id) consumed")
+            }
+            return .echo(tracksOrigin: wasSettled)
         }
+
+        if entry.settled {
+            expectedFrames[id] = nil // left the radius; live below
+            log("echo win\(id) settle-end")
+        }
+        let distance = Self.frameDistance(entry.frame, frame)
+        if distance > entry.lastDistance + 1 {
+            expectedFrames[id] = nil // user took over
+            log("echo win\(id) ESCAPE dist=\(distance) last=\(entry.lastDistance)")
+            if entry.settled, let arm = settleOverrides[id],
+                Self.framesClose(arm.gesture, frame, tolerance: Self.settleOverrideTolerance)
+            {
+                return .overridden
+            }
+            return .live
+        }
+        if context.now().timeIntervalSince(entry.date) > Self.staleWrite {
+            expectedFrames[id] = nil // write never applied; stop waiting
+            log("echo win\(id) stale")
+            return .live
+        }
+        entry.lastDistance = distance
+        expectedFrames[id] = entry
+        log("echo win\(id) converging dist=\(distance)")
+        return .echo(tracksOrigin: false)
     }
 
     // MARK: Drag-out untile
