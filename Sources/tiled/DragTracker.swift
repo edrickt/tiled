@@ -150,11 +150,24 @@ final class DragTracker {
             return min(abs(first), abs(second)) <= pinned ? .grab : .translation
         }
 
+        /// What one tick asks the tracker to do: which path `handleChange`
+        /// takes. The aggregate is never one of the per-axis shapes: an edge
+        /// move on either axis is a resize even when the other axis
+        /// translated.
+        enum Intent: Equatable {
+            /// A title-bar drag: both axes translated, nothing reaches a
+            /// splitter.
+            case translation
+            /// An edge move on either axis: commit the splitters, and mark
+            /// the canvas's resize pending.
+            case resize
+        }
+
         /// Aggregates the axes: any grab or resize wins, because an edge move
         /// on either axis must reach the splitters even when the other axis
         /// absorbed cleanly; otherwise a translation moves the window. No
         /// recognizable shape keeps the conservative resize fallback.
-        static func combined(_ horizontal: TickShape, _ vertical: TickShape) -> TickShape {
+        static func intent(_ horizontal: TickShape, _ vertical: TickShape) -> Intent {
             if horizontal == .grab || horizontal == .resize
                 || vertical == .grab || vertical == .resize
             {
@@ -581,10 +594,10 @@ final class DragTracker {
             noise: Self.tickNoiseBound,
             dominance: Self.tickDominanceRatio,
             pinned: Self.edgeMoveThreshold)
-        switch TickShape.combined(horizontal, vertical) {
+        switch TickShape.intent(horizontal, vertical) {
         case .translation:
             processMove(windowID: id, from: previous, to: frame)
-        case .grab, .resize, .none:
+        case .resize:
             clearDrag(id)
             processResize(windowID: id, from: previous, to: frame)
         }
@@ -676,35 +689,27 @@ final class DragTracker {
         func moved(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) > threshold }
 
         var anyEdgeMoved = false
+        let occupied = occupiedSlots(in: space)
+        var spaceGrid = grid(for: space)
+        var committed = false
         for edge in TileEdge.allCases {
-            let edgeMoved: Bool
-            let position: CGFloat
-            switch edge {
-            case .left:
-                edgeMoved = moved(new.minX, old.minX); position = new.minX
-            case .right:
-                edgeMoved = moved(new.maxX, old.maxX); position = new.maxX
-            case .top:
-                edgeMoved = moved(new.maxY, old.maxY); position = new.maxY
-            case .bottom:
-                edgeMoved = moved(new.minY, old.minY); position = new.minY
-            }
-            guard edgeMoved else { continue }
+            let position = edge.position(in: new)
+            guard moved(position, edge.position(in: old)) else { continue }
             anyEdgeMoved = true
             // The dragged window's own edge is the source of truth; skip it
             // below so we never fight an in-progress native drag.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
             let centered = GridLayout.centeringTwoThirds(
-                on: boundary, draggedSlot: slot, occupants: occupiedSlots(in: space))
-            var spaceGrid = grid(for: space)
+                on: boundary, draggedSlot: slot, occupants: occupied)
             if spaceGrid.update(
                 boundary: boundary, toPosition: position, in: bounds,
                 centeringTwoThirds: centered)
             {
-                gridProvider.setGrid(spaceGrid, space)
+                committed = true
                 log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(spaceGrid)")
             }
         }
+        if committed { gridProvider.setGrid(spaceGrid, space) }
         if anyEdgeMoved {
             // The movement is committed live where it can be (a splitter
             // fraction, clamped; a fixed screen edge commits nothing),
@@ -771,21 +776,17 @@ final class DragTracker {
             onDragEnd(.resize(id))
         }
         let inFlight = drags.keys.sorted()
-        for id in inFlight where drags[id] != nil {
+        for id in inFlight {
             endDrag(id: id, decidedAtMouseUp: true)
         }
     }
 
     // MARK: Geometry helpers
 
-    private static func framesClose(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
+    /// True when `a` and `b` differ by at most `tolerance` per edge.
+    static func framesClose(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
         abs(a.minX - b.minX) <= tolerance && abs(a.maxX - b.maxX) <= tolerance
             && abs(a.minY - b.minY) <= tolerance && abs(a.maxY - b.maxY) <= tolerance
-    }
-
-    /// True when `a` and `b` differ by at most `tolerance` per edge.
-    static func close(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
-        framesClose(a, b, tolerance: tolerance)
     }
 
     /// Sum of per-edge deltas between two frames.

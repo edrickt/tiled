@@ -166,6 +166,17 @@ enum Slot: String, CaseIterable {
 /// side (`rows.upperBound`).
 enum TileEdge: CaseIterable {
     case left, right, top, bottom
+
+    /// Where this edge sits in `frame` (AppKit coords). One mapping, shared
+    /// by the live drag loop and the reassert's reconcile.
+    func position(in frame: CGRect) -> CGFloat {
+        switch self {
+        case .left: frame.minX
+        case .right: frame.maxX
+        case .top: frame.maxY
+        case .bottom: frame.minY
+        }
+    }
 }
 
 /// A movable boundary in the grid. Screen edges are fixed, not boundaries.
@@ -360,18 +371,6 @@ struct GridLayout: Equatable {
             return changed
         }
         return updateIndependently(boundary, to: raw)
-    }
-
-    /// Moves `slot`'s edge through the same splitter math as `update`,
-    /// including the inner-divider symmetry for two-thirds slots.
-    @discardableResult
-    mutating func update(
-        edge: TileEdge, of slot: Slot, toPosition position: CGFloat, in bounds: CGRect
-    ) -> Bool {
-        guard let boundary = Self.boundary(edge: edge, slot: slot) else { return false }
-        return update(
-            boundary: boundary, toPosition: position, in: bounds,
-            centeringTwoThirds: slot.isTwoThirds ? slot : nil)
     }
 
     /// The occupied two-thirds window whose hidden one-thirds divider

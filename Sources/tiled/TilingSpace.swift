@@ -1779,7 +1779,7 @@ struct TilingSpace {
         var reconciled = grid
         for edge in TileEdge.allCases {
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
-            let position = Self.position(of: edge, in: achieved)
+            let position = edge.position(in: achieved)
             reconciled.update(
                 boundary: boundary, toPosition: position, in: visibleFrame,
                 centeringTwoThirds: GridLayout.centeringTwoThirds(
@@ -1881,8 +1881,8 @@ struct TilingSpace {
             for edge in TileEdge.allCases {
                 guard let boundary = GridLayout.boundary(edge: edge, slot: slot)
                 else { continue }
-                let target = Self.position(of: edge, in: entry.target)
-                let landed = Self.position(of: edge, in: achieved)
+                let target = edge.position(in: entry.target)
+                let landed = edge.position(in: achieved)
                 guard abs(landed - target) > DragTracker.noOpWriteTolerance
                 else { continue }
                 if reconciled.update(
@@ -1898,13 +1898,4 @@ struct TilingSpace {
         return changed
     }
 
-    /// The screen-space position of one frame edge (AppKit coords).
-    private static func position(of edge: TileEdge, in frame: CGRect) -> CGFloat {
-        switch edge {
-        case .left: frame.minX
-        case .right: frame.maxX
-        case .top: frame.maxY
-        case .bottom: frame.minY
-        }
-    }
 }

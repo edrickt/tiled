@@ -101,7 +101,7 @@ struct FrameWriter {
         // already-correct window.
         let liveBefore = gateway.frame(of: handle)
         if let live = liveBefore,
-            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)
+            DragTracker.framesClose(live, target, tolerance: DragTracker.noOpWriteTolerance)
         {
             seedBaseline(id, target)
             log("write win\(id) no-op skip target=\(target)")
