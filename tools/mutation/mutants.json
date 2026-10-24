@@ -98,8 +98,8 @@
  [
   "Layout.swift",
   "splitter sibling gap inverted (splitters may cross)",
-  "            clamped = max(clamped, self[keyPath: lower] + 0.01)",
-  "            clamped = max(clamped, self[keyPath: lower] - 0.01)"
+  "            clamped = max(clamped, self[keyPath: lower] + Self.siblingGap)",
+  "            clamped = max(clamped, self[keyPath: lower] - Self.siblingGap)"
  ],
  [
   "Layout.swift",
@@ -146,8 +146,8 @@
  [
   "DragTracker.swift",
   "stale-write window widened to 3600s",
-  "} else if context.now().timeIntervalSince(entry.date) > Self.staleWrite {",
-  "} else if context.now().timeIntervalSince(entry.date) > Self.staleWrite + 3600 {"
+  "        if context.now().timeIntervalSince(entry.date) > Self.staleWrite {",
+  "        if context.now().timeIntervalSince(entry.date) > Self.staleWrite + 3600 {"
  ],
  [
   "Layout.swift",
@@ -284,14 +284,14 @@
  [
   "FrameWriter.swift",
   "no-op write pushed anyway (expectation never converges)",
-  "        if let live = liveBefore,\n            DragTracker.close(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            seedBaseline(id, target)\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
+  "        if let live = liveBefore,\n            DragTracker.framesClose(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            seedBaseline(id, target)\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
   ""
  ],
  [
   "FrameWriter.swift",
   "off-Space defer never taken (hidden canvas written)",
-  "        guard isVisible(space) else {\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }",
-  "        guard true else {\n            markStale(space)\n            log(\"write win\\(id) deferred off-Space\")\n            return .deferredOffSpace\n        }"
+  "        guard isVisible(space) else {\n            markStale(space)",
+  "        guard true else {\n            markStale(space)"
  ],
  [
   "FrameWriter.swift",
@@ -331,19 +331,19 @@
  ],
  [
   "TilingSpace.swift",
-  "resize reconcile leaves the two-thirds hidden divider uncentered",
-  "            reconciled.update(\n                boundary: boundary, toPosition: position, in: visibleFrame,\n                centeringTwoThirds: GridLayout.centeringTwoThirds(\n                    on: boundary, draggedSlot: slot, occupants: occupied))",
-  "            reconciled.update(\n                boundary: boundary, toPosition: position, in: visibleFrame,\n                centeringTwoThirds: nil)"
+  "resize reconcile ignores the occupied two-thirds (hidden divider left uncentered)",
+  "            reconciled.update(\n                edge: edge, of: slot, toPosition: edge.position(in: achieved),\n                in: visibleFrame, occupants: occupied)",
+  "            reconciled.update(\n                edge: edge, of: slot, toPosition: edge.position(in: achieved),\n                in: visibleFrame, occupants: [])"
  ],
  [
-  "TilingSpace.swift",
-  "resize reconcile takes a top window's far edge (row splitter to the screen top)",
+  "Layout.swift",
+  "top edge read from the frame's bottom (row splitter to the screen top)",
   "        case .top: frame.maxY\n        case .bottom: frame.minY",
   "        case .top: frame.minY\n        case .bottom: frame.minY"
  ],
  [
-  "TilingSpace.swift",
-  "resize reconcile takes a bottom window's far edge (row splitter to the screen bottom)",
+  "Layout.swift",
+  "bottom edge read from the frame's top (row splitter to the screen bottom)",
   "        case .top: frame.maxY\n        case .bottom: frame.minY",
   "        case .top: frame.maxY\n        case .bottom: frame.maxY"
  ],
@@ -366,10 +366,10 @@
   "        guard case .resize(let dragged, let achieved) = source,\n            let achieved,\n            let slot = state.slot(of: dragged)"
  ],
  [
-  "TilingSpace.swift",
-  "reassert seeds no diff baseline (first drag after it is dropped)",
-  "        for (id, rect) in rects {\n            context.tracker.seedBaseline(id, rect)\n        }",
-  "        for (id, rect) in rects {\n            _ = rect\n        }"
+  "FrameWriter.swift",
+  "off-Space defer seeds no diff baseline (first drag after the swipe back is dropped)",
+  "            seedBaseline(id, target)\n            log(\"write win\\(id) deferred off-Space\")",
+  "            log(\"write win\\(id) deferred off-Space\")"
  ],
  [
   "TilingSpace.swift",
@@ -380,8 +380,8 @@
  [
   "TilingSpace.swift",
   "neighbour reconcile moves the splitter to the target, not the achieved edge",
-  "                if reconciled.update(\n                    boundary: boundary, toPosition: landed, in: visibleFrame,",
-  "                if reconciled.update(\n                    boundary: boundary, toPosition: target, in: visibleFrame,"
+  "                if reconciled.update(\n                    edge: edge, of: slot, toPosition: landed,\n                    in: visibleFrame, occupants: occupied)",
+  "                if reconciled.update(\n                    edge: edge, of: slot, toPosition: target,\n                    in: visibleFrame, occupants: occupied)"
  ],
  [
   "TilingSpace.swift",
@@ -494,7 +494,7 @@
  [
   "MenuBarPresenter.swift",
   "refresh pass re-resolves the canvas key (menu and glyph can mix canvases)",
-  "            icon: Self.iconSnapshot(\n                space: space,",
+  "            icon: Self.iconSnapshot(\n                space: cursor,",
   "            icon: Self.iconSnapshot(\n                space: controller.focusedTilingSpace,"
  ],
  [
@@ -548,8 +548,8 @@
  [
   "DragTracker.swift",
   "release mark requires a movable splitter (screen-edge drags never reassert)",
-  "            guard edgeMoved else { continue }\n            anyEdgeMoved = true",
-  "            guard edgeMoved, GridLayout.boundary(edge: edge, slot: slot) != nil else { continue }\n            anyEdgeMoved = true"
+  "            guard moved(position, edge.position(in: old)) else { continue }\n            anyEdgeMoved = true",
+  "            guard moved(position, edge.position(in: old)),\n                GridLayout.boundary(edge: edge, slot: slot) != nil\n            else { continue }\n            anyEdgeMoved = true"
  ],
  [
   "TilingSpace.swift",
@@ -560,8 +560,8 @@
  [
   "DragTracker.swift",
   "overridden settle never repaired (screen edge stays stretched)",
-  "                if arm.sightings >= 2 {",
-  "                if arm.sightings >= 999999 {"
+  "        arm.sightings += 1\n        guard arm.sightings >= 2 else {",
+  "        arm.sightings += 1\n        guard arm.sightings >= 999999 else {"
  ],
  [
   "TilingController.swift",
