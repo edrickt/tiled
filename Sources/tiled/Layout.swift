@@ -280,6 +280,9 @@ struct GridLayout: Equatable {
     static let columnClamp: ClosedRange<CGFloat> = 0.15...0.85
     static let rowClamp: ClosedRange<CGFloat> = 0.2...0.8
     static let sixthsColumnClamp: ClosedRange<CGFloat> = 0.1...0.9
+    /// The gap two sibling splitters keep between them, so an independent
+    /// move can neither collapse a slot nor invert the middle third.
+    static let siblingGap: CGFloat = 0.01
 
     /// The movable splitter vertical refinement line `index` (0 = left
     /// screen edge, 4 = right) sits on in `layout`; nil for screen edges.
@@ -373,11 +376,6 @@ struct GridLayout: Equatable {
         return updateIndependently(boundary, to: raw)
     }
 
-    /// The occupied two-thirds window whose hidden one-thirds divider
-    /// must follow `boundary`, if any. Dragging the two-thirds window's
-    /// own outer edge counts directly; so does dragging the adjacent
-    /// third's facing edge, since that is the same splitter resizing both
-    /// windows. Any other boundary leaves the two-thirds divider alone.
     /// Moves the splitter this slot's `edge` rides to `position`, applying
     /// the two-thirds symmetry that edge implies. The one entry point for
     /// every resize path (the live drag loop, the settle's reconcile and the
@@ -397,9 +395,15 @@ struct GridLayout: Equatable {
                 on: boundary, draggedSlot: slot, occupants: occupants))
     }
 
-    /// One declaration, shared by the live drag loop and the reassert's
-    /// reconcile, so the two paths can never disagree about which hidden
-    /// divider follows an edge.
+    /// The occupied two-thirds window whose hidden one-thirds divider
+    /// must follow `boundary`, if any. Dragging the two-thirds window's
+    /// own outer edge counts directly; so does dragging the adjacent
+    /// third's facing edge, since that is the same splitter resizing both
+    /// windows. Any other boundary leaves the two-thirds divider alone.
+    /// One declaration, reached through `update(edge:of:toPosition:in:
+    /// occupants:)` by every resize path, so the live drag loop, the
+    /// settle's reconcile and the achieved-edge readback cannot disagree
+    /// about which hidden divider follows an edge.
     static func centeringTwoThirds(
         on boundary: GridBoundary, draggedSlot: Slot, occupants: Set<Slot>
     ) -> Slot? {
@@ -425,10 +429,10 @@ struct GridLayout: Equatable {
         var clamped = min(max(raw, boundary.clamp.lowerBound), boundary.clamp.upperBound)
         // Sibling ordering: a splitter can never cross the one beside it.
         if let lower = boundary.lowerSibling {
-            clamped = max(clamped, self[keyPath: lower] + 0.01)
+            clamped = max(clamped, self[keyPath: lower] + Self.siblingGap)
         }
         if let upper = boundary.upperSibling {
-            clamped = min(clamped, self[keyPath: upper] - 0.01)
+            clamped = min(clamped, self[keyPath: upper] - Self.siblingGap)
         }
         return write(boundary, to: clamped)
     }

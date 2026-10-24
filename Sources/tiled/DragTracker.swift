@@ -694,8 +694,10 @@ final class DragTracker {
             let position = edge.position(in: new)
             guard moved(position, edge.position(in: old)) else { continue }
             anyEdgeMoved = true
-            // The dragged window's own edge is the source of truth; skip it
-            // below so we never fight an in-progress native drag.
+            // A screen edge has no splitter to move, and the native drag
+            // owns the window's own frame: committing there would fight
+            // it. The pending mark below still makes mouse-up snap the
+            // window back against that edge.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
             if spaceGrid.update(
                 edge: edge, of: slot, toPosition: position, in: bounds,
