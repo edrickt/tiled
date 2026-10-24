@@ -1785,11 +1785,11 @@ struct TilingSpace {
         return reconciled
     }
 
-    /// The effectful half: store the reconciled splitters, seed the drag
-    /// loop's diff baselines for every in-scope occupant (a skipped or
-    /// deferred write never reaches the loop's own mark), write every
-    /// rect through the one write policy, then reconcile each *written*
-    /// occupant's achieved edge back onto the splitter it rides. A
+    /// The effectful half: store the reconciled splitters, write every
+    /// rect through the one write policy (which seeds the drag loop's
+    /// diff baseline for any write it cannot arm an echo for), then
+    /// reconcile each *written* occupant's achieved edge back onto the
+    /// splitter it rides. A
     /// degenerate visible frame has no rects to derive, so nothing is
     /// stored or written.
     @discardableResult
@@ -1808,7 +1808,6 @@ struct TilingSpace {
         reconcileDeferredRequests(context: context)
         var plan = reassertPlan(source)
         grid = plan.grid
-        seedBaselines(plan.rects, context: context)
         var failures: [Failure] = []
         var pass = writeRects(plan.rects, context: context)
         failures += pass.failures
@@ -1824,7 +1823,6 @@ struct TilingSpace {
         for _ in 0..<Self.maxAchievedEdgePasses {
             guard reconcileAchievedEdges(pass.written, context: context) else { break }
             plan = reassertPlan(.grid)
-            seedBaselines(plan.rects, context: context)
             pass = writeRects(plan.rects, context: context)
             failures += pass.failures
         }
@@ -1843,16 +1841,6 @@ struct TilingSpace {
     /// two neighbours that each pull the shared splitter their way from
     /// oscillating forever.
     private static let maxAchievedEdgePasses = 2
-
-    /// Seeds the drag loop's diff baseline for every rect a reassert is
-    /// about to write: a skipped or deferred write never reaches
-    /// markExpected, so without the seed the first drag after the
-    /// reassert diffs against a stale frame and is misread.
-    private func seedBaselines(_ rects: [WindowID: CGRect], context: Context) {
-        for (id, rect) in rects {
-            context.tracker.seedBaseline(id, rect)
-        }
-    }
 
     /// Reconciles every written occupant's achieved edge back onto the
     /// splitter that edge rides, returning whether any splitter moved.

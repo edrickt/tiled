@@ -47,9 +47,10 @@ struct FrameWriter {
     /// Without this a pending convergence check judges a frame that never
     /// landed and can roll the window back.
     private let cancelExpected: (WindowID) -> Void
-    /// Seeds the tracker's diff baseline for a skipped or refused write.
-    /// Neither arms an echo expectation, so without this a later one-tick
-    /// drag diffs against a stale frame and is dropped.
+    /// Seeds the tracker's diff baseline for a write that lands nowhere:
+    /// a deferral, a no-op skip, or a refusal. None of them arms an echo
+    /// expectation, so without this a later one-tick drag diffs against a
+    /// stale frame and is dropped.
     private let seedBaseline: (WindowID, CGRect) -> Void
     private let scheduleCheck: (WindowID, TilingSpaceKey) -> Void
     private let log: (String) -> Void
@@ -92,6 +93,10 @@ struct FrameWriter {
         // Space. The mark re-asserts the canvas later.
         guard isVisible(space) else {
             markStale(space)
+            // The swipe back reasserts onto this target, so the baseline
+            // claims it now: the first drag after the return measures
+            // from the frame the canvas will write.
+            seedBaseline(id, target)
             log("write win\(id) deferred off-Space")
             return .deferredOffSpace
         }

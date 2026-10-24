@@ -114,6 +114,20 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(staleMarks, [canvas])
     }
 
+    func testDeferredWriteSeedsTheBaselineTheSwipeBackWillClaim() {
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let target = CGRect(x: 40, y: 40, width: 300, height: 200)
+
+        let result = makeWriter(visible: { _ in false })
+            .write(7, handle: handle, to: target, bounds: Self.bounds, on: canvas, check: .rollback)
+
+        XCTAssertEqual(result, .deferredOffSpace)
+        XCTAssertEqual(
+            baselines.last?.1, target,
+            "the deferral arms no echo, so the diff baseline carries the target instead")
+        XCTAssertTrue(echoed.isEmpty, "a deferral never arms an expectation")
+    }
+
     func testExplicitNoneCheckWritesWithoutScheduling() {
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         let target = CGRect(x: 40, y: 40, width: 300, height: 200)

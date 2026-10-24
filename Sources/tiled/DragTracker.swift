@@ -372,12 +372,10 @@ final class DragTracker {
     }
 
     /// Seeds only the diff baseline for `id`, without arming an echo
-    /// expectation. The canvas's reassert stores the frame it is about
-    /// to write, and must seed the baseline even for occupants whose
-    /// write the policy skips (already correct) or defers (off-Space):
-    /// those never reach `markExpected`, and without a baseline the
-    /// first drag after the reassert diffs against a stale frame and is
-    /// misread.
+    /// expectation. The write policy calls it for every write that lands
+    /// nowhere (an off-Space deferral, a no-op skip, a refusal): none of
+    /// them reaches `markExpected`, and without a baseline the first
+    /// drag after that write diffs against a stale frame and is misread.
     func seedBaseline(_ id: WindowID, _ frame: CGRect) {
         lastKnownFrames[id] = frame
     }
