@@ -624,26 +624,6 @@ final class GridLayoutTests: XCTestCase {
         return grid.update(boundary: boundary, toPosition: position, in: bounds) ? boundary : nil
     }
 
-    /// A two-thirds slot's edge drag as the live loop composes it: resolve the
-    /// edge to a splitter, then apply the occupant-aware centered symmetry.
-    /// There is no slot-only update overload, because the symmetry depends on
-    /// which two-thirds window occupies the canvas.
-    @discardableResult
-    private func dragTwoThirds(
-        grid: inout GridLayout,
-        slot: Slot,
-        edge: TileEdge,
-        to position: CGFloat
-    ) -> Bool {
-        guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else {
-            return false
-        }
-        return grid.update(
-            boundary: boundary, toPosition: position, in: bounds,
-            centeringTwoThirds: GridLayout.centeringTwoThirds(
-                on: boundary, draggedSlot: slot, occupants: [slot]))
-    }
-
     func testEverySixthsInteriorEdgeDragsASplitter() {
         // Regression test for the actual bug: every interior sixths edge
         // must resolve to a draggable boundary (previously all returned
@@ -717,9 +697,10 @@ final class GridLayoutTests: XCTestCase {
         // divider between those thirds, so both planted thirds stay equal.
         var grid = GridLayout()
         XCTAssertTrue(
-            dragTwoThirds(
-                grid: &grid, slot: .sixthsLeftTwoThirds, edge: .right,
-                to: bounds.minX + 0.78 * bounds.width))
+            grid.update(
+                edge: .right, of: .sixthsLeftTwoThirds,
+                toPosition: bounds.minX + 0.78 * bounds.width, in: bounds,
+                occupants: [.sixthsLeftTwoThirds]))
         XCTAssertEqual(grid.sixthsRightSplit, 0.78, accuracy: 0.001)
         XCTAssertEqual(grid.sixthsLeftSplit, 0.39, accuracy: 0.001)
 
@@ -735,9 +716,10 @@ final class GridLayoutTests: XCTestCase {
         // recenters the hidden divider between its two planted thirds.
         var grid = GridLayout()
         XCTAssertTrue(
-            dragTwoThirds(
-                grid: &grid, slot: .sixthsRightTwoThirds, edge: .left,
-                to: bounds.minX + 0.24 * bounds.width))
+            grid.update(
+                edge: .left, of: .sixthsRightTwoThirds,
+                toPosition: bounds.minX + 0.24 * bounds.width, in: bounds,
+                occupants: [.sixthsRightTwoThirds]))
         XCTAssertEqual(grid.sixthsLeftSplit, 0.24, accuracy: 0.001)
         XCTAssertEqual(grid.sixthsRightSplit, 0.62, accuracy: 0.001)
 
@@ -756,9 +738,10 @@ final class GridLayoutTests: XCTestCase {
         left.sixthsLeftSplit = 0.4
         left.sixthsRightSplit = 0.8
         XCTAssertTrue(
-            dragTwoThirds(
-                grid: &left, slot: .sixthsLeftTwoThirds, edge: .right,
-                to: bounds.minX + 0.2 * bounds.width))
+            left.update(
+                edge: .right, of: .sixthsLeftTwoThirds,
+                toPosition: bounds.minX + 0.2 * bounds.width, in: bounds,
+                occupants: [.sixthsLeftTwoThirds]))
         XCTAssertEqual(left.sixthsRightSplit, 0.2, accuracy: 0.001)
         XCTAssertEqual(left.sixthsLeftSplit, 0.1, accuracy: 0.001)
 
@@ -766,9 +749,10 @@ final class GridLayoutTests: XCTestCase {
         right.sixthsLeftSplit = 0.2
         right.sixthsRightSplit = 0.6
         XCTAssertTrue(
-            dragTwoThirds(
-                grid: &right, slot: .sixthsRightTwoThirds, edge: .left,
-                to: bounds.minX + 0.8 * bounds.width))
+            right.update(
+                edge: .left, of: .sixthsRightTwoThirds,
+                toPosition: bounds.minX + 0.8 * bounds.width, in: bounds,
+                occupants: [.sixthsRightTwoThirds]))
         XCTAssertEqual(right.sixthsLeftSplit, 0.8, accuracy: 0.001)
         XCTAssertEqual(right.sixthsRightSplit, 0.9, accuracy: 0.001)
     }
@@ -788,18 +772,18 @@ final class GridLayoutTests: XCTestCase {
         // clamp bounds only the outer edge. It still stays strictly inside
         // the two-thirds span (and the screen) at both extremes.
         var left = GridLayout()
-        dragTwoThirds(
-            grid: &left, slot: .sixthsLeftTwoThirds, edge: .right,
-            to: bounds.minX)
+        left.update(
+            edge: .right, of: .sixthsLeftTwoThirds,
+            toPosition: bounds.minX, in: bounds, occupants: [.sixthsLeftTwoThirds])
         XCTAssertEqual(left.sixthsRightSplit, GridLayout.sixthsColumnClamp.lowerBound)
         XCTAssertEqual(left.sixthsLeftSplit, 0.05, accuracy: 0.001)
         XCTAssertGreaterThan(left.sixthsLeftSplit, 0)
         XCTAssertLessThan(left.sixthsLeftSplit, left.sixthsRightSplit)
 
         var right = GridLayout()
-        dragTwoThirds(
-            grid: &right, slot: .sixthsRightTwoThirds, edge: .left,
-            to: bounds.maxX)
+        right.update(
+            edge: .left, of: .sixthsRightTwoThirds,
+            toPosition: bounds.maxX, in: bounds, occupants: [.sixthsRightTwoThirds])
         XCTAssertEqual(right.sixthsLeftSplit, GridLayout.sixthsColumnClamp.upperBound)
         XCTAssertEqual(right.sixthsRightSplit, 0.95, accuracy: 0.001)
         XCTAssertGreaterThan(right.sixthsRightSplit, right.sixthsLeftSplit)

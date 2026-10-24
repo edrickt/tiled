@@ -1778,12 +1778,9 @@ struct TilingSpace {
         let occupied = Set(state.occupants.keys)
         var reconciled = grid
         for edge in TileEdge.allCases {
-            guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
-            let position = edge.position(in: achieved)
             reconciled.update(
-                boundary: boundary, toPosition: position, in: visibleFrame,
-                centeringTwoThirds: GridLayout.centeringTwoThirds(
-                    on: boundary, draggedSlot: slot, occupants: occupied))
+                edge: edge, of: slot, toPosition: edge.position(in: achieved),
+                in: visibleFrame, occupants: occupied)
         }
         return reconciled
     }
@@ -1879,16 +1876,13 @@ struct TilingSpace {
                 let achieved = context.gateway.frame(of: record.handle)
             else { continue }
             for edge in TileEdge.allCases {
-                guard let boundary = GridLayout.boundary(edge: edge, slot: slot)
-                else { continue }
                 let target = edge.position(in: entry.target)
                 let landed = edge.position(in: achieved)
                 guard abs(landed - target) > DragTracker.noOpWriteTolerance
                 else { continue }
                 if reconciled.update(
-                    boundary: boundary, toPosition: landed, in: visibleFrame,
-                    centeringTwoThirds: GridLayout.centeringTwoThirds(
-                        on: boundary, draggedSlot: slot, occupants: occupied))
+                    edge: edge, of: slot, toPosition: landed,
+                    in: visibleFrame, occupants: occupied)
                 {
                     changed = true
                 }

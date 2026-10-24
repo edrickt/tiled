@@ -699,11 +699,9 @@ final class DragTracker {
             // The dragged window's own edge is the source of truth; skip it
             // below so we never fight an in-progress native drag.
             guard let boundary = GridLayout.boundary(edge: edge, slot: slot) else { continue }
-            let centered = GridLayout.centeringTwoThirds(
-                on: boundary, draggedSlot: slot, occupants: occupied)
             if spaceGrid.update(
-                boundary: boundary, toPosition: position, in: bounds,
-                centeringTwoThirds: centered)
+                edge: edge, of: slot, toPosition: position, in: bounds,
+                occupants: occupied)
             {
                 committed = true
                 log("resize win\(id) edge=\(edge) position=\(position) -> \(boundary) grid=\(spaceGrid)")

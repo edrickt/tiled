@@ -378,6 +378,25 @@ struct GridLayout: Equatable {
     /// own outer edge counts directly; so does dragging the adjacent
     /// third's facing edge, since that is the same splitter resizing both
     /// windows. Any other boundary leaves the two-thirds divider alone.
+    /// Moves the splitter this slot's `edge` rides to `position`, applying
+    /// the two-thirds symmetry that edge implies. The one entry point for
+    /// every resize path (the live drag loop, the settle's reconcile and the
+    /// achieved-edge readback), so all three resolve a splitter and its
+    /// hidden divider the same way. `occupants` is the canvas's real
+    /// occupant set, which is what the symmetry depends on. Returns false
+    /// when the edge is fixed (a screen edge) or nothing moved.
+    @discardableResult
+    mutating func update(
+        edge: TileEdge, of slot: Slot, toPosition position: CGFloat,
+        in bounds: CGRect, occupants: Set<Slot>
+    ) -> Bool {
+        guard let boundary = Self.boundary(edge: edge, slot: slot) else { return false }
+        return update(
+            boundary: boundary, toPosition: position, in: bounds,
+            centeringTwoThirds: Self.centeringTwoThirds(
+                on: boundary, draggedSlot: slot, occupants: occupants))
+    }
+
     /// One declaration, shared by the live drag loop and the reassert's
     /// reconcile, so the two paths can never disagree about which hidden
     /// divider follows an edge.
