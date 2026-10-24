@@ -61,6 +61,10 @@ final class CanvasDirectory {
 
     // MARK: Canvas table
 
+    /// The canvas for `space`, for reading: an unknown key yields a fresh
+    /// empty canvas rather than nil. Mutations go through `withCanvas` (or
+    /// `modifyCanvas` for a canvas that must already exist); anything
+    /// written into the returned value is discarded.
     func canvas(for space: TilingSpaceKey) -> TilingSpace {
         spaces[space] ?? TilingSpace()
     }
