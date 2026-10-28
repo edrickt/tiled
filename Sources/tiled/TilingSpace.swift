@@ -335,6 +335,9 @@ struct TilingSpace {
         // request left free, so its record and observation survive.
         outcome.forget = decision.windowsToRestore()
             .filter { $0 != commit.rehoused }
+        // A degraded swap's decision names nobody, but its eviction did
+        // untangle a window: report it unless the fallback re-housed it.
+        outcome.forget += commit.forgotten.filter { $0 != commit.rehoused }
         // A refused placement releases the requester's record (see
         // `place`). Record presence is the ownership primitive, so the
         // coordinator must clear its handle-table entry too: a later
@@ -630,9 +633,11 @@ struct TilingSpace {
             // untangling, never by moving into the freed slot while it
             // still covers the layout.
             context.log("swap DEGENERATE win\(id) -> \(slot.rawValue); falling back to tile")
-            return applyTile(
+            var fallback = applyTile(
                 .tile(evicting: [displaced]), requester: id,
                 slot: slot, context: context)
+            fallback.forgotten.append(displaced)
+            return fallback
         }
         // Snapshot before any commit: each entry carries its window's
         // own former tile, so undo replays the swap backwards.
@@ -774,7 +779,10 @@ struct TilingSpace {
         // when the requester's own placement landed: making room for a
         // request that failed would move the victim for nothing, report
         // no destruction to undo, and promise an undo that cannot exist.
-        // A refused re-house write falls back to the plain eviction.
+        // A refused re-house write falls back to the plain eviction. A
+        // refused fallback restore is a real failure: count it, and keep
+        // the "went back" notice off the board.
+        var restorationFailed = false
         if let (wid, home) = rehouse, clean {
             deferredRequests[wid] = nil
             state.commit(window: wid, into: home)
@@ -785,11 +793,15 @@ struct TilingSpace {
                 if write == .deferredOffSpace { commit.deferred = true }
                 commit.rehoused = wid
             } else {
-                _ = restore(window: wid, context: context)
+                let failures = restore([wid], context: context)
+                commit.failures += failures
+                restorationFailed = !failures.isEmpty
                 context.log("rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
             }
         } else if let (wid, _) = rehouse {
-            _ = restore(window: wid, context: context)
+            let failures = restore([wid], context: context)
+            commit.failures += failures
+            restorationFailed = !failures.isEmpty
             context.log("rehouse SKIPPED win\(wid): requester placement failed")
         }
         if clean {
@@ -817,7 +829,7 @@ struct TilingSpace {
             // when it actually landed.
             commit.snapshot = snapshot
             commit.requester = clean ? id : nil
-            if commit.notice == nil, commit.rehoused == nil {
+            if !restorationFailed, commit.notice == nil, commit.rehoused == nil {
                 commit.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
             }
         }
@@ -866,6 +878,9 @@ struct TilingSpace {
         /// transaction reports this instead of making `settle` re-probe
         /// record presence.
         var requesterReleased = false
+        /// Windows this branch untangled on a degraded path whose original
+        /// decision (a swap) would not name them for forgetting.
+        var forgotten: [WindowID] = []
 
         /// True when nothing failed: neither a placement write nor any
         /// restore or reflow write.

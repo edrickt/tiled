@@ -184,7 +184,7 @@ enum SlotPresentation {
     }
 
     static var sixthsTwoThirds: [Slot] {
-        [.sixthsLeftTwoThirds, .sixthsRightTwoThirds]
+        Slot.allCases.filter(\.isTwoThirds)
     }
 }
 

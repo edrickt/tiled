@@ -396,13 +396,16 @@ final class TilingSpaceTests: XCTestCase {
         // re-house would have used. Marking the blocker expanded in the
         // canvas is the rule the fallback must honor.
         space.expanded[blocker] = .zero
-        harness.run(
+        let outcome = harness.run(
             .swap(displaced: blocker), requester: requester, slot: .leftHalf)
 
         XCTAssertNil(
             space.state.slot(of: blocker),
             "an expanded evictee is never re-housed, degenerate swap or not")
         XCTAssertEqual(space.state.slot(of: requester), .leftHalf)
+        XCTAssertTrue(
+            outcome.forget.contains(blocker),
+            "the degraded swap reports the window it untangled")
     }
 
     /// The same shape without the expansion: the lone evictee is re-housed
@@ -515,6 +518,30 @@ final class TilingSpaceTests: XCTestCase {
             "a refused re-house write untangles the victim instead of diverging")
         XCTAssertNotNil(space.notice, "the fallback eviction is still narrated")
         XCTAssertNil(space.error, "the restore itself succeeded")
+    }
+
+    func testRefusedFallbackRestoreIsAFailureNotAFalseSuccess() {
+        // The re-house write is refused, and the pre-tile restore that
+        // falls back to it is refused too (an app that refuses programmatic
+        // resizes). The window stays on screen in its old tile, so the
+        // notice must not claim it went back and the menu must name the
+        // refusal.
+        let b = harness.addWindow()
+        let m = harness.addWindow()
+        let r = harness.addWindow()
+        harness.apply(slot: .sixthBottomLeft, requester: b)
+        harness.apply(slot: .sixthMiddle, requester: m)
+        harness.apply(slot: .sixthRight, requester: r)
+        harness.gateway.refuseSizeWrites.insert(harness.handle(of: r)!)
+
+        harness.apply(slot: .sixthsRightTwoThirds, requester: m)
+
+        XCTAssertNotNil(
+            space.error,
+            "a refused fallback restore names the app instead of silence")
+        XCTAssertFalse(
+            space.notice?.contains("went back") ?? false,
+            "the notice must not claim a refused restore landed")
     }
 
     func testRefusedRequesterLeavesTheRehouseVictimAlone() {
