@@ -244,6 +244,10 @@ final class DragTracker {
     private struct SettleOverride {
         let gesture: CGRect
         var sightings: Int
+        /// The last frame that counted. One app change can arrive as a
+        /// Moved+Resized pair with identical frames; that is one sighting,
+        /// not proof the session reverted.
+        var lastSighted: CGRect?
     }
     private var settleOverrides: [WindowID: SettleOverride] = [:]
 
@@ -487,8 +491,12 @@ final class DragTracker {
             case .translation:
                 processMove(windowID: id, from: previous, to: frame)
             case .resize:
-                clearDrag(id)
-                processResize(windowID: id, from: previous, to: frame)
+                // A shape-less tick takes the conservative resize fallback
+                // but moves no edge: clearing here would drop an in-flight
+                // title-bar drag, and its drop would never be decided.
+                if processResize(windowID: id, from: previous, to: frame) {
+                    clearDrag(id)
+                }
             }
         }
     }
@@ -522,6 +530,8 @@ final class DragTracker {
             settleOverrides[id] = arm
             return false
         }
+        guard arm.lastSighted != frame else { return false }
+        arm.lastSighted = frame
         arm.sightings += 1
         guard arm.sightings >= 2 else {
             settleOverrides[id] = arm
@@ -613,6 +623,9 @@ final class DragTracker {
     /// pauses.
     private func processMove(windowID id: WindowID, from previous: CGRect, to frame: CGRect) {
         if drags[id] == nil {
+            // A new title-bar drag supersedes any settle-override arm left
+            // from an earlier mouse-up on this window.
+            settleOverrides[id] = nil
             let handPress = handPressPoint.map { previous.contains($0) } == true
                 && handPressAt.map {
                     context.now().timeIntervalSince($0) <= Self.handPressWindow
@@ -676,12 +689,15 @@ final class DragTracker {
     /// fraction live; any edge movement — a movable splitter or a fixed
     /// screen edge — marks the canvas's resize pending, so mouse-up
     /// reasserts and a pulled-away screen edge snaps back.
-    private func processResize(windowID id: WindowID, from old: CGRect, to new: CGRect) {
+    @discardableResult
+    private func processResize(
+        windowID id: WindowID, from old: CGRect, to new: CGRect
+    ) -> Bool {
         settleOverrides[id] = nil // a new edge movement supersedes a stale arm
-        guard let slot = context.slotOf(id) else { return }
+        guard let slot = context.slotOf(id) else { return false }
         let space = context.spaceOf(id)
         let bounds = gridProvider.visibleFrame(space)
-        guard bounds.width > 0, bounds.height > 0 else { return }
+        guard bounds.width > 0, bounds.height > 0 else { return false }
         let threshold = Self.edgeMoveThreshold
 
         func moved(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) > threshold }
@@ -716,6 +732,7 @@ final class DragTracker {
             // the user is still steering.
             pendingReasserts.insert(id)
         }
+        return anyEdgeMoved
     }
 
     /// The occupied slots of the canvas a drag is resizing, for the
@@ -762,6 +779,13 @@ final class DragTracker {
     func mouseLifted() {
         handPressPoint = nil
         handPressAt = nil
+        // A window can hold both a pending edge reassert and a live
+        // title-bar drag (an AX tick misread as an edge move). The drop
+        // owns the gesture: decide in-flight drags first, and drop their
+        // pending mark, because the reassert writes every occupant and the
+        // write's echo clears the drag before its drop could be decided.
+        let inFlight = drags.keys.sorted()
+        pendingReasserts.subtract(inFlight)
         let pending = pendingReasserts
         pendingReasserts = []
         for id in pending.sorted() {
@@ -773,7 +797,6 @@ final class DragTracker {
             }
             onDragEnd(.resize(id))
         }
-        let inFlight = drags.keys.sorted()
         for id in inFlight {
             endDrag(id: id, decidedAtMouseUp: true)
         }

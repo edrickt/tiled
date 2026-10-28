@@ -366,7 +366,9 @@ final class DragTrackerTests: XCTestCase {
             decisions, [.resize(1)],
             "one sighting is not yet an override")
 
-        tracker.handleChange(id: 1, frame: resized)
+        // A second, genuinely new frame near the gesture geometry: a
+        // duplicated notification of one app change is not two sightings.
+        tracker.handleChange(id: 1, frame: resized.offsetBy(dx: 2, dy: 0))
         XCTAssertEqual(
             decisions, [.resize(1), .snapback(1)],
             "the overridden settle is re-issued as a grid re-write")
@@ -380,6 +382,70 @@ final class DragTrackerTests: XCTestCase {
         XCTAssertEqual(
             decisions, [.resize(1), .snapback(1)],
             "the repair is one shot")
+    }
+
+    func testSubNoiseFinalTickKeepsATitleBarDragAlive() {
+        // A 1pt tick in a title-bar drag classifies as shape-less and
+        // takes the conservative resize fallback. It must not clear the
+        // drag: the mouse-up would then find nothing to decide and the
+        // window would stay dropped over its still-occupied slot.
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+        // The press sits inside the frame the drag's first tracked tick
+        // leaves behind: the first tick only seeds the baseline.
+        tracker.mousePressed(at: CGPoint(x: 70, y: 470))
+        dragTicks(
+            1, size: CGSize(width: 500, height: 400),
+            to: [(60, 460), (120, 520)])
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 121, y: 521, width: 500, height: 400))
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [.untile(1)], "the drop still decides")
+    }
+
+    func testMouseUpDecidesALiveDragBeforeReassertingIt() {
+        // The coordinator's reassert writes every occupant, and
+        // FrameWriter marks the write expected, which drops the dragged
+        // window's in-flight drag. If mouse-up reasserts the pending edge
+        // first, the drag-out is lost and the splitters reconcile from the
+        // drop. Model that synchronous write here.
+        var liveTracker: DragTracker!
+        var liveDecisions: [DragTracker.DragDecision] = []
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        liveTracker = DragTracker(
+            context: DragTracker.Context(
+                slotOf: { [weak self] in self?.slots[$0] },
+                occupants: { [weak self] in self?.occupants ?? [:] },
+                now: { [weak self] in self?.now ?? Date() }),
+            gridProvider: provider(),
+            onDragEnd: { decision in
+                liveDecisions.append(decision)
+                if case .resize(let id) = decision {
+                    liveTracker.markExpected(id, tiled)
+                }
+            },
+            scheduleDragEnd: { [weak self] fire in
+                self?.dragEndFires.append(fire)
+                return {}
+            })
+        tracker = liveTracker
+        tile(1, .topLeft, frame: tiled)
+
+        var widened = tiled
+        widened.size.width += 100
+        drag(1, from: tiled, to: widened, tracker: liveTracker)
+        XCTAssertTrue(liveDecisions.isEmpty, "the edge drag is pending")
+
+        liveTracker.mousePressed(at: CGPoint(x: 10, y: 410))
+        dragTicks(
+            1, size: widened.size,
+            to: [(60, 460), (120, 520)])
+        liveTracker.mouseLifted()
+
+        XCTAssertEqual(
+            liveDecisions, [.untile(1)],
+            "the live drop decides; the pending reassert is dropped with it")
     }
 
     func testSettledWriteRevertedByTheSessionIsReissued() {
