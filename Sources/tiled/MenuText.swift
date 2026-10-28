@@ -149,7 +149,7 @@ enum MenuText {
     ) -> String {
         guard untiled > 0 else { return "Switched to \(layout.title)." }
         let noun = untiled == 1 ? "1 window" : "\(untiled) windows"
-        let recovery = undoable ? " Undo from the Tiled menu." : ""
+        let recovery = undoable ? undoRecoveryHint : ""
         return "Switched to \(layout.title) · \(noun) untiled.\(recovery)"
     }
 
@@ -161,6 +161,10 @@ enum MenuText {
         let noun = untiled == 1 ? "1 window" : "\(untiled) windows"
         return "Switched to \(layout.title); \(noun) untiled."
     }
+
+    /// The recovery path every notice offers. It names no combo: Undo is
+    /// remappable, and a stale literal teaches a key that may do nothing.
+    static let undoRecoveryHint = " Undo from the Tiled menu."
 
     /// Undo's chapter notice. The layout is named when the chapter put it
     /// back, because a switch chapter's whole point is that the previous
@@ -175,7 +179,8 @@ enum MenuText {
         default: windows = "\(restored) windows restored."
         }
         guard let layoutRestored else {
-            return "Undid displacement · \(windows)"
+            return windows.isEmpty
+                ? "Undid displacement." : "Undid displacement · \(windows)"
         }
         let layout = "back to \(layoutRestored.title)"
         return windows.isEmpty

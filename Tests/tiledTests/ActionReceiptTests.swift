@@ -113,7 +113,7 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertTrue(receipt.performed)
         XCTAssertEqual(
             receipt.notice,
-            "Untiled 2 windows. Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
+            "Untiled 2 windows. Undo from the Tiled menu.")
         XCTAssertEqual(receipt.notice, canvas.notice)
         XCTAssertEqual(receipt.announcement, "All tiled windows restored.")
     }

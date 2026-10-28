@@ -321,7 +321,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.untileAll()
         XCTAssertFalse(canvas.undoStack.isEmpty, "untile-all is itself undoable")
         XCTAssertEqual(canvas.displacedCount, 2)
-        XCTAssertEqual(canvas.notice, "Untiled 2 windows. Press ⌃⌥⇧⌘Z to undo.")
+        XCTAssertEqual(canvas.notice, "Untiled 2 windows. Undo from the Tiled menu.")
         controller.undoLastDisplacement()
         // Undo re-tiles each dissolved window into its slot (under fresh
         // ids, since untile-all cleared the records, so the canvas

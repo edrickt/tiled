@@ -462,8 +462,22 @@ final class UndoIntegrityTests: XCTestCase {
             !canvas.undoStack.isEmpty,
             "no chapter can restore windows whose frames never read")
         XCTAssertFalse(
-            canvas.notice?.contains("to undo") ?? false,
-            "the notice must not offer a key with no chapter behind it")
+            canvas.notice?.contains(MenuText.undoRecoveryHint) ?? false,
+            "the notice must not offer the undo route with no chapter behind it")
+    }
+
+    func testUndoRaisesTheArrangementItRetiles() {
+        // The forward eviction raises the survivor over the evictee;
+        // undo restores the evictee below the arrangement it re-tiles.
+        let (requester, evictee) = makeSwapChapter()
+        gateway.clearRaiseCalls()
+
+        controller.undoLastDisplacement()
+
+        XCTAssertTrue(
+            gateway.raiseCalls.contains(requester),
+            "the restored arrangement ends above the restored evictee")
+        XCTAssertTrue(gateway.raiseCalls.contains(evictee))
     }
 
     // MARK: Refusal attribution and off-Space writes

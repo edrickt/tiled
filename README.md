@@ -252,7 +252,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-make check             # unit suite (945 tests) and the published count
+make check             # unit suite (948 tests) and the published count
 make test              # same suite with the full transcript
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
@@ -287,7 +287,7 @@ The layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (945 tests) | `make check` | nothing; ~5s, no AX, no runloop |
+| Unit suite (948 tests) | `make check` | nothing; ~5s, no AX, no runloop |
 | Focused tests | `swift test --filter <Suite>` | nothing |
 | Full transcript | `make test` | nothing |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |

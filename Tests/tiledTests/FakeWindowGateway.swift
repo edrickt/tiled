@@ -241,6 +241,10 @@ final class FakeWindowGateway: WindowGateway {
         writes.removeAll()
     }
 
+    func clearRaiseCalls() {
+        raiseCalls.removeAll()
+    }
+
     func observedHandles() -> [WindowHandle] {
         Array(changeHandlers.keys)
     }

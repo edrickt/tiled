@@ -1154,6 +1154,11 @@ final class TilingController {
                 observe(window: window)
             }
             restored += result.restored.count
+            // Restored windows sit below the arrangement they left, the
+            // same rule the forward path applies through `outcome.raise`.
+            if !result.restored.isEmpty {
+                raiseOccupants(on: destination)
+            }
             for failure in result.failures {
                 recordFailure(failure.handle, name: failure.name)
             }

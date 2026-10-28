@@ -353,7 +353,7 @@ extension MenuModel.Snapshot {
             hasSplitterBackup: reads.canvas.hasSplitterBackup,
             expandState: reads.expandState,
             tiledWindows: presentation.tiledWindows,
-            canUndoDisplacement: !reads.canvas.undoStack.isEmpty,
+            canUndoDisplacement: reads.canvas.canUndoDisplacement,
             displacedCount: reads.canvas.displacedCount,
             untileCount: reads.canvas.tiledCount,
             monitorSections: presentation.sections,

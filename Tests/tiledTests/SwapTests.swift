@@ -89,8 +89,8 @@ final class SwapTests: XCTestCase {
             canvas.notice?.contains("Right Third") ?? false,
             "the notice names the displaced window's landing tile")
         XCTAssertTrue(
-            canvas.notice?.contains("Z") ?? false,
-            "the notice offers the undo")
+            canvas.notice?.contains(MenuText.undoRecoveryHint) ?? false,
+            "the notice offers the undo route without naming a combo")
     }
 
     func testSwapLeavesFocusOnDisplacedWindow() {

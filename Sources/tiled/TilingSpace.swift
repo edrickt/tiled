@@ -685,8 +685,8 @@ struct TilingSpace {
         // didn't touch: the notice names it and its landing tile.
         let displacedName = appName(displaced, context: context) ?? "That window"
         commit.notice =
-            "\(displacedName) moved to \(SlotPresentation.title(of: previous)) "
-                + "to make room. Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+            "\(displacedName) moved to \(SlotPresentation.title(of: previous))"
+                + " to make room." + MenuText.undoRecoveryHint
         commit.snapshot = snapshot
         commit.requester = id
         context.log(
@@ -961,8 +961,8 @@ struct TilingSpace {
     /// where it moved. Composed in `settle` after reflow, when the final
     /// slot is known.
     private static func rehouseNotice(name: String, slot: Slot) -> String {
-        "\(name) moved to \(SlotPresentation.title(of: slot)) to make room. "
-            + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+        "\(name) moved to \(SlotPresentation.title(of: slot)) to make room."
+            + MenuText.undoRecoveryHint
     }
 
     /// One snapshot entry per displaced window, captured before the
@@ -1008,7 +1008,7 @@ struct TilingSpace {
         default:
             head = "\(names[0]) and \(names.count - 1) more went back to where they were."
         }
-        return head + " Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+        return head + MenuText.undoRecoveryHint
     }
 
     /// A refused placement or swap write, named for the announcement and
@@ -1495,7 +1495,7 @@ struct TilingSpace {
         let noun = chapter.count == 1 ? "1 window" : "\(chapter.count) windows"
         if !chapter.isEmpty {
             beginUndoChapter()
-            notice = "Untiled \(noun). Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo."
+            notice = "Untiled \(noun)." + MenuText.undoRecoveryHint
             primeTracker(for: chapter, context: context)
         }
         // Handles first: the restore clears each record, so resolve every
@@ -1719,6 +1719,11 @@ struct TilingSpace {
     /// windows, or 0 when no chapter is parked. Named for the undo model,
     /// not eviction: a swap chapter displaces without untiling anyone.
     var displacedCount: Int { undoStack.last?.snapshot.count ?? 0 }
+
+    /// Whether the last chapter has anything to restore. Menu visibility
+    /// and the row's count are one fact, so an empty placeholder chapter
+    /// can never show a "Restore 0 Displaced Windows" row.
+    var canUndoDisplacement: Bool { displacedCount > 0 }
 
     // MARK: Reassert
 

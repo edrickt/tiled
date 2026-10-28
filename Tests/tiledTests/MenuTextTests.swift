@@ -197,6 +197,20 @@ final class MenuTextTests: XCTestCase {
             "Undid displacement · 1 window restored.")
     }
 
+    func testEmptyUndoNoticeIsAWellFormedSentence() {
+        // The controller guards this combination away, but the string must
+        // not end in a dangling separator if a future caller reaches it.
+        XCTAssertEqual(
+            MenuText.undoDisplacementNotice(restored: 0, layoutRestored: nil),
+            "Undid displacement.")
+    }
+
+    func testNoticesNeverNameAnUndoCombo() {
+        // Undo is remappable, so the recovery hint points at the menu.
+        XCTAssertFalse(MenuText.undoRecoveryHint.contains("Z"))
+        XCTAssertTrue(MenuText.undoRecoveryHint.contains("Tiled menu"))
+    }
+
     // MARK: Feedback announcements
 
     func testAnnouncements() {

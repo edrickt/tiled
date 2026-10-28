@@ -654,7 +654,7 @@ extension ReflowTests {
         // not the intermediate re-house slot it passed through.
         XCTAssertEqual(
             canvas.notice,
-            "TestApp moved to Right Two-Thirds to make room. Press ⌃⌥⇧⌘Z to undo.")
+            "TestApp moved to Right Two-Thirds to make room. Undo from the Tiled menu.")
     }
 
     func testReHouseUndoRestoresTheVictimsOwnSlot() {

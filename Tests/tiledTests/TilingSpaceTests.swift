@@ -213,8 +213,8 @@ final class TilingSpaceTests: XCTestCase {
         // shared one-step undo.
         XCTAssertEqual(
             space.notice,
-            "TestApp went back to where it was. "
-                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
+            "TestApp went back to where it was."
+                + " Undo from the Tiled menu.")
         let chapter = space.undoStack.last
         XCTAssertNotNil(chapter, "the eviction is undoable like a switch")
         XCTAssertEqual(chapter?.snapshot.first?.slot, .topLeft)
@@ -367,8 +367,8 @@ final class TilingSpaceTests: XCTestCase {
 
         XCTAssertEqual(
             space.notice,
-            "TestApp moved to Right Third to make room. "
-                + "Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
+            "TestApp moved to Right Third to make room."
+                + " Undo from the Tiled menu.")
         XCTAssertEqual(space.undoStack.last?.requester, a)
         let snapshot = try! XCTUnwrap(space.undoStack.last?.snapshot)
         XCTAssertEqual(snapshot.count, 2, "both windows are undoable")
@@ -943,7 +943,7 @@ final class TilingSpaceTests: XCTestCase {
 
         XCTAssertEqual(
             space.notice,
-            "Untiled 2 windows. Press \u{2303}\u{2325}\u{21E7}\u{2318}Z to undo.")
+            "Untiled 2 windows. Undo from the Tiled menu.")
         XCTAssertEqual(space.state.occupants, [:])
         XCTAssertEqual(harness.frame(of: a), aOriginal)
         XCTAssertEqual(harness.frame(of: b), bOriginal)
