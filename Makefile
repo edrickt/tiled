@@ -1,7 +1,7 @@
 # Tiled: the everyday commands. `make help` lists them.
 #
 # These wrap the scripts so there is one obvious spelling per task; the
-# scripts remain the source of truth and are what CI runs.
+# scripts remain the source of truth and are what every gate runs.
 
 .PHONY: help build release test test-q check app app-universal install run repro mutation doctor clean
 

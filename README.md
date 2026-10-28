@@ -258,8 +258,8 @@ make install           # build, install to /Applications, launch
 ```
 
 `make help` lists every task. The Makefile only wraps the scripts in
-`scripts/`, which remain the source of truth and are what CI runs; the bundle
-version comes from `VERSION`.
+`scripts/`, which remain the source of truth and are what every gate runs; the
+bundle version comes from `VERSION`.
 
 ### Running during development
 
@@ -316,7 +316,8 @@ models the quarters eviction algebra, not a second occupancy model. The multi-di
 suite checks same-slot coexistence, per-monitor moves, and splitter isolation
 on two attached displays; unplug/replug, rearrange, and Mission Control
 validation stays in the accompanying manual checklist. Run these before a
-release; they cannot run in CI (they move the real cursor and need a TCC grant).
+release; they cannot run headless (they move the real cursor and need a TCC
+grant).
 
 ```
 make check                              # the gate for every change
@@ -411,7 +412,9 @@ cannot hide. Run the full table before committing.
 Four workers by default (`--workers N` to tune); the tool's own tests run with
 `python3 tools/mutation/test_mutate.py`.
 
-CI (`.github/workflows/tests.yml`) runs the unit suite on every push and PR.
+Nothing runs these gates for you: there is no CI, so `make check` before
+every push and `python3 tools/mutation/mutate.py` before a release are the
+gate. Both are cheap enough that a hand run is the whole cost.
 
 ## Status / roadmap
 
