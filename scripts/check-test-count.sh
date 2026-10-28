@@ -1,8 +1,8 @@
 #!/bin/bash
 # README publishes the unit-test count; keep it true. scripts/test.sh owns
 # the suite run and writes build/test.log, so this check reads that run
-# instead of starting a second one. Skills point at README and publish no
-# count of their own.
+# instead of starting a second one. README is the only place that states a
+# count.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -23,13 +23,6 @@ fi
 
 if [[ "$claims" != "$actual" ]]; then
     echo "test-count: README claims '$claims'; the suite ran $actual" >&2
-    exit 1
-fi
-
-dupes=$(grep -RIlE '[1-9][0-9]* tests' .opencode/skills 2>/dev/null || true)
-if [[ -n "$dupes" ]]; then
-    echo "test-count: skills must not publish a test count; README owns it:" >&2
-    echo "$dupes" >&2
     exit 1
 fi
 

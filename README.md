@@ -320,6 +320,7 @@ release; they cannot run in CI (they move the real cursor and need a TCC grant).
 
 ```
 make check                              # the gate for every change
+scripts/doctor.sh                       # read-only preflight for any live run
 swift test --filter <Suite>             # focused inner loop
 swift tools/repro/probe-spaces.swift     # what the live suites can cover here
 ./scripts/run-repro.sh                  # pre-release live check
@@ -331,6 +332,21 @@ python3 tools/mutation/mutate.py --resume       # only mutants the last run did 
 python3 tools/mutation/mutate.py --list # show the injected-bug table
 python3 tools/mutation/mutate.py --workers 2    # fewer workers on a loaded machine
 ```
+
+The live suites park the host windows at fixed coordinates tuned for roughly
+1512x982, so read the actual and expected frames before calling a failure a
+regression and record the display size with the evidence. On a 1120x1050
+single-display machine the full suite scored `PASS 37 FAIL 2` (S11a and S14b):
+`HOSTC` and `HOSTD` start partly off-screen and `HOSTB`'s center sits under
+`HOSTC`, so a focused case that clicks that center targets the wrong window and
+an eviction restore can be clamped to the visible frame. The resize cases S2-S7
+and the rest of the tiling sequence passed there.
+
+Every live run starts through `scripts/run-repro.sh` or
+`scripts/run-focus-loop.sh`, never against an instance someone else started,
+and keeps its artifacts under `build/verification/<timestamp>-<feature>/` with
+the `PASS`/`FAIL` lines and the command that produced them. A green unit suite
+is necessary, not proof of the live adapter.
 
 ### Focused loops
 

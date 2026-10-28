@@ -1,8 +1,8 @@
 #!/bin/bash
 # Read-only preflight for a live Tiled verification run.
-# Usage: ./.opencode/skills/verify/scripts/doctor.sh
+# Usage: ./scripts/doctor.sh
 set -uo pipefail
-cd "$(dirname "$0")/../../../.."
+cd "$(dirname "$0")/.."
 
 failures=0
 warnings=0
@@ -31,7 +31,7 @@ else
     bad "no GUI session (launchctl managername=$manager, console user=$console_user); live suites need a logged-in desktop"
 fi
 
-# Accessibility permission is attributed to the terminal that runs opencode.
+# Accessibility permission is attributed to the terminal that runs the suites.
 probe=build/verification/ax-trust
 if [ ! -x "$probe" ]; then
     mkdir -p build/verification
@@ -44,7 +44,7 @@ if [ -x "$probe" ]; then
     if [ "$("$probe" 2>/dev/null)" = "true" ]; then
         ok "Accessibility trust for this terminal"
     else
-        bad "Accessibility trust missing: System Settings -> Privacy & Security -> Accessibility, add the app running opencode, then retry"
+        bad "Accessibility trust missing: System Settings -> Privacy & Security -> Accessibility, add the app running the suites, then retry"
     fi
 fi
 

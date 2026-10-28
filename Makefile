@@ -3,7 +3,7 @@
 # These wrap the scripts so there is one obvious spelling per task; the
 # scripts remain the source of truth and are what CI runs.
 
-.PHONY: help build release test test-q check app app-universal install run repro mutation clean
+.PHONY: help build release test test-q check app app-universal install run repro mutation doctor clean
 
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 
@@ -20,6 +20,7 @@ help:
 	@echo "  make install    build, install to /Applications, launch"
 	@echo "  make run        run the dev build from the terminal"
 	@echo "  make repro      live end-to-end suite (needs Accessibility + a quiet desktop)"
+	@echo "  make doctor     read-only preflight for a live run"
 	@echo "  make mutation   would the unit suite notice an injected bug?"
 	@echo "  make clean      remove build products"
 
@@ -55,6 +56,9 @@ repro:
 
 mutation:
 	python3 tools/mutation/mutate.py
+
+doctor:
+	./scripts/doctor.sh
 
 clean:
 	rm -rf .build build
