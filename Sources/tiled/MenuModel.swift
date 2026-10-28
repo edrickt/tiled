@@ -1,11 +1,11 @@
-/// Platform-free description of the status menu, extracted from
-/// `AppDelegate` so the structure contracts (warning precedence over the
+/// Platform-free description of the status menu, extracted from the
+/// delegate so the structure contracts (warning precedence over the
 /// status line, slot grouping, empty states, undo visibility, the
 /// untrusted block) are testable without building NSMenu items.
-/// `AppDelegate` maps these onto NSMenu/NSMenuItem one-for-one.
+/// `MenuBarPresenter` maps these onto NSMenu/NSMenuItem one-for-one.
 enum MenuModel {
-    /// What a clickable item does when chosen. `AppDelegate` maps each
-    /// case to its @objc selector and representedObject.
+    /// What a clickable item does when chosen. `MenuBarPresenter` maps
+    /// each case to its @objc selector and representedObject.
     enum Action: Equatable {
         case tileSlot(SlotKey)
         case toggleExpand
@@ -303,7 +303,7 @@ enum MenuModel {
 
     /// One clickable equivalent per global hotkey: the shortcut stays in
     /// the title text, since firing both would tile-then-untile. The title
-    /// names the concrete tile the row places; the action carries the
+    /// names the concrete slot the row places; the action carries the
     /// shared physical key, so a stale menu cannot commit a foreign slot.
     private static func tileItem(
         _ slot: Slot, _ snapshot: Snapshot

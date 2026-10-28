@@ -9,15 +9,15 @@ struct WindowRecord {
     var preTileFrame: CGRect
 }
 
-/// A window evicted by a layout switch, enabling one-step undo.
-/// Records are rebuilt from live handles on undo; dead windows are skipped.
-/// `space` tags the tiling canvas the window returns to: undo retiles
-/// per display and per Space, so a restored window lands on the canvas
-/// it left. Nil = legacy snapshots (pre-per-monitor), restored into the
-/// requester's canvas.
 /// One window in an undo chapter: it was evicted, moved by a re-house or
 /// swap, or grew by reflow. The chapter is a displacement, not necessarily
 /// an eviction.
+///
+/// Records are rebuilt from live handles on undo; dead windows are skipped.
+/// `space` tags the tiling canvas the window returns to: undo retiles
+/// per display and per Space, so a restored window lands on the canvas
+/// it left. Nil = legacy snapshots (pre-per-canvas), restored onto the
+/// canvas being undone.
 struct EvictedWindow {
     let handle: WindowHandle
     let slot: Slot
@@ -312,7 +312,7 @@ struct TilingSpace {
     /// event freed reflow into one survivor, restored windows sit below
     /// the arrangement, a swap's displaced window takes focus, and the
     /// event is narrated, verified, and made undoable. One chapter per
-    /// event, so a single ⌃⌥⇧⌘Z puts back everything this settled.
+    /// event, so a single Undo puts back everything this event displaced.
     private mutating func settle(
         _ decision: TilePlan, commit: Commit, requester id: WindowID,
         context: Context
@@ -1719,11 +1719,11 @@ struct TilingSpace {
     // MARK: Reassert
 
     /// The trigger for one reassert. A small sum type, not a request
-    /// object: `.resize` is an edge drag's settle (the app's achieved
+    /// object: `.resize` is an edge drag's reassert (the app's achieved
     /// frame is authoritative), `.grid` is every path that already knows
     /// its splitters are right (display change, swipe back, splitter
     /// reset, title-bar snapback). No scope set and no convergence knob:
-    /// the coordinator's mouse-up wires `.resize` in stage 3, and a
+    /// the coordinator's mouse-up wires `.resize`, and a
     /// future overlay-handle gesture would add its own case, not a
     /// speculative one now.
     enum ReassertSource: Equatable {
@@ -1767,7 +1767,7 @@ struct TilingSpace {
     /// its achieved frame covers the screen by definition, and a stale
     /// edge drag that survived an Expand must never reconcile the
     /// splitters (or the neighbours) from that frame. The two-thirds
-    /// hidden-divider rule is the grid's own, shared with the live drag
+    /// hidden-splitter rule is the grid's own, shared with the live drag
     /// loop.
     private func reconciledGrid(_ source: ReassertSource) -> GridLayout {
         guard case .resize(let dragged, let achieved) = source,

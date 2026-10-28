@@ -64,7 +64,8 @@ final class HotkeyServiceTests: XCTestCase {
     }
 
     func testExpandComboIsOptionShiftReturn() {
-        // Sits beside the quarters ⌥⇧ set but on Return, which no slot uses.
+        // Sits beside the slot keys' shared ⌥⇧ set but on Return, which no
+        // slot uses.
         XCTAssertEqual(HotkeyService.expandModifiers, UInt32(shiftKey | optionKey))
         XCTAssertEqual(HotkeyService.expandKeyCode, UInt32(kVK_Return))
         XCTAssertEqual(HotkeyService.expandDefaultBinding.label, "⌥⇧⏎")
@@ -83,16 +84,16 @@ final class HotkeyServiceTests: XCTestCase {
     }
 
     func testEvictComboIsOptionShiftDelete() {
-        // Fixed like expand's ⌥⇧⏎: it sits beside the quarters ⌥⇧ set but
-        // on ⌫ (kVK_Delete), which no slot uses.
+        // Sits beside the slot keys' shared ⌥⇧ set but on ⌫ (kVK_Delete),
+        // which no slot uses.
         XCTAssertEqual(HotkeyService.evictModifiers, UInt32(shiftKey | optionKey))
         XCTAssertEqual(HotkeyService.evictKeyCode, UInt32(kVK_Delete))
         XCTAssertEqual(HotkeyService.evictDefaultBinding.label, "⌥⇧⌫")
     }
 
     func testResetSplittersComboIsOptionShiftR() {
-        // Fixed like expand's ⌥⇧⏎ and evict's ⌥⇧⌫: it sits beside the
-        // sixths ⌥⇧ set but on R, which no slot defaults to.
+        // Sits beside the slot keys' shared ⌥⇧ set but on R, which no slot
+        // defaults to.
         XCTAssertEqual(HotkeyService.resetSplittersModifiers, UInt32(shiftKey | optionKey))
         XCTAssertEqual(HotkeyService.resetSplittersKeyCode, UInt32(kVK_ANSI_R))
         XCTAssertEqual(HotkeyService.resetSplittersDefaultBinding.label, "⌥⇧R")

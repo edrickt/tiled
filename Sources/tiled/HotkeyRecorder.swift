@@ -1,11 +1,11 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// interprets keypresses for the Shortcuts-tab recorder button.
+/// Interprets keypresses for the Shortcuts-tab recorder button.
 ///
 /// Outcomes:
 /// - `.binding`: a combo with ≥1 of ⌃⌥⇧⌘ plus a non-modifier key.
-/// - `.clear`: bare ⌫/forward-delete disables the slot.
+/// - `.clear`: bare ⌫/forward-delete disables that action.
 /// - `.cancel`: bare ⎋ aborts the record, keeping the old binding.
 /// - nil: keep recording (bare keys, lone modifiers, caps lock, repeats,
 ///   mouse/wheel events).

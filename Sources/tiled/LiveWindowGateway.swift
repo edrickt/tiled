@@ -173,8 +173,6 @@ final class AXWindowFrames: WindowFrames {
     }
 }
 
-/// Thin wrapper over the Accessibility API: permissions, focused window,
-/// frame read/write. All coordinate conversion lives here.
 /// The production `WindowGateway`: macOS Accessibility plus the private
 /// window-server Space table, behind the seam.
 ///

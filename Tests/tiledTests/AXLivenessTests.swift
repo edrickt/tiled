@@ -105,7 +105,7 @@ final class AXLivenessTests: XCTestCase {
                 LiveWindowGateway.liveness(
                     probeError: probeError, appWindowsError: .success,
                     appWindowMatch: true, processAlive: true),
-                .unknown, "\(probeError): matching frame is alive")
+                .unknown, "\(probeError): a matching frame is membership, not death")
             XCTAssertEqual(
                 LiveWindowGateway.liveness(
                     probeError: probeError, appWindowsError: .success,

@@ -6,6 +6,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The README now states the shipped rule for the menu-bar glyph and ⌥⇧\:
+  both follow the display under the pointer, while the tiled-window rows
+  and the menu's Switch Layout row follow focus.
+
 ## [0.3.0] - 2026-10-28
 
 ### Added

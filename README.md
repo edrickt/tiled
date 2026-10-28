@@ -39,7 +39,7 @@ layout owns the position.
 
 | Key    | Action |
 |--------|--------|
-| ⌥⇧\   | Switch the focused canvas's layout: untiles every tiled window there (each returns to its pre-tile frame); one undo restores the windows and the previous layout. On an empty canvas it just switches. |
+| ⌥⇧\   | Switch the layout of the display under the pointer (the menu's Switch Layout row follows focus instead): untiles every tiled window on that canvas (each returns to its pre-tile frame); one undo restores the windows and the previous layout. On an empty canvas it just switches. |
 
 ### App actions
 
@@ -53,7 +53,7 @@ slot combo:
 | ⌥⇧⏎    | Expand the focused window to fill the screen (not fullscreen mode) |
 | ⌥⇧⌫    | Evict the focused window: untile it and restore its pre-tile frame |
 | ⌥⇧R    | Reset Splitters: snap the focused canvas's splitters back to even splits, keeping every window tiled |
-| ⌥⇧\    | Switch the focused canvas's layout (see above) |
+| ⌥⇧\    | Switch the layout of the display under the pointer (see above) |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden, as long as this shortcut is enabled and registered; otherwise quit and reopen Tiled) |
 | ⌃⌥⇧⌘Z   | Undo the focused canvas's last displacement (a layout switch, an eviction, or a swap — any reflow it caused is undone with it) |
 
@@ -124,7 +124,7 @@ tell you which app took it.
 
 ## Tiling rules
 
-- One window per tile.
+- One window per slot.
 - Tiling a window into a slot **evicts** any window occupying an overlapping
   slot. Evicted windows are restored to their pre-tile frames.
   - Two quads occupied on one side + the half key → both quads are evicted.
@@ -168,16 +168,18 @@ tell you which app took it.
   All and Reset Splitters act on the focused canvas only. (Where the
   window server withholds a Space id, Tiled falls back to one canvas per
   display rather than guessing.)
-- The menu-bar glyph and the focused-canvas rows follow the focused
-  window's display and Space; the window list still groups every visible
-  display's windows. Swiping to another Space (or focusing a window on
-  another display) redraws the glyph (2×2 or 3×2) and its occupancy for
-  the canvas that just became visible, even though there was no tiling
+- The menu-bar glyph follows the display under the pointer, and the
+  focused-canvas rows follow the focused window's display and Space; the
+  window list still groups every visible display's windows. Swiping the
+  pointer's display to another Space (or moving the pointer to another
+  display) redraws the glyph (2×2 or 3×2) and its occupancy for the
+  canvas that just became visible, even though there was no tiling
   action. Windows parked in hidden Spaces stay tiled and keep their
   history; they simply wait off-menu until you swipe back.
 - Quarters and sixths are mutually exclusive per canvas: ⌥⇧\ switches the
-  focused canvas, untiling every tiled window there and restoring each to
-  its pre-tile frame. One undo returns the windows and the previous layout.
+  layout of the display under the pointer, untiling every tiled window on
+  that canvas and restoring each to its pre-tile frame. One undo returns
+  the windows and the previous layout.
   A canvas keeps its layout when the board empties. A slot key never
   switches: a key with no slot in the active layout is inert and says where
   it belongs. The menu names the effect and how to undo it ("Switched to

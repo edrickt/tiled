@@ -20,9 +20,9 @@ import Foundation
 /// re-pushes it mid-drag.
 ///
 /// Edge drags resize only the dragged window while the button is down:
-/// splitter fractions commit live, but the settle waits for mouse-up
+/// splitter fractions commit live, but the mouse-up reassert waits
 /// (`mousePressed`/`mouseLifted`, wired by the controller's global event
-/// monitors). Resizing the tiles under a held button fights the user's
+/// displays). Resizing the tiles under a held button fights the user's
 /// drag; on release the canvas reasserts the whole layout at once — a
 /// screen edge the drag pulled away included. A resize tick
 /// that trails the mouse-up (AX streams the drag's final frame) re-arms
@@ -34,7 +34,7 @@ import Foundation
 /// — past the untile distance the window untiles where dropped,
 /// otherwise it snaps back into its slot (the canvas reasserts with its
 /// existing splitters). The move-silence debounce is the fallback for a
-/// mouse-up that never arrives (a missed monitor, a drag the OS cancels).
+/// mouse-up that never arrives (a missed display event, a drag the OS cancels).
 /// A single far jump with no recent hand press on the window is never a
 /// hand drag, so it snaps back too — even when an unrelated click lifts
 /// the button before the debounce.

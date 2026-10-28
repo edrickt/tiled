@@ -77,7 +77,7 @@ enum MenuText {
     // MARK: Menu rows
 
     /// One line of the tiled-windows list: slot, app, and live combo. The
-    /// row names the tile the window holds now ("Left Half" in Quarters,
+    /// row names the slot the window holds now ("Left Half" in Quarters,
     /// "Left Third" in Sixths); the menu's display header carries the
     /// layout, and the combo comes from the shared physical key.
     static func windowLine(slot: Slot, appName: String?, label: String?) -> String {

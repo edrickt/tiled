@@ -22,7 +22,7 @@ final class AppDelegateMenuTests: XCTestCase {
         // Rows with no screen tags still group under one "Display" header:
         // the nil key exists in the grouping dictionary, so the single-
         // group check treats it as grouped. (The truly flat branch is
-        // reachable only with zero rows (see the empty test above).)
+        // reachable only with zero rows (see the empty test below).)
         let rows = [
             row(1, .topLeft),
             row(2, .topRight),
@@ -472,9 +472,9 @@ final class AppDelegateMenuTests: XCTestCase {
     // MARK: Refresh ordering (refreshPlan)
 
     func testIconChangeRedrawsWithoutRebuildingTheMenu() {
-        // The status icon reads the focused display's occupancy, which the
-        // menu snapshot deliberately aggregates across displays: a focus
-        // move can change the glyph while the menu snapshot is identical.
+        // The status icon reads the pointer display's occupancy, which the
+        // menu snapshot deliberately aggregates across displays: moving the
+        // pointer can change the glyph while the menu snapshot is identical.
         // The glyph must not ride the menu diff, or it freezes on the
         // display the user left until the next tiling action.
         let plan = MenuBarPresenter.refreshPlan(

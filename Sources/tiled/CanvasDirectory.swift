@@ -106,8 +106,9 @@ final class CanvasDirectory {
 
     // MARK: Display + Space resolution
 
-    /// Canvas key for a display right now. Nil or unknown screens fall
-    /// back to the main display, then the display-less key.
+    /// Canvas key for a display right now. A nil screen falls back to the
+    /// main display, then the display-less key; an unknown screen keeps
+    /// its own key (callers that must clamp check attachment first).
     func key(for screen: ScreenID?) -> TilingSpaceKey {
         let resolved = screen ?? screens().first?.id
         return TilingSpaceKey(

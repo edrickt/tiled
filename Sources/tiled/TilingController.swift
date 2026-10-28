@@ -242,8 +242,8 @@ final class TilingController {
         }
         // Mouse presses/drags supply the hand evidence a move tick cannot
         // carry (see DragTracker.mousePressed/mouseDragged), and mouse-up
-        // commits the deferred neighbor re-pushes of an edge drag (see
-        // DragTracker.mouseLifted). AppDelegate wires the production
+        // reasserts the canvas after an edge drag, dragged window
+        // included (see DragTracker.mouseLifted). AppDelegate wires the production
         // monitors; the no-op defaults keep tests from installing real
         // event monitors.
         observeMouseDown { [weak self] point in self?.mousePressed(at: point) }
@@ -323,7 +323,7 @@ final class TilingController {
     /// some display. The newly visible canvas may have missed a display
     /// reassertion while hidden, and the menu aggregates visible
     /// canvases, so both the stale reassert and the menu refresh are
-    /// unconditional; only the glyph is scoped to the focused canvas.
+    /// unconditional; only the glyph is scoped to the pointer's display.
     private func activeSpaceMayHaveChanged() {
         directory.refreshFrames(directory.visibleKeys())
         reassertStaleActiveSpaces()
@@ -1191,9 +1191,9 @@ final class TilingController {
     /// The current occupants that must step aside before `chapter`
     /// returns: those whose cells a restored window would land on, or
     /// whose layout the chapter contradicts. Chapter members are exempt —
-    /// each has an entry of its own that re-places it (a swap or
-    /// step-aside chapter's destinations may overlap one another) — and
-    /// so is the window being restored.
+    /// each has an entry of its own that re-places it, and their
+    /// destinations are pre-event slots, therefore disjoint, so no member
+    /// can block another — and so is the window being restored.
     private func blockers(
         of chapter: TilingSpace.UndoChapter, on space: TilingSpaceKey,
         excluding handled: Set<WindowID>
@@ -1235,8 +1235,9 @@ final class TilingController {
         tracker.mouseDragged()
     }
 
-    /// The user released the mouse button: the tracker commits every
-    /// splitter move an in-progress edge drag made as a resize decision.
+    /// The user released the mouse button: the tracker names each pending
+    /// edge drag as a resize decision, which the coordinator routes to the
+    /// canvas's reassert, and decides each in-flight title-bar drag's drop.
     /// Wired from the production mouse-up monitor; tests call it directly.
     func mouseLifted() {
         tracker.mouseLifted()
@@ -1267,7 +1268,7 @@ final class TilingController {
 
     /// Reasserts the canvas owning `id` for the given source, then applies
     /// the outcome and refreshes the menu. One spelling for the drag's
-    /// resize and snapback settles, which differ only in the source.
+    /// resize and snapback reasserts, which differ only in the source.
     private func reassert(_ id: WindowID, source: TilingSpace.ReassertSource) {
         guard let key = directory.owner(of: id) else { return }
         let outcome = directory.withCanvas(key) {
@@ -1696,16 +1697,18 @@ final class TilingController {
     // MARK: Per-canvas spaces
 
     /// The canvas currently shown on `screen` (nil resolves the main
-    /// display). Reads resolve through the same key the next action
-    /// would target, withheld-Space fallback included, so a menu or test
-    /// can never observe a different canvas than an action touches.
+    /// display). Reads resolve through the same key a display-scoped
+    /// action would target, withheld-Space fallback included; a slot
+    /// request resolves the requester's own canvas instead (see
+    /// `keyForRequester`), so the two can deliberately differ during a
+    /// withheld Space.
     func canvas(for screen: ScreenID?) -> TilingSpace {
         directory.canvas(for: directory.actionKey(for: screen))
     }
 
     /// One canvas by key: the single scoped read surface. A key that has
-    /// never been used reads as an empty canvas (never nil), so callers
-    /// assert against the same shape an action would have created.
+    /// never been used reads as an empty canvas (never nil); its
+    /// `visibleFrame` stays unresolved until an action establishes it.
     func canvas(for space: TilingSpaceKey) -> TilingSpace {
         directory.canvas(for: space)
     }

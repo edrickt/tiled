@@ -165,8 +165,8 @@ final class ControllerBulkOperationTests: XCTestCase {
         // into its own chapter. The old undo is NOT gone; history stacks,
         // newest last.
         controller.handle(slotKey: .leftColumn)
-        // c is added after switch #1, then switch #2 untiles b alone.
-        // Undo #2 then has to clear c (a later sixths-to-quarters placement).
+        // c is tiled into Quarters bottomRight after switch #2; undo #2
+        // restores Sixths and untiles it.
         let c = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 400, height: 300))
         gateway.focused = c
         controller.handleSwitchLayout(to: .quarters)
@@ -193,12 +193,11 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testUndoHistoryIsBoundedByDepthNotAmnesia() {
-        // Six explicit switches after the first placement; the stack keeps
-        // the freshest five and drops the oldest — exactly five chapters
-        // survive, not fewer. Walking back five times consumes all of
-        // them; the sixth undo answers instead of reaching further, and a
-        // stack that kept a sixth chapter would answer it instead of a
-        // no-op receipt.
+        // Seven explicit switches after the first placement; depth 5 drops
+        // the oldest two, so exactly five chapters survive. Walking back
+        // five times consumes all of them; the sixth undo answers instead
+        // of reaching further, and a stack that kept a sixth chapter would
+        // answer it instead of a no-op receipt.
         for i in 0..<7 {
             let handle = gateway.addWindow(
                 frame: CGRect(x: i * 10, y: i * 10, width: 500, height: 400))
@@ -207,8 +206,8 @@ final class ControllerBulkOperationTests: XCTestCase {
             controller.handle(slotKey: .topLeft)
         }
         XCTAssertFalse(canvas.undoStack.isEmpty)
-        // Each of the five oldest deletions is gone, so each undo must
-        // consume a real chapter. Asserting only the end state (stack
+        // The two oldest chapters are gone, so each of these five undos
+        // must consume a real chapter. Asserting only the end state (stack
         // empty) also passed with a depth-2 stack, where three of these
         // five calls were silent no-ops.
         for index in 1...5 {

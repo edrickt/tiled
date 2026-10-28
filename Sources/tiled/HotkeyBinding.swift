@@ -189,8 +189,8 @@ enum SlotPresentation {
 }
 
 /// Persists per-action hotkey bindings in UserDefaults. Missing entries
-/// fall back to the factory defaults (the ⌥⇧⌘ / ⌥⇧ slot set plus the
-/// app actions' original combos), so a fresh install behaves exactly like
+/// fall back to the factory defaults (the eleven slot keys' shared ⌥⇧ set
+/// plus the app actions' original combos), so a fresh install behaves exactly like
 /// the build where the app actions were hardcoded.
 final class HotkeyStore {
     /// What `apply` decided.

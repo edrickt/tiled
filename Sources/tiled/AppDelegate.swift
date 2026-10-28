@@ -31,8 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyStore: hotkeyStore,
         hotkeyService: { [weak self] in self?.hotkeys },
         actionTarget: self)
-    /// App activation moves focus, and focus picks the display the status
-    /// icon depicts and the window the menu rows describe. The
+    /// App activation moves focus, and focus picks the window the menu rows
+    /// describe; the status icon depicts the display under the pointer. The
     /// controller's change callback only runs for tiling actions, so
     /// without this the menu bar can keep describing the app the user
     /// just left until the next tile.
@@ -181,9 +181,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return self.hotkeyStore.registeredLabel(
                 for: .switchLayout, failedActions: hotkeys.failedActions)
         }
-        // Focus moving to another window can change which display drives
-        // the glyph with no tiling action at all. The gateway re-targets
-        // as apps activate; this subscribes now that AX is trusted.
+        // Moving the pointer to another display, or swiping a display to
+        // another Space, can change the glyph with no tiling action at all.
+        // The gateway re-targets as apps activate; this subscribes now that
+        // AX is trusted.
         controller.observeFocus()
         menuBar.refresh()
         switch AppStartCompletion.make(

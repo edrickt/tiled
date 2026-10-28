@@ -8,11 +8,11 @@
 /// fills two columns), and occupancy is cell overlap rather than slot
 /// identity, so a transient mixed state never reads as empty.
 ///
-/// AppKit-free so the mapping is unit-testable; `AppDelegate` draws the
-/// snapshot this produces.
+/// AppKit-free so the mapping is unit-testable; `MenuBarPresenter` draws
+/// the snapshot this produces.
 enum StatusIcon {
     /// What the icon currently depicts: layout geometry plus fill. The
-    /// delegate diffs this to redraw on occupancy changes, not just
+    /// presenter diffs this to redraw on occupancy changes, not just
     /// layout switches; windows coming and going within one layout must
     /// flip cells without the layout moving.
     struct Snapshot: Equatable {

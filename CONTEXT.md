@@ -81,7 +81,7 @@ Keeping an evictee tiled instead of untangling it. Two rules, step-aside checked
 _Avoid_: relocation, re-assignment, re-seat, displacement (the undo chapter, not the move)
 
 **Displacement (undo chapter)**:
-The undo model's whole destructive event: the windows it evicted, moved (a re-house or swap), or grew by reflow, plus a requester that left its slot. A swap displaces without untiling anyone, so the chapter and its undo copy say "displaced", never "evicted". A chapter stores no layout: undo derives the restored layout from the chapter's slots, so a switch chapter puts back the previous layout with its windows.
+The undo model's whole destructive event: the windows it evicted, moved (a re-house or swap), or grew by reflow, plus a requester that left its slot when the event displaced another window. A requester that moves to a free tile with no displacement leaves no chapter. A swap displaces without untiling anyone, so the chapter and its undo copy say "displaced", never "evicted". A chapter stores no layout: undo derives the restored layout from the chapter's slots, so a switch chapter puts back the previous layout with its windows.
 _Avoid_: switch (undo covers swaps and evictions too), eviction (one cause and one kind of chapter entry)
 _Code_: `TilingSpace.UndoChapter`, `TilingSpace.displacedCount`
 

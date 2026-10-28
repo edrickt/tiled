@@ -67,11 +67,11 @@ struct SlotGeometry: Equatable {
     let rows: Range<Int>
 }
 
-/// A tile a window can occupy, defined structurally by `geometry`.
+/// A slot a window can occupy, defined structurally by `geometry`.
 ///
 /// Overlap rule: two slots overlap iff their spans intersect (equivalently,
 /// their cell sets intersect). The controller enforces "one window per
-/// tile" via the eviction rules in `TilingState.plan(window:into:)`.
+/// slot" via the eviction rules in `TilingState.plan(window:into:)`.
 ///
 /// Quarters slots tile the screen as 2x2 quads plus full-column halves.
 /// Sixths slots tile it as a 3x2 grid (corner/middle sixths) plus
@@ -134,7 +134,7 @@ enum Slot: String, CaseIterable {
     var key: SlotKey { geometry.key }
 
     /// True for the sixths slots that span two thirds of the screen.
-    /// Their span hides a one-thirds divider, which is kept centered
+    /// Their span hides a one-thirds splitter, which is kept centered
     /// when the slot's movable outer edge is resized.
     var isTwoThirds: Bool {
         switch self {
@@ -185,14 +185,14 @@ enum TileEdge: CaseIterable {
 /// clamp range, and any sibling it must not cross. All splitter behavior
 /// (`position`, `update`) is written once against these descriptors.
 enum GridBoundary: CaseIterable {
-    case columnSplit // vertical divider between left and right columns
-    case leftRowSplit // horizontal divider for the left column only
-    case rightRowSplit // horizontal divider for the right column only
-    case sixthsLeftSplit // vertical divider between the left and middle thirds
-    case sixthsRightSplit // vertical divider between the middle and right thirds
-    case sixthsLeftRowSplit // horizontal divider for the left third only
-    case sixthsMiddleRowSplit // horizontal divider for the middle third only
-    case sixthsRightRowSplit // horizontal divider for the right third only
+    case columnSplit // vertical splitter between left and right columns
+    case leftRowSplit // horizontal splitter for the left column only
+    case rightRowSplit // horizontal splitter for the right column only
+    case sixthsLeftSplit // vertical splitter between the left and middle thirds
+    case sixthsRightSplit // vertical splitter between the middle and right thirds
+    case sixthsLeftRowSplit // horizontal splitter for the left third only
+    case sixthsMiddleRowSplit // horizontal splitter for the middle third only
+    case sixthsRightRowSplit // horizontal splitter for the right third only
 
     /// The axis a splitter's fraction measures across.
     enum Axis { case vertical, horizontal }
@@ -257,9 +257,9 @@ enum GridBoundary: CaseIterable {
 struct GridLayout: Equatable {
     /// Fraction of width where the left column ends.
     var columnSplit: CGFloat = 0.5
-    /// Fraction of height where the left column's row divider sits.
+    /// Fraction of height where the left column's row splitter sits.
     var leftRowSplit: CGFloat = 0.5
-    /// Fraction of height where the right column's row divider sits.
+    /// Fraction of height where the right column's row splitter sits.
     /// Independent from the left: dragging BL's top edge moves leftRowSplit
     /// only, so TR/BR keep their rects (and vice versa).
     var rightRowSplit: CGFloat = 0.5
@@ -267,14 +267,14 @@ struct GridLayout: Equatable {
     var sixthsLeftSplit: CGFloat = 1.0 / 3.0
     /// Fraction of width where the middle sixths third ends (default 2/3).
     var sixthsRightSplit: CGFloat = 2.0 / 3.0
-    /// Fraction of height where the left third's row divider sits.
+    /// Fraction of height where the left third's row splitter sits.
     var sixthsLeftRowSplit: CGFloat = 0.5
-    /// Fraction of height where the middle third's row divider sits.
+    /// Fraction of height where the middle third's row splitter sits.
     /// Independent from the other thirds: dragging the middle column's row
     /// edge moves this only, so the left/right corners keep their rects
     /// (and symmetrically for the other columns).
     var sixthsMiddleRowSplit: CGFloat = 0.5
-    /// Fraction of height where the right third's row divider sits.
+    /// Fraction of height where the right third's row splitter sits.
     var sixthsRightRowSplit: CGFloat = 0.5
 
     static let columnClamp: ClosedRange<CGFloat> = 0.15...0.85
@@ -286,10 +286,10 @@ struct GridLayout: Equatable {
 
     /// The movable splitter vertical refinement line `index` (0 = left
     /// screen edge, 4 = right) sits on in `layout`; nil for screen edges.
-    /// Quarters share one column divider across all three interior lines;
+    /// Quarters share one column splitter across all three interior lines;
     /// sixths divide at 1/3 and 2/3 (line 2 falls inside the middle
     /// third's span, which no sixths slot has an edge on, so it rides the
-    /// right divider).
+    /// right splitter).
     static func verticalBoundary(_ index: Int, in layout: LayoutKind) -> GridBoundary? {
         switch (layout, index) {
         case (.quarters, 1...3): return .columnSplit
@@ -349,11 +349,11 @@ struct GridLayout: Equatable {
     ///
     /// `centeringTwoThirds` names the occupied two-thirds window a drag
     /// is resizing, when there is one. Its movable outer edge and the
-    /// hidden one-thirds divider inside it move together to the divider's
+    /// hidden one-thirds splitter inside it move together to the splitter's
     /// midpoint, so a resized two-thirds window still reads as two equal
     /// one-thirds. The pair is updated atomically: the usual sibling
     /// minimum exists to keep independent splitters from crossing, but a
-    /// two-thirds window's own outer edge and the divider that defines
+    /// two-thirds window's own outer edge and the splitter that defines
     /// its equal halves must both move or neither can.
     @discardableResult
     mutating func update(
@@ -378,9 +378,9 @@ struct GridLayout: Equatable {
 
     /// Moves the splitter this slot's `edge` rides to `position`, applying
     /// the two-thirds symmetry that edge implies. The one entry point for
-    /// every resize path (the live drag loop, the settle's reconcile and the
-    /// achieved-edge readback), so all three resolve a splitter and its
-    /// hidden divider the same way. `occupants` is the canvas's real
+    /// every resize path (the live drag loop, the reassert's reconcile and
+    /// the achieved-edge readback), so all three resolve a splitter and its
+    /// hidden one-thirds splitter the same way. `occupants` is the canvas's real
     /// occupant set, which is what the symmetry depends on. Returns false
     /// when the edge is fixed (a screen edge) or nothing moved.
     @discardableResult
@@ -395,15 +395,15 @@ struct GridLayout: Equatable {
                 on: boundary, draggedSlot: slot, occupants: occupants))
     }
 
-    /// The occupied two-thirds window whose hidden one-thirds divider
+    /// The occupied two-thirds window whose hidden one-thirds splitter
     /// must follow `boundary`, if any. Dragging the two-thirds window's
     /// own outer edge counts directly; so does dragging the adjacent
     /// third's facing edge, since that is the same splitter resizing both
-    /// windows. Any other boundary leaves the two-thirds divider alone.
+    /// windows. Any other boundary leaves the two-thirds splitter alone.
     /// One declaration, reached through `update(edge:of:toPosition:in:
     /// occupants:)` by every resize path, so the live drag loop, the
     /// settle's reconcile and the achieved-edge readback cannot disagree
-    /// about which hidden divider follows an edge.
+    /// about which hidden splitter follows an edge.
     static func centeringTwoThirds(
         on boundary: GridBoundary, draggedSlot: Slot, occupants: Set<Slot>
     ) -> Slot? {
@@ -448,8 +448,8 @@ struct GridLayout: Equatable {
 
     /// The coupled fractions for resizing a two-thirds window: the dragged
     /// outer edge still honors its own drag clamp, while the hidden inner
-    /// divider becomes the midpoint of the resulting span. The inner
-    /// divider is derived, not dragged, so its own static clamp and
+    /// splitter becomes the midpoint of the resulting span. The inner
+    /// splitter is derived, not dragged, so its own static clamp and
     /// sibling minimum do not apply; the formulas keep it strictly
     /// between the slot's fixed screen edge and the dragged edge for
     /// every clamped drag.
@@ -624,6 +624,11 @@ struct TilingState: Equatable {
     /// via `remove(window:)`. Claiming an occupied slot evicts its
     /// occupant from state (the gateway write decides the truth on
     /// screen; callers roll back on refusal, as `place` does).
+    ///
+    /// Two deliberate exceptions hold a double-booked cell for one write:
+    /// a swap gives the displaced window the requester's vacated tile
+    /// before the requester moves, and a re-house writes the requester
+    /// before the evictee is re-placed into its new home.
     mutating func commit(window: WindowID, into slot: Slot) {
         precondition(slot.layout == layout, "commit target must match the stored layout")
         for s in Slot.allCases where occupantBySlot[s] == window {
@@ -679,9 +684,9 @@ struct TilingState: Equatable {
     ///
     /// A caller that omits `previous` computes the pre-request region
     /// for the free-region rule, which is only correct for an untiled
-    /// requester. (The step-aside rule ignores `previous`: a requester
-    /// whose vacated slot reached the evictee's leftover would have to
-    /// span both target and leftover — the evictee's own slot.)
+    /// requester. (The step-aside rule ignores `previous`: on a valid
+    /// board the requester's slot is disjoint from the evictee's, so it
+    /// can never sit inside the leftover.)
     func rehousingHome(
         evicting evictee: WindowID, for target: Slot, vacating previous: Slot? = nil
     ) -> Slot? {

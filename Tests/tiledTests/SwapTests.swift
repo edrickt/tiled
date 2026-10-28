@@ -2,10 +2,11 @@ import XCTest
 @testable import tiled
 
 /// Tile displacement through `TilingController.handle`: a tiled
-/// requester's way is cleared without untangling anyone. A blocker that
-/// *contains* the target with a clean leftover steps aside into it (the
-/// report's example); any other single blocker swaps into the vacated
-/// tile. Pins both end to end: the request is honored, the displaced
+/// requester's way is cleared without untangling anyone. A blocker whose
+/// leftover is exactly one whole slot — a containment, or a two-thirds
+/// overlapping a two-thirds — steps aside into it; any other single
+/// blocker swaps into the vacated tile. Pins both end to end: the
+/// request is honored, the displaced
 /// window keeps its tiling, and undo puts everything back.
 final class SwapTests: XCTestCase {
     /// Deterministic display: written rects are checked against this

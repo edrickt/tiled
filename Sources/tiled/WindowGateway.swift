@@ -34,7 +34,9 @@ protocol WindowGateway: AnyObject {
     func focusedWindow() -> WindowHandle?
     /// Frame in AppKit global coordinates (bottom-left origin).
     func frame(of handle: WindowHandle) -> CGRect?
-    /// Moves and resizes; false when the app refused.
+    /// Moves and resizes; false when the write did not land — no binding,
+    /// an AX refusal, or a retryable failure exhausted. Only the last two
+    /// are a refusal in the placement pipeline's sense.
     @discardableResult
     func setFrame(_ handle: WindowHandle, to frame: CGRect) -> Bool
     /// `.dead` once the window is closed or its app quit; `.unknown`
