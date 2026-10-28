@@ -34,6 +34,9 @@ protocol WindowGateway: AnyObject {
     func focusedWindow() -> WindowHandle?
     /// Frame in AppKit global coordinates (bottom-left origin).
     func frame(of handle: WindowHandle) -> CGRect?
+    /// Every Space id the window server reports per display. Empty means
+    /// "unknown": canvas pruning is skipped rather than guessed.
+    var existingSpaceIDs: [CGDirectDisplayID: Set<SpaceID>] { get }
     /// Moves and resizes; false when the write did not land — no binding,
     /// an AX refusal, or a retryable failure exhausted. Only the last two
     /// are a refusal in the placement pipeline's sense.
@@ -91,4 +94,11 @@ protocol WindowGateway: AnyObject {
 
 extension WindowGateway {
     func release(_ handle: WindowHandle) {}
+}
+
+
+extension WindowGateway {
+    /// Test doubles keep the old behavior: an empty inventory means no
+    /// Space is known to be missing.
+    var existingSpaceIDs: [CGDirectDisplayID: Set<SpaceID>] { [:] }
 }

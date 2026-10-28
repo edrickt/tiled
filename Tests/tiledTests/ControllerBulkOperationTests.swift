@@ -410,8 +410,8 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.handleSwitchLayout(to: .sixths)
         controller.handle(slotKey: .leftColumn)
         // A splitter restore is a live receipt: it leaves a notice behind.
-        controller.resetDividers()
-        XCTAssertTrue(controller.restoreSplitters())
+        controller.resetOrRestoreSplitters()
+        XCTAssertTrue(controller.resetOrRestoreSplitters().performed)
         XCTAssertNotNil(canvas.notice)
 
         // Strict no-op: no state, error, or menu side effects; the receipt
@@ -479,7 +479,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.simulateChange(a, to: dragged)
         XCTAssertNotEqual(canvas.grid.columnSplit, 0.5, "drag moved the splitter")
 
-        controller.resetDividers()
+        controller.resetOrRestoreSplitters()
 
         XCTAssertEqual(canvas.grid, GridLayout())
         XCTAssertEqual(
@@ -489,14 +489,17 @@ final class ControllerBulkOperationTests: XCTestCase {
         // One destructive action, one receipt: the reset parks the
         // displaced fractions for a one-step restore.
         XCTAssertTrue(canvas.hasSplitterBackup, "reset keeps receipts")
-        XCTAssertTrue(controller.restoreSplitters(), "the backup restores")
+        XCTAssertTrue(
+            controller.resetOrRestoreSplitters().performed, "the backup restores")
         XCTAssertNotEqual(
             canvas.grid.columnSplit, 0.5, accuracy: 0.001,
             "restore returns the dragged splitter")
         XCTAssertFalse(
             canvas.hasSplitterBackup, "restoring consumes the backup")
-        XCTAssertFalse(
-            controller.restoreSplitters(), "no backup left: second restore is a no-op")
+        XCTAssertTrue(
+            controller.resetOrRestoreSplitters().performed,
+            "with no backup the same press resets again")
+        XCTAssertTrue(canvas.hasSplitterBackup, "that reset parked a new backup")
     }
 
     func testResetOrRestoreSplittersReturnsOneReceiptAndKeepsTheBackup() {
@@ -560,7 +563,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertNotEqual(canvas.grid.columnSplit, 0.5)
 
         gateway.refuseNextWrites(a)
-        controller.resetDividers()
+        controller.resetOrRestoreSplitters()
 
         XCTAssertEqual(
             canvas.error,
@@ -592,7 +595,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         gateway.simulateSilentChange(b, to: farAway)
         gateway.refuseNextWrites(a)
         gateway.refuseNextWrites(b)
-        controller.resetDividers()
+        controller.resetOrRestoreSplitters()
 
         XCTAssertEqual(
             canvas.error,

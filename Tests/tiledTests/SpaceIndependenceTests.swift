@@ -481,6 +481,62 @@ final class SpaceIndependenceTests: XCTestCase {
         assertSwipeBackLeavesTheNewSlot(w, to: Self.spaceB, keeping: aSlot)
     }
 
+    func testVanishedSpaceCanvasIsRetiredAndItsWindowTilesAgain() {
+        let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
+        let keyB = TilingSpaceKey(screen: Self.display.id, space: Self.spaceB)
+        let w = addFocusedWindow()
+        switchTo(Self.spaceB)
+        gateway.focused = w
+        controller.handle(slot: .topLeft)
+        let oldID = try! XCTUnwrap(controller.registeredID(for: w))
+        XCTAssertNotNil(controller.canvas(for: keyB).state.slot(of: oldID))
+        switchTo(Self.spaceA)
+
+        // Mission Control deleted B: the server now lists A and C.
+        gateway.existingSpaceIDs = [Self.displayID: [Self.spaceA, Self.spaceC]]
+        controller.pruneDeadWindows()
+
+        XCTAssertTrue(
+            controller.canvas(for: keyB).records.isEmpty,
+            "a deleted Space's canvas is retired instead of deferring forever")
+        XCTAssertNil(controller.registeredID(for: w), "the record and id are released")
+
+        // The window lives on; a slot key now tiles it on the current canvas.
+        gateway.focused = w
+        controller.handle(slot: .topRight)
+        let newID = try! XCTUnwrap(controller.registeredID(for: w))
+        XCTAssertEqual(controller.canvas(for: keyA).state.slot(of: newID), .topRight)
+    }
+
+    func testClosedWindowLeavesNoDeferredRestoreToNarrate() {
+        let keyB = TilingSpaceKey(screen: Self.display.id, space: Self.spaceB)
+        let w = addFocusedWindow()
+        switchTo(Self.spaceB)
+        gateway.focused = w
+        controller.handle(slot: .topLeft)
+        XCTAssertNotNil(
+            controller.canvas(for: keyB).state.slot(
+                of: try! XCTUnwrap(controller.registeredID(for: w))),
+            "the window tiles on B")
+        switchTo(Self.spaceA)
+        gateway.focused = w
+        controller.handleEvict()
+        XCTAssertNotNil(
+            controller.canvas(for: keyB).deferredRestores[w],
+            "the eviction on hidden B deferred w's pre-tile restore")
+
+        gateway.kill(w)
+        controller.pruneDeadWindows()
+        switchTo(Self.spaceB)
+
+        XCTAssertNil(
+            controller.canvas(for: keyB).deferredRestores[w],
+            "a dead window's parked restore is dropped")
+        XCTAssertNil(
+            controller.canvas(for: keyB).error,
+            "the swipe back names no ghost in a restore-failure notice")
+    }
+
     func testRefusedExpandKeepsTheOldCanvasDeferredRestore() {
         let keyA = TilingSpaceKey(screen: Self.display.id, space: Self.spaceA)
         let original = CGRect(x: 100, y: 100, width: 800, height: 600)

@@ -283,6 +283,10 @@ final class LiveWindowGateway: WindowGateway {
     /// The window-server Space table, injected so the cache policy is
     /// testable without the private SkyLight symbols.
     private let spaceTable: () -> [CGDirectDisplayID: SpaceID]
+    /// The full per-display Space inventory, for retiring canvases whose
+    /// Space was deleted. Injected for the same reason as `spaceTable`.
+    var existingSpaceIDs: [CGDirectDisplayID: Set<SpaceID>] { existingSpacesTable() }
+    private let existingSpacesTable: () -> [CGDirectDisplayID: Set<SpaceID>]
     /// The clock behind the cache lifetime. Injected so a test can age
     /// the cache without sleeping.
     private let now: () -> Date
@@ -295,6 +299,9 @@ final class LiveWindowGateway: WindowGateway {
         observerDriver: AXObserverDriver = LiveAXObserverDriver(),
         spaceTable: @escaping () -> [CGDirectDisplayID: SpaceID] =
             LiveWindowGateway.currentSpaces,
+        existingSpacesTable: @escaping () -> [CGDirectDisplayID: Set<SpaceID>] = {
+            LiveWindowGateway.existingSpaces()
+        },
         now: @escaping () -> Date = Date.init,
         workspaceNotifications: NotificationCenter =
             NSWorkspace.shared.notificationCenter,
@@ -304,6 +311,7 @@ final class LiveWindowGateway: WindowGateway {
     ) {
         self.observerDriver = observerDriver
         self.spaceTable = spaceTable
+        self.existingSpacesTable = existingSpacesTable
         self.now = now
         self.workspaceNotifications = workspaceNotifications
         self.writeRetrySleep = writeRetrySleep
@@ -830,6 +838,55 @@ final class LiveWindowGateway: WindowGateway {
             displayIDs: displayIDs(),
             mainDisplayID: CGMainDisplayID(),
             uuidString: uuidString(for:))
+    }
+
+    /// Every Space id the window server reports per display, from the same
+    /// managed-display table the current-Space lookup reads.
+    static func existingSpaces() -> [CGDirectDisplayID: Set<SpaceID>] {
+        guard
+            let connection = CGS.defaultConnection?(),
+            let displays = CGS.copyManagedDisplaySpaces?(connection)?
+                .takeRetainedValue() as? [[String: Any]]
+        else { return [:] }
+        return existingSpaces(
+            from: displays,
+            displayIDs: displayIDs(),
+            mainDisplayID: CGMainDisplayID(),
+            uuidString: uuidString(for:))
+    }
+
+    /// Pure core: per display, the ids of the Spaces it owns. The current
+    /// Space is unioned in, so an unfamiliar table shape can never delete
+    /// a live canvas; a display with no readable list is omitted (unknown,
+    /// prune nothing there).
+    static func existingSpaces(
+        from displays: [[String: Any]],
+        displayIDs: [CGDirectDisplayID],
+        mainDisplayID: CGDirectDisplayID,
+        uuidString: (CGDirectDisplayID) -> String?
+    ) -> [CGDirectDisplayID: Set<SpaceID>] {
+        var result: [CGDirectDisplayID: Set<SpaceID>] = [:]
+        for display in displays {
+            guard
+                let displayID = displayID(
+                    identifier: display["Display Identifier"] as? String,
+                    among: displays,
+                    displayIDs: displayIDs,
+                    mainDisplayID: mainDisplayID,
+                    uuidString: uuidString)
+            else { continue }
+            let listed = (display["Spaces"] as? [[String: Any]] ?? [])
+                .compactMap { spaceID(from: $0["id64"]) }
+            guard !listed.isEmpty else { continue }
+            var spaces = Set(listed)
+            if let current = display["Current Space"] as? [String: Any],
+                let id = spaceID(from: current["id64"])
+            {
+                spaces.insert(id)
+            }
+            result[displayID] = spaces
+        }
+        return result
     }
 
     /// Pure core of the Space-table parse. Injecting the table, display

@@ -1207,7 +1207,13 @@ struct TilingSpace {
     private mutating func reconcileDeferredRestores(context: Context) {
         guard !deferredRestores.isEmpty else { return }
         var failures: [String] = []
-        let pending = deferredRestores
+        // A window that died while parked can never land its restore:
+        // writing against its released handle reads as an app refusal and
+        // the notice would name a window the user closed. Drop it here,
+        // where the death becomes visible, instead of narrating a ghost.
+        let pending = deferredRestores.filter {
+            context.gateway.liveness(of: $0.key) != .dead
+        }
         deferredRestores = Self.reconcile(pending) { handle, restore in
             let result = context.frameWriter.write(
                 restore.id, handle: handle, to: restore.frame,

@@ -258,12 +258,12 @@ final class PerMonitorTests: XCTestCase {
 
         // Focus left and reset: left snaps even, right keeps its drag.
         gateway.focused = leftHandle
-        controller.resetDividers()
+        controller.resetOrRestoreSplitters()
 
         XCTAssertEqual(controller.canvas(for: leftID).grid, GridLayout())
         XCTAssertNotEqual(controller.canvas(for: rightID).grid.columnSplit, 0.5)
         XCTAssertTrue(controller.canvas(for: leftID).hasSplitterBackup)
-        XCTAssertTrue(controller.restoreSplitters())
+        XCTAssertTrue(controller.resetOrRestoreSplitters().performed)
         XCTAssertNotEqual(controller.canvas(for: leftID).grid.columnSplit, 0.5)
     }
 
@@ -370,12 +370,12 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertNotNil(controller.canvas(for: leftID).state.occupant(of: .topLeft))
         XCTAssertEqual(controller.canvas(for: rightID).state.occupant(of: .topLeft), 2)
 
-        controller.resetDividers()
+        controller.resetOrRestoreSplitters()
         XCTAssertEqual(controller.canvas(for: leftID).grid, GridLayout())
         XCTAssertNotEqual(controller.canvas(for: rightID).grid.columnSplit, 0.5)
-        XCTAssertTrue(controller.restoreSplitters())
+        XCTAssertTrue(controller.resetOrRestoreSplitters().performed)
         XCTAssertNotEqual(controller.canvas(for: leftID).grid.columnSplit, 0.5)
-        XCTAssertFalse(controller.restoreSplitters())
+        XCTAssertFalse(controller.canvas(for: leftID).hasSplitterBackup)
     }
 
     func testClosedWindowOnOneMonitorLeavesTheOtherAlone() {
@@ -512,7 +512,7 @@ final class PerMonitorTests: XCTestCase {
         // display: focus a, whose live frame still lives there) under its
         // own frame.
         gateway.focused = a
-        controller.resetDividers()
+        controller.resetOrRestoreSplitters()
 
         let leftBounds = Self.left.visibleFrame
         let leftFrame = GridLayout().rect(for: .leftHalf, in: leftBounds)

@@ -58,7 +58,7 @@ final class SplitterBackupDragTests: XCTestCase {
     }
 
     func testDragAfterResetLeavesTheParkedBackupAlone() {
-        controller.resetDividers()
+        controller.resetOrRestoreSplitters()
         let parked = canvas.splitterBackup
         XCTAssertNotNil(parked)
 
@@ -66,27 +66,29 @@ final class SplitterBackupDragTests: XCTestCase {
 
         XCTAssertTrue(canvas.hasSplitterBackup, "the drag does not consume the receipt")
         XCTAssertEqual(canvas.splitterBackup, parked, "the parked fractions survive the drag")
-        XCTAssertTrue(controller.restoreSplitters())
+        XCTAssertTrue(controller.resetOrRestoreSplitters().performed)
         XCTAssertEqual(
             canvas.grid, parked,
             "Restore returns the positions parked before the reset, not the dragged ones")
         XCTAssertFalse(canvas.hasSplitterBackup, "restoring consumes the backup")
     }
 
-    func testSecondResetReplacesTheParkedSnapshot() {
-        controller.resetDividers()
+    func testSecondPressRestoresInsteadOfOverwritingTheParkedSnapshot() {
+        // The shipped action is one control, not two: while a backup
+        // exists the same press restores it. A reset route that could run
+        // again would overwrite the only way back, so it does not exist.
+        controller.resetOrRestoreSplitters()
+        let parked = canvas.splitterBackup
         dragRightEdge(by: 60)
-        let secondPreReset = canvas.grid
-        XCTAssertNotEqual(secondPreReset.columnSplit, 0.5, accuracy: 0.001)
+        let dragged = canvas.grid
+        XCTAssertNotEqual(dragged.columnSplit, parked?.columnSplit ?? 0, accuracy: 0.001)
 
-        controller.resetDividers()
+        let receipt = controller.resetOrRestoreSplitters()
 
+        XCTAssertTrue(receipt.performed, "the second press restored")
         XCTAssertEqual(
-            canvas.splitterBackup, secondPreReset,
-            "the second reset parks the second pre-reset positions")
-        XCTAssertTrue(controller.restoreSplitters())
-        XCTAssertEqual(
-            canvas.grid, secondPreReset,
-            "Restore lands the second snapshot, not the first")
+            canvas.grid, parked,
+            "the second press lands the first snapshot instead of overwriting it")
+        XCTAssertFalse(canvas.hasSplitterBackup, "restoring consumes the backup")
     }
 }

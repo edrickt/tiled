@@ -98,6 +98,34 @@ final class CanvasDirectory {
         spaces[space] = value
     }
 
+    /// Canvases whose display is attached and whose Space id the window
+    /// server no longer lists. A key with no Space (withheld) or a display
+    /// the inventory omits is never retired.
+    func vanishedCanvases(
+        known: [CGDirectDisplayID: Set<SpaceID>]
+    ) -> [TilingSpaceKey] {
+        guard !known.isEmpty else { return [] }
+        let displayIDs = Dictionary(
+            uniqueKeysWithValues: screens().map { ($0.id, $0.displayID) })
+        return spaces.keys.filter { key in
+            guard
+                let screen = key.screen,
+                let space = key.space,
+                let displayID = displayIDs[screen],
+                let existing = known[displayID]
+            else { return false }
+            return !existing.contains(space)
+        }.sorted(by: Self.spaceOrder)
+    }
+
+    /// Drops a retired canvas and its identity bookkeeping. Ownership is
+    /// derived from the canvas table, so the records go with it.
+    func dropCanvas(_ space: TilingSpaceKey) {
+        spaces[space] = nil
+        staleSpaces.remove(space)
+        if lastFocusedSpace == space { lastFocusedSpace = nil }
+    }
+
     /// The canvas holding a managed window's record, or nil when untiled.
     /// Ownership is derived here and nowhere else.
     func owner(of id: WindowID) -> TilingSpaceKey? {

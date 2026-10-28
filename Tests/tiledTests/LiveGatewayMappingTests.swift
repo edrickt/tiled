@@ -136,6 +136,34 @@ final class LiveGatewayMappingTests: XCTestCase {
         XCTAssertEqual(mapped, [10: SpaceID(rawValue: 11), 20: SpaceID(rawValue: 22)])
     }
 
+    func testExistingSpacesListsOwnedSpacesAndUnionsTheCurrentOne() {
+        let table: [[String: Any]] = [
+            [
+                "Display Identifier": "left-uuid",
+                "Current Space": ["id64": 11],
+                "Spaces": [["id64": 12], ["id64": 13]],
+            ],
+            [
+                "Display Identifier": "right-uuid",
+                "Current Space": ["id64": 22],
+                // No Spaces list: the display is unknown, so nothing there
+                // is retired.
+            ],
+        ]
+        let uuids: [CGDirectDisplayID: String] = [10: "left-uuid", 20: "right-uuid"]
+
+        let known = LiveWindowGateway.existingSpaces(
+            from: table,
+            displayIDs: [10, 20],
+            mainDisplayID: 99,
+            uuidString: { uuids[$0] })
+
+        XCTAssertEqual(
+            known,
+            [10: [SpaceID(rawValue: 11), SpaceID(rawValue: 12), SpaceID(rawValue: 13)]],
+            "listed Spaces plus the current one; an unreadable list is omitted")
+    }
+
     func testSpacesSkipMalformedRowsInsteadOfGuessing() {
         let table: [[String: Any]] = [
             [

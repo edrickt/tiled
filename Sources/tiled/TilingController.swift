@@ -813,6 +813,7 @@ final class TilingController {
     /// confirmed deaths prune: a busy app's unanswerable probe is unknown,
     /// and pruning on a maybe would untile a live window.
     func pruneDeadWindows() {
+        pruneVanishedCanvases()
         var dead: [(key: TilingSpaceKey, id: WindowID, handle: WindowHandle)] = []
         for (key, canvas) in directory.allCanvases {
             for (id, record) in canvas.records
@@ -832,6 +833,10 @@ final class TilingController {
             }
             register.clearDeath(entry.id)
             dbg("prune win\(entry.id): dead handle confirmed, releasing slot")
+            // The window is gone: any pre-tile restore parked for it on a
+            // hidden canvas can never land, and attempting it on the swipe
+            // back would name a ghost in the restore-failure notice.
+            discardDeferredRestores(for: entry.handle)
             // Hand the element back to the adapter before the record
             // (the only holder of the handle) goes away.
             gateway.release(entry.handle)
@@ -843,6 +848,26 @@ final class TilingController {
         // A recovered probe or a vanished record clears the pending
         // death: only windows still reading dead stay marked.
         register.retainDeaths(only: Set(dead.map(\.id)))
+    }
+
+    /// Retires canvases whose Mission Control Space was deleted. The window
+    /// server moves those windows to a neighbouring Space, so the old
+    /// canvas can never become visible: a slot request there would defer
+    /// forever, and the window would be unable to tile again.
+    private func pruneVanishedCanvases() {
+        let known = gateway.existingSpaceIDs
+        guard !known.isEmpty else { return }
+        for key in directory.vanishedCanvases(known: known) {
+            let canvas = directory.storedCanvas(for: key)
+            for id in canvas?.records.keys ?? [:].keys {
+                // The window is alive (only its Space vanished): forget the
+                // ownership, but keep the handle binding so the next focus
+                // re-adopts it instead of re-resolving from scratch.
+                register.forget(id)
+            }
+            directory.dropCanvas(key)
+            dbg("prune canvas \(key): its Space no longer exists")
+        }
     }
 
     private func raiseOccupants(on space: TilingSpaceKey) {
@@ -922,42 +947,6 @@ final class TilingController {
             noOp: MenuText.splittersNothingToDoAnnouncement())
     }
 
-    /// Snaps all splitters back to defaults and re-tiles everyone. The
-    /// displaced fractions are kept as a one-step restore (same pattern
-    /// as the shortcuts reset backup), so the app's "destruction is
-    /// always reversible" ethic holds for drag positions too. Scoped to
-    /// the focused canvas: other displays and Spaces keep their drag
-    /// positions.
-    func resetDividers() {
-        resetDividers(in: directory.focusedKey())
-    }
-
-    private func resetDividers(in space: TilingSpaceKey) {
-        directory.withCanvas(space) { canvas in
-            canvas.visibleFrame = directory.visibleFrame(for: space)
-            _ = canvas.resetSplitters(context: placementContext(for: space))
-        }
-        onChange?()
-    }
-
-    /// Restores the splitter fractions parked by the last reset, or false
-    /// when there is no backup (fresh install, or already restored once).
-    /// Scoped to the focused canvas, like `resetDividers`.
-    @discardableResult
-    func restoreSplitters() -> Bool {
-        restoreSplitters(in: directory.focusedKey())
-    }
-
-    private func restoreSplitters(in space: TilingSpaceKey) -> Bool {
-        guard directory.storedCanvas(for: space)?.hasSplitterBackup == true else {
-            return false
-        }
-        directory.withCanvas(space) {
-            $0.restoreSplitters(context: placementContext(for: space))
-        }
-        onChange?()
-        return true
-    }
 
     /// What the focused window's expand toggle does right now: drives the
     /// menu row's stateful title.

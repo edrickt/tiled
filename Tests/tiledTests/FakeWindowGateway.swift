@@ -27,6 +27,9 @@ final class FakeWindowGateway: WindowGateway {
     /// the dominant real-world refusal shape (an app that ignores AX
     /// resizes while returning success).
     var silentIgnore: Set<WindowHandle> = []
+    /// Spaces the fake window server reports per display; empty means
+    /// unknown, so no canvas is retired.
+    var existingSpaceIDs: [CGDirectDisplayID: Set<SpaceID>] = [:]
     /// Whether `focus` makes `focusedWindow` return the focused handle.
     /// The real adapter only requests activation: the system may ignore
     /// it, and the next focus query answers with whatever actually has
