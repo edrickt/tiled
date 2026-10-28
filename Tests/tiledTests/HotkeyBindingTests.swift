@@ -245,7 +245,7 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertEqual(
             store.apply(HotkeyBinding(modifiers: 0, keyCode: nil), for: .topLeft),
             HotkeyStore.ApplyResult.applied)
-        XCTAssertFalse(store.binding(for: .topLeft).isEnabled)
+        XCTAssertNil(store.binding(for: .topLeft).keyCode)
     }
 
     func testDuplicateDetectionIgnoresDisabledAndSelf() {
@@ -291,7 +291,7 @@ final class HotkeyBindingTests: XCTestCase {
 
         let store = HotkeyStore(defaults: UserDefaults(suiteName: name)!)
         let binding = store.binding(for: .topLeft)
-        XCTAssertFalse(binding.isEnabled)
+        XCTAssertNil(binding.keyCode)
         XCTAssertNil(binding.label)
         // A stored disabled binding never collides with a real combo.
         XCTAssertTrue(store.duplicates(

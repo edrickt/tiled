@@ -35,11 +35,6 @@ enum MenuModel {
         var action: Action?
         var isSeparator = false
         var children: [Item]?
-        /// Why a non-header item is disabled, in menu-title words (shown
-        /// when enabled would be a lie: the precondition isn't met).
-        /// Rendered by AppDelegate as the item's tooltip.
-        var disabledReason: String?
-
         static func separator() -> Item { Item(title: "", isSeparator: true) }
     }
 

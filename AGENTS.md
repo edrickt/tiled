@@ -27,5 +27,8 @@ Run the full mutation table (`python3 tools/mutation/mutate.py`) once at
 the end, before push or hand-off, not after every unit. `--since <base>`
 scopes a mid-stage run to the sources that stage changed.
 
+Before hand-off, run `make exhaustive` (the exhaustive undo replay; the
+hermetic cycle does not set `TILED_EXHAUSTIVE`).
+
 This section is the only gate policy. Specs, tickets, and reports point
 here; they do not restate or add gates.

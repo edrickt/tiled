@@ -210,7 +210,6 @@ final class MenuModelTests: XCTestCase {
         let sSwitch = unfocused.first { $0.action == .switchLayout(to: .quarters) }
         XCTAssertEqual(sSwitch?.title, "Switch to Quarters · ⌥⇧\\")
         XCTAssertEqual(sSwitch?.isEnabled, true)
-        XCTAssertEqual(sSwitch?.disabledReason, nil)
     }
 
     // MARK: Expand item

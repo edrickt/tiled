@@ -461,14 +461,16 @@ final class TilingStateTests: XCTestCase {
 
     func testSlotForKeyResolvesAgainstTheStoredLayout() {
         var state = TilingState(layout: .quarters)
-        XCTAssertEqual(state.slot(for: .topLeft), .topLeft)
-        XCTAssertEqual(state.slot(for: .leftColumn), .leftHalf)
-        XCTAssertNil(state.slot(for: .topMiddle), "Quarters has no top middle")
+        XCTAssertEqual(SlotKey.topLeft.slot(in: state.layout), .topLeft)
+        XCTAssertEqual(SlotKey.leftColumn.slot(in: state.layout), .leftHalf)
+        XCTAssertNil(
+            SlotKey.topMiddle.slot(in: state.layout), "Quarters has no top middle")
         state.setLayout(.sixths)
-        XCTAssertEqual(state.slot(for: .topLeft), .sixthTopLeft)
-        XCTAssertEqual(state.slot(for: .topMiddle), .sixthTopMiddle)
-        XCTAssertEqual(state.slot(for: .middleColumn), .sixthMiddle)
-        XCTAssertEqual(state.slot(for: .rightTwoThirds), .sixthsRightTwoThirds)
+        XCTAssertEqual(SlotKey.topLeft.slot(in: state.layout), .sixthTopLeft)
+        XCTAssertEqual(SlotKey.topMiddle.slot(in: state.layout), .sixthTopMiddle)
+        XCTAssertEqual(SlotKey.middleColumn.slot(in: state.layout), .sixthMiddle)
+        XCTAssertEqual(
+            SlotKey.rightTwoThirds.slot(in: state.layout), .sixthsRightTwoThirds)
     }
 
     func testCapacityChangesWithTheStoredLayout() {

@@ -7,8 +7,6 @@ struct HotkeyBinding: Equatable {
     var modifiers: UInt32
     var keyCode: UInt32?
 
-    var isEnabled: Bool { keyCode != nil }
-
     init(modifiers: UInt32, keyCode: UInt32?) {
         self.modifiers = modifiers
         self.keyCode = keyCode

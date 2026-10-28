@@ -105,9 +105,10 @@ struct TilingSpace {
     /// frame the toggle would have written (the screen frame, or the
     /// saved one).
     enum DeferredRequest: Equatable {
-        /// A tiling request deferred off-Space: the slot the user asked
-        /// for.
-        case slot(slot: Slot)
+        /// A tiling request deferred off-Space. The slot is re-derived
+        /// from state on return, not retained here: a stored copy could
+        /// silently disagree with a swap committed before the reconcile.
+        case slot
         /// An expansion deferred off-Space: the pre-expand frame to
         /// remember (`expanded[id]`) once the expansion lands.
         case expand(saved: CGRect)
@@ -1112,7 +1113,7 @@ struct TilingSpace {
         // the requested slot so the swipe-back reassert re-issues it,
         // exactly as a deferred reflow reconciles.
         if result == .deferredOffSpace {
-            deferredRequests[id] = .slot(slot: slot)
+            deferredRequests[id] = .slot
         }
         context.log("place win\(id) -> \(slot.rawValue)")
         return .placed(deferred: result == .deferredOffSpace)
@@ -1654,7 +1655,7 @@ struct TilingSpace {
             // into its committed slot; an untiled one returns to the
             // saved frame.
             if let slot = state.slot(of: id) {
-                deferredRequests[id] = .slot(slot: slot)
+                deferredRequests[id] = .slot
             } else {
                 deferredRequests[id] = .collapse(frame: saved)
             }

@@ -107,7 +107,9 @@ final class MenuTextTests: XCTestCase {
                 + "Another Tiled shortcut or a system shortcut may already use it.")
     }
 
-    func testHotkeyFailureWarningFallsBackToActionNameWithoutSelfContradiction() {
+    func testHotkeyFailureWarningHasADefensiveNoLabelSentence() {
+        // Unreachable from today's caller (only enabled actions can fail),
+        // pinned so a future caller cannot render an empty label.
         XCTAssertEqual(
             MenuText.hotkeyFailureWarning(label: nil, title: "Left Third"),
             "The shortcut for “Left Third” could not be registered: it has no hotkey.")

@@ -559,6 +559,10 @@ final class TilingController {
                 canvas: space, performed: false,
                 notice: canvas?.error ?? announcement,
                 announcement: announcement)
+        // `.nothingToEvict`, `.switched`, and `.alreadyInLayout` come from
+        // the evict and switch entry points, not from `place`; the arms
+        // keep the shared Result switch exhaustive. They are unreachable
+        // here, so no receipt built on this path can grow a silent no-op.
         case .nothingToEvict:
             return ActionReceipt(
                 canvas: space, performed: false, notice: notice,

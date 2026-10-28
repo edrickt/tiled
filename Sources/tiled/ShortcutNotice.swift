@@ -8,14 +8,10 @@ import Foundation
 /// both sentences, while a reload that recomputes the same failure produces
 /// an equal notice and therefore neither a label write nor an announcement.
 struct ShortcutNotice: Equatable {
-    enum Kind: Int, Comparable {
+    enum Kind {
         case failure
         case conflict
         case result
-
-        static func < (lhs: Kind, rhs: Kind) -> Bool {
-            lhs.rawValue < rhs.rawValue
-        }
     }
 
     struct Entry: Equatable {

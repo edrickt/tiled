@@ -347,6 +347,11 @@ struct GridLayout: Equatable {
     /// zero and poison a splitter with ±inf/NaN, corrupting every rect
     /// derived from it afterwards.
     ///
+    /// The boundary-only form, used by the edge form below and by the
+    /// grid's own pure tests. Production resize paths call the edge form,
+    /// which derives `centeringTwoThirds` from the canvas's occupants; a
+    /// caller here must pass it explicitly or the symmetry is skipped.
+    ///
     /// `centeringTwoThirds` names the occupied two-thirds window a drag
     /// is resizing, when there is one. Its movable outer edge and the
     /// hidden one-thirds splitter inside it move together to the splitter's
@@ -574,10 +579,6 @@ struct TilingState: Equatable {
 
     /// The slot `key` names in the active layout, or nil when this layout
     /// has no such position.
-    func slot(for key: SlotKey) -> Slot? {
-        key.slot(in: layout)
-    }
-
     var occupants: [Slot: WindowID] { occupantBySlot }
 
     var tiledWindows: [WindowID] { Array(Set(occupantBySlot.values)) }

@@ -53,16 +53,19 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(AppSettings(defaults: defaults).didDismissWelcome)
     }
 
-    func testWelcomeDismissDoesNotBlockReopen() {
-        // didDismissWelcome gates the FIRST launch only; Help reopens the
-        // guide on demand (showWelcomeAgain ignores the flag). Pin the
-        // flag semantics: dismissal persists, default is un-dismissed.
+    func testWelcomeDismissalPersistsAndOnlyGatesTheFirstLaunch() {
+        // The flag's own semantics: default un-dismissed, dismissal
+        // persists. The reopen path (`showWelcomeAgain`) ignores the flag
+        // and is pinned in WelcomeLifecycleTests, not here.
         let (_, defaults) = makeSettings()
         XCTAssertFalse(AppSettings(defaults: defaults).didDismissWelcome)
         AppSettings(defaults: defaults).didDismissWelcome = true
         XCTAssertTrue(AppSettings(defaults: defaults).didDismissWelcome)
-        // Re-entry path must not clear the flag (next launch still skips
-        // Welcome); it only presents the tab for this session.
-        XCTAssertTrue(AppSettings(defaults: defaults).didDismissWelcome)
+
+        XCTAssertFalse(
+            AppLaunchPlan.make(
+                isTrusted: true, didDismissWelcome: true, hideMenuBarIcon: false
+            ).showsWelcome,
+            "a dismissed guide does not reopen on the next launch")
     }
 }

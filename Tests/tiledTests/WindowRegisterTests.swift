@@ -121,9 +121,11 @@ final class WindowRegisterTests: XCTestCase {
 
         XCTAssertNil(register.liveID(for: first))
         XCTAssertEqual(register.liveID(for: second), secondID)
+        XCTAssertEqual(scheduled.count, 2, "both checks were scheduled")
         XCTAssertEqual(
-            scheduled.count, 2,
-            "forgetting one window does not drop another's check")
+            cancellations, 1,
+            "forget cancels its own check and leaves the other window's alone; "
+                + "a stale second cancellation would make this two")
     }
 
     func testDeathConfirmationKeepsTheFirstSightingUntilCleared() {

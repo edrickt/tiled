@@ -240,14 +240,6 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         let item = NSMenuItem(
             title: model.title, action: nil, keyEquivalent: model.keyEquivalent)
         item.isEnabled = model.isEnabled
-        if let reason = model.disabledReason, !model.isEnabled {
-            item.toolTip = reason
-            // Tooltips are hover-only: keyboard and VoiceOver users never
-            // reach them. The reason is the whole point of the disabled
-            // row ("the row never reads as broken"), so expose it where
-            // assistive tech looks. Both channels, one string.
-            item.setAccessibilityHelp(reason)
-        }
         if let action = model.action {
             let wiring = AppDelegate.menuWiring(for: action)
             item.action = wiring.selector

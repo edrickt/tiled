@@ -58,9 +58,10 @@ enum MenuText {
     /// A hotkey lost registration. For app actions the sentence names the
     /// action and its recovery path (`registrationRecovery`); for slots
     /// it names the general suspects instead. `label` nil means the
-    /// action has no readable binding; the warning names the action
-    /// either way, without the self-contradicting “Disabled is already
-    /// used” reading.
+    /// action has no readable binding; no caller passes nil today
+    /// (`failedActions` only holds actions that had a key code), but the
+    /// defensive sentence keeps a future caller from rendering an empty
+    /// label or the self-contradicting “Disabled is already used”.
     static func hotkeyFailureWarning(
         label: String?, title: String, recovery: String? = nil
     ) -> String {
