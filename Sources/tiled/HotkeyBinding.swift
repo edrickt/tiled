@@ -15,14 +15,16 @@ struct HotkeyBinding: Equatable {
     }
 
     /// The persisted dictionary form shared by the store and both park
-    /// namespaces. A negative modifiers entry is corrupt: `set` never
-    /// writes one, and passing it to `UInt32` traps. Decoding returns nil
-    /// so each caller chooses its own fallback (factory default, or
-    /// "no parked binding").
+    /// namespaces. An entry outside `UInt32`'s range is corrupt: `set`
+    /// never writes one, and the conversion traps. Decoding returns nil so
+    /// each caller chooses its own fallback (factory default, or "no
+    /// parked binding"). A negative key code is the disabled sentinel, not
+    /// corrupt.
     init?(storedEntry: [String: Any]) {
         guard let modifiers = storedEntry["modifiers"] as? Int,
             let code = storedEntry["keyCode"] as? Int,
-            modifiers >= 0
+            modifiers >= 0, modifiers <= Int(UInt32.max),
+            code <= Int(UInt32.max)
         else { return nil }
         self.init(
             modifiers: UInt32(modifiers), keyCode: code >= 0 ? UInt32(code) : nil)
@@ -288,8 +290,9 @@ final class HotkeyStore {
     func duplicates(
         of candidate: HotkeyBinding, ignoring ignored: HotkeyAction
     ) -> [HotkeyAction] {
-        guard candidate.keyCode != nil else { return [] }
-        return HotkeyAction.allCases.filter { $0 != ignored && binding(for: $0) == candidate }
+        HotkeyAction.owners(of: candidate, ignoring: ignored) {
+            binding(for: $0) == candidate
+        }
     }
 
     private static func key(for action: HotkeyAction) -> String {

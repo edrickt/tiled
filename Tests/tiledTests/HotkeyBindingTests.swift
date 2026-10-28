@@ -5,7 +5,19 @@ import XCTest
 /// Shared ⌥⇧ slot keys: every physical key has one default binding in
 /// both layouts, and app actions keep their original combos.
 final class HotkeyBindingTests: XCTestCase {
-    private var suiteName: String { "tiledTests-\(UUID().uuidString)" }
+    /// One suite per test, stable across accesses: a computed property
+    /// would mint a fresh domain on every read and leak every plist.
+    private var suiteName = ""
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "tiledTests-\(UUID().uuidString)"
+    }
+
+    override func tearDown() {
+        UserDefaults().removePersistentDomain(forName: suiteName)
+        super.tearDown()
+    }
 
     private func makeStore() -> HotkeyStore {
         HotkeyStore(defaults: UserDefaults(suiteName: suiteName)!)
@@ -284,6 +296,23 @@ final class HotkeyBindingTests: XCTestCase {
         // A stored disabled binding never collides with a real combo.
         XCTAssertTrue(store.duplicates(
             of: HotkeyStore.defaultBinding(for: .topLeft), ignoring: .slotKey(.topRight)).isEmpty)
+    }
+
+    func testStoredEntryAboveUInt32RangeFallsBackToDefaults() {
+        // A plist Int is 64-bit; the conversion to UInt32 traps for a
+        // value the guard never bounded. Both fields must reject it.
+        for (modifiers, keyCode) in [(5_000_000_000, 6), (Int(optionKey), 5_000_000_000)] {
+            let name = suiteName
+            let defaults = UserDefaults(suiteName: name)!
+            defaults.set(
+                ["modifiers": modifiers, "keyCode": keyCode],
+                forKey: "hotkey.sixthTopLeft")
+
+            XCTAssertEqual(
+                HotkeyStore(defaults: defaults).binding(for: .topLeft),
+                HotkeyStore.defaultBinding(for: .topLeft),
+                "an out-of-range stored value degrades instead of trapping")
+        }
     }
 
     func testStoredNegativeModifiersFallsBackToDefaults() {

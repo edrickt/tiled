@@ -30,6 +30,24 @@ final class WelcomeLifecycleTests: XCTestCase {
         super.tearDown()
     }
 
+    func testPermissionFlipIsAnnouncedNotASilentLayoutJump() {
+        let tab = WelcomeTab(hotkeyStore: store)
+        var trusted = false
+        tab.isTrustedProvider = { trusted }
+        var announced: [String] = []
+        tab.onAnnouncement = { announced.append($0) }
+        _ = tab.build(size: NSSize(width: 440, height: 480))
+        tab.refreshPermissionState() // baseline: untrusted
+
+        trusted = true
+        tab.refreshPermissionState()
+
+        XCTAssertEqual(
+            announced,
+            ["Accessibility permission granted; tiled can see and move windows now."],
+            "the row changes state with a sentence, not a silent jump")
+    }
+
     private func makeController() -> SettingsWindowController {
         SettingsWindowController(settings: settings, hotkeyStore: store)
     }

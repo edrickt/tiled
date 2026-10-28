@@ -18,6 +18,10 @@ final class WelcomeTab: NSObject {
     var failedActionsProvider: (() -> [HotkeyAction])?
     /// Opens the Accessibility permission pane.
     var onOpenAccessibilitySettings: (() -> Void)?
+    /// Test seam: receives the permission-flip sentence the row announces.
+    var onAnnouncement: ((String) -> Void)?
+    /// Baseline for the flip announcement; nil until the first probe.
+    private var lastKnownTrusted: Bool?
 
     /// The dismiss button of the last built view, for initial-focus
     /// placement on open.
@@ -281,10 +285,27 @@ final class WelcomeTab: NSObject {
 
     /// Re-probes trust for an already-built Welcome view; the shell's
     /// permission poll calls this when trust may have flipped while the
-    /// window sits open. The row's visibility was set at build time;
-    /// without this it would go stale until the next rebuild.
+    /// window sits open. A flip is announced, not a silent layout jump,
+    /// matching the General and Shortcuts tabs' rows.
     func refreshPermissionState() {
-        permissionRow?.isHidden = isTrustedProvider?() ?? true
+        let trusted = isTrustedProvider?() ?? true
+        permissionRow?.isHidden = trusted
+        if let previous = lastKnownTrusted, previous != trusted {
+            let sentence = trusted
+                ? "Accessibility permission granted; tiled can see and move windows now."
+                : "Tiled can't see and move windows: Accessibility permission is off."
+            onAnnouncement?(sentence)
+            if let row = permissionRow {
+                NSAccessibility.post(
+                    element: row,
+                    notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: sentence,
+                        .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                    ])
+            }
+        }
+        lastKnownTrusted = trusted
     }
 
     @objc private func grantPermissionTapped(_ sender: NSButton) {

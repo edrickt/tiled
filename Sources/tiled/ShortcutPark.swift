@@ -249,9 +249,8 @@ struct BulkRestorePlan: Equatable {
         current: [HotkeyAction: HotkeyBinding],
         accepted: [HotkeyAction: HotkeyBinding]
     ) -> [HotkeyAction] {
-        guard candidate.keyCode != nil else { return [] }
-        return HotkeyAction.allCases.filter { other in
-            other != action && (current[other] == candidate || accepted[other] == candidate)
+        HotkeyAction.owners(of: candidate, ignoring: action) {
+            current[$0] == candidate || accepted[$0] == candidate
         }
     }
 }
@@ -289,8 +288,8 @@ struct SnapshotRestorePlan: Equatable {
                 accepted[action] = candidate
                 continue
             }
-            let owners = HotkeyAction.allCases.filter {
-                $0 != action && !snapshot.contains($0) && current[$0] == candidate
+            let owners = HotkeyAction.owners(of: candidate, ignoring: action) {
+                !snapshot.contains($0) && current[$0] == candidate
             }
             if owners.isEmpty {
                 accepted[action] = candidate
@@ -308,10 +307,10 @@ struct SnapshotRestorePlan: Equatable {
             changed = false
             for action in HotkeyAction.allCases {
                 guard let candidate = accepted[action], candidate.keyCode != nil else { continue }
-                if let owner = HotkeyAction.allCases.first(where: { other in
-                    other != action && accepted[other] == nil
-                        && backups[other] != nil && current[other] == candidate
-                }) {
+                if let owner = HotkeyAction.owners(of: candidate, ignoring: action, matching: { other in
+                    accepted[other] == nil && backups[other] != nil
+                        && current[other] == candidate
+                }).first {
                     accepted[action] = nil
                     skipped.append(Skipped(action: action, owners: [owner]))
                     changed = true

@@ -47,6 +47,10 @@ final class ShortcutsTab: NSObject {
     /// Collapse persistence, and the UserDefaults the park adapter wraps.
     /// Injectable so tests can run the whole park lifecycle without
     /// touching the host's real preferences.
+    /// The recorder's one contract sentence: the section hint and every
+    /// button tooltip read the same literal.
+    private static let recorderContract =
+        "Click a shortcut, press a new combo; Esc keeps the old one, ⌫ disables."
     private let defaults: UserDefaults
     private let park: ShortcutPark
     var onHotkeysChange: (() -> Void)?
@@ -167,7 +171,7 @@ final class ShortcutsTab: NSObject {
 
         // Teach recording before the first control, not below the rows.
         let hint = NSTextField(wrappingLabelWithString:
-            "Click a shortcut, press a new combo; Esc keeps the old one, ⌫ disables.")
+            Self.recorderContract)
         hint.textColor = .secondaryLabelColor
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stack.addArrangedSubview(hint)
@@ -388,7 +392,7 @@ final class ShortcutsTab: NSObject {
         button.action = #selector(recorderClicked(_:))
         // The leading paragraph explains the contract, but a tooltip meets
         // the user at the control itself.
-        button.toolTip = "Click to record a new combo; Esc keeps the old one, ⌫ disables."
+        button.toolTip = Self.recorderContract
         // Armed/cancelled states change only the button title; announce
         // both, so keyboard and VoiceOver users get the same state the
         // mouse path sees. Fires on arm (the monitor starts listening)
@@ -630,23 +634,28 @@ final class ShortcutsTab: NSObject {
             button.showBinding(hotkeyStore.binding(for: action))
             renderFailures()
         case .clear:
-            // A stray ⌫ must not silently discard a tuned combo: park the
-            // previous binding first (the section park namespace, so the
-            // next Enable all restores it), and say what happened; the
-            // footer names the owner on clashes; the clear path owes the
-            // same courtesy.
+            // A stray ⌫ must not silently discard a tuned combo. A slot
+            // key's combo is parked in the section namespace, which Enable
+            // all restores; an app action disables alone (CONTEXT: Parked
+            // combo), so parking it there would orphan the entry, and the
+            // promise must not name a restore no path performs.
             let previous = hotkeyStore.binding(for: action)
-            if previous.keyCode != nil {
+            let isSlotKey = !HotkeyAction.appActions.contains(action)
+            if previous.keyCode != nil, isSlotKey {
                 park.park(previous, for: action, kind: .section)
             }
             hotkeyStore.set(HotkeyBinding(modifiers: 0, keyCode: nil), for: action)
             button.showBinding(hotkeyStore.binding(for: action))
-            let result = previous.label.map { label in
-                "\(action.title) disabled: " +
-                "its old combo (\(label)) is parked; re-record or reset to restore it."
+            let result: String? = previous.label.map { label in
+                isSlotKey
+                    ? "\(action.title) disabled: its old combo (\(label)) is parked; Enable all restores it."
+                    : "\(action.title) disabled: re-record it to restore a combo."
             }
-            render(ShortcutNotice(failures: hotkeyFailureMessages(), result: result))
+            // Re-register first: the failure list this notice renders is
+            // recomputed by the reload, and the old one names the combo
+            // the action just gave up.
             onHotkeysChange?()
+            render(ShortcutNotice(failures: hotkeyFailureMessages(), result: result))
         case .binding(let candidate):
             switch hotkeyStore.apply(candidate, for: action) {
             case .applied:

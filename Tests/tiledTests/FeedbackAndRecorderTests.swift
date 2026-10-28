@@ -191,6 +191,14 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         return nil
     }
 
+    private func findRecorder(action: HotkeyAction, in view: NSView) -> RecorderButton? {
+        if let button = view as? RecorderButton, button.hotkeyAction == action { return button }
+        for subview in view.subviews {
+            if let hit = findRecorder(action: action, in: subview) { return hit }
+        }
+        return nil
+    }
+
     private func findRecorder(key: SlotKey, in view: NSView) -> RecorderButton? {
         if let button = view as? RecorderButton, button.hotkeyAction == .slotKey(key) { return button }
         for subview in view.subviews {
@@ -358,5 +366,36 @@ final class ShortcutsBulkEnableTests: XCTestCase {
         XCTAssertEqual(
             bulk.toolTip,
             "Disable every slot key (parks the current combos; Enable all restores them)")
+    }
+
+    func testClearingAnAppActionParksNothingAndShowsTheReloadedFailures() {
+        // An app action disables one at a time: Enable all never reads
+        // its section park, so parking there would orphan the entry while
+        // the message promised a restore. The failure list must also be
+        // the one the reload computed, not the pre-clear set: the action
+        // just gave up the combo that was failing.
+        let tab = makeTab()
+        tab.failedActionsProvider = { [.expand] }
+        var announced: [String] = []
+        tab.onAnnouncement = { announced.append($0) }
+        tab.onHotkeysChange = { tab.failedActionsProvider = { [] } }
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let recorder = findRecorder(action: .expand, in: view)
+        else { return XCTFail("expected an Expand recorder") }
+
+        recorder.performClick(nil)
+        _ = recorder.routeRecordedEvent(keyDown(keyCode: UInt16(kVK_Delete)))
+
+        XCTAssertNil(store.binding(for: .expand).keyCode, "the clear landed")
+        let park = ShortcutPark(store: UserDefaultsParkStore(defaults: defaults))
+        XCTAssertNil(
+            park.binding(for: .expand, kind: .section),
+            "an app action's clear must not leave a park nothing restores")
+        XCTAssertFalse(
+            announced.last?.contains("could not be registered") ?? false,
+            "the notice shows the post-reload failure set")
+        XCTAssertEqual(
+            announced.last,
+            "Expand to Fill Screen disabled: re-record it to restore a combo.")
     }
 }

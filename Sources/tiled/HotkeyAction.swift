@@ -19,6 +19,19 @@ enum HotkeyAction: Hashable {
 }
 
 extension HotkeyAction {
+    /// Actions whose binding matches `candidate`, in `allCases` order: the
+    /// one rule behind the store's conflict list, the park plans' owner
+    /// lists, and the snapshot plan's demotion pass. A disabled candidate
+    /// never collides.
+    static func owners(
+        of candidate: HotkeyBinding,
+        ignoring ignored: HotkeyAction,
+        matching matches: (HotkeyAction) -> Bool
+    ) -> [HotkeyAction] {
+        guard candidate.keyCode != nil else { return [] }
+        return allCases.filter { $0 != ignored && matches($0) }
+    }
+
     /// Every configurable action, in display order: the eleven slot keys
     /// first (they are the Shortcuts tab's slot-key section and the
     /// initial-focus path), then the app actions.

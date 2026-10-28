@@ -5,7 +5,19 @@ import XCTest
 /// itself goes through SMAppService and isn't unit-testable; the persisted
 /// flag is.
 final class AppSettingsTests: XCTestCase {
-    private var suiteName: String { "tiledTests-\(UUID().uuidString)" }
+    /// One suite per test, stable across accesses, removed afterwards:
+    /// a computed property minted a fresh domain per read and leaked it.
+    private var suiteName = ""
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "tiledTests-\(UUID().uuidString)"
+    }
+
+    override func tearDown() {
+        UserDefaults().removePersistentDomain(forName: suiteName)
+        super.tearDown()
+    }
 
     private func makeSettings() -> (AppSettings, UserDefaults) {
         let defaults = UserDefaults(suiteName: suiteName)!
