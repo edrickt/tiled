@@ -1667,7 +1667,11 @@ struct TilingSpace {
     private func writeExpandedFrame(
         _ id: WindowID, to target: CGRect, context: Context
     ) -> FrameWriter.Result {
-        guard let record = records[id] else { return .deferredOffSpace }
+        // Every caller holds the record. A missing one is not a deferral
+        // (there is no canvas to wait for), so refuse rather than claim an
+        // intent that stands; `.refused` rolls back instead of parking a
+        // request that would reconcile forever.
+        guard let record = records[id] else { return .refused }
         // The shared write policy: the off-Space guard defers a hidden
         // canvas (the caller retains the toggle for the swipe-back
         // reassert), and a no-op target counts as success without a write.

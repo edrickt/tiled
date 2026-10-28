@@ -94,7 +94,12 @@ final class FakeWindowGateway: WindowGateway {
     func setFrame(_ handle: WindowHandle, to frame: CGRect) -> Bool {
         willWrite?(handle)
         guard var window = windows[handle], window.alive else { return false }
-        if silentIgnore.contains(handle) { return true }
+        if silentIgnore.contains(handle) {
+            // The app swallowed the write: report success but record the
+            // attempt, so a write-count assertion sees that it happened.
+            writes.append((handle, frame))
+            return true
+        }
         if window.refuseNextWrites > 0 {
             window.refuseNextWrites -= 1
             windows[handle] = window

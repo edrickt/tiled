@@ -395,6 +395,23 @@ final class LiveGatewayWiringTests: XCTestCase {
         XCTAssertEqual(gateway.liveness(of: handle), .dead)
     }
 
+    func testAppTerminationDropsBindingsOpenedOnlyForFocusReads() {
+        // A window the controller merely asked about (menu build, glyph)
+        // has no record for the death pass to release; its binding must
+        // not outlive the app.
+        let gateway = makeGateway()
+        let frames = FakeWindowFrames(
+            frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let handle = gateway.registerTestWindow(pid: 4242, token: 1, frames: frames)
+        XCTAssertNotNil(gateway.frame(of: handle))
+
+        gateway.appTerminated(pid: 4242)
+
+        XCTAssertNil(
+            gateway.frame(of: handle),
+            "a focus-only binding does not outlive its app")
+    }
+
     // MARK: Frame reads and the write pair
 
     /// The reported bug: a tiled window landed a full window-height below
@@ -442,6 +459,28 @@ final class LiveGatewayWiringTests: XCTestCase {
         XCTAssertEqual(
             frames.frame(), original,
             "the app's window is left at its old frame, not half-moved")
+    }
+
+    func testRefusedPositionNeverWritesTheSize() {
+        // The mirror of the size-refusal case: sizing at the old origin
+        // would half-apply the pair, leaving the window the wrong shape in
+        // a place the state no longer believes in.
+        let gateway = makeGateway()
+        let original = CGRect(x: 10, y: 20, width: 200, height: 100)
+        let frames = FakeWindowFrames(frame: original)
+        frames.topLeftResults = [.failure]
+        let handle = gateway.registerTestWindow(
+            pid: 100, token: 1, frames: frames)
+
+        XCTAssertFalse(
+            gateway.setFrame(
+                handle, to: CGRect(x: 50, y: 60, width: 300, height: 200)),
+            "a refused position means the placement did not land")
+
+        XCTAssertEqual(
+            frames.sizeWrites, [],
+            "a refused position must not resize the window in place")
+        XCTAssertEqual(frames.frame(), original, "the window is left alone")
     }
 
     func testTransientSizeFailureRetriesTheWholePairThroughTheAdapter() {

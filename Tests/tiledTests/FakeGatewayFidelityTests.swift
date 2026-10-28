@@ -30,6 +30,23 @@ final class FakeGatewayFidelityTests: XCTestCase {
             screens: { [Self.screen] })
     }
 
+    func testSilentIgnoreRecordsTheAttemptedWrite() {
+        // The fake reports success but must not hide that a write was
+        // issued: a "no write issued" assertion over a silent-ignore
+        // window would otherwise pass for the wrong reason.
+        let handle = gateway.addWindow(
+            frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        gateway.silentIgnore.insert(handle)
+        let target = CGRect(x: 10, y: 10, width: 200, height: 150)
+
+        XCTAssertTrue(gateway.setFrame(handle, to: target))
+        XCTAssertEqual(gateway.writes.count, 1)
+        XCTAssertEqual(gateway.writes.first?.1, target)
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 0, y: 0, width: 400, height: 300),
+            "the app swallowed it, so the live frame did not move")
+    }
+
     // MARK: Writes that succeed but land elsewhere
 
     func testClampedWriteCommitsStateWithTheLiveFrameDiverging() {

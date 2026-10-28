@@ -325,8 +325,7 @@ final class LiveWindowGateway: WindowGateway {
                 NSWorkspace.applicationUserInfoKey
             ] as? NSRunningApplication
             guard let pid = terminated?.processIdentifier else { return }
-            if pid == self?.focusObserverPID { self?.releaseFocusObserver() }
-            self?.pruneObserver(for: pid)
+            self?.appTerminated(pid: pid)
         }
         spaceChangeObserver = workspaceNotifications.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
@@ -405,7 +404,9 @@ final class LiveWindowGateway: WindowGateway {
 
         // The write pair retries as a unit: position writes are idempotent,
         // so a retry after a partial application (position landed, size hit
-        // a busy app) just rewrites both, never a half-moved window.
+        // a busy app) just rewrites both, never a half-moved window. A
+        // refused position stops before the size: sizing at the old origin
+        // would half-apply the write in the other direction.
         var lastError: AXError = .success
         let error = AXWrite.retrying(
             operation: {
@@ -415,13 +416,14 @@ final class LiveWindowGateway: WindowGateway {
                 // too low, pushing bottom-row tiles off the screen.
                 let positionResult = frames.setTopLeft(
                     CGPoint(x: frame.minX, y: frame.maxY))
-                if positionResult == .success { positionLanded = true }
+                guard positionResult == .success else {
+                    lastError = positionResult
+                    return lastError
+                }
+                positionLanded = true
                 let sizeResult = frames.setSize(frame.size)
-                guard positionResult == .success, sizeResult == .success else {
-                    // Report whichever write failed so the retry policy can
-                    // judge it; when both failed, either is a valid cause.
-                    lastError =
-                        positionResult == .success ? sizeResult : positionResult
+                guard sizeResult == .success else {
+                    lastError = sizeResult
                     return lastError
                 }
                 return .success
@@ -449,7 +451,7 @@ final class LiveWindowGateway: WindowGateway {
         guard let binding = bindings.removeValue(forKey: handle) else { return }
         focusMemo.invalidate(handle)
         if let key = binding.observedKey {
-            registry.forget(key: key, pid: binding.pid)
+            registry.forget(key: key)
             if tokenIndex[key] == handle { tokenIndex[key] = nil }
         }
         if !bindings.values.contains(where: { $0.pid == binding.pid }) {
@@ -479,6 +481,21 @@ final class LiveWindowGateway: WindowGateway {
     ) {
         guard let pid = bindings[handle]?.pid else { return }
         adopt(handle, element: nil, token: token, frames: frames, pid: pid)
+    }
+
+    /// An app quit. Its windows are gone; drop the bindings opened only for
+    /// focus reads (menu builds, the status glyph), which have no record
+    /// for the controller's death pass to release. Observed bindings stay:
+    /// the controller's prune owns their record, and the undo chapter skips
+    /// a dead handle by itself.
+    func appTerminated(pid: pid_t) {
+        if pid == focusObserverPID { releaseFocusObserver() }
+        pruneObserver(for: pid)
+        let stale = bindings.filter { $0.value.pid == pid && $0.value.observedKey == nil }
+        for handle in stale.keys {
+            bindings[handle] = nil
+            focusMemo.invalidate(handle)
+        }
     }
 
     func liveness(of handle: WindowHandle) -> Liveness {
@@ -1062,12 +1079,10 @@ final class LiveWindowGateway: WindowGateway {
         }
         let handle = WindowHandle(id: nextHandleID)
         nextHandleID += 1
-        bindings[handle] = WindowBinding(
-            pid: pid, frames: AXWindowFrames(element: element),
-            token: UInt(CFHash(element)))
-        adopt(
-            handle, element: element, token: UInt(CFHash(element)),
-            frames: AXWindowFrames(element: element), pid: pid)
+        let token = UInt(CFHash(element))
+        let frames = AXWindowFrames(element: element)
+        bindings[handle] = WindowBinding(pid: pid, frames: frames, token: token)
+        adopt(handle, element: element, token: token, frames: frames, pid: pid)
         return handle
     }
 
@@ -1089,7 +1104,7 @@ final class LiveWindowGateway: WindowGateway {
         binding.token = token
         binding.frames = frames
         if let oldKey, oldKey != token {
-            registry.forget(key: oldKey, pid: pid)
+            registry.forget(key: oldKey)
             if tokenIndex[oldKey] == handle { tokenIndex[oldKey] = nil }
             binding.observedKey = token
             tokenIndex[token] = handle
@@ -1450,7 +1465,10 @@ final class LiveWindowGateway: WindowGateway {
         /// Forgets one released handle's key. The pid's shared observer
         /// stays (its other windows still use it); the key must not, so a
         /// window re-tiled under a fresh handle can register again.
-        mutating func forget(key: UInt, pid: pid_t) {
+        /// Forgets one element key. The registry is keyed by CFHash, not
+        /// pid: a pid's shared observer outlives any one window, and only
+        /// `forget(pid:)` drops the observer's own rows.
+        mutating func forget(key: UInt) {
             registeredKeys[key] = nil
             pendingKeys.remove(key)
         }
