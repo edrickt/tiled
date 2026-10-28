@@ -266,8 +266,8 @@
  [
   "TilingSpace.swift",
   "degenerate swap fallback forgets which windows are expanded (re-houses an expanded evictee)",
-  "            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: context)",
-  "            expanded[displaced] = nil\n            return applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: context)"
+  "            var fallback = applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: context)",
+  "            expanded[displaced] = nil\n            var fallback = applyTile(\n                .tile(evicting: [displaced]), requester: id,\n                slot: slot, context: context)"
  ],
  [
   "LiveWindowGateway.swift",
@@ -506,7 +506,7 @@
  [
   "TilingSpace.swift",
   "deferred restore reconcile never runs (deferred restores dropped)",
-  "        let pending = deferredRestores\n        deferredRestores = Self.reconcile(pending) { handle, restore in",
+  "        let pending = deferredRestores.filter {\n            context.gateway.liveness(of: $0.key) != .dead\n        }\n        deferredRestores = Self.reconcile(pending) { handle, restore in",
   "        let pending: [WindowHandle: DeferredRestore] = [:]\n        deferredRestores = Self.reconcile(pending) { handle, restore in"
  ],
  [
@@ -650,8 +650,8 @@
  [
   "DragTracker.swift",
   "mouse-up leaves the hand evidence set (a later jump borrows a click)",
-  "    func mouseLifted() {\n        handPressPoint = nil\n        handPressAt = nil\n        let pending = pendingReasserts",
-  "    func mouseLifted() {\n        let pending = pendingReasserts"
+  "    func mouseLifted() {\n        handPressPoint = nil\n        handPressAt = nil",
+  "    func mouseLifted() {"
  ],
  [
   "FrameWriter.swift",
