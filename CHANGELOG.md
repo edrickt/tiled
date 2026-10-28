@@ -6,16 +6,19 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
 ### Added
 
 - Eleven shared ⌥⇧ slot keys (U I O M , . J K L H ;) that mean the
   matching position in whichever layout the canvas is showing, plus ⌥⇧\
-  to switch the focused canvas's layout explicitly. A switch untiles every
-  tiled window there and restores each to its pre-tile frame; one undo
-  returns the windows and the previous layout. The layout is a stored
-  canvas choice, so an empty canvas keeps it, and a key with no slot in the
-  active layout is inert and says where it belongs. Tiled now registers 17
-  hotkeys: 11 slot keys and 6 app actions.
+  to switch the layout of the display under the pointer — with or without a
+  window there — explicitly (the menu's Switch Layout row still follows
+  focus). A switch untiles every tiled window there and restores each to
+  its pre-tile frame; one undo returns the windows and the previous layout.
+  The layout is a stored canvas choice, so an empty canvas keeps it, and a
+  key with no slot in the active layout is inert and says where it belongs.
+  Tiled now registers 17 hotkeys: 11 slot keys and 6 app actions.
 - The Shortcuts tab shows App Actions (6) and Slot Keys (11), with one bulk
   Enable/Disable all for the eleven slot keys.
 
@@ -281,6 +284,7 @@ First release.
 - Universal release bundles (Apple Silicon and Intel), built and checksummed
   by the release workflow on a `v*` tag.
 
+[0.3.0]: https://github.com/edrickt/tiled/releases/tag/v0.3.0
 [0.2.2]: https://github.com/edrickt/tiled/releases/tag/v0.2.2
 [0.2.1]: https://github.com/edrickt/tiled/releases/tag/v0.2.1
 [0.2.0]: https://github.com/edrickt/tiled/releases/tag/v0.2.0
