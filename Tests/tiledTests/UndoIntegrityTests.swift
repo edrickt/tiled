@@ -466,6 +466,20 @@ final class UndoIntegrityTests: XCTestCase {
             "the notice must not offer the undo route with no chapter behind it")
     }
 
+    func testChapterEntriesAreTaggedWithThePushingCanvas() {
+        // `restoreChapter` groups by tag, but every production push uses
+        // the acting canvas, so the legacy untagged branch is the only
+        // way two groups could appear. Pin the invariant the grouping
+        // relies on rather than leaving it to convention.
+        _ = makeSwapChapter()
+        let key = controller.focusedTilingSpace
+        let chapter = try! XCTUnwrap(canvas.undoStack.last)
+        XCTAssertFalse(chapter.snapshot.isEmpty)
+        XCTAssertTrue(
+            chapter.snapshot.allSatisfy { $0.space == key },
+            "every entry is tagged with the canvas that pushed the chapter")
+    }
+
     func testUndoRaisesTheArrangementItRetiles() {
         // The forward eviction raises the survivor over the evictee;
         // undo restores the evictee below the arrangement it re-tiles.

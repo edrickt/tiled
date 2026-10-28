@@ -426,6 +426,12 @@ struct TilingSpace {
     /// freshest `undoDepth` recoveries, dropping the oldest. A new tiling
     /// action pushes; it never silently invalidates: depth, not amnesia,
     /// bounds the history.
+    ///
+    /// Every entry a canvas pushes is tagged with that canvas (`context`
+    /// is the pushing canvas), so undo restores on the canvas that pushed;
+    /// `TilingController.restoreChapter` still groups by tag so a legacy
+    /// untagged entry lands on the canvas being undone. Chapters are
+    /// in-memory only, so no cross-canvas tag exists today.
     mutating func pushUndo(snapshot: [EvictedWindow]?, requester: WindowID?) {
         guard let snapshot, !snapshot.isEmpty else { return }
         beginUndoChapter()
