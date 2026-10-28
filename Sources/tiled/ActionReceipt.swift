@@ -11,6 +11,10 @@ struct ActionReceipt: Equatable {
     /// still reports the canvas that owns that window.
     let canvas: TilingSpaceKey
     /// True only when something actually changed and no restore refused.
+    /// No presenter branches on it: the spoken channel keys off
+    /// `announcement`, and the menu keys off `notice`. It stays on the
+    /// value as the controller's own verdict for tests and for a future
+    /// surface that must distinguish a performed no-op from a refusal.
     let performed: Bool
     /// The canvas's sticky notice/error after the action: the text the menu
     /// carries until the next action replaces it.

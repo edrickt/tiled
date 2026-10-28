@@ -165,7 +165,9 @@ enum MenuModel {
             }
             items.append(Item(title: snapshot.layoutTitle, isEnabled: false))
         }
-        items.append(.separator())
+        // Untrusted has no status block above, so it must not lead with a
+        // separator; every other shape still separates status from Act.
+        if !items.isEmpty { items.append(.separator()) }
 
         // 2. Act + 3. Manage.
         if snapshot.isTrusted {
@@ -238,22 +240,23 @@ enum MenuModel {
                         items.append(windowItem(window, snapshot))
                     }
                 } else {
-                    var index = 0
+                    // Rows arrive in canvas order, which can interleave a
+                    // display's identified and withheld canvases. Group
+                    // each window under its own section's identity instead
+                    // of consuming one contiguous run.
+                    let sectionKeys = Set(snapshot.monitorSections.map(\.key))
                     for section in snapshot.monitorSections {
                         items.append(Item(
                             title: section.title, isEnabled: false, isHeader: true))
-                        while index < snapshot.tiledWindows.count,
-                              snapshot.tiledWindows[index].screen == section.key
-                        {
-                            items.append(windowItem(snapshot.tiledWindows[index], snapshot))
-                            index += 1
+                        for window in snapshot.tiledWindows where window.screen == section.key {
+                            items.append(windowItem(window, snapshot))
                         }
                     }
                     // Defensive: windows whose section key mismatched
                     // (stale snapshot) still render rather than vanish.
-                    while index < snapshot.tiledWindows.count {
-                        items.append(windowItem(snapshot.tiledWindows[index], snapshot))
-                        index += 1
+                    for window in snapshot.tiledWindows
+                    where !(window.screen.map(sectionKeys.contains) ?? false) {
+                        items.append(windowItem(window, snapshot))
                     }
                 }
             }

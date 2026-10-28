@@ -26,7 +26,7 @@ final class NoticePresentationTests: XCTestCase {
 
         XCTAssertEqual(
             notices.overlay(
-                canvasNotice: "Focused notice", canvasError: nil,
+                canvasNotice: "Focused notice",
                 focusedSpace: focused),
             error,
             "a background action's receipt is the latest user-visible outcome")
@@ -40,12 +40,12 @@ final class NoticePresentationTests: XCTestCase {
 
         XCTAssertEqual(
             notices.overlay(
-                canvasNotice: "Fresh outcome", canvasError: nil,
+                canvasNotice: "Fresh outcome",
                 focusedSpace: focused),
             "Fresh outcome")
         XCTAssertEqual(
             notices.overlay(
-                canvasNotice: "Focused notice", canvasError: nil,
+                canvasNotice: "Focused notice",
                 focusedSpace: focused),
             "Focused notice",
             "a superseded receipt never resurfaces, even when the new notice is nil")
@@ -59,10 +59,25 @@ final class NoticePresentationTests: XCTestCase {
 
         XCTAssertEqual(
             notices.overlay(
-                canvasNotice: "Focused notice", canvasError: "New error",
+                canvasNotice: "Focused notice",
                 focusedSpace: focused),
             "Focused notice",
             "the new generation owns the overlay, not the stale background receipt")
+    }
+
+    func testAReceiptPresentedAfterTheStateChangeSurvives() {
+        // The controller refreshes (`stateDidChange`) before handing over a
+        // late receipt. Presenting first would arm the overlay against the
+        // old generation, and the bump would erase it in the same turn.
+        var notices = NoticePresentation()
+        notices.stateDidChange()
+        let late = receipt(on: background)
+        notices.present(late, focusedSpace: focused)
+
+        XCTAssertEqual(
+            notices.overlay(canvasNotice: nil, focusedSpace: focused),
+            late.notice,
+            "a receipt presented after the refresh is the newest outcome")
     }
 
     func testMovingFocusDoesNotCarryTheReceiptToAThirdCanvas() {
@@ -72,7 +87,7 @@ final class NoticePresentationTests: XCTestCase {
 
         XCTAssertEqual(
             notices.overlay(
-                canvasNotice: "Third notice", canvasError: nil,
+                canvasNotice: "Third notice",
                 focusedSpace: third),
             "Third notice")
     }
@@ -84,7 +99,7 @@ final class NoticePresentationTests: XCTestCase {
 
         XCTAssertEqual(
             notices.overlay(
-                canvasNotice: "Focused notice", canvasError: nil,
+                canvasNotice: "Focused notice",
                 focusedSpace: focused),
             "Focused notice",
             "the receipt on this canvas is already carried by canvasNotice")
@@ -95,7 +110,7 @@ final class NoticePresentationTests: XCTestCase {
 
         XCTAssertEqual(
             notices.overlay(
-                canvasNotice: "Focused notice", canvasError: nil,
+                canvasNotice: "Focused notice",
                 focusedSpace: focused),
             "Focused notice")
     }
@@ -108,7 +123,7 @@ final class NoticePresentationTests: XCTestCase {
 
         XCTAssertEqual(
             notices.overlay(
-                canvasNotice: "Focused notice", canvasError: nil,
+                canvasNotice: "Focused notice",
                 focusedSpace: focused),
             "Focused notice",
             "returning to the same canvas must not resurrect the cleared receipt")

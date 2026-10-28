@@ -187,7 +187,6 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
                 reads: reads,
                 notice: notices.overlay(
                     canvasNotice: reads.canvas.notice,
-                    canvasError: reads.canvas.error,
                     focusedSpace: focus)),
             icon: Self.iconSnapshot(
                 space: cursor,

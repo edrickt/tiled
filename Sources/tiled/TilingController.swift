@@ -713,10 +713,13 @@ final class TilingController {
         }
         let error = directory.storedCanvas(for: errorSpace)?.error
         let announcement = MenuText.refusedAnnouncement(windowName: name)
+        // Refresh first: `onChange` bumps the notice generation, and a
+        // receipt presented before the bump is superseded in the same
+        // turn, so a background canvas's sentence would never render.
+        onChange?()
         onLateReceipt?(ActionReceipt(
             canvas: errorSpace, performed: false,
             notice: error ?? announcement, announcement: announcement))
-        onChange?()
         dbg("verify FAILED win\(id): silent ignore, rolled back")
     }
 

@@ -40,7 +40,6 @@ struct NoticePresentation: Equatable {
     /// old text.
     func overlay(
         canvasNotice: String?,
-        canvasError: String?,
         focusedSpace: TilingSpaceKey
     ) -> String? {
         guard let receipt,
@@ -48,6 +47,9 @@ struct NoticePresentation: Equatable {
               presentedSpace == focusedSpace,
               presentedGeneration == generation
         else { return canvasNotice }
-        return receipt.notice ?? canvasError ?? canvasNotice
+        // Never fall back to the focused canvas's error: that error belongs
+        // to another canvas and already has its own menu row, so borrowing
+        // it would render the same sentence twice.
+        return receipt.notice ?? canvasNotice
     }
 }

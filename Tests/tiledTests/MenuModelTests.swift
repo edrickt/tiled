@@ -438,6 +438,34 @@ final class MenuModelTests: XCTestCase {
         XCTAssertTrue(titles[second + 1].contains("Mail"))
     }
 
+    func testInterleavedCanvasesKeepRowsUnderTheirOwnDisplayHeader() {
+        // `visibleKeys()` emits every identified canvas before every
+        // withheld one, so one display's rows can straddle another's. The
+        // rendered menu must still put each row under its own header.
+        let left = ScreenID(rawValue: 0)
+        let right = ScreenID(rawValue: 1)
+        var snap = snapshot(tiledWindows: [
+            .init(id: 1, slot: .topLeft, appName: "Safari", screen: left),
+            .init(id: 2, slot: .topLeft, appName: "Mail", screen: right),
+            .init(id: 3, slot: .topRight, appName: "Notes", screen: left),
+        ])
+        snap.monitorSections = [
+            .init(title: "Display 1 · Quarters · 2 tiled", key: left),
+            .init(title: "Display 2 · Quarters · 1 tiled", key: right),
+        ]
+        let titles = items(snap).map(\.title)
+        let leftHeader = titles.firstIndex(of: "Display 1 · Quarters · 2 tiled")!
+        let rightHeader = titles.firstIndex(of: "Display 2 · Quarters · 1 tiled")!
+        let safari = titles.firstIndex { $0.contains("Safari") }!
+        let notes = titles.firstIndex { $0.contains("Notes") }!
+        let mail = titles.firstIndex { $0.contains("Mail") }!
+        XCTAssertEqual(safari, leftHeader + 1)
+        XCTAssertEqual(
+            notes, leftHeader + 2,
+            "the interleaved row stays under its own header")
+        XCTAssertEqual(mail, rightHeader + 1)
+    }
+
     func testSectionsWithTheSameTitleMatchRowsByDisplayIdentity() {
         // Two unlabeled displays both render a "Display" header. The rows
         // must follow their own section's identity, never the first
@@ -519,6 +547,7 @@ final class MenuModelTests: XCTestCase {
         // its own separator, so an empty manage block must not add a second.
         let shapes = [
             snapshot(),
+            snapshot(isTrusted: false),
             snapshot(canUndoDisplacement: true, displacedCount: 1),
             snapshot(hasSplitterBackup: true),
             snapshot(
