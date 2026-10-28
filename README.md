@@ -414,7 +414,8 @@ Four workers by default (`--workers N` to tune); the tool's own tests run with
 
 Nothing runs these gates for you: there is no CI, so `make check` before
 every push and `python3 tools/mutation/mutate.py` before a release are the
-gate. Both are cheap enough that a hand run is the whole cost.
+gate. Both are cheap enough that a hand run is the whole cost. `docs/release.md`
+has the release steps that `release.yml` used to run.
 
 ## Status / roadmap
 
