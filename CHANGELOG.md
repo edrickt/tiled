@@ -6,11 +6,52 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
+## [0.3.1] - 2026-10-28
 
+### Fixed
+
+- A refused position write no longer resizes the window in place: the
+  frame write pair is all-or-nothing in both directions, so an app that
+  refuses the move leaves the window exactly where it was.
+- A Mission Control Space deleted while its canvas held windows no longer
+  strands them: the canvas is retired, and the window tiles again on the
+  Space macOS moved it to instead of deferring forever against a canvas
+  that can never be visible.
+- The menu no longer shows the same error twice after an action on another
+  display, and a window on a display holding both a named and a withheld
+  canvas stays under its own display's header, with that header's count.
+- A re-house whose fallback restore is also refused now names the app in
+  the menu instead of claiming the window went back.
+- A mouse-up can no longer lose a drag: a sub-pixel final tick no longer
+  cancels an in-flight title-bar drag, and a live drag is decided before
+  the edge reassert that used to erase it and reconcile the splitters from
+  the dropped frame.
+- A stored shortcut value outside the usable range no longer traps when
+  Settings opens; it degrades to the factory default.
+- Clearing a failing shortcut no longer leaves the old warning on screen,
+  and clearing an app action no longer parks its combo where nothing could
+  restore it. Slot keys still park for Enable all, and the message names
+  that route.
+- Undo's notices point at the menu instead of a hardcoded ⌃⌥⇧⌘Z (Undo is
+  remappable), an undo re-tiles above the arrangement it restores, and the
+  menu never offers "Restore 0 Displaced Windows".
+- A closed window's parked restore is dropped instead of failing on the
+  swipe back and naming a window the user closed.
+- Reset Splitters keeps its one-press contract: while a backup is parked
+  the same press restores it instead of overwriting it.
+- The Welcome tab announces an Accessibility permission change instead of
+  changing layout silently.
+- Hotkey bindings opened only for focus reads are released when their app
+  quits.
 - The README now states the shipped rule for the menu-bar glyph and ⌥⇧\:
   both follow the display under the pointer, while the tiled-window rows
   and the menu's Switch Layout row follow focus.
+
+### Added
+
+- `make exhaustive` runs the exhaustive undo replay (653 boards, 11,931
+  chapters) and joins the hand-off gate, which the hermetic cycle never
+  ran before.
 
 ## [0.3.0] - 2026-10-28
 
