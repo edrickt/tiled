@@ -103,6 +103,13 @@ final class MinimumSizeTests: XCTestCase {
                 frame, CGRect(x: 1100, y: 0, width: 500, height: 1000),
                 "it simply stops shrinking: the floor-width window holds "
                     + "the screen edge it was pinned to")
+            // The neighbour's floor is the conflict winner: the splitter
+            // moves back to the edge the neighbour could reach, and the
+            // dragged window is re-derived to abut it. The two tiles stay
+            // consistent; the drag could not go further.
+            XCTAssertEqual(
+                self.gateway.frame(of: a)!.maxX, 1100,
+                "a clamped neighbour bounds the drag and the splitter abuts it")
             lifted.fulfill()
         }
         wait(for: [lifted], timeout: 1)

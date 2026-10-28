@@ -263,8 +263,10 @@ final class CanvasDirectory {
     }
 
     /// The visible frame of a canvas's own display: the one geometry every
-    /// rect on that canvas derives from. A display-less key uses the main
-    /// screen, then the live main screen, then zero.
+    /// rect on that canvas derives from. A display-less key, or one whose
+    /// display is detached, uses the main screen, then the live main
+    /// screen, then zero; `refreshFrames` skips a detached display, so the
+    /// fallback is never written back over a returned display's frame.
     func visibleFrame(for space: TilingSpaceKey) -> CGRect {
         if let screen = space.screen,
             let info = screens().first(where: { $0.id == screen })

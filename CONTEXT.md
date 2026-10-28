@@ -60,7 +60,7 @@ _Avoid_: settle (the placement pipeline's own step), reflow (reflow merges freed
 _Code_: `TilingSpace.reassert(_:context:)`, over the pure core `TilingSpace.reassertPlan(_:)`
 
 **Achieved frame**:
-Where an app actually left the window, which an app's minimum-size floor can hold short of the splitter the cursor moved. The reassert trusts the achieved frame over the splitter, so neighbours abut the window itself and never the splitter it could not reach.
+Where an app actually left the window, which an app's minimum-size floor can hold short of the splitter the cursor moved. The reassert trusts the achieved frame over the splitter, so neighbours abut the window itself and never the splitter it could not reach. When a neighbour's own floor keeps it short of the splitter the drag moved, the neighbour's achieved edge wins the splitter and the dragged window is re-derived to abut it: two windows cantilevered past each other cannot both keep their achieved frames, and the tile stays consistent.
 _Avoid_: actual frame, clamped frame (a clamp is one cause), intent (the drag loop's pushed target, which is where we aimed, not where the app landed)
 _Code_: the dragged window's live frame, read at reassert
 
