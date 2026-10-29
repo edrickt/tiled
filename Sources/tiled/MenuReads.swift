@@ -64,7 +64,7 @@ struct MenuReads {
     /// the display's `ScreenID` (identity); the display name is used only
     /// for the header text. One section per display that has windows, in
     /// controller order. Two same-named displays stay separate because
-    /// identity, not the name, groups them. Single monitor (or no screen
+    /// identity, not the name, groups them. Single display (or no screen
     /// tags) renders the flat legacy list.
     static func monitorPresentation(
         rows: [TilingController.TiledWindowInfo],
@@ -105,9 +105,9 @@ struct MenuReads {
                 .init(id: $0.id, slot: $0.slot, appName: $0.appName)
             }
         }
-        // Status line: one monitor reads as before; two read per
+        // Status line: one display reads as before; two read per
         // display ("Display 1 · Quarters · 2 tiled + Display 2 · Sixths
-        // · 1 tiled") so the compass never hides a background monitor.
+        // · 1 tiled") so the compass never hides a background display.
         let statusLine: String
         if sections.isEmpty {
             statusLine = "Layout: \(layoutForScreen(nil).title) · \(rows.count) tiled"

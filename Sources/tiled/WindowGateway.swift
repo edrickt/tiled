@@ -63,7 +63,7 @@ protocol WindowGateway: AnyObject {
     /// The Mission Control Space shown on `display` right now, or nil
     /// when the window server cannot say (a display-less environment,
     /// or a future OS without the private Space table). Nil keeps the
-    /// old per-display behavior: one layout per monitor.
+    /// old per-display behavior: one layout per display.
     func activeSpace(on display: CGDirectDisplayID) -> SpaceID?
     /// Calls `onChange` when the active Space changes on any display:
     /// the swipe that swaps which canvas is on screen. Replaces any

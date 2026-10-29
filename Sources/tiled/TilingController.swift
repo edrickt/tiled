@@ -306,6 +306,7 @@ final class TilingController {
     /// Records the cursor's display from an injected point, answering
     /// whether it moved. The presenter's seam for tests: the live
     /// registrar path is `cursorMoved(to:)`.
+    @discardableResult
     func noteCursor(at point: CGPoint) -> Bool {
         directory.noteCursor(at: point)
     }
@@ -315,6 +316,7 @@ final class TilingController {
     /// tracking is not guaranteed, so the seed makes the glyph correct
     /// without trusting the monitors (`NSEvent.mouseLocation` needs no
     /// accessibility trust).
+    @discardableResult
     func noteCursorFromMouseLocation() -> Bool {
         noteCursor(at: NSEvent.mouseLocation)
     }

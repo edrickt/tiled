@@ -6,6 +6,31 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-28
+
+### Fixed
+
+- The debug build is warning-free again: a dead `slot` binding in the
+  collapse-expansion deferral now reads as the boolean test it is, and
+  the cursor-seed calls discard their result explicitly. No behavior
+  change.
+- Glossary drift swept a second time: prose that said "monitor" for the
+  display dimension (status icon, menu grouping, window gateway, README)
+  now says "display". Code identifiers are untouched. No behavior change.
+- The open self-untile question is pinned hermetically: a new regression
+  test proves undo after a focused untile restores the reflowed survivor
+  and leaves the untiled window at its pre-tile frame, so the live log's
+  missing re-place matches the design instead of a dropped write.
+  Whether undo should re-tile there is a product call, parked in the
+  ticket with the pinning test cited.
+
+### Added
+
+- `tools/repro/probe-identity.swift` reports the display number and
+  Space table a canvas key is built from, for the sleep/wake identity
+  hypothesis the audit parked.
+- `.gitignore` now covers local tool state (`.headroom/`, `.pi/`).
+
 ## [0.3.1] - 2026-10-28
 
 ### Fixed

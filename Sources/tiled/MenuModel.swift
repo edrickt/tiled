@@ -45,7 +45,7 @@ enum MenuModel {
     /// every tick; the menu only cares about state, warnings, rows).
     ///
     /// The memberwise initializer keeps direct construction working:
-    /// `monitorSections` defaults to [] (single monitor, no headers).
+    /// `monitorSections` defaults to [] (single display, no headers).
     struct Snapshot: Equatable {
         var isTrusted: Bool
         var warnings: [String]
@@ -77,8 +77,8 @@ enum MenuModel {
         /// for the manage list, because the row's count must match the
         /// action it performs.
         var untileCount: Int
-        /// Per-monitor section headers for the tiled-windows list, in
-        /// menu order. Empty = single monitor (no headers rendered).
+        /// Per-display section headers for the tiled-windows list, in
+        /// menu order. Empty = single display (no headers rendered).
         var monitorSections: [MonitorSection] = []
         /// The live combo label for each action that has one. Absent means
         /// the action is disabled, so its row renders without a combo. The
@@ -97,7 +97,7 @@ enum MenuModel {
             var appName: String?
             /// Display the window tiles on, matched against
             /// `MonitorSection.key`: identity, never the display name, so
-            /// two monitors sharing a name still separate. Nil for the
+            /// two displays sharing a name still separate. Nil for the
             /// legacy flat list.
             var screen: ScreenID? = nil
         }
@@ -227,9 +227,9 @@ enum MenuModel {
                 items.append(.separator())
             }
             if hasWindowRows {
-                // Multi-monitor: group the manage list per display with a
+                // Multi-display: group the manage list per display with a
                 // disabled header per section ("Display 1 · Quarters · 2
-                // tiled"). Single-monitor setups render the flat list.
+                // tiled"). Single-display setups render the flat list.
                 if snapshot.monitorSections.isEmpty {
                     for window in snapshot.tiledWindows {
                         items.append(windowItem(window, snapshot))

@@ -7,3 +7,7 @@ build/
 
 .impeccable/critique/*
 !.impeccable/critique/2026-09-04T16-14-22Z__sources-tiled.md
+
+# Local tool state, never distributed.
+.headroom/
+.pi/

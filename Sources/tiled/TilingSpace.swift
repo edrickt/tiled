@@ -1660,7 +1660,7 @@ struct TilingSpace {
             // swipe-back reassert issues it. A tiled collapse re-tiles
             // into its committed slot; an untiled one returns to the
             // saved frame.
-            if let slot = state.slot(of: id) {
+            if state.slot(of: id) != nil {
                 deferredRequests[id] = .slot
             } else {
                 deferredRequests[id] = .collapse(frame: saved)

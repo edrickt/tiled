@@ -26,7 +26,7 @@ enum StatusIcon {
         var occupiedSlots: Int
         /// Display the glyph depicts, when naming it distinguishes the
         /// depiction (more than one display attached). Nil on a single
-        /// display, where the monitor is unambiguous and the spoken line
+        /// display, where the display is unambiguous and the spoken line
         /// stays as it was.
         var displayName: String?
     }
@@ -59,7 +59,7 @@ enum StatusIcon {
 
     /// One immutable pass over the state the icon reads: geometry plus
     /// fill, so the delegate diffs a single value. `displayName` travels
-    /// with the snapshot so the spoken line names the monitor the glyph
+    /// with the snapshot so the spoken line names the display the glyph
     /// depicts; it is part of equality, so a focus move to another display
     /// redraws the icon's accessible description even when the occupancy
     /// map is identical.
@@ -79,7 +79,7 @@ enum StatusIcon {
     /// half reports "1 of 4 slots occupied", not "2 of 4". When the
     /// snapshot names a display (more than one attached), the line ends
     /// by naming it, matching the menu headers so a VoiceOver user can
-    /// tell which monitor the glyph describes.
+    /// tell which display the glyph describes.
     static func accessibilityDescription(_ snapshot: Snapshot) -> String {
         let total = cells(for: snapshot.layout).count
         let line = "Tiled \(snapshot.layout.title) layout, "

@@ -728,4 +728,39 @@ final class UndoIntegrityTests: XCTestCase {
             localGateway.frame(of: handle), screen.visibleFrame,
             "the deferred expansion lands on the swipe back")
     }
+
+    /// The self-untile shape from `.scratch/undo/issues/01`: HOSTA holds
+    /// the middle third, HOSTB the right third; the focused HOSTB is
+    /// untiled (its restore is the recovery), HOSTA reflows into the
+    /// right two-thirds, and undo restores HOSTA alone. The untiled
+    /// window keeps its pre-tile frame: the chapter holds the survivor's
+    /// move, never the untiled window, so a live log showing no re-place
+    /// for it matches the design, not a dropped write.
+    func testUndoAfterSelfUntileRestoresSurvivorOnly() {
+        harness.addFocusedWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        controller.handle(slot: .sixthMiddle)
+        let bFrame = CGRect(x: 900, y: 50, width: 600, height: 450)
+        let b = harness.addFocusedWindow(frame: bFrame)
+        controller.handle(slot: .sixthRight)
+
+        controller.untile(window: 2)
+
+        XCTAssertEqual(
+            canvas.state.slot(of: 1), .sixthsRightTwoThirds,
+            "the survivor absorbs the freed third")
+        XCTAssertNil(canvas.state.slot(of: 2), "the untiled window released its slot")
+        XCTAssertEqual(
+            gateway.frame(of: b), bFrame,
+            "untile writes the pre-tile frame back")
+
+        XCTAssertTrue(controller.undoLastDisplacement(), "the reflow chapter is undoable")
+
+        XCTAssertEqual(
+            canvas.state.slot(of: 1), .sixthMiddle,
+            "undo shrinks the survivor back")
+        XCTAssertNil(canvas.state.slot(of: 2), "undo does not re-tile the untiled window")
+        XCTAssertEqual(
+            gateway.frame(of: b), bFrame,
+            "the untiled window keeps its pre-tile frame")
+    }
 }

@@ -185,8 +185,8 @@ tell you which app took it.
   it belongs. The menu names the effect and how to undo it ("Switched to
   Sixths · 3 windows untiled. Undo from the Tiled menu.").
 - A display change (unplug, rearrange, resolution) re-asserts every visible
-  canvas immediately. Canvas identity follows the physical monitor's
-  CoreGraphics display number, so reordering screens never moves a monitor's
+  canvas immediately. Canvas identity follows the physical display's
+  CoreGraphics display number, so reordering screens never moves a display's
   arrangement to another display. Hidden Spaces are marked stale instead:
   Tiled never writes an off-Space window, because an AX resize can pull it
   onto the visible Space. Swiping back re-asserts that Space against the new
@@ -209,7 +209,7 @@ updates as you drag; the neighbor windows on the other side — and the
 dragged window's own tile — are rewritten when the mouse button is
 released. The row splitters are independent per column (quarters) or per
 third (sixths), so resizing one column's rows never moves the other, and
-the same independence holds between monitors and Spaces, so dragging an
+the same independence holds between displays and Spaces, so dragging an
 edge on one canvas never moves tiles on another. A two-thirds window
 resizes as two equal one-thirds: the hidden splitter inside it follows
 its outer edge, staying at the midpoint. A
@@ -252,7 +252,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-make check             # unit suite (958 tests) and the published count
+make check             # unit suite (959 tests) and the published count
 make test              # same suite with the full transcript
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
@@ -287,7 +287,7 @@ The layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (958 tests) | `make check` | nothing; ~5s, no AX, no runloop |
+| Unit suite (959 tests) | `make check` | nothing; ~5s, no AX, no runloop |
 | Focused tests | `swift test --filter <Suite>` | nothing |
 | Full transcript | `make test` | nothing |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |
@@ -315,7 +315,7 @@ freshly focused same-app window sitting on a tiled window's exact frame
 — the shape Firefox's tab tear-out produces — must not inherit its
 handle and untile the original. Sixths boards stay disjoint in the suite: it
 models the quarters eviction algebra, not a second occupancy model. The multi-display
-suite checks same-slot coexistence, per-monitor moves, and splitter isolation
+suite checks same-slot coexistence, per-display moves, and splitter isolation
 on two attached displays; unplug/replug, rearrange, and Mission Control
 validation stays in the accompanying manual checklist. Run these before a
 release; they cannot run headless (they move the real cursor and need a TCC
