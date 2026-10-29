@@ -6,6 +6,14 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-29
+
+First stable release. No code changes since 0.3.2: the audited 0.3.x
+foundation — atomic frame writes, canvas retirement for deleted
+Spaces, truthful menus and undo, the warning-free build — is now the
+1.0 behavior the README documents, held by the standing gates (959
+unit tests, the 149-mutant table, the exhaustive undo replay).
+
 ## [0.3.2] - 2026-10-28
 
 ### Fixed
