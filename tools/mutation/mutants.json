@@ -834,6 +834,18 @@
   "            binding.observedKey = token"
  ],
  [
+  "LiveWindowGateway.swift",
+  "a system-wide answer that named the app is discarded for the workspace's frontmost app (focus resolution overrides AX)",
+  "        if systemWideRead == .success { return .systemWide }",
+  "        if false { return .systemWide }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "the fallback asks a pid no app can own (focus resolution targets pid 0)",
+  "        guard let frontmost, frontmost > 0 else { return .none }",
+  "        guard let frontmost else { return .none }"
+ ],
+ [
   "HotkeyService.swift",
   "the route table drops its last action (a hotkey goes dead)",
   "        uniqueKeysWithValues: HotkeyAction.allCases.map { ($0.hotkeyID, $0) })",

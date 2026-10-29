@@ -6,6 +6,23 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-29
+
+### Fixed
+
+- An app that never marks a window AX-focused can be tiled again. A
+  Chromium/CEF host (Spotify is the measured one) exposes no focused UI
+  element, so the system-wide `kAXFocusedApplicationAttribute` read
+  answers `.noValue` and every slot key resolved "no focused window":
+  the window never moved and no notice named why. The requester now
+  falls back to the workspace's frontmost app, whose own
+  `kAXFocusedWindowAttribute` read answers for such an app — and only
+  when AX named no app, so an answer AX gave is never overridden.
+  Verified live on macOS 26 (Spotify 1.3.3, `TILED_DEBUG=1`: the read
+  logged err=-25212 with Spotify frontmost and err=0 with Firefox
+  frontmost, milliseconds apart; the fallback then tiled Spotify into
+  the requested slot).
+
 ## [1.0.0] - 2026-10-29
 
 First stable release. No code changes since 0.3.2: the audited 0.3.x

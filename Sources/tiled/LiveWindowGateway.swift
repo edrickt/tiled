@@ -294,6 +294,10 @@ final class LiveWindowGateway: WindowGateway {
     /// NSWorkspace's; tests pass a private centre so constructing the
     /// adapter never subscribes to the running session.
     private let workspaceNotifications: NotificationCenter
+    /// The workspace's frontmost app, the fallback's own input (see
+    /// `FocusSource`). Injected so the fallback is testable without the
+    /// running session; production reads NSWorkspace.
+    private let frontmostPID: () -> pid_t?
 
     init(
         observerDriver: AXObserverDriver = LiveAXObserverDriver(),
@@ -307,9 +311,13 @@ final class LiveWindowGateway: WindowGateway {
             NSWorkspace.shared.notificationCenter,
         writeRetrySleep: @escaping (TimeInterval) -> Void = {
             Thread.sleep(forTimeInterval: $0)
+        },
+        frontmostPID: @escaping () -> pid_t? = {
+            NSWorkspace.shared.frontmostApplication?.processIdentifier
         }
     ) {
         self.observerDriver = observerDriver
+        self.frontmostPID = frontmostPID
         self.spaceTable = spaceTable
         self.existingSpacesTable = existingSpacesTable
         self.now = now
@@ -368,7 +376,7 @@ final class LiveWindowGateway: WindowGateway {
             if let testFocusedWindow {
                 return testFocusedWindow()
             }
-            guard let (element, pid) = Self.focusedAXWindow() else {
+            guard let (element, pid) = self.focusedAXWindow() else {
                 return nil
             }
             return handle(for: element, pid: pid)
@@ -1286,24 +1294,68 @@ final class LiveWindowGateway: WindowGateway {
 
     // MARK: Focused window
 
-    private static func focusedAXWindow() -> (element: AXUIElement, pid: pid_t)? {
+    /// Where the requester's app element comes from: the system-wide
+    /// focused-application read, or — when AX has no focused application
+    /// to name — the workspace's frontmost app.
+    enum FocusSource: Equatable {
+        /// The system-wide read named the frontmost app: authoritative,
+        /// and never overridden by a workspace answer that could race it.
+        case systemWide
+        /// The system-wide read had no answer. The workspace's frontmost
+        /// app is the equivalent answer, and its own
+        /// `kAXFocusedWindowAttribute` read still works for an app that
+        /// never marks one of its windows focused.
+        case frontmost(pid_t)
+        /// No frontmost app to ask: nothing to tile.
+        case none
+    }
+
+    /// The one decision behind the fallback, pure so the policy is
+    /// testable without an Accessibility grant.
+    ///
+    /// Chromium/CEF hosts (Spotify is the measured one) leave the
+    /// system-wide element with nothing to report: they expose no
+    /// focused UI element, so `kAXFocusedApplicationAttribute` answers
+    /// `.noValue` and every slot key resolved "no focused window". The
+    /// app element still answers `kAXFocusedWindowAttribute`, so a
+    /// missing system-wide answer falls back to the workspace's
+    /// frontmost app instead of failing the request.
+    static func focusSource(systemWideRead: AXError, frontmost: pid_t?) -> FocusSource {
+        if systemWideRead == .success { return .systemWide }
+        guard let frontmost, frontmost > 0 else { return .none }
+        return .frontmost(frontmost)
+    }
+
+    private func focusedAXWindow() -> (element: AXUIElement, pid: pid_t)? {
         let systemWide = AXUIElementCreateSystemWide()
         // The system-wide and app elements here are transient (never
         // registered), so the per-element timeout must be applied inline:
         // a hung focused app would otherwise block focus resolution for
         // the default ~6s on every hotkey press.
-        applyMessagingTimeout(systemWide)
+        Self.applyMessagingTimeout(systemWide)
 
         var appValue: CFTypeRef?
-        guard
-            AXUIElementCopyAttributeValue(
-                systemWide, kAXFocusedApplicationAttribute as CFString, &appValue)
-                == .success,
-            let rawApp = appValue,
-            CFGetTypeID(rawApp) == AXUIElementGetTypeID()
-        else { return nil }
-        let appElement = rawApp as! AXUIElement
-        applyMessagingTimeout(appElement)
+        let appRead = AXUIElementCopyAttributeValue(
+            systemWide, kAXFocusedApplicationAttribute as CFString, &appValue)
+        let appElement: AXUIElement
+        switch Self.focusSource(systemWideRead: appRead, frontmost: frontmostPID()) {
+        case .systemWide:
+            guard let rawApp = appValue, CFGetTypeID(rawApp) == AXUIElementGetTypeID()
+            else { return nil }
+            appElement = rawApp as! AXUIElement
+        case .frontmost(let fallbackPID):
+            // The measured Chromium/CEF case: name it, so a live session
+            // can tell the fallback apart from a system-wide answer.
+            if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+                NSLog(
+                    "Tiled: [DEBUG-focus] system-wide read had no app (err=%d); fell back to frontmost pid=%d",
+                    appRead.rawValue, fallbackPID)
+            }
+            appElement = AXUIElementCreateApplication(fallbackPID)
+        case .none:
+            return nil
+        }
+        Self.applyMessagingTimeout(appElement)
 
         var pid: pid_t = 0
         guard AXUIElementGetPid(appElement, &pid) == .success else { return nil }

@@ -95,7 +95,12 @@ _Avoid_: drag-to-untile, fling
 
 **Requester**:
 The window asking to be tiled in the current `handle` call; never evicts itself.
+A Chromium/CEF host can leave AX with no focused application to name (it
+exposes no focused UI element), so a requester AX cannot name is resolved
+from the workspace's frontmost app; that fallback never overrides an answer
+AX gave.
 _Avoid_: focused window (focus is how it's usually found, not what it is)
+_Code_: `LiveWindowGateway.focusSource`
 
 **Window handle**:
 The controller's opaque reference to a managed window, issued by the window gateway.
