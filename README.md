@@ -212,11 +212,16 @@ third (sixths), so resizing one column's rows never moves the other, and
 the same independence holds between displays and Spaces, so dragging an
 edge on one canvas never moves tiles on another. A two-thirds window
 resizes as two equal one-thirds: the hidden splitter inside it follows
-its outer edge, staying at the midpoint. A
-neighbor pushed narrower (or shorter) than its app's minimum size simply
-stops shrinking at that size, pinned to the screen edge it already held:
-the window always stays inside the boundaries of the screen, never
-sliding off it. Dragging an edge that coincides with the screen edge
+its outer edge, staying at the midpoint. A neighbor pushed narrower (or
+shorter) than its app's minimum size simply stops shrinking at that
+size, pinned to the screen edge it already held: the window always
+stays inside the boundaries of the screen, never sliding off it. Since
+the drag is yours and the floor is the app's, the edge you are dragging
+keeps the position you gave it and covers over the minimum-size window:
+the two overlap, and dragging the splitter back past the neighbor's
+achieved edge makes them flush again. (A window that lands a few pixels
+*short* of its target by rounding or an inset still owns the splitter,
+so no gap opens.) Dragging an edge that coincides with the screen edge
 itself (the top edge of a right two-thirds window, say) moves no
 splitter — screen edges are fixed — and the edge snaps back to the
 screen edge when you release: the drag is free while the button is
@@ -252,7 +257,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-make check             # unit suite (964 tests) and the published count
+make check             # unit suite (965 tests) and the published count
 make test              # same suite with the full transcript
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
@@ -287,7 +292,7 @@ The layers, from hermetic to physical:
 
 | Layer | Command | Needs |
 |-------|---------|-------|
-| Unit suite (964 tests) | `make check` | nothing; ~5s, no AX, no runloop |
+| Unit suite (965 tests) | `make check` | nothing; ~5s, no AX, no runloop |
 | Focused tests | `swift test --filter <Suite>` | nothing |
 | Full transcript | `make test` | nothing |
 | Coverage report | `swift test --enable-code-coverage` then `xcrun llvm-cov report ...` | nothing |

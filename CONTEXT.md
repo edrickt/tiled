@@ -60,9 +60,14 @@ _Avoid_: settle (the placement pipeline's own step), reflow (reflow merges freed
 _Code_: `TilingSpace.reassert(_:context:)`, over the pure core `TilingSpace.reassertPlan(_:)`
 
 **Achieved frame**:
-Where an app actually left the window, which an app's minimum-size floor can hold short of the splitter the cursor moved. The reassert trusts the achieved frame over the splitter, so neighbours abut the window itself and never the splitter it could not reach. When a neighbour's own floor keeps it short of the splitter the drag moved, the neighbour's achieved edge wins the splitter and the dragged window is re-derived to abut it: two windows cantilevered past each other cannot both keep their achieved frames, and the tile stays consistent.
+Where an app actually left the window, which an app's minimum-size floor can hold short of the splitter the cursor moved. The reassert trusts the achieved frame over the splitter, so neighbours abut the window itself and never the splitter it could not reach. A frame that lands *smaller* than its target fell short by rounding or an inset, and its achieved edge wins the splitter, so no gap opens. A frame that lands *larger* than its target is a floor clamp (see Floor clamp): the window keeps its floor and the splitter keeps the position the drag gave it.
 _Avoid_: actual frame, clamped frame (a clamp is one cause), intent (the drag loop's pushed target, which is where we aimed, not where the app landed)
 _Code_: the dragged window's live frame, read at reassert
+
+**Floor clamp**:
+A written frame an app answered larger than its target because the size it was given was below its own minimum: the app keeps the target's origin and grows away from it, so a floor-clamped frame can escape the visible frame, and the write policy repins it to hold the screen edge it already hugged. The window keeps its floor exactly where it stands — its minimum size and the screen edge it held — and the reassert moves no splitter for it: the expanding window keeps the edge the drag reached and covers over the floor-width neighbour, the two overlapping instead of the drag being pulled back by a size the neighbour cannot give up. A later grid reassert re-clamps the neighbour in place, so the overlap is the stable answer, not a transient; dragging the splitter back past the neighbour's achieved edge makes the two flush again.
+_Avoid_: minimum-size clamp (the write policy's repin step, one part of this), clamped frame (unqualified: a rounding shortfall is not a floor), pinned window (the frame is pinned, not the window)
+_Code_: `FrameWriter.repinnedInsideBounds` (the repin); the grown-axis test in `TilingSpace.reconcileAchievedEdges` (no splitter moves)
 
 **Eviction**:
 Untiling a window to make room, restoring its pre-tile frame; what `plan` returns when another window overlaps the requested slot.

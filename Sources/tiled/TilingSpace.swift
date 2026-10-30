@@ -1887,8 +1887,12 @@ struct TilingSpace {
     /// is, so the splitter follows it and the tiles abut. An edge on a
     /// screen edge has no boundary (fixed) and is left alone: the
     /// residual an app cannot remove lands there, never between tiles.
-    /// The readback is the one effect the pure plan cannot perform, so it
-    /// lives here, in the effectful half.
+    /// A window whose app *floor* refused the requested shrink grew past
+    /// its target instead of falling short; it keeps its floor where it
+    /// stands and the splitter stays where the drag put it, so the two
+    /// windows overlap rather than the drag being pulled back by a size
+    /// the neighbour cannot give up. The readback is the one effect the
+    /// pure plan cannot perform, so it lives here, in the effectful half.
     private mutating func reconcileAchievedEdges(
         _ written: [(id: WindowID, target: CGRect)], context: Context
     ) -> Bool {
@@ -1900,7 +1904,18 @@ struct TilingSpace {
                 let record = records[entry.id],
                 let achieved = context.gateway.frame(of: record.handle)
             else { continue }
+            // The clamp signature is a size the app grew past the target
+            // on that axis: only a floor refuses a shrink. A window that
+            // landed smaller fell short (rounded or inset) and its edge
+            // still owns the splitter.
+            let floorClampedWidth =
+                achieved.width - entry.target.width > DragTracker.noOpWriteTolerance
+            let floorClampedHeight =
+                achieved.height - entry.target.height > DragTracker.noOpWriteTolerance
             for edge in TileEdge.allCases {
+                let floorClamped =
+                    edge == .left || edge == .right ? floorClampedWidth : floorClampedHeight
+                guard !floorClamped else { continue }
                 let target = edge.position(in: entry.target)
                 let landed = edge.position(in: achieved)
                 guard abs(landed - target) > DragTracker.noOpWriteTolerance

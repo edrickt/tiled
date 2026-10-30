@@ -391,6 +391,24 @@
  ],
  [
   "TilingSpace.swift",
+  "floor-clamped neighbour pulls the splitter back anyway (drag undone)",
+  "                guard !floorClamped else { continue }",
+  "                guard floorClamped else { continue }"
+ ],
+ [
+  "TilingSpace.swift",
+  "floor clamp detected on the wrong axis (growth skips the other splitter)",
+  "                let floorClamped =\n                    edge == .left || edge == .right ? floorClampedWidth : floorClampedHeight",
+  "                let floorClamped =\n                    edge == .left || edge == .right ? floorClampedHeight : floorClampedWidth"
+ ],
+ [
+  "TilingSpace.swift",
+  "floor clamp read as the shortfall case (rounded neighbour leaves the gap)",
+  "            let floorClampedWidth =\n                achieved.width - entry.target.width > DragTracker.noOpWriteTolerance",
+  "            let floorClampedWidth =\n                entry.target.width - achieved.width > DragTracker.noOpWriteTolerance"
+ ],
+ [
+  "TilingSpace.swift",
   "corrective pass re-applies the resize reconcile (undoes the neighbour)",
   "            plan = reassertPlan(.grid)",
   "            plan = reassertPlan(source)"

@@ -6,6 +6,20 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-29
+
+### Fixed
+
+- Dragging a shared edge to expand over a neighbour at its app's minimum
+  size no longer snaps the drag back at mouse-up. The floor-clamped
+  neighbour keeps its minimum size pinned to the screen edge it already
+  held, and the expanding window keeps the edge the drag reached; the two
+  overlap, the expanded window in front, until the splitter is dragged
+  back past the neighbour's achieved edge. A neighbour that lands a few
+  pixels *short* of its target by rounding still pulls the splitter, so
+  no gap reopens. (A frame the app answered *larger* than its target is a
+  floor clamp; only that case leaves the splitter alone. See ADR 0004.)
+
 ## [1.0.1] - 2026-10-29
 
 ### Fixed

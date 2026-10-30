@@ -15,11 +15,14 @@ import XCTest
 /// sails the clamped window off the screen instead of letting it simply
 /// stop shrinking.
 ///
-/// The reported bug is the drag shape below: a middle third expanded
+/// The drag shape below is the reported one: a middle third expanded
 /// over a right third until the right third cannot shrink any more. The
 /// neighbor is re-pushed on mouse-up to a rect narrower than its floor;
-/// the window must stay in the boundaries of the screen and stop at its
-/// minimum size, never slide off the edge.
+/// it must stay in the boundaries of the screen and hold its minimum
+/// size, never slide off the edge. The edge it was pinned to holds, so
+/// the minimum-size window keeps its floor where it stands and the
+/// expanding window keeps the frame the drag reached over it: the drag
+/// is not pulled back by a floor the neighbor cannot give up.
 final class MinimumSizeTests: XCTestCase {
     /// Deterministic display: every rect is checked against this one,
     /// never the host Mac's screen.
@@ -60,13 +63,14 @@ final class MinimumSizeTests: XCTestCase {
         controller.handle(slot: slot)
     }
 
-    /// The reported bug, minimised: middle third + right third, expand
-    /// the middle third rightward past the point where the right third
-    /// can still shrink. The right third is re-pushed on mouse-up to
-    /// 300pt wide - below its 500pt floor - and macOS hangs the clamped
-    /// window off the right screen edge. It must instead hold the screen
-    /// edge and stop shrinking at its floor.
-    func testRightThirdThatCannotShrinkStaysInsideTheScreen() {
+    /// The reported shape: middle third + right third, expand the middle
+    /// third rightward past the point where the right third can still
+    /// shrink. The right third is re-pushed on mouse-up to 300pt wide -
+    /// below its 500pt floor - and macOS hangs the clamped window off the
+    /// right screen edge. It must hold the screen edge at its floor, and
+    /// the expanding middle third must keep the edge the drag reached:
+    /// the two overlap rather than the drag being pulled back.
+    func testExpandingWindowKeepsItsEdgeOverAMinimumSizeNeighbour() {
         let a = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 600, height: 400))
         tile(a, into: .sixthMiddle)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 100, width: 550, height: 400))
@@ -94,25 +98,69 @@ final class MinimumSizeTests: XCTestCase {
         controller.mouseLifted()
         let lifted = XCTestExpectation(description: "coalesced push on mouse-up")
         DispatchQueue.main.async {
-            let frame = self.gateway.frame(of: b)!
+            let neighbour = self.gateway.frame(of: b)!
+            let dragged = self.gateway.frame(of: a)!
             XCTAssertTrue(
-                Self.screen.visibleFrame.contains(frame),
+                Self.screen.visibleFrame.contains(neighbour),
                 "the right third stays in the boundaries of the screen, "
-                    + "instead of sliding off the edge: \(frame)")
+                    + "instead of sliding off the edge: \(neighbour)")
             XCTAssertEqual(
-                frame, CGRect(x: 1100, y: 0, width: 500, height: 1000),
+                neighbour, CGRect(x: 1100, y: 0, width: 500, height: 1000),
                 "it simply stops shrinking: the floor-width window holds "
                     + "the screen edge it was pinned to")
-            // The neighbour's floor is the conflict winner: the splitter
-            // moves back to the edge the neighbour could reach, and the
-            // dragged window is re-derived to abut it. The two tiles stay
-            // consistent; the drag could not go further.
             XCTAssertEqual(
-                self.gateway.frame(of: a)!.maxX, 1100,
-                "a clamped neighbour bounds the drag and the splitter abuts it")
+                dragged.maxX, 1300,
+                "the expanding window keeps the edge the drag reached: a "
+                    + "neighbour's floor never pulls the splitter back")
+            XCTAssertLessThan(
+                dragged.minX, neighbour.minX,
+                "the expanding window covers over the minimum-size "
+                    + "neighbour: dragged=\(dragged) neighbour=\(neighbour)")
+            XCTAssertEqual(
+                self.controller.canvas(for: Self.screen.id).grid.sixthsRightSplit,
+                1300.0 / 1600.0, accuracy: 0.001,
+                "the splitter stays where the drag left it")
             lifted.fulfill()
         }
         wait(for: [lifted], timeout: 1)
+    }
+
+    /// The overlap the drag lands is not undone by a later plain grid
+    /// reassert (a display change, a swipe back): the floor-width
+    /// neighbour is re-pushed to a rect below its floor each time, must
+    /// clamp in place again, and must not pull the splitter and shrink
+    /// the expanded window behind the user's back.
+    func testFloorClampedNeighbourNeverPullsTheSplitterOnALaterReassert() {
+        let harness = TilingSpaceHarness()
+        harness.gateway.writtenFrame = { [minSize = Self.minSize] _, target in
+            CGRect(
+                origin: target.origin,
+                size: CGSize(
+                    width: max(target.width, minSize.width),
+                    height: max(target.height, minSize.height)))
+        }
+        let middle = harness.addWindow(frame: CGRect(x: 533, y: 0, width: 800, height: 600))
+        harness.apply(slot: .sixthMiddle, requester: middle)
+        let right = harness.addWindow(frame: CGRect(x: 1066, y: 0, width: 800, height: 600))
+        harness.apply(slot: .sixthRight, requester: right)
+        // The drag committed the splitter at 1300, past the right
+        // third's 500pt floor.
+        harness.space.grid.sixthsRightSplit = 1300.0 / 1600.0
+
+        for reassert in ["first", "second"] {
+            harness.space.reassert(.grid, context: harness.context())
+            XCTAssertEqual(
+                harness.frame(of: middle)!.maxX, 1300, accuracy: 0.5,
+                "the \(reassert) reassert leaves the expanded window's edge alone")
+            XCTAssertEqual(
+                harness.frame(of: right)!,
+                CGRect(x: 1100, y: 0, width: 500, height: 1200),
+                "the \(reassert) reassert holds the neighbour's floor in place")
+            XCTAssertEqual(
+                harness.space.grid.sixthsRightSplit, 1300.0 / 1600.0,
+                accuracy: 0.001,
+                "the \(reassert) reassert leaves the splitter where the drag left it")
+        }
     }
 
     /// The dragged window's *own* clamp, minimised: the left third is
