@@ -38,6 +38,114 @@ final class UntiledSizeTests: XCTestCase {
     }
 }
 
+/// Windows are sized to the birth canvas's layout at creation: the
+/// cursor display's canvas decides the footprint, the window stays
+/// floating, and only a landed write claims state. A sixth's width is
+/// 1600 x (1/3) in the grid, one ulp off the 1600 / 3 literal, so every
+/// sixths width below reads at the suite's sixth-width tolerance.
+final class WindowBirthTests: XCTestCase {
+    private static let screen = ScreenInfo(
+        id: ScreenID(rawValue: 1),
+        frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+        name: "Display 1",
+        displayID: CGDirectDisplayID(42))
+
+    private static let spaceA = SpaceID(rawValue: 101)
+
+    private var harness: ControllerHarness!
+    private var gateway: FakeWindowGateway { harness.gateway }
+    private var controller: TilingController { harness.controller }
+    private var canvas: TilingSpace { harness.canvas }
+
+    override func setUp() {
+        super.setUp()
+        harness = ControllerHarness(
+            screens: [Self.screen],
+            activeSpaces: [Self.screen.displayID: Self.spaceA],
+            deathConfirmation: 0)
+        harness.fireCursorMove(to: CGPoint(x: 500, y: 500))
+    }
+
+    func testNewWindowIsSizedToCanvasLayoutAtBirth() {
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+
+        let landed = gateway.frame(of: handle)!
+        XCTAssertEqual(landed.origin, CGPoint(x: 10, y: 10))
+        XCTAssertEqual(landed.height, 500)
+        XCTAssertEqual(landed.width, 1600.0 / 3.0, accuracy: 0.0001)
+        let id = controller.registeredID(for: handle)
+        XCTAssertNotNil(id)
+        XCTAssertNil(
+            canvas.state.slot(of: id!), "a birth sizes, never tiles")
+        XCTAssertEqual(gateway.writes.count, 1, "one birth, one write")
+    }
+
+    func testBirthOnQuartersCanvasUsesQuarterSize() {
+        controller.handleSwitchLayout(to: .quarters)
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 20, y: 30, width: 900, height: 700))
+
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 20, y: 30, width: 800, height: 500))
+    }
+
+    func testBirthWriteRefusalLeavesWindowAlone() {
+        gateway.willWrite = { self.gateway.refuseNextWrites($0) }
+        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
+
+        let handle = gateway.simulateWindowCreated(frame: birth)
+
+        XCTAssertEqual(
+            gateway.frame(of: handle), birth,
+            "a refused birth leaves the window alone")
+        XCTAssertNil(
+            controller.registeredID(for: handle),
+            "a refused birth claims no record")
+        XCTAssertEqual(
+            canvas.error, TilingSpace.refusalMessage(count: 1),
+            "a refused birth narrates the refusal")
+        gateway.willWrite = nil
+    }
+
+    func testBirthThenCloseDropsWithoutGhostWrite() {
+        let handle = gateway.addWindow(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        gateway.kill(handle)
+        gateway.clearWrites()
+
+        controller.handleWindowCreated(handle)
+
+        XCTAssertTrue(
+            gateway.writes.isEmpty,
+            "a window dead on arrival draws no birth write")
+        XCTAssertNil(controller.registeredID(for: handle))
+    }
+
+    func testRetileAfterBirthDiscardsBirthSizing() {
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        let birthFrame = gateway.frame(of: handle)!
+        gateway.focused = handle
+        controller.handle(slot: .sixthTopLeft)
+        let id = controller.registeredID(for: handle)!
+
+        XCTAssertEqual(canvas.state.slot(of: id), .sixthTopLeft)
+        XCTAssertEqual(
+            canvas.record(of: id)?.preTileFrame, birthFrame,
+            "the tile reads the sized frame as its pre-tile frame")
+        XCTAssertNil(
+            canvas.deferredRestores[handle],
+            "tiling a birth leaves no stale restore behind")
+        XCTAssertTrue(controller.untile(window: id).performed)
+        XCTAssertEqual(
+            gateway.frame(of: handle), birthFrame,
+            "untile restores the sized frame, not a stale one")
+    }
+}
+
 /// The canvas exits that share the sizing: drag-out and hidden-Space
 /// untile leave the sized footprint through the same write policy.
 final class UntiledExitTests: XCTestCase {

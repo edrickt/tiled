@@ -275,6 +275,26 @@ final class LiveWindowGateway: WindowGateway {
     /// menu and, when the focused display changed canvas, the glyph.
     private var spaceChangeHandler: (() -> Void)?
     private var spaceChangeObserver: NSObjectProtocol?
+    /// Birth callback: one handler for every created window, whatever
+    /// app owns it. Set by `observeWindowCreations`; nil until the
+    /// controller subscribes.
+    private var creationHandler: ((WindowHandle) -> Void)?
+    /// App element per creation-subscribed pid, retained so the birth
+    /// router can list the app's windows and so the notification can be
+    /// removed. Keyed by pid, alongside the shared observers.
+    private var creationAppElements: [pid_t: AXUIElement] = [:]
+    /// App-element token (CFHash) -> pid: the creation notification
+    /// arrives with the app element's token, which names no window, so
+    /// this map routes it to the pid whose window list holds the newborn.
+    private var creationPIDs: [UInt: pid_t] = [:]
+    /// Window tokens already seen per pid, baselined at subscription:
+    /// windows open before the subscription predate it, so only later
+    /// creations route to the callback.
+    private var creationSeenTokens: [pid_t: Set<UInt>] = [:]
+    /// Tracks future launches: an app that starts after the birth
+    /// subscription still gets its app element observed, so its first
+    /// window fires like any other birth.
+    private var appLaunchObserver: NSObjectProtocol?
     /// Display-to-Space cache, refreshed on a short interval and
     /// invalidated by the workspace notification, so one menu build
     /// never walks the window-server Space table once per row.
@@ -354,6 +374,19 @@ final class LiveWindowGateway: WindowGateway {
                 self?.spaceDidChange()
             }
         }
+        // An app that launches after the birth subscription still gets
+        // its app element observed, so its first window fires like any
+        // other birth.
+        appLaunchObserver = workspaceNotifications.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            let launched = notification.userInfo?[
+                NSWorkspace.applicationUserInfoKey
+            ] as? NSRunningApplication
+            guard let pid = launched?.processIdentifier, pid > 0 else { return }
+            self?.subscribeCreations(for: pid)
+        }
     }
 
     deinit {
@@ -365,6 +398,9 @@ final class LiveWindowGateway: WindowGateway {
         }
         if let spaceChangeObserver {
             workspaceNotifications.removeObserver(spaceChangeObserver)
+        }
+        if let appLaunchObserver {
+            workspaceNotifications.removeObserver(appLaunchObserver)
         }
         releaseFocusObserver()
     }
@@ -471,7 +507,12 @@ final class LiveWindowGateway: WindowGateway {
             if tokenIndex[key] == handle { tokenIndex[key] = nil }
         }
         if !bindings.values.contains(where: { $0.pid == binding.pid }) {
-            pruneObserver(for: binding.pid)
+            // A birth subscription outlives any one window: the app is
+            // still running, and its next window must still fire. Only
+            // an app quit (see `appTerminated`) retires the observer.
+            if creationHandler == nil {
+                pruneObserver(for: binding.pid)
+            }
         }
     }
 
@@ -684,6 +725,9 @@ final class LiveWindowGateway: WindowGateway {
     /// the runloop retains forever once added.
     private func pruneObserver(for pid: pid_t) {
         let keys = registry.forget(pid: pid)
+        creationPIDs = creationPIDs.filter { $0.value != pid }
+        creationAppElements[pid] = nil
+        creationSeenTokens[pid] = nil
         guard let observer = observers[pid] else { return }
         observerDriver.removeRunLoopSource(observer)
         observers[pid] = nil
@@ -796,6 +840,140 @@ final class LiveWindowGateway: WindowGateway {
     func observeFocusChanges(_ onChange: @escaping () -> Void) {
         focusChangeHandler = onChange
         retargetFocusObserver()
+    }
+
+    /// One birth subscription for every app: subscribes each running
+    /// app's app element now, and future launches via the launch
+    /// observer, so a brand-new app's first window fires like any other
+    /// birth. Windows already open are only baselined, never reported.
+    func observeWindowCreations(_ onCreated: @escaping (WindowHandle) -> Void) {
+        creationHandler = onCreated
+        for app in NSWorkspace.shared.runningApplications {
+            let pid = app.processIdentifier
+            guard pid > 0 else { continue }
+            subscribeCreations(for: pid)
+        }
+    }
+
+    /// Subscribes one app's app element to window-creation on its shared
+    /// observer, reusing the registry: the same begin/finish shape as
+    /// `observe`, with the app element in place of a window element and
+    /// the creation notification in place of move/resize/destroy.
+    private func subscribeCreations(for pid: pid_t) {
+        guard creationHandler != nil else { return }
+        let appElement = AXUIElementCreateApplication(pid)
+        Self.applyMessagingTimeout(appElement)
+        seedSeenWindows(appElement, pid: pid)
+        creationAppElements[pid] = appElement
+        let key = UInt(CFHash(appElement))
+        creationPIDs[key] = pid
+        switch registry.begin(key: key, pid: pid) {
+        case .skip:
+            return
+        case .createObserver:
+            let result = observerDriver.createObserver(
+                pid: pid,
+                onNotification: { [weak self] notification, token in
+                    self?.handleAXNotification(
+                        notification: notification, token: token)
+                })
+            guard result.status == .success, let newObserver = result.observer
+            else {
+                registry.finish(
+                    key: key, pid: pid, outcome: .observerUnavailable)
+                NSLog(
+                    "tiled: AXObserverCreate failed for pid %d (%d)", pid,
+                    result.status.rawValue)
+                return
+            }
+            observers[pid] = newObserver
+            observerDriver.addRunLoopSource(newObserver)
+            registerCreations(
+                on: newObserver, appElement: appElement, pid: pid, key: key)
+        case .register:
+            guard let observer = observers[pid] else {
+                // The registry believed this pid had an observer and the
+                // object is gone: forget the belief so the next attempt
+                // creates one instead of failing here forever.
+                registry.finish(
+                    key: key, pid: pid, outcome: .observerUnavailable)
+                return
+            }
+            registerCreations(
+                on: observer, appElement: appElement, pid: pid, key: key)
+        }
+    }
+
+    /// Registers the creation notification for one app element, then
+    /// reports how the attempt ended. Only a landed registration routes
+    /// births; a window whose app element could not be registered stays
+    /// retryable through the launch observer and the next subscribe.
+    private func registerCreations(
+        on observer: AXObserverHandle, appElement: AXUIElement?, pid: pid_t,
+        key: UInt
+    ) {
+        let status = observerDriver.addNotification(
+            kAXWindowCreatedNotification as String, to: observer,
+            element: appElement)
+        if !ObservationRegistry.addSucceeded(status) {
+            NSLog(
+                "tiled: could not observe window creation on pid %d (%d)",
+                pid, status.rawValue)
+        }
+        registry.finish(
+            key: key, pid: pid,
+            outcome: ObservationRegistry.addSucceeded(status)
+                ? .registered : .registrationFailed)
+    }
+
+    /// Baselines one app's currently open windows, so only later
+    /// creations route to the callback. An unreadable list baselines
+    /// nothing: the next notification retries from the same state.
+    private func seedSeenWindows(_ appElement: AXUIElement, pid: pid_t) {
+        var listRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement, kAXWindowsAttribute as CFString, &listRef
+        ) == .success, let list = listRef as? [AXUIElement] else { return }
+        creationSeenTokens[pid, default: []].formUnion(
+            list.map { UInt(CFHash($0)) })
+    }
+
+    /// One window-creation notification for `pid`: diffs the app's window
+    /// list against its bindings and baseline, and routes each genuine
+    /// newborn to the birth callback. Dead-on-arrival windows are
+    /// dropped before the callback, never reported.
+    private func windowCreated(pid: pid_t) {
+        guard let handler = creationHandler else { return }
+        guard let listed = Self.appWindowList(pid: pid) else { return }
+        let bound = Set(
+            bindings.values.filter { $0.pid == pid }.map(\.token))
+        var seen = creationSeenTokens[pid] ?? []
+        var newborns: [AXUIElement] = []
+        for element in listed {
+            let token = UInt(CFHash(element))
+            guard !bound.contains(token), !seen.contains(token) else { continue }
+            // Tokens are hashes: confirm identity before issuing a handle.
+            guard !bindings.values.contains(where: {
+                $0.pid == pid && ($0.element.map { CFEqual($0, element) } ?? false)
+            }) else { continue }
+            seen.insert(token)
+            newborns.append(element)
+        }
+        creationSeenTokens[pid] = seen
+        for element in newborns {
+            let handle = WindowHandle(id: nextHandleID)
+            nextHandleID += 1
+            let token = UInt(CFHash(element))
+            let frames = AXWindowFrames(element: element)
+            bindings[handle] = WindowBinding(
+                pid: pid, frames: frames, token: token)
+            adopt(handle, element: element, token: token, frames: frames, pid: pid)
+            guard liveness(of: handle) != .dead, frame(of: handle) != nil else {
+                release(handle)
+                continue
+            }
+            handler(handle)
+        }
     }
 
     func activeSpace(on display: CGDirectDisplayID) -> SpaceID? {
@@ -1266,6 +1444,15 @@ final class LiveWindowGateway: WindowGateway {
     func handleAXNotification(notification: String, token: UInt) {
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] notification %@ arrived", notification)
+        }
+        // Creation notifications arrive with the app element's token,
+        // which names no window: route to the pid whose window list
+        // holds the newborn.
+        if notification == kAXWindowCreatedNotification as String,
+            let pid = creationPIDs[token]
+        {
+            windowCreated(pid: pid)
+            return
         }
         guard let handle = tokenIndex[token] else {
             if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {

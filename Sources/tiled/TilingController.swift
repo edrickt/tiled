@@ -265,6 +265,12 @@ final class TilingController {
         gateway.observeSpaceChanges { [weak self] in
             self?.activeSpaceMayHaveChanged()
         }
+        // Size newly created windows to the birth canvas's layout.
+        // The gateway owns delivery (per-app creation subscriptions
+        // live); this route only sizes, never auto-tiles.
+        gateway.observeWindowCreations { [weak self] in
+            self?.handleWindowCreated($0)
+        }
     }
 
     deinit {
@@ -1411,6 +1417,63 @@ final class TilingController {
         }
         apply(outcome, on: key)
         onChange?()
+    }
+
+    /// A window the OS just created: size it to the birth canvas's
+    /// layout footprint in place, never auto-tiled. The birth canvas is
+    /// the cursor display's canvas (the display the user's attention is
+    /// on), matching the status glyph. Only a landed or deferred write
+    /// claims state: a refused or unreadable birth leaves the window
+    /// exactly as its app opened it, and any deferred restore parked for
+    /// the handle stays live.
+    func handleWindowCreated(_ handle: WindowHandle) {
+        // A duplicate delivery: the first birth already won.
+        guard register.liveID(for: handle) == nil else { return }
+        // Dead on arrival: never owned a frame; drop without a write.
+        guard gateway.liveness(of: handle) != .dead else { return }
+        // Unreadable (or zero): the window has no sane geometry, so
+        // refuse to guess, like the expand toggle's no-readable-frame
+        // no-op.
+        guard let live = gateway.frame(of: handle), live != .zero else { return }
+        let key = directory.cursorKey()
+        let id = register.claim(handle, on: key)
+        // Established with its display's visible frame when new, so the
+        // footprint below always derives from the canvas's own geometry.
+        let snapshot = directory.withCanvas(key) { $0 }
+        let target = snapshot.grid.sizedUntileFrame(
+            keeping: live.origin, for: snapshot.state.layout,
+            in: snapshot.visibleFrame)
+        let context = placementContext(for: key)
+        let result = frameWriter.write(
+            id, handle: handle, to: target, bounds: snapshot.visibleFrame,
+            on: key, check: .none)
+        switch result {
+        case .written, .skippedNoOp:
+            directory.withCanvas(key) {
+                $0.recordBirth(id, handle: handle, frame: target)
+            }
+            observe(window: id)
+            discardDeferredRestores(for: handle)
+            onChange?()
+        case .deferredOffSpace:
+            directory.withCanvas(key) {
+                $0.recordBirth(id, handle: handle, frame: target)
+            }
+            discardDeferredRestores(for: handle)
+            // Park after the discard clears every canvas, so the
+            // swipe-back reconcile lands this frame and nothing older.
+            directory.withCanvas(key) {
+                $0.parkBirthRestore(id: id, handle: handle, frame: target)
+            }
+            observe(window: id)
+            onChange?()
+        case .refused:
+            register.forget(id)
+            directory.withCanvas(key) {
+                $0.error = TilingSpace.refusalMessage(count: 1)
+            }
+            onChange?()
+        }
     }
 
     // MARK: Presentation

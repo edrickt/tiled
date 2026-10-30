@@ -174,6 +174,22 @@ final class FakeWindowGateway: WindowGateway {
         focusChangeHandler?()
     }
 
+    private var creationHandler: ((WindowHandle) -> Void)?
+
+    func observeWindowCreations(_ onCreated: @escaping (WindowHandle) -> Void) {
+        creationHandler = onCreated
+    }
+
+    /// Test control: simulates the OS delivering a window-creation
+    /// notification. Creates the window, then routes it through the
+    /// creation handler exactly as the live adapter routes a birth.
+    @discardableResult
+    func simulateWindowCreated(frame: CGRect) -> WindowHandle {
+        let handle = addWindow(frame: frame)
+        creationHandler?(handle)
+        return handle
+    }
+
     /// Mission Control Space currently shown per display. Empty means
     /// "unknown", so keys fall back to per-display behavior.
     var activeSpaces: [CGDirectDisplayID: SpaceID] = [:]

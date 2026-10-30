@@ -231,6 +231,25 @@ struct TilingSpace {
         deferredRestores[handle] = nil
     }
 
+    /// Records a birth-sized window: untiled but managed, so a later
+    /// slot request reads the sized frame as its pre-tile frame (see
+    /// `place`, which refreshes from the live frame on first tiling).
+    /// A slot request reuses this record and drops any deferred restore,
+    /// so the birth sizing never goes stale: it is the frame, not a
+    /// pending write.
+    mutating func recordBirth(
+        _ id: WindowID, handle: WindowHandle, frame: CGRect
+    ) {
+        beginRecord(id, handle: handle, frame: frame)
+    }
+
+    /// Parks a birth-sized frame the canvas cannot write yet (its Space
+    /// is hidden): the swipe-back reassert lands it through the same
+    /// deferred-restore reconcile every other off-Space write shares.
+    mutating func parkBirthRestore(id: WindowID, handle: WindowHandle, frame: CGRect) {
+        deferredRestores[handle] = DeferredRestore(id: id, frame: frame)
+    }
+
     func record(of id: WindowID) -> WindowRecord? { records[id] }
 
     func handle(of id: WindowID) -> WindowHandle? { records[id]?.handle }

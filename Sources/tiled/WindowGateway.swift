@@ -70,6 +70,12 @@ protocol WindowGateway: AnyObject {
     /// previous handler. The live adapter observes the workspace
     /// notification; the fake exposes `simulateSpaceChange` for tests.
     func observeSpaceChanges(_ onChange: @escaping () -> Void)
+    /// Calls `onCreated` with a fresh handle for every window the OS
+    /// creates, in any app: the birth-sizing hook. Replaces any previous
+    /// handler. The live adapter subscribes each running app (and future
+    /// launches) to the window-creation notification; the fake exposes
+    /// `simulateWindowCreated` for tests.
+    func observeWindowCreations(_ onCreated: @escaping (WindowHandle) -> Void)
     /// Brings the window forward without disturbing layout.
     func focus(_ handle: WindowHandle)
     /// Raises the window above its siblings without focusing it: the
