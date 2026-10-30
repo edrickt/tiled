@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-29
+
 ### Changed
 
 - Tiling into a slot blocked by two windows no longer sends both home: they
