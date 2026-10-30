@@ -153,7 +153,7 @@ tell you which app took it.
 - Tiling a window into its own tile does nothing: no restore, no reassert.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.
-- **Drag a tiled window by its title bar**: past ~50pt of drag it untiles
+- **Drag a tiled window by its title bar**: past ~25pt of drag it untiles
   right where you dropped it (the drop's top edge takes the layout's slot
   footprint); a shorter drag snaps back into its tile. A single far jump
   with no recent hand press on the window (a programmatic move, not a

@@ -345,8 +345,8 @@ final class ControllerGatewayTests: XCTestCase {
 
         controller.mousePressed(at: CGPoint(x: tiled.midX, y: tiled.midY))
         var short = tiled
-        short.origin.x += 20
-        short.origin.y += 20
+        short.origin.x += 10
+        short.origin.y += 10
         gateway.simulateChange(handle, to: short)
         controller.mouseLifted()
 
@@ -754,7 +754,7 @@ final class ControllerGatewayTests: XCTestCase {
     }
 
     func testShortDragSnapsBackIntoTile() {
-        let drag = tileAndDrag(10, 10) // net displacement ~28pt
+        let drag = tileAndDrag(5, 5) // net displacement ~14pt
         let expectation = XCTestExpectation(description: "snapback")
         DispatchQueue.main.async {
             XCTAssertEqual(self.canvas.state.slot(of: 1), .topLeft, "still tiled")

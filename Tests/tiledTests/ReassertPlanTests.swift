@@ -394,7 +394,7 @@ final class ReassertPlanTests: XCTestCase {
         harness.canvasVisible = true
         let rect = harness.rect(.topLeft)
         harness.tracker.mousePressed(at: CGPoint(x: rect.midX, y: rect.midY))
-        harness.tracker.handleChange(id: a, frame: rect.offsetBy(dx: 30, dy: 30))
+        harness.tracker.handleChange(id: a, frame: rect.offsetBy(dx: 10, dy: 10))
         harness.tracker.mouseLifted()
 
         XCTAssertEqual(

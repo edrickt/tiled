@@ -75,7 +75,7 @@ final class TilingSpaceTests: XCTestCase {
 
         XCTAssertTrue(harness.expectedWrites.isEmpty, "the placement write skipped")
         harness.tracker.mousePressed(at: CGPoint(x: target.midX, y: target.midY))
-        harness.tracker.handleChange(id: id, frame: target.offsetBy(dx: 30, dy: 30))
+        harness.tracker.handleChange(id: id, frame: target.offsetBy(dx: 10, dy: 10))
         harness.tracker.mouseLifted()
 
         XCTAssertEqual(
@@ -686,7 +686,7 @@ final class TilingSpaceTests: XCTestCase {
 
         XCTAssertEqual(space.state.slot(of: b), .leftHalf, "the survivor grows")
         harness.tracker.mousePressed(at: CGPoint(x: grown.midX, y: grown.midY))
-        harness.tracker.handleChange(id: b, frame: grown.offsetBy(dx: 30, dy: 30))
+        harness.tracker.handleChange(id: b, frame: grown.offsetBy(dx: 10, dy: 10))
         harness.tracker.mouseLifted()
 
         XCTAssertEqual(
@@ -1172,7 +1172,7 @@ final class TilingSpaceTests: XCTestCase {
 
         let target = harness.rect(.topLeft)
         harness.tracker.mousePressed(at: CGPoint(x: target.midX, y: target.midY))
-        harness.tracker.handleChange(id: restored, frame: target.offsetBy(dx: 30, dy: 30))
+        harness.tracker.handleChange(id: restored, frame: target.offsetBy(dx: 10, dy: 10))
         harness.tracker.mouseLifted()
 
         XCTAssertEqual(
@@ -1214,7 +1214,7 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertTrue(space.isExpanded(id))
         XCTAssertTrue(harness.expectedWrites.isEmpty, "the expand write skipped")
         harness.tracker.mousePressed(at: CGPoint(x: bounds.midX, y: bounds.midY))
-        harness.tracker.handleChange(id: id, frame: bounds.offsetBy(dx: 30, dy: 30))
+        harness.tracker.handleChange(id: id, frame: bounds.offsetBy(dx: 10, dy: 10))
         harness.tracker.mouseLifted()
 
         XCTAssertEqual(

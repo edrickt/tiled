@@ -538,7 +538,7 @@ final class DragTrackerTests: XCTestCase {
         tile(1, .topLeft, frame: tileRect)
         tracker.forget(1)
 
-        dragTicks(1, size: size, to: [(0, 400), (20, 420), (30, 430)])
+        dragTicks(1, size: size, to: [(0, 400), (10, 410), (15, 415)])
         dragEndFires.last?()
 
         XCTAssertEqual(decisions, [.snapback(1)], "a short title-bar drag snaps back")
@@ -582,7 +582,7 @@ final class DragTrackerTests: XCTestCase {
         tile(1, .topLeft, frame: CGRect(origin: CGPoint(x: 0, y: 400), size: size))
         tracker.forget(1)
 
-        dragTicks(1, size: size, to: [(0, 400), (20, 420), (30, 430)])
+        dragTicks(1, size: size, to: [(0, 400), (10, 410), (15, 415)])
         tracker.mouseLifted()
 
         XCTAssertEqual(decisions, [.snapback(1)], "a short drag snaps back at mouse-up")
@@ -1020,12 +1020,12 @@ final class DragTrackerTests: XCTestCase {
         // releasing short of the untile distance snaps back to the slot.
         tile(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
         tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+        tracker.handleChange(id: 1, frame: CGRect(x: 6, y: 406, width: 500, height: 400))
         tracker.handleChange(id: 1, frame: CGRect(x: 10, y: 410, width: 500, height: 400))
-        tracker.handleChange(id: 1, frame: CGRect(x: 20, y: 420, width: 500, height: 400))
         XCTAssertEqual(grid(), GridLayout(), "drag tracking never moves splitters")
         XCTAssertFalse(dragEndFires.isEmpty, "settle must not swallow a title-bar grab")
 
-        // Release (~28pt of drag, well inside the untile distance): the
+        // Release (~14pt of drag, well inside the untile distance): the
         // pending drag end snaps the window back into its slot.
         dragEndFires.last?()
         XCTAssertEqual(decisions, [.snapback(1)])

@@ -283,7 +283,7 @@ final class DragTracker {
     /// ticks can lag the true final frame by a few points.
     private static let settleOverrideTolerance: CGFloat = 8
     /// Origin drag distance past which a title-bar drag untiles the window.
-    private static let untileDragDistance: CGFloat = 50
+    private static let untileDragDistance: CGFloat = 25
     /// Move silence after which a title-bar drag counts as finished: the
     /// fallback end for a mouse-up that never fired (`mouseLifted` ends
     /// an in-progress drag immediately).
