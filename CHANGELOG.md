@@ -6,6 +6,14 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Tiling into a slot blocked by two windows no longer sends both home: they
+  mirror to the other side and stay tiled (two right quads move to the two
+  left quads when a left half becomes the right half). If the other side
+  can't hold them all, or a middle third is in the way, both untangle as
+  before.
+
 ## [1.0.2] - 2026-10-29
 
 ### Fixed

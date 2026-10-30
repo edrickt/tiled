@@ -82,8 +82,23 @@ Absorbing freed cells: when a tiled window leaves the layout (eviction, untile, 
 _Avoid_: growth, backfill, gap-filling (the code name is `reflow`)
 
 **Re-house**:
-Keeping an evictee tiled instead of untangling it. Two rules, step-aside checked first, both exact-or-nil: when the evictee's slot overlaps the requested slot and its leftover — its slot minus the request — is exactly one whole unoccupied slot, the blocker steps aside into that leftover (the left third requested at its top sixth steps down into the bottom-left sixth, the left half into the bottom-left quad, a two-thirds into the third its request leaves clean; the one overlap that is not a containment — a left two-thirds blocking a right two-thirds request — steps aside into the left third); otherwise, when the cells left free after the request form exactly one whole slot, the evicted window re-tiles into that slot (with the bottom-left sixth occupied, the middle third making room for the right two-thirds moves into the free top-left sixth). A region or leftover that is not exactly one slot falls back to untile-and-restore, and expanded windows never re-house — they untangle (see Expand). The step-aside covers tiled requesters too: it wins over a swap, because the blocker keeps its own strip instead of teleporting to the requester's vacated tile, whose cells then reflow to a neighbor or to the re-housed blocker itself. Undo puts the whole chapter back: each moved window returns to the slot it was evicted from, which for a step-aside is its original full slot, and a tiled requester returns to the slot it vacated.
+Keeping an evictee tiled instead of untangling it. Two rules, step-aside checked first, both exact-or-nil: when the evictee's slot overlaps the requested slot and its leftover — its slot minus the request — is exactly one whole unoccupied slot, the blocker steps aside into that leftover (the left third requested at its top sixth steps down into the bottom-left sixth, the left half into the bottom-left quad, a two-thirds into the third its request leaves clean; the one overlap that is not a containment — a left two-thirds blocking a right two-thirds request — steps aside into the left third); otherwise, when the cells left free after the request form exactly one whole slot, the evicted window re-tiles into that slot (with the bottom-left sixth occupied, the middle third making room for the right two-thirds moves into the free top-left sixth). A region or leftover that is not exactly one slot falls back to untile-and-restore, and expanded windows never re-house — they untangle (see Expand). A group of two or more windows in the way re-houses as a mirror (see Mirror), or not at all. The step-aside covers tiled requesters too: it wins over a swap, because the blocker keeps its own strip instead of teleporting to the requester's vacated tile, whose cells then reflow to a neighbor or to the re-housed blocker itself. Undo puts the whole chapter back: each moved window returns to the slot it was evicted from, which for a step-aside is its original full slot, and a tiled requester returns to the slot it vacated.
 _Avoid_: relocation, re-assignment, re-seat, displacement (the undo chapter, not the move)
+
+**Mirror**:
+The group re-house: each window in the way of a request reflects into its own
+slot in the same layout, column `c` ↔ `3 − c` with the row unchanged, so the
+left half's two right quads take the two left quads and a right third's two
+corner sixths take the left third. Applies with two or more windows in the
+way, whether or not the requester held the other side, and never with one
+(the swap and re-house rules own that case). Exact-or-nil per group: one
+missing home — the middle third and the middle sixths mirror onto
+themselves, which always overlaps the target — evicts every window in the
+way. There is no vertical mirror: every slot tall enough to hold two stacked
+windows is a full-height column.
+_Avoid_: flip, mirror swap (nobody trades tiles; a swap is one blocker taking
+the requester's vacated slot), mirroring (the noun is the mirror)
+_Code_: `Slot.mirror`, `TilingState.mirroredHomes`
 
 **Displacement (undo chapter)**:
 The undo model's whole destructive event: the windows it evicted, moved (a re-house or swap), or grew by reflow, plus a requester that left its slot when the event displaced another window. A requester that moves to a free tile with no displacement leaves no chapter. A swap displaces without untiling anyone, so the chapter and its undo copy say "displaced", never "evicted". A chapter stores no layout: undo derives the restored layout from the chapter's slots, so a switch chapter puts back the previous layout with its windows.

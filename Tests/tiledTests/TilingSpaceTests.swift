@@ -605,11 +605,9 @@ final class TilingSpaceTests: XCTestCase {
 
     func testTwoBlockersEvictWithoutSteppingAside() {
         // Middle third AND right third block a right two-thirds
-        // request: two blockers, so there is no lone evictee to
-        // re-house — everyone untangles. (For quarter and sixth targets
-        // geometry allows at most one blocker: every slot overlapping a
-        // one-cell-tall target contains it, and two of those would
-        // double-book cells.)
+        // request. The middle third mirrors onto itself, and its own
+        // slot overlaps the target, so the group has no home: everyone
+        // untangles rather than half of them moving.
         let middle = harness.addWindow()
         harness.apply(slot: .sixthMiddle, requester: middle)
         let right = harness.addWindow()

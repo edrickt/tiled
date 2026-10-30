@@ -127,7 +127,16 @@ tell you which app took it.
 - One window per slot.
 - Tiling a window into a slot **evicts** any window occupying an overlapping
   slot. Evicted windows are restored to their pre-tile frames.
-  - Two quads occupied on one side + the half key → both quads are evicted.
+  - **Mirror:** with two or more windows in the way, each moves to its own
+    slot on the other side instead of untangling, so a left half tiled to the
+    right half sends the two right quads to the two left quads, and a left
+    two-thirds tiled to the right two-thirds sends the two right corner
+    sixths to the two left ones. Windows land on the other side whether or
+    not the requester held it. All or nothing: if any home is taken, or a
+    middle third or middle sixth is in the way (it mirrors onto itself),
+    every window in the way is evicted instead.
+  - Two quads occupied on one side + the half key → both quads mirror to the
+    other side, or both are evicted when the mirror cannot fit.
   - A half occupied + a quad key on that side → the half window steps aside
     into the other quad on that side when it's free; only then is it evicted.
 - **Swap:** a tiled window tiling into a slot blocked by exactly one other

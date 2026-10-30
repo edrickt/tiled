@@ -922,5 +922,23 @@
   "inert key reports it performed",
   "            canvas: space, performed: false, notice: sentence, announcement: sentence)",
   "            canvas: space, performed: true, notice: sentence, announcement: sentence)"
+ ],
+ [
+  "Layout.swift",
+  "mirror reflects nothing",
+  "        let columns = (4 - geometry.columns.upperBound)..<(4 - geometry.columns.lowerBound)",
+  "        let columns = geometry.columns"
+ ],
+ [
+  "Layout.swift",
+  "group home ignores the windows that stay",
+  "            guard staying.allSatisfy({ $0.key.cells.isDisjoint(with: home.cells) }) else {\n                return nil\n            }",
+  "            guard true else {\n                return nil\n            }"
+ ],
+ [
+  "Layout.swift",
+  "group home counts the requester as staying",
+  "            $0.value != requester && !blockers.contains($0.value)",
+  "            !blockers.contains($0.value)"
  ]
 ]
