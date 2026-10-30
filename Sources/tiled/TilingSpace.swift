@@ -335,10 +335,10 @@ struct TilingSpace {
         // window is the exception: it stayed tiled in the slot the
         // request left free, so its record and observation survive.
         outcome.forget = decision.windowsToRestore()
-            .filter { $0 != commit.rehoused }
+            .filter { !commit.rehoused.contains($0) }
         // A degraded swap's decision names nobody, but its eviction did
         // untangle a window: report it unless the fallback re-housed it.
-        outcome.forget += commit.forgotten.filter { $0 != commit.rehoused }
+        outcome.forget += commit.forgotten.filter { !commit.rehoused.contains($0) }
         // A refused placement releases the requester's record (see
         // `place`). Record presence is the ownership primitive, so the
         // coordinator must clear its handle-table entry too: a later
@@ -368,19 +368,23 @@ struct TilingSpace {
             // middle third).
             let skip = Set(
                 ([id] + decision.windowsToRestore())
-                    .filter { $0 != commit.rehoused })
+                    .filter { !commit.rehoused.contains($0) })
             let reflow = reflow(freed, excluding: skip, context: context)
             reflowSnapshot = reflow.undoEntries
             actionFailures += reflow.failures
         }
-        // Reflow can grow the re-housed window into a larger slot (the
+        // Reflow can grow a re-housed window into a larger slot (the
         // left two-thirds blocker of a left-third request ends up as the
         // right two-thirds), so narrate only after it runs, with the slot
-        // the window actually holds now.
-        if let rehoused = commit.rehoused, let finalSlot = state.slot(of: rehoused) {
-            commit.notice = Self.rehouseNotice(
-                name: appName(rehoused, context: context) ?? "That window",
-                slot: finalSlot)
+        // each window actually holds now.
+        let homes = decision.windowsToRestore().compactMap { wid -> (name: String?, slot: Slot)? in
+            guard commit.rehoused.contains(wid), let finalSlot = state.slot(of: wid) else {
+                return nil
+            }
+            return (name: appName(wid, context: context), slot: finalSlot)
+        }
+        if !homes.isEmpty {
+            commit.notice = Self.rehouseNotice(homes: homes)
         }
         // Restored windows sit BELOW the arrangement they left: an
         // evictee returns to its pre-tile frame and must never cover the
@@ -408,9 +412,8 @@ struct TilingSpace {
             // rolls back. Cancelled by the next placement's scheduling
             // (a newer write supersedes) and by forget paths.
             outcome.verify = verificationWindows(for: decision, requester: id)
-            if let rehoused = commit.rehoused {
-                outcome.verify.append(rehoused)
-            }
+            outcome.verify.append(
+                contentsOf: decision.windowsToRestore().filter { commit.rehoused.contains($0) })
         }
         outcome.observe = commit.observed
         // The reflow's survivors share the event's undo chapter: undo
@@ -792,7 +795,7 @@ struct TilingSpace {
                 // A deferred off-Space write stands: the victim keeps the
                 // freed slot and reconciles when the canvas is visible.
                 if write == .deferredOffSpace { commit.deferred = true }
-                commit.rehoused = wid
+                commit.rehoused = [wid]
             } else {
                 let failures = restore([wid], context: context)
                 commit.failures += failures
@@ -830,7 +833,7 @@ struct TilingSpace {
             // when it actually landed.
             commit.snapshot = snapshot
             commit.requester = clean ? id : nil
-            if !restorationFailed, commit.notice == nil, commit.rehoused == nil {
+            if !restorationFailed, commit.notice == nil, commit.rehoused.isEmpty {
                 commit.notice = Self.evictionNotice(names: evictedNames, count: evicted.count)
             }
         }
@@ -868,7 +871,9 @@ struct TilingSpace {
         var snapshot: [EvictedWindow]?
         var requester: WindowID?
         var reflowFreed: Set<TileCell>?
-        var rehoused: WindowID?
+        /// Windows that stayed tiled by re-housing: the request made room
+        /// for them, so they keep their record and are never restored.
+        var rehoused: Set<WindowID> = []
         var observed: [WindowID] = []
         /// A placement or re-house write was deferred off-Space: its
         /// state stands, so the event narrates the deferral rather than
@@ -979,12 +984,32 @@ struct TilingSpace {
 
     // MARK: Eviction narrative
 
-    /// The re-house notice: the victim stayed tiled, so the notice names
-    /// where it moved. Composed in `settle` after reflow, when the final
-    /// slot is known.
-    private static func rehouseNotice(name: String, slot: Slot) -> String {
-        "\(name) moved to \(SlotPresentation.title(of: slot)) to make room."
-            + MenuText.undoRecoveryHint
+    /// The re-house notice: the windows stayed tiled, so the notice names
+    /// where they moved. Composed in `settle` after reflow, when every
+    /// final slot is known. One window keeps its own sentence; two named
+    /// windows each get a verb and a slot; anything else — a third window,
+    /// or a name AX could not answer — falls back to a count, because a
+    /// sentence with "That window" twice tells nobody where anything went.
+    static func rehouseNotice(homes: [(name: String?, slot: Slot)]) -> String {
+        guard let first = homes.first else { return "" }
+        let head: String
+        switch homes.count {
+        case 1:
+            let name = first.name ?? "That window"
+            head = "\(name) moved to \(SlotPresentation.title(of: first.slot)) to make room."
+        case 2 where homes.allSatisfy({ $0.name != nil }):
+            head =
+                "\(first.name!) moved to \(SlotPresentation.title(of: first.slot))"
+                + " and \(homes[1].name!) moved to \(SlotPresentation.title(of: homes[1].slot))"
+                + " to make room."
+        case 2:
+            head = "2 windows moved to the other side to make room."
+        default:
+            head = first.name.map {
+                "\($0) and \(homes.count - 1) other windows moved to the other side to make room."
+            } ?? "\(homes.count) windows moved to the other side to make room."
+        }
+        return head + MenuText.undoRecoveryHint
     }
 
     /// One snapshot entry per displaced window, captured before the

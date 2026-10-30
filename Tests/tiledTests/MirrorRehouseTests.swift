@@ -117,4 +117,49 @@ final class MirrorRehouseTests: XCTestCase {
         XCTAssertNil(
             state.mirroredHomes(evicting: [2], for: .rightHalf, requester: 1))
     }
+
+    // MARK: The re-house notice
+
+    func testNoticeNamesTwoHomesWithTheirSlots() {
+        // Two windows that stayed tiled each get a verb and a slot, so the
+        // sentence cannot be read as one window moving twice.
+        XCTAssertEqual(
+            TilingSpace.rehouseNotice(homes: [
+                (name: "Preview", slot: .topLeft), (name: "Notes", slot: .bottomLeft),
+            ]),
+            "Preview moved to Top Left and Notes moved to Bottom Left to make room."
+                + MenuText.undoRecoveryHint)
+    }
+
+    func testNoticeFallsBackToACountWhenANameIsMissing() {
+        // An unnamed app (an AX tree that answers nothing) must not read
+        // as "That window moved to Top Left and That window moved to
+        // Bottom Left".
+        XCTAssertEqual(
+            TilingSpace.rehouseNotice(homes: [
+                (name: "Preview", slot: .topLeft), (name: nil, slot: .bottomLeft),
+            ]),
+            "2 windows moved to the other side to make room." + MenuText.undoRecoveryHint)
+    }
+
+    func testSingleHomeKeepsItsOwnWording() {
+        // The lone re-house sentence is unchanged, fallback name included.
+        XCTAssertEqual(
+            TilingSpace.rehouseNotice(homes: [(name: "Preview", slot: .sixthRight)]),
+            "Preview moved to Right Third to make room." + MenuText.undoRecoveryHint)
+        XCTAssertEqual(
+            TilingSpace.rehouseNotice(homes: [(name: nil, slot: .sixthRight)]),
+            "That window moved to Right Third to make room." + MenuText.undoRecoveryHint)
+    }
+
+    func testNoticeNamesThreeOrMoreByFirstAndCount() {
+        let homes: [(name: String?, slot: Slot)] = [
+            (name: "Preview", slot: .topLeft), (name: "Notes", slot: .bottomLeft),
+            (name: "Mail", slot: .topRight),
+        ]
+        XCTAssertEqual(
+            TilingSpace.rehouseNotice(homes: homes),
+            "Preview and 2 other windows moved to the other side to make room."
+                + MenuText.undoRecoveryHint)
+    }
 }
