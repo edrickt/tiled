@@ -182,7 +182,7 @@ final class TilingSpaceTests: XCTestCase {
 
     // MARK: Eviction
 
-    func testEvictionRestoresPreTileFrame() {
+    func testEvictionRestoresSizedFrame() {
         let a = harness.addWindow()
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
         harness.gateway.setFrame(harness.handle(of: a)!, to: original)
@@ -196,8 +196,8 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertNil(space.error)
         XCTAssertNil(space.state.slot(of: a))
         XCTAssertEqual(
-            harness.frame(of: a), original,
-            "eviction writes the pre-tile frame back to the window")
+            harness.frame(of: a), CGRect(x: 10, y: 20, width: 800, height: 600),
+            "eviction writes the quarter footprint at the pre-tile origin")
     }
 
     func testPlainTileEvictionNoticesAndSnapshotsForUndo() {
@@ -569,10 +569,12 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertNotNil(space.records[m], "the record survives with the occupancy")
         XCTAssertNil(
             space.state.slot(of: r),
-            "the victim untiles to its pre-tile frame, not into a new tile")
+            "the victim untiles to its sized frame, not into a new tile")
+        XCTAssertEqual(harness.frame(of: r)?.origin, .zero)
+        XCTAssertEqual(harness.frame(of: r)?.height, 600)
         XCTAssertEqual(
-            harness.frame(of: r), CGRect(x: 0, y: 0, width: 800, height: 600),
-            "its pre-tile frame is where it sat before tiling")
+            harness.frame(of: r)!.width, 1600.0 / 3.0, accuracy: 0.0001,
+            "its sixth footprint sits at the pre-tile origin")
         XCTAssertFalse(
             space.notice?.contains("to make room") ?? false,
             "no re-house notice for a request that never landed")
@@ -656,7 +658,11 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(space.state.slot(of: a), .sixthLeft, "the survivor expands down")
         XCTAssertEqual(harness.frame(of: a), harness.rect(.sixthLeft))
         XCTAssertNil(space.state.slot(of: b), "the untiled window released its slot")
-        XCTAssertEqual(harness.frame(of: b), CGRect(x: 0, y: 0, width: 800, height: 600))
+        XCTAssertEqual(harness.frame(of: b)?.origin, .zero)
+        XCTAssertEqual(harness.frame(of: b)?.height, 600)
+        XCTAssertEqual(
+            harness.frame(of: b)!.width, 1600.0 / 3.0, accuracy: 0.0001,
+            "the untiled window floats at the sixth footprint")
         XCTAssertEqual(outcome.forget, [b])
         XCTAssertTrue(outcome.raise)
         XCTAssertEqual(
@@ -707,13 +713,19 @@ final class TilingSpaceTests: XCTestCase {
         let b = harness.addWindow()
         harness.apply(slot: .sixthTopLeft, requester: a)
         harness.apply(slot: .sixthBottomLeft, requester: b)
-        // The drop moved b; drag-out never writes the pre-tile frame.
+        // The drop moved b; drag-out never restores the pre-tile frame.
+        // The drop's origin takes the sixth footprint instead, repinned
+        // where the taller footprint would spill off the canvas.
         let dropped = CGRect(x: 300, y: 700, width: 500, height: 300)
         harness.gateway.setFrame(harness.handle(of: b)!, to: dropped)
 
         let outcome = space.untileFromDrag(window: b, context: context())
 
-        XCTAssertEqual(harness.frame(of: b), dropped, "the drop is the placement")
+        XCTAssertEqual(harness.frame(of: b)?.origin, CGPoint(x: 300, y: 600))
+        XCTAssertEqual(harness.frame(of: b)?.height, 600)
+        XCTAssertEqual(
+            harness.frame(of: b)!.width, 1600.0 / 3.0, accuracy: 0.0001,
+            "the drop is the placement, at the layout's footprint")
         XCTAssertEqual(space.state.slot(of: a), .sixthLeft, "the freed cells reflow")
         XCTAssertEqual(outcome.forget, [b])
         XCTAssertNil(space.error)
@@ -818,9 +830,9 @@ final class TilingSpaceTests: XCTestCase {
 
     // MARK: Restore policy
 
-    /// A pre-tile restore on a hidden canvas defers too: the evicted
+    /// A sized restore on a hidden canvas defers too: the evicted
     /// window is not dragged through Mission Control, its slot is
-    /// released, and the deferred restore lands on the swipe-back reassert —
+    /// released, and the deferred sized restore lands on the swipe-back reassert —
     /// the same off-Space contract every other write obeys.
     func testHiddenCanvasEvictionDefersTheRestoreAndReconcilesOnReturn() {
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
@@ -847,11 +859,11 @@ final class TilingSpaceTests: XCTestCase {
         space.reassert(.grid, context: context())
 
         XCTAssertEqual(
-            harness.frame(of: a), original,
-            "the deferred restore lands when the canvas becomes visible")
+            harness.frame(of: a), CGRect(x: 10, y: 20, width: 800, height: 600),
+            "the deferred sized restore lands when the canvas becomes visible")
     }
 
-    /// A hidden untile-all defers every restore (its re-observation of the
+    /// A hidden untile-all defers every sized restore (its re-observation of the
     /// windows for the undo chapter must not discard them) and lands them
     /// all on the swipe back.
     func testHiddenCanvasUntileAllDefersEveryRestoreAndReconcilesOnReturn() {
@@ -872,8 +884,8 @@ final class TilingSpaceTests: XCTestCase {
         harness.canvasVisible = true
         space.reassert(.grid, context: context())
 
-        XCTAssertEqual(harness.frame(of: a), aFrame)
-        XCTAssertEqual(harness.frame(of: b), bFrame)
+        XCTAssertEqual(harness.frame(of: a), CGRect(x: 10, y: 20, width: 800, height: 600))
+        XCTAssertEqual(harness.frame(of: b), CGRect(x: 500, y: 40, width: 800, height: 600))
     }
 
     /// Re-tiling a window with a deferred restore before the canvas
@@ -898,14 +910,15 @@ final class TilingSpaceTests: XCTestCase {
     }
 
     /// The restore takes the same no-op skip as every other write: a
-    /// window already sitting at its pre-tile frame is not rewritten, so
+    /// window already sitting at its sized frame is not rewritten, so
     /// its settling app is never re-armed into a phantom drag.
     func testRestoreSkipsAnAlreadyCorrectFrame() {
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
         let a = harness.addWindow(frame: original)
         harness.apply(slot: .topLeft, requester: a)
-        // The app resisted the tile and never left its pre-tile frame.
-        harness.gateway.simulateSilentChange(harness.handle(of: a)!, to: original)
+        // The app already sits at the sized footprint the restore would write.
+        let sized = CGRect(x: 10, y: 20, width: 800, height: 600)
+        harness.gateway.simulateSilentChange(harness.handle(of: a)!, to: sized)
         harness.gateway.clearWrites()
         harness.clearExpectedWrites()
 
@@ -920,9 +933,9 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertNil(space.state.slot(of: a), "the slot is released regardless")
     }
 
-    /// A restore on a visible canvas is unchanged: the pre-tile frame is
+    /// A restore on a visible canvas is unchanged: the sized frame is
     /// written and the slot released, with nothing deferred for later.
-    func testVisibleRestoreWritesThePreTileFrameAndReleasesTheSlot() {
+    func testVisibleRestoreWritesTheSizedFrameAndReleasesTheSlot() {
         let original = CGRect(x: 10, y: 20, width: 300, height: 200)
         let a = harness.addWindow(frame: original)
         harness.apply(slot: .topLeft, requester: a)
@@ -931,7 +944,7 @@ final class TilingSpaceTests: XCTestCase {
 
         space.untile(window: a, reflowing: false, context: context())
 
-        XCTAssertEqual(harness.frame(of: a), original)
+        XCTAssertEqual(harness.frame(of: a), CGRect(x: 10, y: 20, width: 800, height: 600))
         XCTAssertNil(space.state.slot(of: a))
         XCTAssertTrue(space.deferredRestores.isEmpty, "a visible restore is never deferred")
         XCTAssertEqual(
@@ -942,10 +955,11 @@ final class TilingSpaceTests: XCTestCase {
             "and clears it when the window is untiled: no phantom expectation")
     }
 
-    /// A pre-tile frame that straddles the canvas edge is the app's own
-    /// placement: the restore is left exactly where the user had it,
-    /// never yanked back inside the visible frame.
-    func testStraddlingPreTileRestoreIsLeftWhereTheAppPutIt() {
+    /// A pre-tile origin that straddles the canvas edge takes the quarter
+    /// footprint and repins inside the visible frame: the sized frame is
+    /// the canvas's own placement, not the app's, so it never spills
+    /// off-screen.
+    func testStraddlingPreTileRestoreRepinsInsideTheVisibleFrame() {
         let straddling = CGRect(x: 1500, y: 0, width: 300, height: 300)
         let a = harness.addWindow(frame: straddling)
         harness.apply(slot: .topLeft, requester: a)
@@ -954,8 +968,8 @@ final class TilingSpaceTests: XCTestCase {
         space.untile(window: a, reflowing: false, context: context())
 
         XCTAssertEqual(
-            harness.frame(of: a), straddling,
-            "a straddling pre-tile frame the app applied is never repinned")
+            harness.frame(of: a), CGRect(x: 800, y: 0, width: 800, height: 600),
+            "the sized frame hugs the screen edge instead of spilling off it")
     }
 
     // MARK: Untile all
@@ -975,7 +989,9 @@ final class TilingSpaceTests: XCTestCase {
             "Untiled 2 windows. Undo from the Tiled menu.")
         XCTAssertEqual(space.state.occupants, [:])
         XCTAssertEqual(harness.frame(of: a), aOriginal)
-        XCTAssertEqual(harness.frame(of: b), bOriginal)
+        XCTAssertEqual(
+            harness.frame(of: b), CGRect(x: 800, y: 50, width: 800, height: 600),
+            "the taller footprint repins inside the visible frame")
         XCTAssertEqual(Set(outcome.forget), [a, b])
         XCTAssertEqual(outcome.observe.count, 2, "the chapter re-observes both windows")
         XCTAssertEqual(space.undoStack.last?.snapshot.count, 2)

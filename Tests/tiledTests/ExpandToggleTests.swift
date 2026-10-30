@@ -232,20 +232,21 @@ final class ExpandToggleTests: XCTestCase {
 
     // MARK: Untile interaction
 
-    func testUntileWhileExpandedRestoresPreTileFrame() {
-        let original = CGRect(x: 120, y: 90, width: 700, height: 500)
-        let handle = gateway.addWindow(frame: original)
+    func testUntileWhileExpandedLeavesSizedFrame() {
+        let handle = gateway.addWindow(frame: CGRect(x: 120, y: 90, width: 700, height: 500))
         gateway.focused = handle
         controller.handle(slot: .topLeft)
 
         controller.handleExpandToggle()
         controller.untile(window: 1)
 
-        XCTAssertEqual(gateway.frame(of: handle), original)
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 120, y: 90, width: 800, height: 500),
+            "untiling an expanded window leaves the quarter footprint")
         // Expansion ended with the untile: the toggle expands from scratch.
         gateway.focused = handle
         controller.handleExpandToggle()
-        XCTAssertEqual(gateway.frame(of: handle), bounds(for: original))
+        XCTAssertEqual(gateway.frame(of: handle), Self.screen.visibleFrame)
     }
 
     func testEvictingAnExpandedWindowRestoresAndClearsExpansion() {
@@ -265,8 +266,8 @@ final class ExpandToggleTests: XCTestCase {
         XCTAssertEqual(canvas.state.slot(of: 1), nil)
         XCTAssertEqual(canvas.state.slot(of: 2), .topLeft)
         XCTAssertEqual(
-            gateway.frame(of: a), CGRect(x: 120, y: 90, width: 700, height: 500),
-            "eviction restores the pre-tile frame and ends the expansion")
+            gateway.frame(of: a), CGRect(x: 120, y: 90, width: 800, height: 500),
+            "eviction leaves the quarter footprint and ends the expansion")
 
         // The expansion is gone: the toggle expands again from scratch.
         gateway.focused = a

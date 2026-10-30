@@ -266,8 +266,8 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertNil(canvas.state.slot(of: 1), "long drag releases the slot")
         XCTAssertNil(canvas.state.occupant(of: .topLeft))
         XCTAssertEqual(
-            gateway.frame(of: drag.handle), drag.finalFrame,
-            "the untiled window stays where the user dropped it")
+            gateway.frame(of: drag.handle), CGRect(x: 120, y: 500, width: 800, height: 500),
+            "the drop's origin takes the quarter footprint, repinned inside the screen")
     }
 
     func testSingleTickHandDragAtMouseUpUntiles() {
@@ -289,7 +289,9 @@ final class ControllerGatewayTests: XCTestCase {
         controller.mouseLifted()
 
         XCTAssertNil(canvas.state.slot(of: 1), "a one-tick hand drag still untiles")
-        XCTAssertEqual(gateway.frame(of: handle), far)
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 200, y: 500, width: 800, height: 500),
+            "the drop's origin takes the quarter footprint, repinned inside the screen")
     }
 
     func testQuartzMouseDownAtTheWindowCenterAuthorizesAOneTickDrag() {
@@ -790,11 +792,11 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(canvas.state.occupant(of: .topLeft), 5, "a reissued under a fresh id")
         XCTAssertNil(canvas.state.slot(of: 4), "d stepped aside, not silently clobbered")
         XCTAssertEqual(
-            gateway.frame(of: d), CGRect(x: 50, y: 50, width: 700, height: 500),
-            "d restored to its pre-tile frame, not left overlapping a's tile")
+            gateway.frame(of: d), CGRect(x: 50, y: 50, width: 800, height: 500),
+            "d steps aside to its sized frame, not left overlapping a's tile")
         XCTAssertEqual(
-            gateway.frame(of: e), CGRect(x: 60, y: 60, width: 600, height: 400),
-            "e stayed untiled at its pre-tile frame")
+            gateway.frame(of: e), CGRect(x: 60, y: 60, width: 800, height: 500),
+            "e stayed untiled at its sized frame")
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
     }
 
@@ -816,8 +818,8 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(canvas.state.slot(of: 2), .leftHalf)
         XCTAssertNil(canvas.state.slot(of: 1), "the blocker was evicted")
         XCTAssertEqual(
-            gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 600),
-            "a was restored to its pre-tile frame, not left expanded")
+            gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 500),
+            "a untangles to the quarter footprint, not left expanded")
     }
 
     // MARK: Ghost cleanup

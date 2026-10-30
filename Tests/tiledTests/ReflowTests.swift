@@ -390,7 +390,11 @@ extension ReflowTests {
         XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft, "the survivor expands up")
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthLeft, for: b))
         XCTAssertTrue(canvas.state.slot(of: 1) == nil, "the evicted window is untiled")
-        XCTAssertEqual(gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 600))
+        XCTAssertEqual(gateway.frame(of: a)?.origin, .zero)
+        XCTAssertEqual(gateway.frame(of: a)?.height, 500)
+        XCTAssertEqual(
+            gateway.frame(of: a)!.width, 1600.0 / 3.0, accuracy: 0.0001,
+            "the evicted window floats at the sixth footprint")
     }
 
     func testRefusedReflowWriteRollsTheSurvivorBack() {
@@ -498,7 +502,11 @@ extension ReflowTests {
             "the survivor returns to the slot it held before the reflow")
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthBottomLeft, for: b))
         XCTAssertTrue(canvas.state.slot(of: 1) == nil, "the evicted window stays untiled")
-        XCTAssertEqual(gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 600))
+        XCTAssertEqual(gateway.frame(of: a)?.origin, .zero)
+        XCTAssertEqual(gateway.frame(of: a)?.height, 500)
+        XCTAssertEqual(
+            gateway.frame(of: a)!.width, 1600.0 / 3.0, accuracy: 0.0001,
+            "undo leaves the evicted window at its sized frame")
     }
 
     func testMoveToFreeSlotReflowsVacatedCells() {

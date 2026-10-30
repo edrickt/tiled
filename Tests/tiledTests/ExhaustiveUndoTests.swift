@@ -14,10 +14,10 @@ import XCTest
 /// The documented semantics the check encodes:
 /// - every snapshot entry returns to its recorded slot;
 /// - a requester with a snapshot entry returns to that slot;
-/// - a requester without an entry is returned to its pre-tile frame when
-///   the chapter names it as the requester (a fresh eviction), and is
-///   otherwise left where the request put it (a move whose only
-///   displacement is a reflow);
+/// - a requester without an entry floats at the layout's slot footprint
+///   at its pre-tile origin when the chapter names it as the requester
+///   (a fresh eviction), and is otherwise left where the request put it
+///   (a move whose only displacement is a reflow);
 /// - a switch untiles every occupant and its chapter returns the whole
 ///   pre-switch board, previous layout included;
 /// - no other window moves.
@@ -199,10 +199,17 @@ final class ExhaustiveUndoTests: XCTestCase {
         let requesterHasEntry = chapter.snapshot.contains { $0.handle == requesterHandle }
         if chapter.requester != nil, !requesterHasEntry {
             occupants = occupants.filter { $0.value != requesterIndex }
-            // A named requester with no entry is restored to its pre-tile
-            // frame. A zero record writes nothing, so the frame stays.
+            // A named requester with no entry is restored to the
+            // layout's slot footprint at its pre-tile origin. A zero
+            // record writes nothing, so the frame stays. The footprint
+            // is drawn from the layout the undo lands on: the chapter's
+            // own when reconciliation adopts it, else the board's — and
+            // a chapter naming a requester always carries entries, so
+            // the chapter's layout decides either way.
             if let preTileFrame, preTileFrame != .zero {
-                frames[requesterIndex] = preTileFrame
+                let sizing = chapter.snapshot.first?.slot.layout ?? after.layout
+                frames[requesterIndex] = grid.sizedUntileFrame(
+                    keeping: preTileFrame.origin, for: sizing, in: visibleFrame)
             }
         }
         return Board(occupants: occupants, layout: after.layout, frames: frames)

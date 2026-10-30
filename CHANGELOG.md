@@ -6,6 +6,15 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Every exit from tiling leaves the window floating at the layout's slot
+  footprint — quarter size on a Quarters canvas, sixth size on a Sixths
+  canvas — instead of snapping back to its pre-tile frame. Manual untile,
+  eviction, untile-all, layout switch, and drag-out all resize in place
+  (origin kept, repinned inside the visible frame), and undo chapters
+  store the sized frame.
+
 ## [1.0.3] - 2026-10-29
 
 ### Changed

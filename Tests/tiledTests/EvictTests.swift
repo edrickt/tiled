@@ -114,16 +114,17 @@ final class EvictTests: XCTestCase {
         XCTAssertEqual(gateway.zOrder.last, a, "the expanded survivor ends above the evictee")
     }
 
-    func testEvictUntilesFocusedAndRestoresPreTileFrame() {
+    func testEvictUntilesFocusedAndLeavesSizedFrame() {
         let handle = addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
-        let original = gateway.frame(of: handle)!
         controller.handle(slot: .topLeft)
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
 
         controller.handleEvict()
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
-        XCTAssertEqual(gateway.frame(of: handle), original)
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 12, y: 34, width: 800, height: 500),
+            "evict leaves the quarter footprint at the pre-tile origin")
     }
 
     func testEvictWithNoFocusedWindowAnswers() {
@@ -153,16 +154,17 @@ final class EvictTests: XCTestCase {
             "pressing Evict on an untiled window leaves no record behind")
     }
 
-    func testEvictExpandedWindowRestoresPreTile() {
-        let original = CGRect(x: 120, y: 90, width: 700, height: 500)
-        let handle = addFocusedWindow(frame: original)
+    func testEvictExpandedWindowLeavesSizedFrame() {
+        let handle = addFocusedWindow(frame: CGRect(x: 120, y: 90, width: 700, height: 500))
         controller.handle(slot: .topLeft)
         controller.handleExpandToggle()
         XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
 
         controller.handleEvict()
 
-        XCTAssertEqual(gateway.frame(of: handle), original)
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 120, y: 90, width: 800, height: 500),
+            "evicting an expanded window leaves the quarter footprint")
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         // Expansion ended with the evict: the toggle expands from scratch.
         gateway.focused = handle
@@ -177,5 +179,21 @@ final class EvictTests: XCTestCase {
         XCTAssertTrue(
             gateway.focusCalls.isEmpty,
             "nothing tiled left to focus: the evicted window keeps focus")
+    }
+
+    func testEvictWritesQuarterSizedFrame() {
+        // Quarters canvas: evicting leaves the window floating at the
+        // quarter footprint with its origin kept, not the raw pre-tile frame.
+        controller.handleSwitchLayout(to: .quarters)
+        let handle = addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
+        controller.handle(slot: .topLeft)
+
+        controller.handleEvict()
+
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 12, y: 34, width: 800, height: 500),
+            "evict resizes in place to the layout's slot footprint")
     }
 }

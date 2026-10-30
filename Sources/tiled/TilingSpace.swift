@@ -577,9 +577,11 @@ struct TilingSpace {
     /// Switches this canvas to `target`, untiling everything first.
     ///
     /// The layout is a canvas choice, not an occupancy side effect. Every
-    /// tiled window is restored to its pre-tile frame (an expanded window
-    /// included, to the frame it had before tiling), the board empties,
-    /// and the canvas adopts `target`. The snapshot is taken before the
+    /// tiled window is restored to the slot-sized floating frame (an expanded window
+    /// included, at the origin of the frame it had before tiling), the board empties,
+    /// and the canvas adopts `target`. The footprint is drawn from `target`:
+    /// the windows float over the layout the canvas is adopting, not the one
+    /// they are leaving. The snapshot is taken before the
     /// restores drop the records, in id order, so undo can put the whole
     /// pre-switch world back in one chapter. A zero-window switch pushes no
     /// chapter: the layout change itself is narrated but there is nothing
@@ -591,10 +593,10 @@ struct TilingSpace {
         let tiled = state.tiledWindows.sorted()
         let snapshot: [EvictedWindow] = tiled.compactMap { id in
             guard let slot = state.slot(of: id) else { return nil }
-            return evictedEntry(for: id, slot: slot, space: context.space)
+            return evictedEntry(for: id, slot: slot, space: context.space, sizingFor: target)
         }
         primeTracker(for: state.occupants, context: context)
-        let failures = restore(tiled, context: context)
+        let failures = restore(tiled, context: context, sizingFor: target)
         adoptLayout(target)
         pushUndo(snapshot: snapshot, requester: nil)
         if let message = Self.failureMessage(failures) {
@@ -1041,14 +1043,22 @@ struct TilingSpace {
     }
 
     /// One undo entry for `id`'s `slot`: the handle to find it again, the
-    /// slot to return it to, the frame it held. Nil when the record is
-    /// gone.
+    /// slot to return it to, the slot-sized frame it floats at. The chapter
+    /// stores the sized frame, not the raw pre-tile frame, so a later undo
+    /// re-place and a later untile agree on where the window sits. A zero
+    /// record writes nothing on untile, so it stays zero here too. Nil when
+    /// the record is gone. `sizingFor` overrides the layout the footprint
+    /// is drawn from; only the layout switch passes one.
     private func evictedEntry(
-        for id: WindowID, slot: Slot, space: TilingSpaceKey?
+        for id: WindowID, slot: Slot, space: TilingSpaceKey?,
+        sizingFor layoutOverride: LayoutKind? = nil
     ) -> EvictedWindow? {
-        records[id].map {
-            EvictedWindow(
-                handle: $0.handle, slot: slot, preTileFrame: $0.preTileFrame, space: space)
+        records[id].map { record in
+            let raw = record.preTileFrame
+            let sized = raw == .zero ? raw : grid.sizedUntileFrame(
+                keeping: raw.origin, for: layoutOverride ?? state.layout, in: visibleFrame)
+            return EvictedWindow(
+                handle: record.handle, slot: slot, preTileFrame: sized, space: space)
         }
     }
 
@@ -1171,31 +1181,40 @@ struct TilingSpace {
         state.remove(window: id)
     }
 
-    /// Restores the window's pre-tile frame and releases its slot, going
-    /// through the one write policy every other push shares: a target the
+    /// Restores the window's slot-sized floating frame and releases its slot,
+    /// going through the one write policy every other push shares: the sized
+    /// target keeps the pre-tile frame's origin and takes the canvas layout's
+    /// smallest slot footprint, kept inside the visible frame. A target the
     /// window already holds is skipped, and a canvas the user cannot see
     /// defers rather than writing blind. Returns false only when the
     /// gateway refused the write, so the caller can say so instead of
     /// silently leaving a stray window behind. A refused write normally
     /// releases the slot too; undo's fresh requester passes
     /// `keepingOccupancyOnRefusal` so the window stays the owner of the
-    /// slot it visibly holds, mirroring `place`'s rollback. The
-    /// coordinator's undo reuses this for the chapter's requester.
+    /// slot it visibly holds, mirroring `place`'s rollback. `sizingFor`
+    /// overrides the layout the footprint is drawn from: the layout switch
+    /// restores under the layout it is adopting, every other exit under the
+    /// canvas's own. The coordinator's undo reuses this for the chapter's
+    /// requester.
     @discardableResult
     mutating func restore(
-        window id: WindowID, context: Context, keepingOccupancyOnRefusal: Bool = false
+        window id: WindowID, context: Context, keepingOccupancyOnRefusal: Bool = false,
+        sizingFor layoutOverride: LayoutKind? = nil
     ) -> Bool {
         var restored = true
         var refused = false
         if let record = records[id], record.preTileFrame != .zero {
+            let layout = layoutOverride ?? state.layout
+            let target = grid.sizedUntileFrame(
+                keeping: record.preTileFrame.origin, for: layout, in: visibleFrame)
             let result = context.frameWriter.write(
-                id, handle: record.handle, to: record.preTileFrame,
+                id, handle: record.handle, to: target,
                 bounds: visibleFrame, on: context.space, check: .none)
             if result == .deferredOffSpace {
-                // Deferred: nothing was written. Retain the restore so the
+                // Deferred: nothing was written. Retain the sized restore so the
                 // swipe-back reassert lands it once the canvas is visible.
                 deferredRestores[record.handle] = DeferredRestore(
-                    id: id, frame: record.preTileFrame)
+                    id: id, frame: target)
             }
             restored = result.stands
             refused = result == .refused
@@ -1206,14 +1225,20 @@ struct TilingSpace {
     }
 
     /// Restores every window in `ids`, returning one failure per refused
-    /// pre-tile write. The frame is captured before the restore releases
+    /// slot-sized write. The sized frame is captured before the restore releases
     /// the record, so the failure carries the intent that did not land.
-    private mutating func restore(_ ids: [WindowID], context: Context) -> [Failure] {
+    private mutating func restore(
+        _ ids: [WindowID], context: Context, sizingFor layoutOverride: LayoutKind? = nil
+    ) -> [Failure] {
         var failures: [Failure] = []
         for evicted in ids {
             let name = appName(evicted, context: context) ?? "A window"
-            let frame = records[evicted]?.preTileFrame ?? .zero
-            if !restore(window: evicted, context: context) {
+            let raw = records[evicted]?.preTileFrame ?? .zero
+            let frame = raw == .zero ? raw : grid.sizedUntileFrame(
+                keeping: raw.origin, for: layoutOverride ?? state.layout, in: visibleFrame)
+            if !restore(
+                window: evicted, context: context, sizingFor: layoutOverride)
+            {
                 failures.append(
                     Failure(windowName: name, kind: .restore, frame: frame))
             }
@@ -1512,11 +1537,34 @@ struct TilingSpace {
     }
 
     /// Drag-out untile: the drop IS the placement, so the pre-tile frame
-    /// is never written. The freed cells still reflow and the survivor is
-    /// raised, chapter and all.
+    /// is never restored — but the drop takes the canvas layout's smallest
+    /// slot footprint at the drop origin, written through the one write
+    /// policy every other exit shares. The freed cells still reflow and the
+    /// survivor is raised, chapter and all.
     mutating func untileFromDrag(window id: WindowID, context: Context) -> Outcome {
         error = nil
         notice = nil
+        if let record = records[id] {
+            // The live drop frame owns the origin; an unreadable drop
+            // falls back to the pre-tile origin, and a zero record writes
+            // nothing, exactly like a zero restore.
+            let origin = context.gateway.frame(of: record.handle)?.origin
+                ?? (record.preTileFrame == .zero ? nil : record.preTileFrame.origin)
+            if let origin {
+                let target = grid.sizedUntileFrame(
+                    keeping: origin, for: state.layout, in: visibleFrame)
+                let result = context.frameWriter.write(
+                    id, handle: record.handle, to: target,
+                    bounds: visibleFrame, on: context.space, check: .none)
+                if result == .deferredOffSpace {
+                    deferredRestores[record.handle] = DeferredRestore(
+                        id: id, frame: target)
+                } else if result == .refused {
+                    error = MenuText.restoreFailureMessage(
+                        [appName(id, context: context) ?? "A window"])
+                }
+            }
+        }
         return leave(window: id, from: state.slot(of: id), context: context)
     }
 

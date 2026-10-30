@@ -51,9 +51,8 @@ final class ControllerBulkOperationTests: XCTestCase {
 
     // MARK: Untile restores frames
 
-    func testUntileRestoresPreTileFrame() {
+    func testUntileRestoresSizedFrame() {
         let handle = harness.addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
-        let original = gateway.frame(of: handle)!
         controller.handle(slot: .topLeft)
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
 
@@ -61,8 +60,8 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(
-            gateway.frame(of: handle), original,
-            "untile writes the pre-tile frame back")
+            gateway.frame(of: handle), CGRect(x: 12, y: 34, width: 800, height: 500),
+            "untile writes the quarter footprint at the pre-tile origin")
     }
 
     func testUntileUnknownWindowIsSafe() {
@@ -72,10 +71,8 @@ final class ControllerBulkOperationTests: XCTestCase {
 
     func testUntileAllRestoresEveryWindow() {
         let a = harness.addFocusedWindow(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
-        let aOriginal = gateway.frame(of: a)!
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 500, y: 100, width: 700, height: 500))
-        let bOriginal = gateway.frame(of: b)!
         gateway.focused = b
         controller.handle(slot: .topRight)
         XCTAssertEqual(canvas.state.tiledWindows.count, 2)
@@ -83,15 +80,17 @@ final class ControllerBulkOperationTests: XCTestCase {
         controller.untileAll()
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
-        XCTAssertEqual(gateway.frame(of: a), aOriginal)
-        XCTAssertEqual(gateway.frame(of: b), bOriginal)
+        XCTAssertEqual(
+            gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 500))
+        XCTAssertEqual(
+            gateway.frame(of: b), CGRect(x: 500, y: 100, width: 800, height: 500),
+            "untile-all leaves every window at the quarter footprint")
     }
 
     // MARK: Layout-switch undo lifecycle
 
     func testUndoLayoutSwitchReturnsEvictedWindowsAndTheLayout() {
         let a = harness.addFocusedWindow()
-        let aOriginal = gateway.frame(of: a)!
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
         gateway.focused = b
@@ -105,9 +104,11 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(canvas.displacedCount, 2)
         XCTAssertNotNil(canvas.notice)
         XCTAssertTrue(canvas.state.occupants.isEmpty)
+        XCTAssertEqual(gateway.frame(of: a)?.origin, .zero)
+        XCTAssertEqual(gateway.frame(of: a)?.height, 500)
         XCTAssertEqual(
-            gateway.frame(of: a), aOriginal,
-            "the switch restores the pre-tile frame immediately")
+            gateway.frame(of: a)!.width, 1600.0 / 3.0, accuracy: 0.0001,
+            "the switch restores the adopted layout's footprint immediately")
         controller.handle(slotKey: .leftColumn)
         XCTAssertNotNil(canvas.state.occupant(of: .sixthLeft))
 
@@ -286,15 +287,15 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertTrue(canvas.undoStack.isEmpty)
     }
 
-    func testPreTileFrameSurvivesLayoutSwitches() {
+    func testSizedOriginSurvivesLayoutSwitches() {
         let handle = harness.addFocusedWindow(frame: CGRect(x: 21, y: 43, width: 510, height: 320))
-        let original = gateway.frame(of: handle)!
         controller.handleSwitchLayout(to: .quarters)
         controller.handle(slotKey: .topLeft)
 
-        // Each explicit switch restores the pre-tile frame, and the next
-        // placement records that same frame as the new pre-tile: unlikeing
-        // still returns the window exactly where it started.
+        // Each explicit switch leaves the sized footprint at the pre-tile
+        // origin, and the next placement records that frame as the new
+        // pre-tile: untiling still returns the window to its original
+        // origin, never a tile rect from another layout.
         controller.handleSwitchLayout(to: .sixths)
         controller.handle(slotKey: .leftColumn)
         controller.handleSwitchLayout(to: .quarters)
@@ -304,8 +305,8 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         controller.untile(window: id)
         XCTAssertEqual(
-            gateway.frame(of: handle), original,
-            "untile restores the original pre-tile frame, not a tile rect")
+            gateway.frame(of: handle), CGRect(x: 21, y: 43, width: 800, height: 500),
+            "untile keeps the original origin at the layout's footprint")
     }
 
     func testUntileAllStartsItsOwnUndoChapter() {

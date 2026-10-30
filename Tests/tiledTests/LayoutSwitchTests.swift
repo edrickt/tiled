@@ -84,7 +84,7 @@ final class LayoutSwitchTests: XCTestCase {
             "Switched to Sixths · 3 windows untiled. Undo from the Tiled menu.")
     }
 
-    func testExpandedWindowRestoresToItsPreTileFrameOnSwitch() {
+    func testExpandedWindowUntanglesToSizedFrameOnSwitch() {
         let preTile = CGRect(x: 100, y: 100, width: 600, height: 400)
         let handle = harness.addFocusedWindow(frame: preTile)
         tileQuarter(.topLeft)
@@ -95,8 +95,8 @@ final class LayoutSwitchTests: XCTestCase {
         controller.handleSwitchLayout()
 
         XCTAssertEqual(
-            gateway.frame(of: handle), preTile,
-            "an expanded window returns to the frame it had before tiling")
+            gateway.frame(of: handle), CGRect(x: 100, y: 100, width: 640, height: 540),
+            "an expanded window untangles to the adopted layout's footprint")
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(canvas.state.layout, .sixths)
 
@@ -246,5 +246,50 @@ final class LayoutSwitchTests: XCTestCase {
         XCTAssertEqual(canvas.state.layout, .quarters)
         XCTAssertFalse(receipt.performed)
         XCTAssertTrue(receipt.announcement?.contains("has no slot in Quarters") == true)
+    }
+
+    func testSwitchAdoptsTargetLayoutSize() {
+        // Sixths -> quarters: every window lands at the quarter
+        // footprint, sized under the layout the canvas is adopting.
+        let a = harness.addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
+        tileSixth(.sixthTopLeft)
+        let b = harness.addFocusedWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        tileSixth(.sixthTopRight)
+
+        controller.handleSwitchLayout()
+
+        XCTAssertEqual(canvas.state.layout, .quarters)
+        XCTAssertEqual(
+            gateway.frame(of: a), CGRect(x: 12, y: 34, width: 960, height: 540),
+            "the switch writes the target layout's footprint at the window's origin")
+        XCTAssertEqual(
+            gateway.frame(of: b), CGRect(x: 900, y: 50, width: 960, height: 540))
+        let snapshot = Dictionary(
+            uniqueKeysWithValues: (canvas.undoStack.last?.snapshot ?? []).map {
+                ($0.slot, $0.preTileFrame)
+            })
+        XCTAssertEqual(snapshot[.sixthTopLeft], CGRect(x: 12, y: 34, width: 960, height: 540))
+        XCTAssertEqual(snapshot[.sixthTopRight], CGRect(x: 900, y: 50, width: 960, height: 540))
+    }
+
+    func testUntileAllWritesSixthSizedFrames() {
+        // Sixths canvas: untile-all leaves every window at the sixth
+        // footprint at its own origin. A sixth's width is 1920 x (1/3)
+        // in the grid, one ulp off the 1920 / 3 literal.
+        let a = harness.addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
+        tileSixth(.sixthTopLeft)
+        let b = harness.addFocusedWindow(frame: CGRect(x: 40, y: 500, width: 600, height: 300))
+        tileSixth(.sixthBottomLeft)
+
+        controller.untileAll()
+
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
+        for (handle, origin) in [(a, CGPoint(x: 12, y: 34)), (b, CGPoint(x: 40, y: 500))] {
+            let frame = gateway.frame(of: handle)
+            XCTAssertEqual(frame?.origin, origin)
+            XCTAssertEqual(frame?.height, 540)
+            XCTAssertEqual(frame!.width, 1920.0 / 3.0, accuracy: 0.0001)
+        }
+        XCTAssertEqual(canvas.displacedCount, 2, "untile-all still covers both windows")
     }
 }

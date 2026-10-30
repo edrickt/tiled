@@ -594,8 +594,8 @@ final class SpaceIndependenceTests: XCTestCase {
 
         switchTo(Self.spaceB)
         XCTAssertEqual(
-            gateway.frame(of: w), original,
-            "B's pre-tile restore still lands after the refused undo")
+            gateway.frame(of: w), CGRect(x: 100, y: 100, width: 960, height: 540),
+            "B's sized restore still lands after the refused undo")
     }
 
     func testSplittersAreIndependentPerSpace() {
@@ -901,8 +901,10 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: d), dTiled)
 
         switchTo(Self.spaceA)
-        XCTAssertEqual(gateway.frame(of: a), aFrame, "the deferred restore lands on return")
-        XCTAssertEqual(gateway.frame(of: d), dFrame)
+        XCTAssertEqual(gateway.frame(of: a), CGRect(x: 100, y: 100, width: 960, height: 540))
+        XCTAssertEqual(
+            gateway.frame(of: d), CGRect(x: 200, y: 200, width: 960, height: 540),
+            "the deferred sized restores land on return")
     }
 
     /// F5: untiling on a hidden canvas defers the window's pre-tile
@@ -1012,8 +1014,8 @@ final class SpaceIndependenceTests: XCTestCase {
 
         switchTo(Self.spaceA)
         XCTAssertEqual(
-            gateway.frame(of: w), original,
-            "the deferred pre-tile restore still lands on the swipe back")
+            gateway.frame(of: w), CGRect(x: 100, y: 100, width: 960, height: 540),
+            "the deferred sized restore still lands on the swipe back")
     }
 
     func testScreenChangeWhileHiddenReassertsWhenTheSpaceReturns() {
