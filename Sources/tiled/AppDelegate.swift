@@ -186,6 +186,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The gateway re-targets as apps activate; this subscribes now that
         // AX is trusted.
         controller.observeFocus()
+        // Birth subscriptions attempted before trust was granted all
+        // failed; re-subscribe now that AX is trusted so already-running
+        // apps size their new windows without a relaunch.
+        controller.observeWindowCreations()
         menuBar.refresh()
         switch AppStartCompletion.make(
             afterPermissionWait: afterPermissionWait,

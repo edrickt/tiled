@@ -175,8 +175,12 @@ final class FakeWindowGateway: WindowGateway {
     }
 
     private var creationHandler: ((WindowHandle) -> Void)?
+    /// Birth-hook subscriptions issued, in order. Lets tests pin that a
+    /// trust grant re-subscribes already-running apps.
+    private(set) var creationSubscriptions = 0
 
     func observeWindowCreations(_ onCreated: @escaping (WindowHandle) -> Void) {
+        creationSubscriptions += 1
         creationHandler = onCreated
     }
 

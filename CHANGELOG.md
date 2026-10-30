@@ -14,6 +14,9 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   eviction, untile-all, layout switch, and drag-out all resize in place
   (origin kept, repinned inside the visible frame), and undo chapters
   store the sized frame.
+- New windows open at the cursor display's canvas footprint instead of
+  keeping whatever size their app gave them, and stay floating: Tiled
+  never auto-tiles.
 
 ## [1.0.3] - 2026-10-29
 

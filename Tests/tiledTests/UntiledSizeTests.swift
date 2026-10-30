@@ -124,6 +124,23 @@ final class WindowBirthTests: XCTestCase {
         XCTAssertNil(controller.registeredID(for: handle))
     }
 
+    func testBirthSubscriptionResubscribesOnTrustGrant() {
+        XCTAssertEqual(
+            gateway.creationSubscriptions, 1,
+            "init subscribes the birth hook once")
+
+        controller.observeWindowCreations()
+
+        XCTAssertEqual(
+            gateway.creationSubscriptions, 2,
+            "a trust grant re-subscribes already-running apps")
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        XCTAssertEqual(
+            gateway.frame(of: handle)!.width, 1600.0 / 3.0, accuracy: 0.0001,
+            "the latest subscription still sizes births")
+    }
+
     func testRetileAfterBirthDiscardsBirthSizing() {
         let handle = gateway.simulateWindowCreated(
             frame: CGRect(x: 10, y: 10, width: 800, height: 600))

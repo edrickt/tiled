@@ -265,18 +265,27 @@ final class TilingController {
         gateway.observeSpaceChanges { [weak self] in
             self?.activeSpaceMayHaveChanged()
         }
-        // Size newly created windows to the birth canvas's layout.
-        // The gateway owns delivery (per-app creation subscriptions
-        // live); this route only sizes, never auto-tiles.
-        gateway.observeWindowCreations { [weak self] in
-            self?.handleWindowCreated($0)
-        }
+        observeWindowCreations()
     }
 
     deinit {
         pruneCancel?()
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
+        }
+    }
+
+    /// (Re)subscribes the birth-sizing hook. Called once from `init`
+    /// and again when Accessibility trust arrives (see
+    /// `AppDelegate.start`): pre-trust, every per-app observer creation
+    /// fails, so a first-run launch would otherwise leave already-running
+    /// apps unsubscribed until relaunch. Repeating is safe: the registry
+    /// dedupes subscribed pids, and failed attempts retry.
+    func observeWindowCreations() {
+        // The gateway owns delivery (per-app creation subscriptions
+        // live); this route only sizes, never auto-tiles.
+        gateway.observeWindowCreations { [weak self] in
+            self?.handleWindowCreated($0)
         }
     }
 
