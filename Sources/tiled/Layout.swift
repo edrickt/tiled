@@ -158,6 +158,27 @@ enum Slot: String, CaseIterable {
         geometry.columns.overlaps(other.geometry.columns)
             && geometry.rows.overlaps(other.geometry.rows)
     }
+
+    /// The slot reflected in the vertical centre line of the shared 4×2
+    /// refinement: column `c` ↔ `3 − c`, row unchanged. Every slot's
+    /// mirror is a slot of its own layout, which is what lets a group of
+    /// windows in the way move as a shape rather than a rect. There is no
+    /// vertical mirror: every slot tall enough to hold two stacked windows
+    /// is a full-height column, so the requester is always beside the
+    /// group. The middle third and the middle sixths are their own mirror.
+    var mirror: Slot {
+        let columns = (4 - geometry.columns.upperBound)..<(4 - geometry.columns.lowerBound)
+        let rows = geometry.rows
+        guard
+            let mirrored = Slot.allCases.first(where: {
+                $0.layout == geometry.layout && $0.geometry.columns == columns
+                    && $0.geometry.rows == rows
+            })
+        else {
+            preconditionFailure("every slot's mirror is a slot of its own layout")
+        }
+        return mirrored
+    }
 }
 
 /// An edge of a window's frame. AppKit coordinates, y grows upward:
