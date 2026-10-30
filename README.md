@@ -436,6 +436,10 @@ every push and `python3 tools/mutation/mutate.py` before a release are the
 gate. Both are cheap enough that a hand run is the whole cost. `docs/release.md`
 has the release steps that `release.yml` used to run.
 
+## Licensing
+
+Tiled is MIT-licensed. See [`LICENSE`](LICENSE).
+
 ## Status / roadmap
 
 - [x] Menu bar app (LSUIElement), Accessibility permission flow
