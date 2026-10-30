@@ -181,7 +181,7 @@ final class MirrorRehouseTests: XCTestCase {
         harness.apply(slot: .leftHalf, requester: a)
         let b = harness.addWindow()
         harness.apply(slot: .topRight, requester: b)
-        let c = harness.addWindow()
+        let c = harness.addWindow(frame: CGRect(x: 40, y: 50, width: 500, height: 400))
         harness.apply(slot: .bottomRight, requester: c)
         let bPreTile = space.records[b]!.preTileFrame
         let cPreTile = space.records[c]!.preTileFrame
@@ -240,8 +240,16 @@ final class MirrorRehouseTests: XCTestCase {
         XCTAssertEqual(space.state.slot(of: a), .sixthsRightTwoThirds)
         XCTAssertEqual(space.state.slot(of: b), .sixthTopLeft)
         XCTAssertEqual(space.state.slot(of: c), .sixthBottomLeft)
-        XCTAssertEqual(harness.frame(of: b), harness.rect(.sixthTopLeft))
-        XCTAssertEqual(harness.frame(of: c), harness.rect(.sixthBottomLeft))
+        // Worked values from the injected 1600×1200 bounds: each sixth is
+        // a third of the screen wide (533⅓pt) and half of it tall.
+        let topLeft = harness.frame(of: b)!
+        XCTAssertEqual(topLeft.origin, CGPoint(x: 0, y: 600))
+        XCTAssertEqual(topLeft.width, 1600.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(topLeft.height, 600)
+        let bottomLeft = harness.frame(of: c)!
+        XCTAssertEqual(bottomLeft.origin, CGPoint(x: 0, y: 0))
+        XCTAssertEqual(bottomLeft.width, 1600.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(bottomLeft.height, 600)
     }
 
     func testOneUndoPutsTheWholeMirroredGroupBack() {
@@ -373,5 +381,53 @@ final class MirrorRehouseTests: XCTestCase {
         XCTAssertEqual(harness.frame(of: b), CGRect(x: 0, y: 600, width: 960, height: 600))
         XCTAssertEqual(harness.frame(of: c), CGRect(x: 0, y: 0, width: 960, height: 600))
         XCTAssertEqual(harness.frame(of: a), CGRect(x: 960, y: 0, width: 640, height: 1200))
+    }
+
+    func testARefusedRequesterRestoresTheWholeGroup() {
+        // The requester's own write is refused: every window in the way
+        // goes back to its pre-tile frame, nothing claims to have moved,
+        // and the error names the refusal rather than swallowing it.
+        let a = harness.addWindow()
+        harness.apply(slot: .leftHalf, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: c)
+        let bPreTile = space.records[b]!.preTileFrame
+        let cPreTile = space.records[c]!.preTileFrame
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!, count: 1)
+
+        harness.apply(slot: .rightHalf, requester: a)
+
+        XCTAssertNil(space.state.slot(of: b), "the requester's refusal restores the group")
+        XCTAssertNil(space.state.slot(of: c))
+        XCTAssertEqual(harness.frame(of: b), bPreTile)
+        XCTAssertEqual(harness.frame(of: c), cPreTile)
+        XCTAssertNotNil(space.error, "the requester's refusal is reported")
+        XCTAssertFalse(
+            space.notice?.contains("to make room") ?? true,
+            "no window moved, so the notice must not claim one did")
+        XCTAssertNotNil(space.undoStack.last, "the eviction is still undoable")
+    }
+
+    func testARefusedRestoreKeepsTheWentBackNoticeOffTheBoard() {
+        // Both homes are refused and only the second window's restore
+        // lands: the board is half torn down, so the notice must not claim
+        // every window went back to where it was.
+        let a = harness.addWindow()
+        harness.apply(slot: .leftHalf, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: c)
+        harness.gateway.refuseNextWrites(harness.handle(of: b)!, count: 2)
+        harness.gateway.refuseNextWrites(harness.handle(of: c)!, count: 1)
+
+        harness.apply(slot: .rightHalf, requester: a)
+
+        XCTAssertFalse(
+            space.notice?.contains("went back") ?? false,
+            "one refused restore keeps the notice from claiming both went back")
+        XCTAssertNotNil(space.error, "the refused restore is reported")
     }
 }

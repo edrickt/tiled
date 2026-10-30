@@ -420,6 +420,10 @@ final class TilingSpaceTests: XCTestCase {
 
         XCTAssertEqual(space.state.slot(of: blocker), .rightHalf, "the lone evictee stays tiled")
         XCTAssertEqual(space.state.slot(of: requester), .leftHalf)
+        XCTAssertEqual(
+            space.notice,
+            "TestApp moved to Right Half to make room." + MenuText.undoRecoveryHint,
+            "the degraded swap still narrates where the window went")
     }
 
     // MARK: Switch

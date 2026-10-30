@@ -340,7 +340,7 @@ func doTile(_ t: String, _ slot: String) {
     // it: the cells nobody occupies — the target plus every other
     // window's tile, with the requester still in the tile it is leaving —
     // must be exactly one whole slot, and a lone evictee moves into it
-    // instead of untangling. Two evictees never re-house.
+    // instead of untangling. Two or more evictees mirror instead (above).
     var rehouse: (window: String, home: String)?
     if blockers.count == 1 {
         let evictee = blockers.first!.key
@@ -351,6 +351,30 @@ func doTile(_ t: String, _ slot: String) {
         let free = allQuadCells.subtracting(occupied)
         if let home = quadSlots.first(where: { quads[$0] == free }) {
             rehouse = (evictee, home)
+        }
+    }
+
+    // The mirror comes before any eviction: with two or more blockers,
+    // each one reflects into its own slot on the other side (column c ->
+    // 3-c) and nobody is untiled. All or nothing, exactly as the app
+    // decides it: one home that is occupied or that sits inside the
+    // target sends the whole group down the eviction path.
+    if blockers.count > 1 {
+        let mirror = ["TL": "TR", "TR": "TL", "BL": "BR", "BR": "BL", "LH": "RH", "RH": "LH"]
+        let homes = blockers.compactMap { blocker -> (String, String)? in
+            guard let home = mirror[blocker.value], !overlaps(home, slot) else { return nil }
+            return (blocker.key, home)
+        }
+        let stealsAHome = tiled.contains { other, s in
+            other != t
+                && !blockers.contains(where: { $0.key == other })
+                && homes.contains(where: { overlaps($0.1, s) })
+        }
+        if homes.count == blockers.count, !stealsAHome {
+            for (blocker, home) in homes { tiled[blocker] = home }
+            if !wasTiled, let f = preFrame, !isOnGrid(f) { preTile[t] = f }
+            tiled[t] = slot
+            return
         }
     }
 
@@ -589,10 +613,10 @@ if col == colSaved, rowL == rowLSaved, rowR == rowRSaved,
     fail += 1; print(">>>> FAILED S7: splitters moved on screen-edge drag")
 }
 
-// MARK: S8 - half over two quads evicts both
+// MARK: S8 - half over the other left quad evicts it
 
 doTile("HOSTA", "LH")
-verify("S8 LH over TL+BL: A in left half, B evicted")
+verify("S8 A takes LH; B evicted: one blocker, and no whole slot is free")
 
 // MARK: S9 - quad over occupied quad evicts
 
@@ -643,12 +667,12 @@ verify("S12b state healthy after close + hotkey")
 doTile("HOSTA", "TL"); doTile("HOSTB", "BL"); doTile("HOSTC", "TR")
 verify("S13 retiled TL+BL+TR with current splitters")
 
-// MARK: S14 - half over two occupied quads: double eviction
+// MARK: S14 - half over two occupied quads: both mirror to the right
 
-doTile("HOSTC", "LH") // TL(A) + BL(B) both occupied -> both evicted
-verify("S14a C tiled LH; A and B both evicted (double eviction)")
-doTile("HOSTA", "TL") // LH overlaps TL -> evicts C
-verify("S14b A retiled TL; C evicted")
+doTile("HOSTC", "LH") // TL(A) + BL(B) block it -> both mirror right
+verify("S14a C tiled LH; A in TR and B in BR (mirror, nobody evicted)")
+doTile("HOSTA", "TL") // C's LH overlaps TL -> C steps aside into BL
+verify("S14b A retiled TL; C steps aside to BL")
 doTile("HOSTB", "BL"); doTile("HOSTC", "TR")
 verify("S14c full grid restored")
 
@@ -674,8 +698,9 @@ verify("S16b A in TL, B in BL")
 
 // A is tiled, exactly one window blocks BL, and the tile A vacates (TL)
 // is disjoint from BL, so this swaps: nobody is untiled and B takes the
-// vacated TL. A second blocker, an untiled requester, or a vacated tile
-// overlapping the target would evict instead (S14a, S17c, S18b).
+// vacated TL. A second blocker mirrors instead when both homes are free
+// (S14a, S18b); an untiled requester or a vacated tile overlapping the
+// target would evict instead.
 doTile("HOSTA", "BL")
 verify("S16c swap: A in BL, B in TL, nobody evicted")
 
@@ -691,19 +716,19 @@ verify("S17a A in TL, B in BR")
 doTile("HOSTC", "LH")
 verify("S17b re-house: C in LH, A moved to TR, B untouched")
 
-// MARK: S18 - undo restores a double eviction
+// MARK: S18 - undo restores a mirrored group
 
 evict("HOSTA"); evict("HOSTB"); evict("HOSTC")
 doTile("HOSTA", "TL"); doTile("HOSTB", "BL")
 verify("S18a A in TL, B in BL")
 
-// The left half overlaps both A (TL) and B (BL): two evictees, so no
-// swap (one blocker required) and no re-house (one evictee required).
-// This is the newest undo chapter, so one ⌃⌥⇧⌘Z returns all of it: the
-// evicted windows go back to their slots and the requester to its
-// pre-tile frame.
+// The left half overlaps both A (TL) and B (BL): two blockers, so no
+// swap and no lone re-house — the group mirrors instead, A to TR and B
+// to BR. This is the newest undo chapter, so one ⌃⌥⇧⌘Z returns all of
+// it: the mirrored windows go back to their slots and the requester to
+// its pre-tile frame.
 doTile("HOSTC", "LH")
-verify("S18b C in LH, A and B both evicted")
+verify("S18b C in LH, A mirrored to TR and B to BR")
 pressUndo()
 usleep(1_500_000)
 tiled["HOSTC"] = nil

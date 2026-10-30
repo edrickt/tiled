@@ -376,11 +376,12 @@ struct TilingSpace {
         // Reflow can grow a re-housed window into a larger slot (the
         // left two-thirds blocker of a left-third request ends up as the
         // right two-thirds), so narrate only after it runs, with the slot
-        // each window actually holds now.
-        let homes = decision.windowsToRestore().compactMap { wid -> (name: String?, slot: Slot)? in
-            guard commit.rehoused.contains(wid), let finalSlot = state.slot(of: wid) else {
-                return nil
-            }
+        // each window actually holds now. The chapter's re-housed set —
+        // not the decision's restore list — is the source: a degraded swap
+        // stays `.swap`, whose restore list is empty, and its fallback
+        // still re-houses and still narrates.
+        let homes = commit.rehoused.sorted().compactMap { wid -> (name: String?, slot: Slot)? in
+            guard let finalSlot = state.slot(of: wid) else { return nil }
             return (name: appName(wid, context: context), slot: finalSlot)
         }
         if !homes.isEmpty {
@@ -710,9 +711,10 @@ struct TilingSpace {
     }
 
     /// The tile branch: evict whoever overlaps, place the requester, and
-    /// re-house a lone evictee into the one whole slot the request left
-    /// free. Hands the freed cells to settle, which owns the one reflow
-    /// applier.
+    /// keep the windows in the way tiled — a lone evictee re-houses into
+    /// the one whole slot the request left free, and a group of two or
+    /// more mirrors to the other side. Hands the freed cells to settle,
+    /// which owns the one reflow applier.
     private mutating func applyTile(
         _ decision: TilePlan, requester id: WindowID, slot: Slot, context: Context
     ) -> Commit {
@@ -799,7 +801,7 @@ struct TilingSpace {
             guard clean else {
                 let failures = restore([wid], context: context)
                 commit.failures += failures
-                restorationFailed = !failures.isEmpty
+                if !failures.isEmpty { restorationFailed = true }
                 context.log("rehouse SKIPPED win\(wid): requester placement failed")
                 continue
             }
@@ -814,7 +816,10 @@ struct TilingSpace {
             } else {
                 let failures = restore([wid], context: context)
                 commit.failures += failures
-                restorationFailed = !failures.isEmpty
+                // Sticky: a later window's landed restore must not turn
+                // an earlier refusal back off and let the board claim
+                // every window went back.
+                if !failures.isEmpty { restorationFailed = true }
                 context.log(
                     "rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
             }

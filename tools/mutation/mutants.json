@@ -940,5 +940,17 @@
   "group home counts the requester as staying",
   "            $0.value != requester && !blockers.contains($0.value)",
   "            !blockers.contains($0.value)"
+ ],
+ [
+  "TilingSpace.swift",
+  "a refused home write is treated as landed",
+  "            if write.stands {",
+  "            if true {"
+ ],
+ [
+  "TilingSpace.swift",
+  "a refused requester skips restoring the group",
+  "            guard clean else {\n                let failures = restore([wid], context: context)",
+  "            guard clean else {\n                let failures: [Failure] = []"
  ]
 ]

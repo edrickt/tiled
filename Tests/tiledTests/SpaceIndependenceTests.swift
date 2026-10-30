@@ -864,8 +864,9 @@ final class SpaceIndependenceTests: XCTestCase {
     }
 
     func testHiddenSpaceEvictionDefersTheRestoreAndReconcilesOnReturn() {
-        // Three windows tiled on Space A, then the user swipes to B and
-        // issues a request that evicts two of them. The restores must not
+        // Four windows tiled on Space A, then the user swipes to B and
+        // issues a request that evicts two of them (the fourth blocks
+        // their mirrors). The restores must not
         // drag those windows through Mission Control while A is hidden;
         // they land on A when the user swipes back.
         let aFrame = CGRect(x: 100, y: 100, width: 800, height: 600)

@@ -25,8 +25,9 @@ final class MatrixCrossCheckTests: XCTestCase {
     /// - `.noop`: nothing changed.
     /// - `.swap`: the two windows trade tiles, nobody else moves.
     /// - `.tile`: the requester lands, every evictee either re-houses
-    ///   into the one whole slot the request freed (`rehousingHome`) or
-    ///   is gone, and every survivor stays tiled.
+    ///   into the one whole slot the request freed (`rehousingHome`), or
+    ///   mirrors to the other side as part of a group (`mirroredHomes`),
+    ///   or is gone, and every survivor stays tiled.
     /// Structural health (one layout, no ghosts, no double-booked cells)
     /// is checked after every case.
     private func assertCanvasFollows(
