@@ -521,12 +521,14 @@ struct GridLayout: Equatable {
     }
 
     /// The frame an untiled window takes on this canvas: the layout's
-    /// smallest slot footprint (a quarter in quarters, a small sixth in
-    /// sixths) at `origin`, kept inside `bounds`.
+    /// regular even-split footprint (a quarter in quarters, a small sixth
+    /// in sixths) at `origin`, kept inside `bounds`.
     ///
     /// A window leaving tiling keeps where it is and only takes the grid's
     /// size, so it reads as belonging to the canvas it now floats over.
-    /// The pin reuses the write policy's post-clamp shape: a frame that
+    /// The size always comes from a fresh even-split grid, never this
+    /// canvas's drag-edited splitters: a freed window must not inherit
+    /// the resize it just escaped. The pin reuses the write policy's post-clamp shape: a frame that
     /// covers the screen edge it already hugged stops at that edge instead
     /// of spilling off screen, and every other frame keeps its origin
     /// exactly.
@@ -542,7 +544,8 @@ struct GridLayout: Equatable {
         case .quarters: reference = .topLeft
         case .sixths: reference = .sixthTopLeft
         }
-        let frame = CGRect(origin: origin, size: rect(for: reference, in: bounds).size)
+        let size = GridLayout().rect(for: reference, in: bounds).size
+        let frame = CGRect(origin: origin, size: size)
         guard bounds.width > 0, bounds.height > 0 else { return frame }
         func pin(from lower: CGFloat, to upper: CGFloat, in range: ClosedRange<CGFloat>)
             -> CGFloat

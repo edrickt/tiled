@@ -13,7 +13,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   canvas — instead of snapping back to its pre-tile frame. Manual untile,
   eviction, untile-all, layout switch, and drag-out all resize in place
   (origin kept, repinned inside the visible frame), and undo chapters
-  store the sized frame.
+  store the sized frame. The footprint is always the regular even-split
+  size, ignoring any drag-edited splitters.
 - New windows open at the cursor display's canvas footprint instead of
   keeping whatever size their app gave them, and stay floating: Tiled
   never auto-tiles.

@@ -2,8 +2,9 @@ import CoreGraphics
 import XCTest
 @testable import tiled
 
-/// The pure sizing every untile exit shares: the canvas's smallest slot
-/// footprint, at the window's own origin, kept inside the visible frame.
+/// The pure sizing every untile exit shares: the layout's regular
+/// even-split footprint, at the window's own origin, kept inside the
+/// visible frame.
 final class UntiledSizeTests: XCTestCase {
     func testSizedUntileFrameKeepsOriginAndMatchesTileSize() {
         let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
@@ -26,6 +27,24 @@ final class UntiledSizeTests: XCTestCase {
             GridLayout().sizedUntileFrame(
                 keeping: CGPoint(x: 1500, y: 900), for: .quarters, in: bounds),
             CGRect(x: 800, y: 500, width: 800, height: 500))
+    }
+
+    func testSizedUntileFrameIgnoresDragEditedSplits() {
+        // A canvas whose splitters were drag-edited still untile-births
+        // the regular even-split footprint, never the edited one.
+        let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        var edited = GridLayout()
+        edited.columnSplit = 0.1
+        edited.sixthsLeftSplit = 0.1
+        XCTAssertEqual(
+            edited.sizedUntileFrame(
+                keeping: CGPoint(x: 12, y: 34), for: .quarters, in: bounds),
+            CGRect(x: 12, y: 34, width: 800, height: 500))
+        let sixths = edited.sizedUntileFrame(
+            keeping: CGPoint(x: 12, y: 34), for: .sixths, in: bounds)
+        XCTAssertEqual(sixths.origin, CGPoint(x: 12, y: 34))
+        XCTAssertEqual(sixths.height, 500)
+        XCTAssertEqual(sixths.width, 1600.0 / 3.0, accuracy: 0.0001)
     }
 
     func testSizedUntileFrameDegenerateBoundsSkips() {
