@@ -736,13 +736,19 @@ struct TilingSpace {
         // the victim re-tiles into it instead of untangling (the
         // middle third evicted by the right two-thirds moves into
         // the free top-left sixth). Expanded windows skip it: they
-        // come back to earth by untangling, not by moving.
-        var rehouse: (window: WindowID, home: Slot)?
+        // come back to earth by untangling, not by moving. A group of two
+        // or more reflects instead: every window in the way keeps its own
+        // shape on the other side, so the request displaces nobody.
+        var rehouse: [WindowID: Slot] = [:]
         if evicted.count == 1, !isExpanded(evicted[0]),
             let home = state.rehousingHome(
                 evicting: evicted[0], for: slot, vacating: previous)
         {
-            rehouse = (evicted[0], home)
+            rehouse = [evicted[0]: home]
+        } else if !evicted.contains(where: { isExpanded($0) }),
+            let homes = state.mirroredHomes(evicting: evicted, for: slot, requester: id)
+        {
+            rehouse = homes
         }
         var snapshot = evicted.compactMap { evictedID in
             snapshotEntry(for: evictedID, fallback: slot, space: context.space)
@@ -758,7 +764,7 @@ struct TilingSpace {
             snapshotEntry(for: id, fallback: $0, space: context.space)
         }
         let restoreFailures = restore(
-            evicted.filter { $0 != rehouse?.window }, context: context)
+            evicted.filter { rehouse[$0] == nil }, context: context)
         let placement = place(
             window: id, into: slot, context: context, observed: &commit.observed)
         switch placement {
@@ -778,35 +784,40 @@ struct TilingSpace {
         if clean, let requesterEntry {
             snapshot.append(requesterEntry)
         }
-        // Re-house commit: once the requester sits, the victim moves
-        // into the one free slot and stays tiled. The move only happens
+        // Re-house commit: once the requester sits, each window that
+        // stayed tiled moves into its home. The move only happens
         // when the requester's own placement landed: making room for a
-        // request that failed would move the victim for nothing, report
+        // request that failed would move a window for nothing, report
         // no destruction to undo, and promise an undo that cannot exist.
-        // A refused re-house write falls back to the plain eviction. A
-        // refused fallback restore is a real failure: count it, and keep
-        // the "went back" notice off the board.
+        // A refused re-house write falls back to the plain eviction for
+        // that one window — its neighbours keep the halls they reached.
+        // A refused fallback restore is a real failure: count it, and
+        // keep the "went back" notice off the board.
         var restorationFailed = false
-        if let (wid, home) = rehouse, clean {
+        for wid in evicted {
+            guard let home = rehouse[wid] else { continue }
+            guard clean else {
+                let failures = restore([wid], context: context)
+                commit.failures += failures
+                restorationFailed = !failures.isEmpty
+                context.log("rehouse SKIPPED win\(wid): requester placement failed")
+                continue
+            }
             deferredRequests[wid] = nil
             state.commit(window: wid, into: home)
             let write = applyLayout(for: wid, context: context, on: context.space)
             if write.stands {
-                // A deferred off-Space write stands: the victim keeps the
+                // A deferred off-Space write stands: the window keeps the
                 // freed slot and reconciles when the canvas is visible.
                 if write == .deferredOffSpace { commit.deferred = true }
-                commit.rehoused = [wid]
+                commit.rehoused.insert(wid)
             } else {
                 let failures = restore([wid], context: context)
                 commit.failures += failures
                 restorationFailed = !failures.isEmpty
-                context.log("rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
+                context.log(
+                    "rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
             }
-        } else if let (wid, _) = rehouse {
-            let failures = restore([wid], context: context)
-            commit.failures += failures
-            restorationFailed = !failures.isEmpty
-            context.log("rehouse SKIPPED win\(wid): requester placement failed")
         }
         if clean {
             // Hand the freed region to settle: it owns the one reflow

@@ -5,8 +5,8 @@ import XCTest
 /// request) pair from the pure plan matrices is replayed through the
 /// canvas (`TilingSpace` with a fake gateway and injected bounds) and
 /// checked against the model's plan-defined contract. The model is
-/// `plan` itself plus the pure rules (`rehousingHome`, `reflow`); the
-/// test never re-implements the placement pipeline's commit order.
+/// `plan` itself plus the pure rules (`rehousingHome`, `mirroredHomes`,
+/// `reflow`); the test never re-implements the placement pipeline's commit order.
 /// Both requester kinds run: a fresh untiled window (tile/evict/switch
 /// paths) and an already-tiled window (move and no-op paths, which only
 /// tiled requesters can produce).
@@ -57,8 +57,14 @@ final class MatrixCrossCheckTests: XCTestCase {
                 "\(context): the requester lands in its slot")
             for evicted in evicting {
                 if evicted == requester { continue }
-                // Only a lone evictee is ever re-housed (the canvas's
-                // rule); with more than one, everyone goes home.
+                // A lone evictee re-houses into the one whole slot the
+                // request freed; a group of two or more mirrors, each
+                // window into its own slot on the other side, or takes
+                // the eviction path whole.
+                let groupHomes = evicting.count > 1
+                    ? model.mirroredHomes(
+                        evicting: evicting, for: target, requester: requester)
+                    : nil
                 if evicting.count == 1,
                     let home = model.rehousingHome(
                         evicting: evicted, for: target, vacating: model.slot(of: requester))
@@ -66,10 +72,14 @@ final class MatrixCrossCheckTests: XCTestCase {
                     XCTAssertEqual(
                         canvas.state.slot(of: evicted), home,
                         "\(context): the lone evictee re-houses into the one free slot")
+                } else if let home = groupHomes?[evicted] {
+                    XCTAssertEqual(
+                        canvas.state.slot(of: evicted), home,
+                        "\(context): each window in the way mirrors to the other side")
                 } else {
                     XCTAssertNil(
                         canvas.state.slot(of: evicted),
-                        "\(context): a window with no re-house slot is released")
+                        "\(context): a window with no home is released")
                 }
             }
             // Survivors: reflow may grow them, never drop them.

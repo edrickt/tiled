@@ -162,4 +162,216 @@ final class MirrorRehouseTests: XCTestCase {
             "Preview and 2 other windows moved to the other side to make room."
                 + MenuText.undoRecoveryHint)
     }
+
+    // MARK: The canvas
+
+    private var harness: TilingSpaceHarness!
+    private var space: TilingSpace { harness.space }
+
+    override func setUp() {
+        super.setUp()
+        harness = TilingSpaceHarness()
+    }
+
+    func testLeftHalfRequestMirrorsBothRightQuadsToTheLeft() {
+        // The user's case, on the canvas: window 1 held the left half, so
+        // windows 2 and 3 moved to the two left quads and window 1 took
+        // the right half. Everyone stays tiled.
+        let a = harness.addWindow()
+        harness.apply(slot: .leftHalf, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: c)
+        let bPreTile = space.records[b]!.preTileFrame
+        let cPreTile = space.records[c]!.preTileFrame
+
+        harness.apply(slot: .rightHalf, requester: a)
+
+        XCTAssertNil(space.error)
+        XCTAssertEqual(space.state.slot(of: a), .rightHalf)
+        XCTAssertEqual(space.state.slot(of: b), .topLeft)
+        XCTAssertEqual(space.state.slot(of: c), .bottomLeft)
+        XCTAssertEqual(
+            harness.frame(of: b), CGRect(x: 0, y: 600, width: 800, height: 600),
+            "the top-right quad's window now holds the top-left quad")
+        XCTAssertEqual(
+            harness.frame(of: c), CGRect(x: 0, y: 0, width: 800, height: 600),
+            "the bottom-right quad's window now holds the bottom-left quad")
+        XCTAssertEqual(
+            space.records[b]!.preTileFrame, bPreTile,
+            "a re-housed window keeps the frame it will untile to")
+        XCTAssertEqual(space.records[c]!.preTileFrame, cPreTile)
+        XCTAssertEqual(
+            space.notice,
+            "TestApp moved to Top Left and TestApp moved to Bottom Left to make room."
+                + MenuText.undoRecoveryHint)
+    }
+
+    func testFreshRequesterMirrorsBothQuadsIntoEmptySlots() {
+        // A window that was not tiled gets the same mirror: the quads land
+        // on the left even though the requester never held that side.
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: c)
+        let fresh = harness.addWindow()
+
+        harness.apply(slot: .rightHalf, requester: fresh)
+
+        XCTAssertEqual(space.state.slot(of: fresh), .rightHalf)
+        XCTAssertEqual(space.state.slot(of: b), .topLeft)
+        XCTAssertEqual(space.state.slot(of: c), .bottomLeft)
+    }
+
+    func testSixthCornerPairMirrorsOntoTheLeftThird() {
+        // One layout over: the left two-thirds moves right, so the two
+        // right corner sixths take the top-left and bottom-left sixths.
+        let a = harness.addWindow()
+        harness.apply(slot: .sixthsLeftTwoThirds, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .sixthTopRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .sixthBottomRight, requester: c)
+
+        harness.apply(slot: .sixthsRightTwoThirds, requester: a)
+
+        XCTAssertNil(space.error)
+        XCTAssertEqual(space.state.slot(of: a), .sixthsRightTwoThirds)
+        XCTAssertEqual(space.state.slot(of: b), .sixthTopLeft)
+        XCTAssertEqual(space.state.slot(of: c), .sixthBottomLeft)
+        XCTAssertEqual(harness.frame(of: b), harness.rect(.sixthTopLeft))
+        XCTAssertEqual(harness.frame(of: c), harness.rect(.sixthBottomLeft))
+    }
+
+    func testOneUndoPutsTheWholeMirroredGroupBack() {
+        // The event is one displacement chapter: both blockers return to
+        // the slots they were evicted from, and the requester to the slot
+        // it vacated.
+        let a = harness.addWindow()
+        harness.apply(slot: .leftHalf, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: c)
+
+        harness.apply(slot: .rightHalf, requester: a)
+
+        XCTAssertEqual(space.undoStack.count, 1)
+        XCTAssertEqual(
+            space.undoStack.last?.snapshot.map(\.slot), [.topRight, .bottomRight, .leftHalf])
+        XCTAssertEqual(space.undoStack.last?.requester, a)
+    }
+
+    func testAHomeHeldByAWindowThatStaysEvictsTheGroup() {
+        // All or nothing: window 4 holds the top-left sixth, so the
+        // top-right sixth has no home and both corner sixths untangle
+        // instead of one moving and one going home.
+        let a = harness.addWindow()
+        harness.apply(slot: .sixthMiddle, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .sixthTopRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .sixthBottomRight, requester: c)
+        let d = harness.addWindow()
+        harness.apply(slot: .sixthTopLeft, requester: d)
+        let bPreTile = space.records[b]!.preTileFrame
+        let cPreTile = space.records[c]!.preTileFrame
+
+        harness.apply(slot: .sixthRight, requester: a)
+
+        XCTAssertEqual(space.state.slot(of: a), .sixthRight)
+        XCTAssertNil(space.state.slot(of: b))
+        XCTAssertNil(space.state.slot(of: c))
+        XCTAssertEqual(
+            space.state.slot(of: d), .sixthTopLeft, "the window that stayed did not move")
+        XCTAssertEqual(harness.frame(of: b), bPreTile, "an evicted window goes back to its frame")
+        XCTAssertEqual(harness.frame(of: c), cPreTile)
+    }
+
+    func testExpandedBlockerForcesTheGroupToUntangle() {
+        // An expanded window never re-houses, so its group takes the
+        // eviction path and nobody stays tiled.
+        let a = harness.addWindow()
+        harness.apply(slot: .leftHalf, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: c)
+        harness.space.expandToggle(window: b, context: harness.context())
+
+        harness.apply(slot: .rightHalf, requester: a)
+
+        XCTAssertEqual(space.state.slot(of: a), .rightHalf)
+        XCTAssertNil(space.state.slot(of: b))
+        XCTAssertNil(space.state.slot(of: c))
+    }
+
+    func testARefusedHomeRestoresThatWindowAndKeepsTheOtherTiled() {
+        // The group writes each home in turn: a refusal untangles that one
+        // window (its own restore lands, so the action is not an error) and
+        // its neighbour keeps the home it reached, then reflow grows it
+        // into the quad the refusal freed.
+        let a = harness.addWindow()
+        harness.apply(slot: .leftHalf, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: c)
+        let cPreTile = space.records[c]!.preTileFrame
+        harness.gateway.refuseNextWrites(harness.handle(of: c)!, count: 1)
+
+        harness.apply(slot: .rightHalf, requester: a)
+
+        XCTAssertEqual(
+            space.state.slot(of: b), .leftHalf,
+            "the home landed, then reflow grew it into the freed bottom-left quad")
+        XCTAssertNil(space.state.slot(of: c), "the refused window untangled")
+        XCTAssertEqual(harness.frame(of: c), cPreTile)
+        XCTAssertNil(
+            space.error, "the restore itself succeeded, exactly as a lone re-house's does")
+    }
+
+    func testADeferredHomeStandsWithoutAWrite() {
+        // A canvas on a Space the user cannot see is never written blind:
+        // the group's homes stand in state and reconcile on the swipe
+        // back, exactly as a lone re-house does.
+        let a = harness.addWindow()
+        harness.apply(slot: .leftHalf, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: c)
+        let bFrame = harness.frame(of: b)
+        harness.clearExpectedWrites()
+        harness.canvasVisible = false
+
+        let outcome = harness.apply(slot: .rightHalf, requester: a)
+
+        XCTAssertEqual(outcome.result, .deferred)
+        XCTAssertNil(space.error, "a deferral is not an app refusal")
+        XCTAssertEqual(space.state.slot(of: b), .topLeft)
+        XCTAssertEqual(space.state.slot(of: c), .bottomLeft)
+        XCTAssertEqual(harness.frame(of: b), bFrame, "a hidden canvas is never written blind")
+        XCTAssertTrue(harness.expectedWrites.isEmpty, "a deferred home arms no phantom expectation")
+    }
+
+    func testAHomeLandsOnTheDraggedSplitter() {
+        // The mirror writes slot rects from the canvas's current grid, so
+        // a dragged vertical splitter moves the homes with it: at 0.6 the
+        // left side is 960pt wide.
+        let a = harness.addWindow()
+        harness.apply(slot: .leftHalf, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .topRight, requester: b)
+        let c = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: c)
+        harness.space.grid.columnSplit = 0.6
+
+        harness.apply(slot: .rightHalf, requester: a)
+
+        XCTAssertEqual(harness.frame(of: b), CGRect(x: 0, y: 600, width: 960, height: 600))
+        XCTAssertEqual(harness.frame(of: c), CGRect(x: 0, y: 0, width: 960, height: 600))
+        XCTAssertEqual(harness.frame(of: a), CGRect(x: 960, y: 0, width: 640, height: 1200))
+    }
 }

@@ -874,6 +874,11 @@ final class SpaceIndependenceTests: XCTestCase {
         controller.handle(slot: .topLeft)
         let d = addFocusedWindow(frame: dFrame)
         controller.handle(slot: .bottomLeft)
+        // A window that stays on the right side blocks both mirrors, so
+        // the request really does evict: this test is about the deferred
+        // restore, not about where the evicted windows end up.
+        _ = addFocusedWindow(frame: CGRect(x: 1300, y: 40, width: 400, height: 300))
+        controller.handle(slot: .topRight)
         let e = addFocusedWindow(frame: CGRect(x: 300, y: 300, width: 400, height: 300))
         controller.handle(slot: .bottomRight)
 
@@ -912,6 +917,11 @@ final class SpaceIndependenceTests: XCTestCase {
         controller.handle(slot: .topLeft)
         let b = addFocusedWindow(frame: CGRect(x: 200, y: 200, width: 500, height: 400))
         controller.handle(slot: .bottomLeft)
+        // A window that stays on the top right blocks a's mirror, so the
+        // request evicts both left-side windows instead of reflecting
+        // them: the deferred restores are what this test is about.
+        _ = addFocusedWindow(frame: CGRect(x: 1300, y: 40, width: 400, height: 300))
+        controller.handle(slot: .topRight)
         let requester = addFocusedWindow(frame: CGRect(x: 300, y: 300, width: 400, height: 300))
         controller.handle(slot: .bottomRight)
 
