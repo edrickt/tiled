@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-30
+
 ### Changed
 
 - Fresh canvases start in Quarters instead of Sixths: the first slot key
