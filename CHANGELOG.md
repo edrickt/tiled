@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-30
+
 ### Changed
 
 - Every exit from tiling leaves the window floating at the layout's slot
