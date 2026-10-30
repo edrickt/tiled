@@ -86,13 +86,12 @@ caused it. A hole no neighbor can merge into exactly stays empty.
 
 ### Reset Splitters (⌥⇧R)
 
-⌥⇧R always snaps the focused canvas's splitters back to even splits;
-pressing it again resets again (and replaces the parked backup). The
-one-step restore lives in the menu: a reset parks the positions from
-before it, and the same row is then titled **Restore Previous
-Splitters** until clicked, bringing those positions back. A drag alone
-never arms the restore (and a drag after a reset doesn't clear it).
-Windows stay in their slots either way; only the sizes change.
+⌥⇧R and the menu row share one action: a reset snaps the focused canvas's
+splitters back to even splits and parks the positions from before it; while
+that backup is parked the same press (or the same row, then titled **Restore
+Previous Splitters**) brings those positions back instead of resetting again.
+A drag alone never arms the restore (and a drag after a reset doesn't clear
+it). Windows stay in their slots either way; only the sizes change.
 
 First launch opens Settings on a Welcome tab: focus any window and press the
 Top Left slot key (⌥⇧U by default), with a miniature preview showing what the
@@ -144,8 +143,8 @@ tell you which app took it.
   slot overlaps the target and its leftover (its slot minus the target) is
   exactly one whole slot, in which case the blocker steps aside into that
   leftover instead (see the re-house rule under Evict). Otherwise the
-  blocker moves into the tile the requester vacated (which never overlaps
-  the target), and both stay tiled. Focus follows the displaced window
+  blocker moves into the tile the requester vacated (which is disjoint from
+  the target in the swap case), and both stay tiled. Focus follows the displaced window
   into the tile it landed in. (With more than one window in the way, or
   from an untiled window, the request evicts as above, and focus stays
   put.) Undo swaps back.
@@ -238,13 +237,13 @@ down, and the mouse-up re-assert pulls the edge home. A corner that
 mixes a screen edge with a real splitter (the top-left corner of a
 two-thirds window) resizes the splitter live as usual and keeps the
 new splitter position; only the screen edge snaps back.
-**Reset Splitters** in the menu (or ⌥⇧R) snaps the focused canvas's
-splitters back to even splits. Once a reset has parked the pre-reset
-positions, the same row is titled **Restore Previous Splitters** and
-brings them back; that restore row stays until the backup is used, even
-if Untile All empties the canvas. The plain **Reset Splitters** row needs
-a tiled edge, so it is omitted when the focused canvas has no tiled
-windows and no parked backup.
+**Reset Splitters** in the menu and ⌥⇧R share one action: a reset snaps the
+focused canvas's splitters back to even splits and parks the pre-reset
+positions; while that backup is parked the same row is titled **Restore
+Previous Splitters** and both surfaces bring those positions back. That
+restore row stays until the backup is used, even if Untile All empties the
+canvas. The plain **Reset Splitters** row needs a tiled edge, so it is omitted
+when the focused canvas has no tiled windows and no parked backup.
 
 ## Installing a release build
 
@@ -273,9 +272,10 @@ make app-universal     # same, fat binary for Apple Silicon + Intel
 make install           # build, install to /Applications, launch
 ```
 
-`make help` lists every task. The Makefile only wraps the scripts in
-`scripts/`, which remain the source of truth and are what every gate runs; the
-bundle version comes from `VERSION`.
+`make help` lists every task. The Makefile gives one obvious spelling per task:
+the script-backed targets wrap `scripts/` (which remain the source of truth
+where they exist), while `build`, `release`, `test`, `run`, `clean`, and
+`exhaustive` invoke Swift directly; the bundle version comes from `VERSION`.
 
 ### Running during development
 
@@ -322,7 +322,7 @@ covering the quarters family end to end (tiling, edge drags with
 per-column row independence, clamping, screen edges, eviction, swap,
 re-house, undo, closes) and the sixths family (the layout
 switch, sixths geometry, per-third row independence, and a two-thirds
-window's hidden divider). Drag-out has its own focused probes
+window's hidden splitter). Drag-out has its own focused probes
 (`tools/repro/dragout-sixth-test.swift`, `tools/repro/evict-drag-test.swift`). Handle
 identity has one too (`tools/repro/handle-collision-repro.swift`): a
 freshly focused same-app window sitting on a tiled window's exact frame
@@ -353,11 +353,14 @@ python3 tools/mutation/mutate.py --workers 2    # fewer workers on a loaded mach
 The live suites park the host windows at fixed coordinates tuned for roughly
 1512x982, so read the actual and expected frames before calling a failure a
 regression and record the display size with the evidence. On a 1120x1050
-single-display machine the full suite scored `PASS 37 FAIL 2` (S11a and S14b):
-`HOSTC` and `HOSTD` start partly off-screen and `HOSTB`'s center sits under
-`HOSTC`, so a focused case that clicks that center targets the wrong window and
-an eviction restore can be clamped to the visible frame. The resize cases S2-S7
-and the rest of the tiling sequence passed there.
+single-display machine the 39-case suite at v0.3.x scored `PASS 37 FAIL 2`
+(S11a and S14b): `HOSTC` and `HOSTD` start partly off-screen and `HOSTB`'s
+center sits under `HOSTC`, so a focused case that clicks that center targets
+the wrong window and an eviction restore can be clamped to the visible frame.
+The resize cases S2-S7 and the rest of the tiling sequence passed there. The
+suite has since grown (mirror group S18, reflow modeling for S14b) to 42
+checks at v1.0.3; re-measure on the same small display before treating that
+old score as the expected result.
 
 Every live run starts through `scripts/run-repro.sh` or
 `scripts/run-focus-loop.sh`, never against an instance someone else started,

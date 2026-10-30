@@ -34,6 +34,7 @@ tr -d '[:space:]' < VERSION   # e.g. 0.3.0
 ```bash
 swift build
 make check                                  # suite once; README's count must match
+make exhaustive                             # exhaustive undo replay (hand-off gate)
 python3 tools/mutation/mutate.py            # the full table, not --since
 scripts/doctor.sh                           # preflight: GUI session, AX trust, no stale hosts
 ./scripts/run-repro.sh                      # live end-to-end, after the preflight passes
