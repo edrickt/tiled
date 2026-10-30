@@ -267,7 +267,7 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertNil(canvas.state.occupant(of: .topLeft))
         XCTAssertEqual(
             gateway.frame(of: drag.handle), CGRect(x: 120, y: 500, width: 800, height: 500),
-            "the drop's origin takes the quarter footprint, repinned inside the screen")
+            "the drop's origin takes the quarter footprint, repinned inside the visible frame")
     }
 
     func testSingleTickHandDragAtMouseUpUntiles() {
@@ -291,7 +291,7 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertNil(canvas.state.slot(of: 1), "a one-tick hand drag still untiles")
         XCTAssertEqual(
             gateway.frame(of: handle), CGRect(x: 200, y: 500, width: 800, height: 500),
-            "the drop's origin takes the quarter footprint, repinned inside the screen")
+            "the drop's origin takes the quarter footprint, repinned inside the visible frame")
     }
 
     func testQuartzMouseDownAtTheWindowCenterAuthorizesAOneTickDrag() {

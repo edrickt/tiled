@@ -1514,11 +1514,11 @@ struct TilingSpace {
 
     // MARK: Untile / evict / release
 
-    /// Restores one window to its pre-tile frame and releases its slot,
-    /// then lets the freed cells reflow (when `reflowing`). The freed
-    /// cells' survivor moves into them and shares the leave's undo
-    /// chapter; the restore itself keeps no chapter (the frame IS the
-    /// recovery).
+    /// Leaves one window in the slot-sized floating frame at its pre-tile
+    /// origin and releases its slot, then lets the freed cells reflow
+    /// (when `reflowing`). The freed cells' survivor moves into them and
+    /// shares the leave's undo chapter; the restore itself keeps no
+    /// chapter (the frame IS the recovery).
     mutating func untile(window id: WindowID, reflowing: Bool, context: Context) -> Outcome {
         error = nil
         notice = nil
@@ -1619,10 +1619,10 @@ struct TilingSpace {
 
     /// Dissolves every window on this canvas in one undo chapter. The
     /// chapter lists each dissolved (slot, pre-tile frame) pair, and undo
-    /// re-applies the slot rect on top of the restored frame: the window
-    /// visibly returns to the arrangement, not just to its pre-tile
-    /// frame. Fresh ids are issued for the re-observed windows (their
-    /// records were released).
+    /// re-applies the slot rect on top of the sized frame: the window
+    /// visibly returns to the arrangement, not just to its slot-sized
+    /// floating frame. Fresh ids are issued for the re-observed windows
+    /// (their records were released).
     mutating func untileAll(context: Context) -> Outcome {
         error = nil
         notice = nil
@@ -1650,10 +1650,10 @@ struct TilingSpace {
         if !failures.isEmpty {
             error = MenuText.restoreFailureMessage(failures)
         }
-        // Rebuild the chapter from the frames untile-all just restored:
-        // each window now sits at its pre-tile frame with no record, so
-        // re-observe it there and pair it with its dissolved slot. The
-        // undo then retiles the live window back into place.
+        // Rebuild the chapter from the frames untile-all just sized:
+        // each window now sits at its slot-sized floating frame with no
+        // record, so re-observe it there and pair it with its dissolved
+        // slot. The undo then retiles the live window back into place.
         if !chapter.isEmpty {
             var snapshot: [EvictedWindow] = []
             for (slot, id) in chapter {
