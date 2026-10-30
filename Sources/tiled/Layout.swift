@@ -520,6 +520,42 @@ struct GridLayout: Equatable {
         }
     }
 
+    /// The frame an untiled window takes on this canvas: the layout's
+    /// smallest slot footprint (a quarter in quarters, a small sixth in
+    /// sixths) at `origin`, kept inside `bounds`.
+    ///
+    /// A window leaving tiling keeps where it is and only takes the grid's
+    /// size, so it reads as belonging to the canvas it now floats over.
+    /// The pin reuses the write policy's post-clamp shape: a frame that
+    /// covers the screen edge it already hugged stops at that edge instead
+    /// of spilling off screen, and every other frame keeps its origin
+    /// exactly.
+    ///
+    /// Degenerate `bounds` (a display whose visible frame has no extent)
+    /// has no edge to pin against, so the frame is left unpinned at the
+    /// reference size, which is itself zero: origin kept, never a NaN.
+    func sizedUntileFrame(
+        keeping origin: CGPoint, for layout: LayoutKind, in bounds: CGRect
+    ) -> CGRect {
+        let reference: Slot
+        switch layout {
+        case .quarters: reference = .topLeft
+        case .sixths: reference = .sixthTopLeft
+        }
+        let frame = CGRect(origin: origin, size: rect(for: reference, in: bounds).size)
+        guard bounds.width > 0, bounds.height > 0 else { return frame }
+        func pin(from lower: CGFloat, to upper: CGFloat, in range: ClosedRange<CGFloat>)
+            -> CGFloat
+        {
+            if upper > range.upperBound { return range.upperBound - upper }
+            if lower < range.lowerBound { return range.lowerBound - lower }
+            return 0
+        }
+        let dx = pin(from: frame.minX, to: frame.maxX, in: bounds.minX...bounds.maxX)
+        let dy = pin(from: frame.minY, to: frame.maxY, in: bounds.minY...bounds.maxY)
+        return frame.offsetBy(dx: dx, dy: dy)
+    }
+
     /// Rect for `slot` within `bounds` (AppKit coordinates, y grows upward):
     /// the product of the slot's column and row span boundary lines.
     func rect(for slot: Slot, in bounds: CGRect) -> CGRect {
