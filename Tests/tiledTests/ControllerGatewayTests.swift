@@ -938,8 +938,8 @@ final class ControllerGatewayTests: XCTestCase {
         let receipt = controller.handleSwitchLayout()
 
         XCTAssertTrue(receipt.performed)
-        XCTAssertEqual(receipt.announcement, "Switched to Quarters.")
-        XCTAssertEqual(canvas.state.layout, .quarters)
+        XCTAssertEqual(receipt.announcement, "Switched to Sixths.")
+        XCTAssertEqual(canvas.state.layout, .sixths)
     }
 
     func testUntileBeforeVerificationCancelsTheCheck() {

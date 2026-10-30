@@ -9,7 +9,7 @@ A named tile a window can occupy (Top Left, Left Third, …), defined by its set
 _Avoid_: tile, zone, region
 
 **Layout**:
-One of two mutually exclusive geometries per tiling space: quarters (2×2 plus halves) or sixths (3×2 grid plus thirds and two-thirds). Each display's each Space runs its own, stored on the canvas and kept when the board empties. `⌥⇧\` switches it explicitly: every tiled window on that canvas is restored to its pre-tile frame, and one undo returns the windows and the previous layout. A slot request never switches; a key with no slot in the active layout is inert and names the layout that owns the position. Two layouts never coexist on one canvas.
+One of two mutually exclusive geometries per tiling space: quarters (2×2 plus halves) or sixths (3×2 grid plus thirds and two-thirds). Each display's each Space runs its own, stored on the canvas and kept when the board empties. Fresh canvases start in Quarters. `⌥⇧\` switches it explicitly: every tiled window on that canvas is restored to its pre-tile frame, and one undo returns the windows and the previous layout. A slot request never switches; a key with no slot in the active layout is inert and names the layout that owns the position. Two layouts never coexist on one canvas.
 _Avoid_: mode, grid
 
 **Slot key**:

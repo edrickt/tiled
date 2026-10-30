@@ -398,13 +398,13 @@ final class TilingController {
     func handle(slotKey key: SlotKey) -> ActionReceipt {
         let focusedSpace = directory.focusedKey()
         guard let target = focusedTarget() else {
-            let layout = directory.storedCanvas(for: focusedSpace)?.state.layout ?? .sixths
+            let layout = directory.storedCanvas(for: focusedSpace)?.state.layout ?? .fresh
             if key.slot(in: layout) == nil {
                 return inertReceipt(key: key, layout: layout, on: focusedSpace)
             }
             return noFocusedWindowReceipt(on: focusedSpace)
         }
-        let layout = directory.storedCanvas(for: target.key)?.state.layout ?? .sixths
+        let layout = directory.storedCanvas(for: target.key)?.state.layout ?? .fresh
         guard let slot = key.slot(in: layout) else {
             return inertReceipt(key: key, layout: layout, on: target.key)
         }
@@ -492,7 +492,7 @@ final class TilingController {
     func handleSwitchLayout() -> ActionReceipt {
         pruneDeadWindows()
         let space = directory.cursorKey()
-        let target = (directory.storedCanvas(for: space)?.state.layout ?? .sixths).other
+        let target = (directory.storedCanvas(for: space)?.state.layout ?? .fresh).other
         return switchLayout(to: target, on: space)
     }
 
@@ -1075,7 +1075,7 @@ final class TilingController {
             guard let group = bySpace[destination],
                 let groupLayout = group.first?.slot.layout
             else { continue }
-            let current = directory.storedCanvas(for: destination)?.state.layout ?? .sixths
+            let current = directory.storedCanvas(for: destination)?.state.layout ?? .fresh
             guard current != groupLayout else { continue }
             let occupants = (directory.storedCanvas(for: destination)?.state.occupants ?? [:])
                 .sorted { $0.key.rawValue < $1.key.rawValue }

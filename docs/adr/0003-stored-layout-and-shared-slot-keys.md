@@ -2,6 +2,9 @@
 
 Status: accepted
 
+> Note (2026-10-30): the fresh-canvas default is now Quarters
+> (`LayoutKind.fresh`); the stored-layout model below is unchanged.
+
 Layout used to be derived from occupancy, so an empty canvas could not hold a choice and a slot press in the other layout was a destructive implicit switch. We decided `TilingState` stores `LayoutKind` (fresh canvases start in Sixths) and `setLayout` is the only writer, preconditioning an empty board. `plan` and `commit` require the target slot's layout to match the stored layout, and `TilePlan` has no switch or wrong-layout branch. The switch is its own requesterless canvas action, `⌥⇧\`: it snapshots every occupant, restores each to its pre-tile frame, adopts the other layout, and pushes one chapter; a zero-window switch pushes none. Two canvases can show different layouts, but one canvas never mixes them.
 
 The eleven slot keys are physical: U I O M , . J K L H ;. Each has one `SlotKey`, one Carbon id, and one ⌥⇧ default binding, and the active layout decides which `Slot` the press means. The key-to-slot mapping lives in the existing `SlotGeometry.key` column so geometry and dispatch cannot drift; `SlotKey.slot(in:)` searches that table, and a key with no slot in the active layout is inert and names the layout that owns the position. Slot storage identities are the sixths slot raw values, derived from that one table, so old sixths overrides and parks resolve with no migration; the six retired quarter identities are deleted once at launch. Retirement is idempotent and writes no marker or version key.

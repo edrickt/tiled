@@ -112,7 +112,7 @@ final class MenuReadsTests: XCTestCase {
     func testReadsCarryTheCanvasLayoutWithNoFocusedWindow() {
         // The switch row no longer needs focus, so the reads carry the
         // canvas layout rather than a focus flag.
-        XCTAssertEqual(reads(for: controller.focusedTilingSpace).canvas.state.layout, .sixths)
+        XCTAssertEqual(reads(for: controller.focusedTilingSpace).canvas.state.layout, .quarters)
 
         let safari = gateway.addWindow(
             frame: CGRect(x: 0, y: 0, width: 800, height: 600), appName: "Safari")

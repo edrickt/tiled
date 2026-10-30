@@ -53,7 +53,7 @@ final class ExhaustiveUndoTests: XCTestCase {
 
         init(occupants: [Slot: Int], frames: [Int: CGRect]) {
             self.occupants = occupants
-            self.layout = occupants.isEmpty ? .sixths : (occupants.keys.first?.layout ?? .sixths)
+            self.layout = occupants.isEmpty ? .quarters : (occupants.keys.first?.layout ?? .quarters)
             self.frames = frames
         }
     }
@@ -269,8 +269,8 @@ final class ExhaustiveUndoTests: XCTestCase {
             "the structural-health check did not notice a window owning overlapping cells")
 
         let start = Date()
-        var paths: [String: [Step]] = ["sixths|": []]
-        var queue = ["sixths|"]
+        var paths: [String: [Step]] = ["quarters|": []]
+        var queue = ["quarters|"]
         var edges = 0
         var undoChecks = 0
         var switches = 0

@@ -236,9 +236,9 @@ final class ControllerBulkOperationTests: XCTestCase {
     func testSwitchWithNoWindowsOffersNoUndo() {
         let receipt = controller.handleSwitchLayout()
 
-        XCTAssertEqual(canvas.state.layout, .quarters)
-        XCTAssertEqual(canvas.notice, "Switched to Quarters.")
-        XCTAssertEqual(receipt.announcement, "Switched to Quarters.")
+        XCTAssertEqual(canvas.state.layout, .sixths)
+        XCTAssertEqual(canvas.notice, "Switched to Sixths.")
+        XCTAssertEqual(receipt.announcement, "Switched to Sixths.")
         XCTAssertTrue(canvas.undoStack.isEmpty)
         XCTAssertEqual(canvas.displacedCount, 0)
     }

@@ -38,7 +38,7 @@ final class ReflowTests: XCTestCase {
     func testEvictBottomLeftGrowsTopLeftDown() {
         // The report's example: two left corner sixths; the bottom one
         // leaves, the top one expands down into the left third.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopLeft)
         state.commit(window: b, into: .sixthBottomLeft)
         state.remove(window: b)
@@ -48,7 +48,7 @@ final class ReflowTests: XCTestCase {
     }
 
     func testEvictMiddleThirdGrowsRightThirdLeftwards() {
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopLeft)
         state.commit(window: b, into: .sixthBottomLeft)
         state.commit(window: c, into: .sixthMiddle)
@@ -63,7 +63,7 @@ final class ReflowTests: XCTestCase {
         // Left, middle, and right thirds; the middle leaves. Both flanks
         // could become two-thirds, and they overlap each other: right
         // preferred, so the right third wins the freed cells.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthLeft)
         state.commit(window: b, into: .sixthMiddle)
         state.commit(window: c, into: .sixthRight)
@@ -77,7 +77,7 @@ final class ReflowTests: XCTestCase {
         // Middle and right thirds; the middle third window moves to the
         // free bottom-left sixth. Its vacated cells flow right: the right
         // third becomes the right two-thirds.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopLeft)
         state.commit(window: b, into: .sixthMiddle)
         state.commit(window: c, into: .sixthRight)
@@ -101,7 +101,7 @@ final class ReflowTests: XCTestCase {
     }
 
     func testEvictTopLeftGrowsBottomLeftUp() {
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopLeft)
         state.commit(window: b, into: .sixthBottomLeft)
         state.remove(window: a)
@@ -111,7 +111,7 @@ final class ReflowTests: XCTestCase {
     }
 
     func testEvictTopMiddleGrowsBottomMiddleUp() {
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopMiddle)
         state.commit(window: b, into: .sixthBottomMiddle)
         state.remove(window: a)
@@ -146,7 +146,7 @@ final class ReflowTests: XCTestCase {
         // leaves a hole — the right third cannot reach it, and a
         // two-thirds would have to swallow the middle the requester now
         // occupies... nothing merges, nothing moves.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopLeft)
         state.commit(window: c, into: .sixthRight)
         state.remove(window: a)
@@ -172,7 +172,7 @@ final class ReflowTests: XCTestCase {
     func testLeaversCellsStayFreedAfterRemoval() {
         // Callers remove the leaver before reflowing; its cells arrive
         // as the freed region and no longer block as occupied.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopLeft)
         state.commit(window: b, into: .sixthBottomLeft)
         state.remove(window: b)
@@ -192,7 +192,7 @@ final class ReflowTests: XCTestCase {
         // two-thirds request evicts the middle third — and the cells
         // left free are exactly the top-left sixth, so the victim
         // re-tiles there instead of untangling.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthBottomLeft)
         state.commit(window: b, into: .sixthMiddle)
         state.commit(window: c, into: .sixthRight)
@@ -206,7 +206,7 @@ final class ReflowTests: XCTestCase {
         // bottom-left, bottom-right (evicting the right third) covers
         // the whole board: nothing is left free, so the victim untiles
         // to its pre-tile frame.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopLeft)
         state.commit(window: b, into: .sixthMiddle)
         state.commit(window: c, into: .sixthRight)
@@ -221,7 +221,7 @@ final class ReflowTests: XCTestCase {
         // The middle third -> right two-thirds evicts the right third;
         // the requester absorbs the middle's cells, and the free region
         // is exactly the top-left sixth — the victim re-tiles there.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthBottomLeft)
         state.commit(window: b, into: .sixthMiddle)
         state.commit(window: c, into: .sixthRight)
@@ -262,7 +262,7 @@ final class ReflowTests: XCTestCase {
         // but the cells left free — the left sixth's two cells plus one
         // cell of the middle sixth — are three cells, not one whole slot:
         // nothing to re-house into.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthTopRight)
         state.commit(window: b, into: .sixthTopMiddle)
         XCTAssertEqual(
@@ -275,7 +275,7 @@ final class ReflowTests: XCTestCase {
         // its leftover (its slot minus the target) is exactly the
         // bottom-left sixth, so the blocker steps down into that slot
         // instead of untangling.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthLeft)
         XCTAssertEqual(
             state.rehousingHome(evicting: a, for: .sixthTopLeft),
@@ -286,7 +286,7 @@ final class ReflowTests: XCTestCase {
         // The same containment rule runs both ways: a left third
         // blocking a bottom-left sixth request steps up into the
         // top-left sixth.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthLeft)
         XCTAssertEqual(
             state.rehousingHome(evicting: a, for: .sixthBottomLeft),
@@ -308,7 +308,7 @@ final class ReflowTests: XCTestCase {
         // with a clean leftover — the middle third — so it shrinks into
         // that slot. Its corner-sixth siblings leave L-shaped leftovers
         // and re-house nowhere (see the L test below).
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthsLeftTwoThirds)
         XCTAssertEqual(
             state.rehousingHome(evicting: a, for: .sixthLeft),
@@ -325,7 +325,7 @@ final class ReflowTests: XCTestCase {
         // two-thirds, so the blocker re-tiles there rather than
         // untangling. Only when no rule finds a whole slot does the
         // window untile.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthLeft)
         state.commit(window: c, into: .sixthBottomLeft)
         XCTAssertEqual(
@@ -337,7 +337,7 @@ final class ReflowTests: XCTestCase {
         // The left two-thirds minus the top-left sixth is an L-shape,
         // not a slot: the blocker untangles instead of being squeezed
         // into a region nobody can name.
-        var state = TilingState()
+        var state = TilingState(layout: .sixths)
         state.commit(window: a, into: .sixthsLeftTwoThirds)
         XCTAssertEqual(
             state.rehousingHome(evicting: a, for: .sixthTopLeft),

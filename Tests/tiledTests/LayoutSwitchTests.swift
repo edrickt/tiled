@@ -42,15 +42,15 @@ final class LayoutSwitchTests: XCTestCase {
     func testZeroWindowSwitchAdoptsTheLayoutNarratesAndPushesNoChapter() {
         let receipt = controller.handleSwitchLayout()
 
-        XCTAssertEqual(canvas.state.layout, .quarters)
-        XCTAssertEqual(receipt.announcement, "Switched to Quarters.")
-        XCTAssertEqual(canvas.notice, "Switched to Quarters.")
+        XCTAssertEqual(canvas.state.layout, .sixths)
+        XCTAssertEqual(receipt.announcement, "Switched to Sixths.")
+        XCTAssertEqual(canvas.notice, "Switched to Sixths.")
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertTrue(canvas.undoStack.isEmpty, "nothing destructive happened")
 
         let back = controller.handleSwitchLayout()
-        XCTAssertEqual(canvas.state.layout, .sixths)
-        XCTAssertEqual(back.announcement, "Switched to Sixths.")
+        XCTAssertEqual(canvas.state.layout, .quarters)
+        XCTAssertEqual(back.announcement, "Switched to Quarters.")
         XCTAssertTrue(canvas.undoStack.isEmpty)
     }
 
@@ -197,25 +197,25 @@ final class LayoutSwitchTests: XCTestCase {
         let leftHandle = gateway.addWindow(
             frame: CGRect(x: 100, y: 100, width: 800, height: 600))
         gateway.focused = leftHandle
-        controller.handleSwitchLayout(to: .quarters)
+        controller.handleSwitchLayout(to: .sixths)
         controller.handle(slotKey: .topLeft)
         let rightHandle = gateway.addWindow(
             frame: CGRect(x: 2020, y: 100, width: 800, height: 600))
         gateway.focused = rightHandle
         controller.handle(slotKey: .topRight)
 
-        XCTAssertEqual(controller.canvas(for: TilingSpaceKey(screen: left, space: nil)).state.layout, .quarters)
-        XCTAssertEqual(controller.canvas(for: TilingSpaceKey(screen: right, space: nil)).state.layout, .sixths)
+        XCTAssertEqual(controller.canvas(for: TilingSpaceKey(screen: left, space: nil)).state.layout, .sixths)
+        XCTAssertEqual(controller.canvas(for: TilingSpaceKey(screen: right, space: nil)).state.layout, .quarters)
 
         harness.fireCursorMove(to: CGPoint(x: 2500, y: 500))
         controller.handleSwitchLayout()
 
         XCTAssertEqual(
             controller.canvas(for: TilingSpaceKey(screen: left, space: nil)).state.layout,
-            .quarters, "the focused display's canvas keeps its layout")
+            .sixths, "the focused display's canvas keeps its layout")
         XCTAssertEqual(
             controller.canvas(for: TilingSpaceKey(screen: right, space: nil)).state.layout,
-            .quarters, "the cursor's display switched")
+            .sixths, "the cursor's display switched")
         XCTAssertTrue(
             controller.canvas(for: TilingSpaceKey(screen: left, space: nil))
                 .state.occupants.isEmpty == false,
@@ -223,14 +223,14 @@ final class LayoutSwitchTests: XCTestCase {
 
         // The targeted row follows focus even with the cursor elsewhere.
         gateway.focused = leftHandle
-        controller.handleSwitchLayout(to: .sixths)
+        controller.handleSwitchLayout(to: .quarters)
 
         XCTAssertEqual(
             controller.canvas(for: TilingSpaceKey(screen: left, space: nil)).state.layout,
-            .sixths, "the targeted row follows focus, not the cursor")
+            .quarters, "the targeted row follows focus, not the cursor")
         XCTAssertEqual(
             controller.canvas(for: TilingSpaceKey(screen: right, space: nil)).state.layout,
-            .quarters, "the targeted row stays scoped to the focused canvas")
+            .sixths, "the targeted row stays scoped to the focused canvas")
     }
 
     func testSlotKeyNeverSwitchesLayout() {

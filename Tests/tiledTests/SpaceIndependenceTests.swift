@@ -192,7 +192,7 @@ final class SpaceIndependenceTests: XCTestCase {
         switchTo(Self.spaceB)
         XCTAssertEqual(reports, 1, "the first callback resolves the starting canvas")
         XCTAssertEqual(
-            controller.canvas(for: controller.focusedTilingSpace).state.layout, .sixths,
+            controller.canvas(for: controller.focusedTilingSpace).state.layout, .quarters,
             "the focused canvas follows the newly visible Space")
         XCTAssertTrue(
             controller.canvas(for: controller.focusedTilingSpace).state.occupants.isEmpty)
@@ -327,8 +327,8 @@ final class SpaceIndependenceTests: XCTestCase {
         let receipt = controller.handleSwitchLayout()
 
         XCTAssertEqual(
-            controller.canvas(for: Self.otherDisplay.id).state.layout, .quarters,
-            "the windowless cursor display's fresh canvas starts on sixths and toggles")
+            controller.canvas(for: Self.otherDisplay.id).state.layout, .sixths,
+            "the windowless cursor display's fresh canvas starts on quarters and toggles")
         XCTAssertEqual(
             controller.canvas(for: Self.display.id).state.layout, .quarters,
             "the focused display's canvas is untouched by the hotkey")

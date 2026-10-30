@@ -420,8 +420,8 @@ final class TilingStateTests: XCTestCase {
 
     // MARK: Layout state
 
-    func testFreshStateStartsInSixths() {
-        XCTAssertEqual(TilingState().layout, .sixths)
+    func testFreshStateStartsInQuarters() {
+        XCTAssertEqual(TilingState().layout, .quarters)
     }
 
     func testSetLayoutStoresTheChoiceOnAnEmptyBoard() {

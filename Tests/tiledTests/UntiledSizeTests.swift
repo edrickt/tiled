@@ -93,6 +93,7 @@ final class WindowBirthTests: XCTestCase {
     }
 
     func testNewWindowIsSizedToCanvasLayoutAtBirth() {
+        controller.handleSwitchLayout(to: .sixths)
         let handle = gateway.simulateWindowCreated(
             frame: CGRect(x: 10, y: 10, width: 800, height: 600))
 
@@ -150,6 +151,7 @@ final class WindowBirthTests: XCTestCase {
     }
 
     func testBirthSubscriptionResubscribesOnTrustGrant() {
+        controller.handleSwitchLayout(to: .sixths)
         XCTAssertEqual(
             gateway.creationSubscriptions, 1,
             "init subscribes the birth hook once")
@@ -167,6 +169,7 @@ final class WindowBirthTests: XCTestCase {
     }
 
     func testRetileAfterBirthDiscardsBirthSizing() {
+        controller.handleSwitchLayout(to: .sixths)
         let handle = gateway.simulateWindowCreated(
             frame: CGRect(x: 10, y: 10, width: 800, height: 600))
         let birthFrame = gateway.frame(of: handle)!

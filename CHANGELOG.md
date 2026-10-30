@@ -8,6 +8,9 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Fresh canvases start in Quarters instead of Sixths: the first slot key
+  on a new display or Space tiles a quarter, and the no-arg layout switch
+  from a fresh canvas goes to Sixths.
 - Drag-out untile distance halved again: ~25pt of title-bar drag (was
   ~50pt) releases the tile; a shorter drag still snaps back.
 

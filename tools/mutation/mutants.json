@@ -62,8 +62,8 @@
  [
   "Layout.swift",
   "fresh canvas defaults to quarters",
-  "    init(layout: LayoutKind = .sixths) {",
-  "    init(layout: LayoutKind = .quarters) {"
+  "    static let fresh: LayoutKind = .quarters",
+  "    static let fresh: LayoutKind = .sixths"
  ],
  [
   "Layout.swift",
@@ -139,8 +139,8 @@
  ],
  [
   "DragTracker.swift",
-  "untile drag distance 50 -> 10000",
-  "private static let untileDragDistance: CGFloat = 50",
+  "untile drag distance 25 -> 10000",
+  "private static let untileDragDistance: CGFloat = 25",
   "private static let untileDragDistance: CGFloat = 10000"
  ],
  [
@@ -602,8 +602,8 @@
  [
   "TilingController.swift",
   "undo reconciles a canvas that already shows the chapter's layout (untiles bystanders)",
-  "            let current = directory.storedCanvas(for: destination)?.state.layout ?? .sixths\n            guard current != groupLayout else { continue }",
-  "            let current = directory.storedCanvas(for: destination)?.state.layout ?? .sixths\n            guard true else { continue }"
+  "            let current = directory.storedCanvas(for: destination)?.state.layout ?? .fresh\n            guard current != groupLayout else { continue }",
+  "            let current = directory.storedCanvas(for: destination)?.state.layout ?? .fresh\n            guard true else { continue }"
  ],
  [
   "TilingController.swift",
@@ -908,8 +908,8 @@
  [
   "TilingController.swift",
   "switch key targets the layout already shown",
-  "        let target = (directory.storedCanvas(for: space)?.state.layout ?? .sixths).other",
-  "        let target = (directory.storedCanvas(for: space)?.state.layout ?? .sixths)"
+  "        let target = (directory.storedCanvas(for: space)?.state.layout ?? .fresh).other",
+  "        let target = (directory.storedCanvas(for: space)?.state.layout ?? .fresh)"
  ],
  [
   "TilingSpace.swift",

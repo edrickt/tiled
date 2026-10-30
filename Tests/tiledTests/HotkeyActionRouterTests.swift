@@ -105,7 +105,7 @@ final class AppHotkeyPerformerTests: XCTestCase {
 
         performer.tile(slotKey: .topLeft)
 
-        XCTAssertEqual(canvas.state.slot(of: 1), .sixthTopLeft)
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
         let receipt = try XCTUnwrap(presentedReceipts.last)
         XCTAssertTrue(receipt.performed)
         XCTAssertNil(receipt.announcement, "a landed placement stays silent")
@@ -116,10 +116,10 @@ final class AppHotkeyPerformerTests: XCTestCase {
 
         performer.performSwitchLayout()
 
-        XCTAssertEqual(canvas.state.layout, .quarters)
+        XCTAssertEqual(canvas.state.layout, .sixths)
         let receipt = try XCTUnwrap(presentedReceipts.last)
         XCTAssertTrue(receipt.performed)
-        XCTAssertEqual(receipt.announcement, "Switched to Quarters.")
+        XCTAssertEqual(receipt.announcement, "Switched to Sixths.")
     }
 
     func testExpandRoutesToTheControllerAndPresentsItsReceipt() throws {

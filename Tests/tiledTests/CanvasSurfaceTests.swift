@@ -87,10 +87,10 @@ final class CanvasSurfaceTests: XCTestCase {
         XCTAssertEqual(
             controller.canvas(for: withheld).state.occupant(of: .topLeft), withheldWindow.id)
         XCTAssertEqual(
-            controller.canvas(for: named).state.occupant(of: .sixthTopLeft), namedWindow.id,
-            "the fresh window resolves the named canvas, whose fresh layout is sixths")
+            controller.canvas(for: named).state.occupant(of: .topLeft), namedWindow.id,
+            "the fresh window resolves the named canvas, whose fresh layout is quarters")
         XCTAssertEqual(
-            controller.canvas(for: Self.screen.id).state.occupant(of: .sixthTopLeft),
+            controller.canvas(for: Self.screen.id).state.occupant(of: .topLeft),
             namedWindow.id,
             "the display action resolves the named canvas once it holds anything")
         XCTAssertEqual(
@@ -139,7 +139,7 @@ final class CanvasSurfaceTests: XCTestCase {
             controller.canvas(for: withheld).state.occupant(of: .topRight), withheldWindow.id,
             "a request from the window resolves the canvas that owns it")
         XCTAssertEqual(
-            controller.canvas(for: named).state.occupant(of: .sixthTopLeft), namedWindow.id,
+            controller.canvas(for: named).state.occupant(of: .topLeft), namedWindow.id,
             "the named canvas is untouched by the window's own request")
     }
 }

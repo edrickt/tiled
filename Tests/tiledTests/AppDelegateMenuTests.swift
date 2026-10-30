@@ -288,7 +288,7 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(
             snapshot.icon,
             StatusIcon.Snapshot(
-                layout: .sixths,
+                layout: .quarters,
                 filled: [],
                 occupiedSlots: 0,
                 displayName: "Built-in"),
@@ -329,14 +329,14 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(store.binding(for: .topLeft).label, "⌥Q")
         XCTAssertEqual(after.menu.labels[.slotKey(.topLeft)], "⌥Q")
         XCTAssertTrue(after.menu.isTrusted)
-        XCTAssertEqual(after.menu.activeLayout, .sixths)
+        XCTAssertEqual(after.menu.activeLayout, .quarters)
         XCTAssertNotEqual(
             before.menu, after.menu,
             "a label-only remap must be visible to the last-snapshot diff")
         let topLeft = MenuModel.items(snapshot: after.menu)
             .first { $0.title == "Tile Focused Window" }?
             .children?.first { $0.action == .tileSlot(.topLeft) }
-        XCTAssertEqual(topLeft?.title, "Top Left Sixth · ⌥Q")
+        XCTAssertEqual(topLeft?.title, "Top Left · ⌥Q")
     }
 
     // MARK: Glyph follows the cursor (status item paths)

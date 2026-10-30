@@ -11,6 +11,11 @@ enum LayoutKind: String {
     case quarters
     case sixths
 
+    /// The layout a fresh canvas holds before anything adopts one.
+    /// `TilingState`'s default and the controller's no-canvas fallbacks
+    /// all read this, so the default cannot drift apart across call sites.
+    static let fresh: LayoutKind = .quarters
+
     var title: String {
         switch self {
         case .quarters: "Quarters"
@@ -621,7 +626,7 @@ struct TilingState: Equatable {
     /// a placement.
     private(set) var layout: LayoutKind
 
-    init(layout: LayoutKind = .sixths) {
+    init(layout: LayoutKind = .fresh) {
         self.layout = layout
     }
 
