@@ -288,6 +288,37 @@ func actualFrame(_ t: String) -> CGRect? {
 
 func untileMirror(_ t: String) { tiled[t] = nil }
 
+/// Reflow, as `TilingState.reflow` decides it: the cells an event freed
+/// (the windows it untiled, plus the requester's old tile) merge into
+/// exactly one adjacent survivor when the union is a whole slot. The
+/// requester never grows, a re-housed window may, and the right column
+/// wins a tie — the app's own order. Modelled here because a move frees
+/// cells a neighbour absorbs: after A leaves TR, B at BR becomes RH, and
+/// a suite that ignored it would report the app's correct frame as a
+/// failure.
+func reflow(_ freed: Set<String>, requester: String) {
+    var free = freed.subtracting(tiled.values.flatMap { quads[$0]! })
+    while !free.isEmpty {
+        let candidates = tiled.compactMap { entry -> (String, String, String)? in
+            guard entry.key != requester,
+                let grown = quadSlots.first(where: { quads[$0] == quads[entry.value]!.union(free) })
+            else { return nil }
+            return (entry.key, entry.value, grown)
+        }
+        func rightness(_ s: String) -> Int {
+            quads[s]!.contains(where: { $0.hasSuffix("r") }) ? 1 : 0
+        }
+        guard
+            let best = candidates.max(by: { lhs, rhs in
+                if rightness(lhs.2) != rightness(rhs.2) { return rightness(lhs.2) < rightness(rhs.2) }
+                return quads[lhs.2]!.count < quads[rhs.2]!.count
+            })
+        else { break }
+        tiled[best.0] = best.2
+        free.subtract(quads[best.2]!)
+    }
+}
+
 /// Whether a frame is one of the grid's slot rects under the current
 /// splitters. A window the app still has tiled reports one of these.
 func isOnGrid(_ f: CGRect) -> Bool {
@@ -304,6 +335,12 @@ func doTile(_ t: String, _ slot: String) {
         return
     }
     let blockers = tiled.filter { $0.key != t && overlaps($0.value, slot) }
+    // The cells this event frees, before anything moves: the blockers'
+    // tiles and the requester's own, minus the target it is taking.
+    let previousSlot = tiled[t]
+    var freed = Set(blockers.values.flatMap { quads[$0]! })
+    if let previousSlot { freed.formUnion(quads[previousSlot]!) }
+    freed.subtract(quads[slot]!)
 
     // Step-aside: a lone blocker whose slot minus the target is exactly one
     // whole free slot moves there instead of being untiled, and that wins
@@ -322,6 +359,7 @@ func doTile(_ t: String, _ slot: String) {
             if !wasTiled, let f = preFrame, !isOnGrid(f) { preTile[t] = f }
             tiled[evictee] = aside
             tiled[t] = slot
+            reflow(freed, requester: t)
             return
         }
     }
@@ -374,6 +412,7 @@ func doTile(_ t: String, _ slot: String) {
             for (blocker, home) in homes { tiled[blocker] = home }
             if !wasTiled, let f = preFrame, !isOnGrid(f) { preTile[t] = f }
             tiled[t] = slot
+            reflow(freed, requester: t)
             return
         }
     }
@@ -390,6 +429,7 @@ func doTile(_ t: String, _ slot: String) {
     // correctly never performs.
     if !wasTiled, let f = preFrame, !isOnGrid(f) { preTile[t] = f }
     tiled[t] = slot
+    reflow(freed, requester: t)
 }
 
 // Simulated drag: mutate the dragged window's frame via AX in steps.
