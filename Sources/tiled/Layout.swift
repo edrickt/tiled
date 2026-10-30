@@ -727,6 +727,46 @@ struct TilingState: Equatable {
         return Slot.allCases.first { $0.layout == target.layout && $0.cells == free }
     }
 
+    /// The mirrored homes for a whole group of blockers: every window in
+    /// the way reflects into its own slot on the other side, so the
+    /// requester's request displaces nobody (the left half's two right
+    /// quads take the two left quads, the right third's two corner sixths
+    /// take the left third). Exact-or-nil, the stance `rehousingHome`
+    /// takes: if one member has no home the whole group evicts, because a
+    /// half-mirrored board is an arrangement nobody asked for and the
+    /// user could not predict.
+    ///
+    /// A member has no home when its mirror overlaps `target` — every
+    /// middle slot mirrors to itself, which is why a group containing the
+    /// middle third or a middle sixth can never mirror — or when a window
+    /// that stays holds any of its cells. `requester` does not count as
+    /// staying: the request vacates its old slot, so its cells are free.
+    /// Blocks of two or more are the caller's trigger; a single blocker
+    /// keeps swap, step-aside, and the free-slot rule.
+    func mirroredHomes(
+        evicting blockers: [WindowID], for target: Slot, requester: WindowID
+    ) -> [WindowID: Slot]? {
+        guard blockers.count > 1 else { return nil }
+        let staying = occupantBySlot.filter {
+            $0.value != requester && !blockers.contains($0.value)
+        }
+        var homes: [WindowID: Slot] = [:]
+        for blocker in blockers {
+            guard let current = slot(of: blocker) else { return nil }
+            let home = current.mirror
+            guard !home.overlaps(target) else { return nil }
+            guard staying.allSatisfy({ $0.key.cells.isDisjoint(with: home.cells) }) else {
+                return nil
+            }
+            homes[blocker] = home
+        }
+        // The reflection is injective, so distinct blockers cannot collide
+        // here; the check keeps the decision honest if a slot table ever
+        // stops being symmetric.
+        guard Set(homes.values).count == homes.count else { return nil }
+        return homes
+    }
+
     /// Reflow: decides which survivors absorb freed cells. When a tiled
     /// window leaves the layout (eviction, untile, drag-out, close) or
     /// moves, its freed cells merge with exactly one adjacent survivor
