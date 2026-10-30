@@ -36,7 +36,7 @@ layout owns the position.
 
 | Key    | Action |
 |--------|--------|
-| ⌥⇧\   | Switch the layout of the display under the pointer (the menu's Switch Layout row follows focus instead): untiles every tiled window on that canvas (each keeps its origin and takes the adopted layout's slot footprint); one undo restores the windows and the previous layout. On an empty canvas it just switches. |
+| ⌥⇧\   | Switch the layout of the display under the pointer (the menu's Switch Layout row follows focus instead): untiles every tiled window on that canvas (each keeps its top edge and takes the adopted layout's slot footprint); one undo restores the windows and the previous layout. On an empty canvas it just switches. |
 
 ### App actions
 
@@ -65,7 +65,7 @@ the expanded window alone.
 ### Evict (⌥⇧⌫)
 
 Evicting leaves the focused window floating at the layout's slot
-footprint (origin kept, kept inside the visible frame) and releases
+footprint (top edge kept, kept inside the visible frame) and releases
 its slot. When a tiling request evicts a window, the victim keeps its
 tiling whenever a whole slot fits: if its own slot overlaps the target and
 the leftover (its slot minus the target) is exactly one whole slot, it
@@ -123,7 +123,7 @@ tell you which app took it.
 
 - One window per slot.
 - Tiling a window into a slot **evicts** any window occupying an overlapping
-  slot. Evicted windows float at the layout's slot footprint, origin kept.
+  slot. Evicted windows float at the layout's slot footprint, top edge kept.
   - **Mirror:** with two or more windows in the way, each moves to its own
     slot on the other side instead of untangling, so a left half tiled to the
     right half sends the two right quads to the two left quads, and a left
@@ -154,7 +154,7 @@ tell you which app took it.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.
 - **Drag a tiled window by its title bar**: past ~50pt of drag it untiles
-  right where you dropped it (the drop's origin takes the layout's slot
+  right where you dropped it (the drop's top edge takes the layout's slot
   footprint); a shorter drag snaps back into its tile. A single far jump
   with no recent hand press on the window (a programmatic move, not a
   hand drag) still snaps back, even if an unrelated click follows.
@@ -191,7 +191,7 @@ tell you which app took it.
   it belongs. The menu names the effect and how to undo it ("Switched to
   Sixths · 3 windows untiled. Undo from the Tiled menu.").
 - New windows open at the cursor display's canvas footprint — quarter
-  size on a Quarters canvas, sixth size on a Sixths canvas, origin kept —
+  size on a Quarters canvas, sixth size on a Sixths canvas, top edge kept —
   and stay floating; Tiled never auto-tiles.
 - A display change (unplug, rearrange, resolution) re-asserts every visible
   canvas immediately. Canvas identity follows the physical display's

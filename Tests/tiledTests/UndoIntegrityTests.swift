@@ -104,8 +104,8 @@ final class UndoIntegrityTests: XCTestCase {
             "a returns to the slot it was evicted from, its step-aside quad")
         XCTAssertNil(canvas.state.slot(of: 3), "c's request is undone and c releases")
         XCTAssertEqual(
-            gateway.frame(of: c), CGRect(x: 60, y: 60, width: 960, height: 540),
-            "c untangles to the quarter footprint at its origin")
+            gateway.frame(of: c), CGRect(x: 60, y: 0, width: 960, height: 540),
+            "c untangles to the quarter footprint at its top edge")
         XCTAssertEqual(canvas.state.slot(of: 2), .topLeft, "b keeps the quad it stepped into")
         XCTAssertEqual(canvas.state.tiledWindows.count, 2)
     }
@@ -127,7 +127,7 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertNil(canvas.state.occupant(of: .sixthBottomRight))
         XCTAssertNil(canvas.state.slot(of: 3), "c was untiled out of the abandoned layout")
         XCTAssertEqual(
-            gateway.frame(of: c), CGRect(x: 60, y: 60, width: 640, height: 540),
+            gateway.frame(of: c), CGRect(x: 60, y: 0, width: 640, height: 540),
             "c untangles to the sixth footprint it held")
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
     }
@@ -152,8 +152,8 @@ final class UndoIntegrityTests: XCTestCase {
         XCTAssertNotNil(canvas.error, "the refusal is reported")
         XCTAssertNil(canvas.state.slot(of: 2), "the evictee went home, not to a new tile")
         XCTAssertEqual(
-            gateway.frame(of: middle), CGRect(x: 20, y: 20, width: 640, height: 540),
-            "the victim's frame is the sixth footprint at its origin")
+            gateway.frame(of: middle), CGRect(x: 20, y: 0, width: 640, height: 540),
+            "the victim's frame is the sixth footprint hung from its top edge")
         XCTAssertFalse(
             canvas.notice?.contains("to make room") ?? false,
             "no re-house notice for a request that never landed")
@@ -175,8 +175,8 @@ final class UndoIntegrityTests: XCTestCase {
 
         XCTAssertNil(canvas.state.slot(of: 1), "w was evicted by the failed request")
         XCTAssertEqual(
-            gateway.frame(of: w), CGRect(x: 0, y: 0, width: 960, height: 540),
-            "w floats at the quarter footprint")
+            gateway.frame(of: w), CGRect(x: 0, y: 60, width: 960, height: 540),
+            "w floats at the quarter footprint hung from its top edge")
         XCTAssertNotNil(canvas.notice, "the eviction is narrated, not silent")
         XCTAssertFalse(canvas.undoStack.isEmpty, "the eviction is undoable")
 
@@ -750,8 +750,8 @@ final class UndoIntegrityTests: XCTestCase {
             "the survivor absorbs the freed third")
         XCTAssertNil(canvas.state.slot(of: 2), "the untiled window released its slot")
         XCTAssertEqual(
-            gateway.frame(of: b), CGRect(x: 900, y: 50, width: 640, height: 540),
-            "untile leaves the sixth footprint at the pre-tile origin")
+            gateway.frame(of: b), CGRect(x: 900, y: 0, width: 640, height: 540),
+            "untile leaves the sixth footprint hung from the pre-tile top edge")
 
         XCTAssertTrue(controller.undoLastDisplacement(), "the reflow chapter is undoable")
 
@@ -760,7 +760,7 @@ final class UndoIntegrityTests: XCTestCase {
             "undo shrinks the survivor back")
         XCTAssertNil(canvas.state.slot(of: 2), "undo does not re-tile the untiled window")
         XCTAssertEqual(
-            gateway.frame(of: b), CGRect(x: 900, y: 50, width: 640, height: 540),
+            gateway.frame(of: b), CGRect(x: 900, y: 0, width: 640, height: 540),
             "the untiled window keeps its sized frame")
     }
 }

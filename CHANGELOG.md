@@ -12,9 +12,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   footprint — quarter size on a Quarters canvas, sixth size on a Sixths
   canvas — instead of snapping back to its pre-tile frame. Manual untile,
   eviction, untile-all, layout switch, and drag-out all resize in place
-  (origin kept, repinned inside the visible frame), and undo chapters
+  (top edge kept, the bottom edge pulled up to the grid's size, repinned inside
+  the visible frame), and undo chapters
   store the sized frame. The footprint is always the regular even-split
-  size, ignoring any drag-edited splitters.
+  size, ignoring any drag-edited splitters. The footprint hangs from the
+  window's top edge: the top stays where it was and the bottom edge rises
+  to the grid's size.
 - New windows open at the cursor display's canvas footprint instead of
   keeping whatever size their app gave them, and stay floating: Tiled
   never auto-tiles.

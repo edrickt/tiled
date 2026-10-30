@@ -594,7 +594,7 @@ final class SpaceIndependenceTests: XCTestCase {
 
         switchTo(Self.spaceB)
         XCTAssertEqual(
-            gateway.frame(of: w), CGRect(x: 100, y: 100, width: 960, height: 540),
+            gateway.frame(of: w), CGRect(x: 100, y: 160, width: 960, height: 540),
             "B's sized restore still lands after the refused undo")
     }
 
@@ -901,9 +901,9 @@ final class SpaceIndependenceTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: d), dTiled)
 
         switchTo(Self.spaceA)
-        XCTAssertEqual(gateway.frame(of: a), CGRect(x: 100, y: 100, width: 960, height: 540))
+        XCTAssertEqual(gateway.frame(of: a), CGRect(x: 100, y: 160, width: 960, height: 540))
         XCTAssertEqual(
-            gateway.frame(of: d), CGRect(x: 200, y: 200, width: 960, height: 540),
+            gateway.frame(of: d), CGRect(x: 200, y: 60, width: 960, height: 540),
             "the deferred sized restores land on return")
     }
 
@@ -1014,7 +1014,7 @@ final class SpaceIndependenceTests: XCTestCase {
 
         switchTo(Self.spaceA)
         XCTAssertEqual(
-            gateway.frame(of: w), CGRect(x: 100, y: 100, width: 960, height: 540),
+            gateway.frame(of: w), CGRect(x: 100, y: 160, width: 960, height: 540),
             "the deferred sized restore still lands on the swipe back")
     }
 

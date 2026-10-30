@@ -200,7 +200,7 @@ final class ExhaustiveUndoTests: XCTestCase {
         if chapter.requester != nil, !requesterHasEntry {
             occupants = occupants.filter { $0.value != requesterIndex }
             // A named requester with no entry is restored to the
-            // layout's slot footprint at its pre-tile origin. A zero
+            // layout's slot footprint hung from its pre-tile top edge. A zero
             // record writes nothing, so the frame stays. The footprint
             // is drawn from the layout the undo lands on: the chapter's
             // own when reconciliation adopts it, else the board's — and
@@ -209,7 +209,7 @@ final class ExhaustiveUndoTests: XCTestCase {
             if let preTileFrame, preTileFrame != .zero {
                 let sizing = chapter.snapshot.first?.slot.layout ?? after.layout
                 frames[requesterIndex] = grid.sizedUntileFrame(
-                    keeping: preTileFrame.origin, for: sizing, in: visibleFrame)
+                    keepingTopOf: preTileFrame, for: sizing, in: visibleFrame)
             }
         }
         return Board(occupants: occupants, layout: after.layout, frames: frames)

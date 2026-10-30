@@ -123,8 +123,8 @@ final class EvictTests: XCTestCase {
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(
-            gateway.frame(of: handle), CGRect(x: 12, y: 34, width: 800, height: 500),
-            "evict leaves the quarter footprint at the pre-tile origin")
+            gateway.frame(of: handle), CGRect(x: 12, y: 0, width: 800, height: 500),
+            "evict leaves the quarter footprint hung from the pre-tile top edge")
     }
 
     func testEvictWithNoFocusedWindowAnswers() {
@@ -183,7 +183,7 @@ final class EvictTests: XCTestCase {
 
     func testEvictWritesQuarterSizedFrame() {
         // Quarters canvas: evicting leaves the window floating at the
-        // quarter footprint with its origin kept, not the raw pre-tile frame.
+        // quarter footprint hung from its top edge, not the raw pre-tile frame.
         controller.handleSwitchLayout(to: .quarters)
         let handle = addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
         controller.handle(slot: .topLeft)
@@ -193,7 +193,7 @@ final class EvictTests: XCTestCase {
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(
             gateway.frame(of: handle),
-            CGRect(x: 12, y: 34, width: 800, height: 500),
+            CGRect(x: 12, y: 0, width: 800, height: 500),
             "evict resizes in place to the layout's slot footprint")
     }
 }

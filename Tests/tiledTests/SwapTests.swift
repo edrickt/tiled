@@ -188,8 +188,8 @@ final class SwapTests: XCTestCase {
             controller.focusedExpandState, .expands,
             "the expanded window's expansion died with the eviction")
         XCTAssertEqual(
-            gateway.frame(of: c)?.origin.y, 100,
-            "the expanded window keeps its untangled origin")
+            gateway.frame(of: c)?.origin.y, 0,
+            "the expanded window keeps its untangled top edge")
         XCTAssertEqual(gateway.frame(of: c)?.height, 500)
         XCTAssertEqual(
             gateway.frame(of: c)!.origin.x, 3200.0 / 3.0, accuracy: 0.0001)

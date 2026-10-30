@@ -196,8 +196,8 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertNil(space.error)
         XCTAssertNil(space.state.slot(of: a))
         XCTAssertEqual(
-            harness.frame(of: a), CGRect(x: 10, y: 20, width: 800, height: 600),
-            "eviction writes the quarter footprint at the pre-tile origin")
+            harness.frame(of: a), CGRect(x: 10, y: 0, width: 800, height: 600),
+            "eviction writes the quarter footprint hung from the pre-tile top edge")
     }
 
     func testPlainTileEvictionNoticesAndSnapshotsForUndo() {
@@ -714,14 +714,14 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .sixthTopLeft, requester: a)
         harness.apply(slot: .sixthBottomLeft, requester: b)
         // The drop moved b; drag-out never restores the pre-tile frame.
-        // The drop's origin takes the sixth footprint instead, repinned
+        // The drop's top edge takes the sixth footprint instead, repinned
         // where the taller footprint would spill off the canvas.
         let dropped = CGRect(x: 300, y: 700, width: 500, height: 300)
         harness.gateway.setFrame(harness.handle(of: b)!, to: dropped)
 
         let outcome = space.untileFromDrag(window: b, context: context())
 
-        XCTAssertEqual(harness.frame(of: b)?.origin, CGPoint(x: 300, y: 600))
+        XCTAssertEqual(harness.frame(of: b)?.origin, CGPoint(x: 300, y: 400))
         XCTAssertEqual(harness.frame(of: b)?.height, 600)
         XCTAssertEqual(
             harness.frame(of: b)!.width, 1600.0 / 3.0, accuracy: 0.0001,
@@ -859,7 +859,7 @@ final class TilingSpaceTests: XCTestCase {
         space.reassert(.grid, context: context())
 
         XCTAssertEqual(
-            harness.frame(of: a), CGRect(x: 10, y: 20, width: 800, height: 600),
+            harness.frame(of: a), CGRect(x: 10, y: 0, width: 800, height: 600),
             "the deferred sized restore lands when the canvas becomes visible")
     }
 
@@ -884,8 +884,8 @@ final class TilingSpaceTests: XCTestCase {
         harness.canvasVisible = true
         space.reassert(.grid, context: context())
 
-        XCTAssertEqual(harness.frame(of: a), CGRect(x: 10, y: 20, width: 800, height: 600))
-        XCTAssertEqual(harness.frame(of: b), CGRect(x: 500, y: 40, width: 800, height: 600))
+        XCTAssertEqual(harness.frame(of: a), CGRect(x: 10, y: 0, width: 800, height: 600))
+        XCTAssertEqual(harness.frame(of: b), CGRect(x: 500, y: 0, width: 800, height: 600))
     }
 
     /// Re-tiling a window with a deferred restore before the canvas
@@ -917,7 +917,7 @@ final class TilingSpaceTests: XCTestCase {
         let a = harness.addWindow(frame: original)
         harness.apply(slot: .topLeft, requester: a)
         // The app already sits at the sized footprint the restore would write.
-        let sized = CGRect(x: 10, y: 20, width: 800, height: 600)
+        let sized = CGRect(x: 10, y: 0, width: 800, height: 600)
         harness.gateway.simulateSilentChange(harness.handle(of: a)!, to: sized)
         harness.gateway.clearWrites()
         harness.clearExpectedWrites()
@@ -944,7 +944,7 @@ final class TilingSpaceTests: XCTestCase {
 
         space.untile(window: a, reflowing: false, context: context())
 
-        XCTAssertEqual(harness.frame(of: a), CGRect(x: 10, y: 20, width: 800, height: 600))
+        XCTAssertEqual(harness.frame(of: a), CGRect(x: 10, y: 0, width: 800, height: 600))
         XCTAssertNil(space.state.slot(of: a))
         XCTAssertTrue(space.deferredRestores.isEmpty, "a visible restore is never deferred")
         XCTAssertEqual(
@@ -990,7 +990,7 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(space.state.occupants, [:])
         XCTAssertEqual(harness.frame(of: a), aOriginal)
         XCTAssertEqual(
-            harness.frame(of: b), CGRect(x: 800, y: 50, width: 800, height: 600),
+            harness.frame(of: b), CGRect(x: 800, y: 0, width: 800, height: 600),
             "the taller footprint repins inside the visible frame")
         XCTAssertEqual(Set(outcome.forget), [a, b])
         XCTAssertEqual(outcome.observe.count, 2, "the chapter re-observes both windows")

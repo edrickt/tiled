@@ -95,7 +95,7 @@ final class LayoutSwitchTests: XCTestCase {
         controller.handleSwitchLayout()
 
         XCTAssertEqual(
-            gateway.frame(of: handle), CGRect(x: 100, y: 100, width: 640, height: 540),
+            gateway.frame(of: handle), CGRect(x: 100, y: 0, width: 640, height: 540),
             "an expanded window untangles to the adopted layout's footprint")
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(canvas.state.layout, .sixths)
@@ -260,21 +260,21 @@ final class LayoutSwitchTests: XCTestCase {
 
         XCTAssertEqual(canvas.state.layout, .quarters)
         XCTAssertEqual(
-            gateway.frame(of: a), CGRect(x: 12, y: 34, width: 960, height: 540),
-            "the switch writes the target layout's footprint at the window's origin")
+            gateway.frame(of: a), CGRect(x: 12, y: 0, width: 960, height: 540),
+            "the switch writes the target layout's footprint hung from the window's top edge")
         XCTAssertEqual(
-            gateway.frame(of: b), CGRect(x: 900, y: 50, width: 960, height: 540))
+            gateway.frame(of: b), CGRect(x: 900, y: 0, width: 960, height: 540))
         let snapshot = Dictionary(
             uniqueKeysWithValues: (canvas.undoStack.last?.snapshot ?? []).map {
                 ($0.slot, $0.preTileFrame)
             })
-        XCTAssertEqual(snapshot[.sixthTopLeft], CGRect(x: 12, y: 34, width: 960, height: 540))
-        XCTAssertEqual(snapshot[.sixthTopRight], CGRect(x: 900, y: 50, width: 960, height: 540))
+        XCTAssertEqual(snapshot[.sixthTopLeft], CGRect(x: 12, y: 0, width: 960, height: 540))
+        XCTAssertEqual(snapshot[.sixthTopRight], CGRect(x: 900, y: 0, width: 960, height: 540))
     }
 
     func testUntileAllWritesSixthSizedFrames() {
         // Sixths canvas: untile-all leaves every window at the sixth
-        // footprint at its own origin. A sixth's width is 1920 x (1/3)
+        // footprint hung from its own top edge. A sixth's width is 1920 x (1/3)
         // in the grid, one ulp off the 1920 / 3 literal.
         let a = harness.addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
         tileSixth(.sixthTopLeft)
@@ -284,9 +284,13 @@ final class LayoutSwitchTests: XCTestCase {
         controller.untileAll()
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
-        for (handle, origin) in [(a, CGPoint(x: 12, y: 34)), (b, CGPoint(x: 40, y: 500))] {
+        XCTAssertEqual(
+            gateway.frame(of: a), CGRect(x: 12, y: 0, width: 640, height: 540))
+        // b's top edge fits, so its top stays and only the bottom rises.
+        XCTAssertEqual(
+            gateway.frame(of: b), CGRect(x: 40, y: 260, width: 640, height: 540))
+        for handle in [a, b] {
             let frame = gateway.frame(of: handle)
-            XCTAssertEqual(frame?.origin, origin)
             XCTAssertEqual(frame?.height, 540)
             XCTAssertEqual(frame!.width, 1920.0 / 3.0, accuracy: 0.0001)
         }

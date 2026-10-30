@@ -795,7 +795,7 @@ final class ControllerGatewayTests: XCTestCase {
             gateway.frame(of: d), CGRect(x: 50, y: 50, width: 800, height: 500),
             "d steps aside to its sized frame, not left overlapping a's tile")
         XCTAssertEqual(
-            gateway.frame(of: e), CGRect(x: 60, y: 60, width: 800, height: 500),
+            gateway.frame(of: e), CGRect(x: 60, y: 0, width: 800, height: 500),
             "e stayed untiled at its sized frame")
         XCTAssertEqual(canvas.state.tiledWindows.count, 1)
     }
@@ -818,7 +818,7 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(canvas.state.slot(of: 2), .leftHalf)
         XCTAssertNil(canvas.state.slot(of: 1), "the blocker was evicted")
         XCTAssertEqual(
-            gateway.frame(of: a), CGRect(x: 0, y: 0, width: 800, height: 500),
+            gateway.frame(of: a), CGRect(x: 0, y: 100, width: 800, height: 500),
             "a untangles to the quarter footprint, not left expanded")
     }
 

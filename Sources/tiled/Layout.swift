@@ -522,22 +522,22 @@ struct GridLayout: Equatable {
 
     /// The frame an untiled window takes on this canvas: the layout's
     /// regular even-split footprint (a quarter in quarters, a small sixth
-    /// in sixths) at `origin`, kept inside `bounds`.
+    /// in sixths) hung from `frame`'s top edge, kept inside `bounds`.
     ///
-    /// A window leaving tiling keeps where it is and only takes the grid's
-    /// size, so it reads as belonging to the canvas it now floats over.
-    /// The size always comes from a fresh even-split grid, never this
-    /// canvas's drag-edited splitters: a freed window must not inherit
-    /// the resize it just escaped. The pin reuses the write policy's post-clamp shape: a frame that
+    /// A window leaving tiling keeps its top edge and pulls its bottom
+    /// edge up to the grid's size, so it reads as belonging to the canvas
+    /// it now floats over. The size always comes from a fresh even-split
+    /// grid, never this canvas's drag-edited splitters: a freed window
+    /// must not inherit the resize it just escaped. The pin reuses the write policy's post-clamp shape: a frame that
     /// covers the screen edge it already hugged stops at that edge instead
-    /// of spilling off screen, and every other frame keeps its origin
+    /// of spilling off screen, and every other frame keeps its top edge
     /// exactly.
     ///
     /// Degenerate `bounds` (a display whose visible frame has no extent)
     /// has no edge to pin against, so the frame is left unpinned at the
-    /// reference size, which is itself zero: origin kept, never a NaN.
+    /// reference size, which is itself zero: top edge kept, never a NaN.
     func sizedUntileFrame(
-        keeping origin: CGPoint, for layout: LayoutKind, in bounds: CGRect
+        keepingTopOf frame: CGRect, for layout: LayoutKind, in bounds: CGRect
     ) -> CGRect {
         let reference: Slot
         switch layout {
@@ -545,8 +545,10 @@ struct GridLayout: Equatable {
         case .sixths: reference = .sixthTopLeft
         }
         let size = GridLayout().rect(for: reference, in: bounds).size
-        let frame = CGRect(origin: origin, size: size)
-        guard bounds.width > 0, bounds.height > 0 else { return frame }
+        let hung = CGRect(
+            x: frame.minX, y: frame.maxY - size.height,
+            width: size.width, height: size.height)
+        guard bounds.width > 0, bounds.height > 0 else { return hung }
         func pin(from lower: CGFloat, to upper: CGFloat, in range: ClosedRange<CGFloat>)
             -> CGFloat
         {
@@ -554,9 +556,9 @@ struct GridLayout: Equatable {
             if lower < range.lowerBound { return range.lowerBound - lower }
             return 0
         }
-        let dx = pin(from: frame.minX, to: frame.maxX, in: bounds.minX...bounds.maxX)
-        let dy = pin(from: frame.minY, to: frame.maxY, in: bounds.minY...bounds.maxY)
-        return frame.offsetBy(dx: dx, dy: dy)
+        let dx = pin(from: hung.minX, to: hung.maxX, in: bounds.minX...bounds.maxX)
+        let dy = pin(from: hung.minY, to: hung.maxY, in: bounds.minY...bounds.maxY)
+        return hung.offsetBy(dx: dx, dy: dy)
     }
 
     /// Rect for `slot` within `bounds` (AppKit coordinates, y grows upward):

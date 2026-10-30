@@ -60,8 +60,8 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertEqual(
-            gateway.frame(of: handle), CGRect(x: 12, y: 34, width: 800, height: 500),
-            "untile writes the quarter footprint at the pre-tile origin")
+            gateway.frame(of: handle), CGRect(x: 12, y: 0, width: 800, height: 500),
+            "untile writes the quarter footprint hung from the pre-tile top edge")
     }
 
     func testUntileUnknownWindowIsSafe() {
@@ -104,7 +104,7 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(canvas.displacedCount, 2)
         XCTAssertNotNil(canvas.notice)
         XCTAssertTrue(canvas.state.occupants.isEmpty)
-        XCTAssertEqual(gateway.frame(of: a)?.origin, .zero)
+        XCTAssertEqual(gateway.frame(of: a)?.origin, CGPoint(x: 0, y: 100))
         XCTAssertEqual(gateway.frame(of: a)?.height, 500)
         XCTAssertEqual(
             gateway.frame(of: a)!.width, 1600.0 / 3.0, accuracy: 0.0001,
@@ -287,15 +287,15 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertTrue(canvas.undoStack.isEmpty)
     }
 
-    func testSizedOriginSurvivesLayoutSwitches() {
+    func testSizedTopEdgeSurvivesLayoutSwitches() {
         let handle = harness.addFocusedWindow(frame: CGRect(x: 21, y: 43, width: 510, height: 320))
         controller.handleSwitchLayout(to: .quarters)
         controller.handle(slotKey: .topLeft)
 
-        // Each explicit switch leaves the sized footprint at the pre-tile
-        // origin, and the next placement records that frame as the new
-        // pre-tile: untiling still returns the window to its original
-        // origin, never a tile rect from another layout.
+        // Each explicit switch leaves the sized footprint hung from the
+        // pre-tile top edge, and the next placement records that frame as
+        // the new pre-tile: untiling still returns the window to its
+        // original top edge, never a tile rect from another layout.
         controller.handleSwitchLayout(to: .sixths)
         controller.handle(slotKey: .leftColumn)
         controller.handleSwitchLayout(to: .quarters)
@@ -305,8 +305,8 @@ final class ControllerBulkOperationTests: XCTestCase {
 
         controller.untile(window: id)
         XCTAssertEqual(
-            gateway.frame(of: handle), CGRect(x: 21, y: 43, width: 800, height: 500),
-            "untile keeps the original origin at the layout's footprint")
+            gateway.frame(of: handle), CGRect(x: 21, y: 0, width: 800, height: 500),
+            "untile keeps the original top edge at the layout's footprint")
     }
 
     func testUntileAllStartsItsOwnUndoChapter() {

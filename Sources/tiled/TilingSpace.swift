@@ -1075,7 +1075,7 @@ struct TilingSpace {
         records[id].map { record in
             let raw = record.preTileFrame
             let sized = raw == .zero ? raw : grid.sizedUntileFrame(
-                keeping: raw.origin, for: layoutOverride ?? state.layout, in: visibleFrame)
+                keepingTopOf: raw, for: layoutOverride ?? state.layout, in: visibleFrame)
             return EvictedWindow(
                 handle: record.handle, slot: slot, preTileFrame: sized, space: space)
         }
@@ -1225,7 +1225,7 @@ struct TilingSpace {
         if let record = records[id], record.preTileFrame != .zero {
             let layout = layoutOverride ?? state.layout
             let target = grid.sizedUntileFrame(
-                keeping: record.preTileFrame.origin, for: layout, in: visibleFrame)
+                keepingTopOf: record.preTileFrame, for: layout, in: visibleFrame)
             let result = context.frameWriter.write(
                 id, handle: record.handle, to: target,
                 bounds: visibleFrame, on: context.space, check: .none)
@@ -1254,7 +1254,7 @@ struct TilingSpace {
             let name = appName(evicted, context: context) ?? "A window"
             let raw = records[evicted]?.preTileFrame ?? .zero
             let frame = raw == .zero ? raw : grid.sizedUntileFrame(
-                keeping: raw.origin, for: layoutOverride ?? state.layout, in: visibleFrame)
+                keepingTopOf: raw, for: layoutOverride ?? state.layout, in: visibleFrame)
             if !restore(
                 window: evicted, context: context, sizingFor: layoutOverride)
             {
@@ -1567,11 +1567,11 @@ struct TilingSpace {
             // The live drop frame owns the origin; an unreadable drop
             // falls back to the pre-tile origin, and a zero record writes
             // nothing, exactly like a zero restore.
-            let origin = context.gateway.frame(of: record.handle)?.origin
-                ?? (record.preTileFrame == .zero ? nil : record.preTileFrame.origin)
-            if let origin {
+            let source = context.gateway.frame(of: record.handle)
+                ?? (record.preTileFrame == .zero ? nil : record.preTileFrame)
+            if let source {
                 let target = grid.sizedUntileFrame(
-                    keeping: origin, for: state.layout, in: visibleFrame)
+                    keepingTopOf: source, for: state.layout, in: visibleFrame)
                 let result = context.frameWriter.write(
                     id, handle: record.handle, to: target,
                     bounds: visibleFrame, on: context.space, check: .none)

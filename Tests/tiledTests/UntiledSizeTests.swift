@@ -3,20 +3,22 @@ import XCTest
 @testable import tiled
 
 /// The pure sizing every untile exit shares: the layout's regular
-/// even-split footprint, at the window's own origin, kept inside the
-/// visible frame.
+/// even-split footprint, hung from the window's top edge, kept inside
+/// the visible frame.
 final class UntiledSizeTests: XCTestCase {
-    func testSizedUntileFrameKeepsOriginAndMatchesTileSize() {
+    func testSizedUntileFrameKeepsTopEdgeAndMatchesTileSize() {
         let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        let source = CGRect(x: 100, y: 100, width: 700, height: 900)
         XCTAssertEqual(
             GridLayout().sizedUntileFrame(
-                keeping: CGPoint(x: 12, y: 34), for: .quarters, in: bounds),
-            CGRect(x: 12, y: 34, width: 800, height: 500))
+                keepingTopOf: source, for: .quarters, in: bounds),
+            CGRect(x: 100, y: 500, width: 800, height: 500))
         // A sixth's width is 1600 x (1/3) in the grid, one ulp away from
         // 1600 / 3, so it is read at the suite's sixth-width tolerance.
         let sixths = GridLayout().sizedUntileFrame(
-            keeping: CGPoint(x: 12, y: 34), for: .sixths, in: bounds)
-        XCTAssertEqual(sixths.origin, CGPoint(x: 12, y: 34))
+            keepingTopOf: source, for: .sixths, in: bounds)
+        XCTAssertEqual(sixths.minX, 100)
+        XCTAssertEqual(sixths.maxY, 1000, "the top edge stays, the bottom rises")
         XCTAssertEqual(sixths.height, 500)
         XCTAssertEqual(sixths.width, 1600.0 / 3.0, accuracy: 0.0001)
     }
@@ -25,7 +27,8 @@ final class UntiledSizeTests: XCTestCase {
         let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
         XCTAssertEqual(
             GridLayout().sizedUntileFrame(
-                keeping: CGPoint(x: 1500, y: 900), for: .quarters, in: bounds),
+                keepingTopOf: CGRect(x: 1500, y: 900, width: 200, height: 200),
+                for: .quarters, in: bounds),
             CGRect(x: 800, y: 500, width: 800, height: 500))
     }
 
@@ -38,18 +41,21 @@ final class UntiledSizeTests: XCTestCase {
         edited.sixthsLeftSplit = 0.1
         XCTAssertEqual(
             edited.sizedUntileFrame(
-                keeping: CGPoint(x: 12, y: 34), for: .quarters, in: bounds),
-            CGRect(x: 12, y: 34, width: 800, height: 500))
+                keepingTopOf: CGRect(x: 12, y: 34, width: 700, height: 900),
+                for: .quarters, in: bounds),
+            CGRect(x: 12, y: 434, width: 800, height: 500))
         let sixths = edited.sizedUntileFrame(
-            keeping: CGPoint(x: 12, y: 34), for: .sixths, in: bounds)
-        XCTAssertEqual(sixths.origin, CGPoint(x: 12, y: 34))
+            keepingTopOf: CGRect(x: 12, y: 34, width: 700, height: 900),
+            for: .sixths, in: bounds)
+        XCTAssertEqual(sixths.maxY, 934, "the top edge stays, the bottom rises")
         XCTAssertEqual(sixths.height, 500)
         XCTAssertEqual(sixths.width, 1600.0 / 3.0, accuracy: 0.0001)
     }
 
     func testSizedUntileFrameDegenerateBoundsSkips() {
         let frame = GridLayout().sizedUntileFrame(
-            keeping: CGPoint(x: 12, y: 34), for: .quarters, in: .zero)
+            keepingTopOf: CGRect(x: 12, y: 34, width: 0, height: 0),
+            for: .quarters, in: .zero)
         XCTAssertEqual(frame.origin, CGPoint(x: 12, y: 34))
         XCTAssertEqual(frame.size, .zero)
         XCTAssertTrue(
@@ -91,7 +97,7 @@ final class WindowBirthTests: XCTestCase {
             frame: CGRect(x: 10, y: 10, width: 800, height: 600))
 
         let landed = gateway.frame(of: handle)!
-        XCTAssertEqual(landed.origin, CGPoint(x: 10, y: 10))
+        XCTAssertEqual(landed.origin, CGPoint(x: 10, y: 110))
         XCTAssertEqual(landed.height, 500)
         XCTAssertEqual(landed.width, 1600.0 / 3.0, accuracy: 0.0001)
         let id = controller.registeredID(for: handle)
@@ -108,7 +114,7 @@ final class WindowBirthTests: XCTestCase {
 
         XCTAssertEqual(
             gateway.frame(of: handle),
-            CGRect(x: 20, y: 30, width: 800, height: 500))
+            CGRect(x: 20, y: 230, width: 800, height: 500))
     }
 
     func testBirthWriteRefusalLeavesWindowAlone() {
@@ -210,7 +216,7 @@ final class UntiledExitTests: XCTestCase {
 
     func testDragOutDropIsSizedToLayout() {
         // Two stacked sixths; b is dragged out and dropped at (300, 400).
-        // The drop origin takes the sixth footprint, the freed cells
+        // The drop's top edge takes the sixth footprint, the freed cells
         // still reflow into the survivor, and the growth still shares one
         // undo chapter. A sixth's width is 1600 x (1/3) in the grid, one
         // ulp off the 1600 / 3 literal.
@@ -225,7 +231,7 @@ final class UntiledExitTests: XCTestCase {
         controller.untileFromDrag(bID)
 
         let landed = gateway.frame(of: b)!
-        XCTAssertEqual(landed.origin, CGPoint(x: 300, y: 400))
+        XCTAssertEqual(landed.origin, CGPoint(x: 300, y: 200))
         XCTAssertEqual(landed.height, 500)
         XCTAssertEqual(landed.width, 1600.0 / 3.0, accuracy: 0.0001)
         XCTAssertEqual(
@@ -262,7 +268,7 @@ final class UntiledExitTests: XCTestCase {
         gateway.simulateSpaceChange()
 
         let landed = gateway.frame(of: handle)!
-        XCTAssertEqual(landed.origin, CGPoint(x: 12, y: 34))
+        XCTAssertEqual(landed.origin, CGPoint(x: 12, y: 0))
         XCTAssertEqual(landed.height, 500)
         XCTAssertEqual(
             landed.width, 1600.0 / 3.0, accuracy: 0.0001,

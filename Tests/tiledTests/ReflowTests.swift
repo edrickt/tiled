@@ -390,7 +390,7 @@ extension ReflowTests {
         XCTAssertEqual(canvas.state.slot(of: 2), .sixthLeft, "the survivor expands up")
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthLeft, for: b))
         XCTAssertTrue(canvas.state.slot(of: 1) == nil, "the evicted window is untiled")
-        XCTAssertEqual(gateway.frame(of: a)?.origin, .zero)
+        XCTAssertEqual(gateway.frame(of: a)?.origin, CGPoint(x: 0, y: 100))
         XCTAssertEqual(gateway.frame(of: a)?.height, 500)
         XCTAssertEqual(
             gateway.frame(of: a)!.width, 1600.0 / 3.0, accuracy: 0.0001,
@@ -502,7 +502,7 @@ extension ReflowTests {
             "the survivor returns to the slot it held before the reflow")
         XCTAssertEqual(gateway.frame(of: b), expectedRect(.sixthBottomLeft, for: b))
         XCTAssertTrue(canvas.state.slot(of: 1) == nil, "the evicted window stays untiled")
-        XCTAssertEqual(gateway.frame(of: a)?.origin, .zero)
+        XCTAssertEqual(gateway.frame(of: a)?.origin, CGPoint(x: 0, y: 100))
         XCTAssertEqual(gateway.frame(of: a)?.height, 500)
         XCTAssertEqual(
             gateway.frame(of: a)!.width, 1600.0 / 3.0, accuracy: 0.0001,
