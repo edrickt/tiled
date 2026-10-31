@@ -102,8 +102,26 @@ final class LiveAXObserverDriver: AXObserverDriver {
             CFRunLoopMode.commonModes)
     }
 
+    /// The pid that owns a delivered notification's element. Creation
+    /// notifications arrive with the newborn window's element, never the
+    /// app element the subscription was registered on — so the app
+    /// element's hash cannot name the pid, and the owner is read straight
+    /// off the delivered element instead. Internal so the routing is
+    /// pinned without an Accessibility grant.
+    static func creationPid(from element: AXUIElement) -> pid_t? {
+        var pid: pid_t = 0
+        return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+    }
+
     private static let callback: AXObserverCallback = {
         _, element, notification, _ in
+        if (notification as String) == kAXWindowCreatedNotification as String {
+            LiveWindowGateway.active?.handleAXNotification(
+                notification: notification as String,
+                token: UInt(CFHash(element)),
+                pid: creationPid(from: element))
+            return
+        }
         LiveWindowGateway.active?.handleAXNotification(
             notification: notification as String,
             token: UInt(CFHash(element)))
@@ -938,29 +956,77 @@ final class LiveWindowGateway: WindowGateway {
             list.map { UInt(CFHash($0)) })
     }
 
+    /// Whether a listed element is already managed: its token is
+    /// observed, or its identity matches an observed window. Tokens are
+    /// hashes, so identity confirms before a handle is reused or issued.
+    /// Focus-only bindings — adopted by a focus read, never observed or
+    /// sized — never shadow a birth: the newborn loop reuses their handle
+    /// instead. Internal so the rule is pinned without an Accessibility
+    /// grant.
+    static func isManagedBirth(
+        token: UInt, element: AXUIElement,
+        observedTokens: Set<UInt>, observedElements: [AXUIElement]
+    ) -> Bool {
+        if observedTokens.contains(token) { return true }
+        return observedElements.contains { CFEqual($0, element) }
+    }
+
     /// One window-creation notification for `pid`: diffs the app's window
-    /// list against its bindings and baseline, and routes each genuine
-    /// newborn to the birth callback. Dead-on-arrival windows are
+    /// list against its observed bindings and baseline, and routes each
+    /// genuine newborn to the birth callback. Dead-on-arrival windows are
     /// dropped before the callback, never reported.
     private func windowCreated(pid: pid_t) {
         guard let handler = creationHandler else { return }
         guard let listed = Self.appWindowList(pid: pid) else { return }
-        let bound = Set(
-            bindings.values.filter { $0.pid == pid }.map(\.token))
+        // A focus read adopts a window before its creation notification
+        // is processed; that focus-only binding (never observed, never
+        // sized) must not shadow the birth the way a managed window's
+        // does.
+        let observed = bindings.values.filter {
+            $0.pid == pid && $0.observedKey != nil
+        }
+        let observedTokens = Set(observed.map(\.token))
+        let observedElements = observed.compactMap(\.element)
         var seen = creationSeenTokens[pid] ?? []
         var newborns: [AXUIElement] = []
         for element in listed {
             let token = UInt(CFHash(element))
-            guard !bound.contains(token), !seen.contains(token) else { continue }
-            // Tokens are hashes: confirm identity before issuing a handle.
-            guard !bindings.values.contains(where: {
-                $0.pid == pid && ($0.element.map { CFEqual($0, element) } ?? false)
-            }) else { continue }
+            guard
+                !Self.isManagedBirth(
+                    token: token, element: element,
+                    observedTokens: observedTokens,
+                    observedElements: observedElements),
+                !seen.contains(token)
+            else { continue }
             seen.insert(token)
             newborns.append(element)
         }
         creationSeenTokens[pid] = seen
         for element in newborns {
+            // A focus read may have adopted this window first: reuse that
+            // handle so focus and birth share one identity instead of
+            // forking a second record for the same window. A managed
+            // window re-notified this way reuses its handle too, and the
+            // birth callback's duplicate delivery drops it.
+            if let existing = bindings.first(where: {
+                $0.value.pid == pid
+                    && ($0.value.element.map { CFEqual($0, element) } ?? false)
+            })?.key {
+                let token = UInt(CFHash(element))
+                let frames = AXWindowFrames(element: element)
+                adopt(
+                    existing, element: element, token: token,
+                    frames: frames, pid: pid)
+                guard
+                    liveness(of: existing) != .dead,
+                    frame(of: existing) != nil
+                else {
+                    release(existing)
+                    continue
+                }
+                handler(existing)
+                continue
+            }
             let handle = WindowHandle(id: nextHandleID)
             nextHandleID += 1
             let token = UInt(CFHash(element))
@@ -1441,17 +1507,20 @@ final class LiveWindowGateway: WindowGateway {
     /// outlive records, so routing keys on the observation token rather
     /// than a refcon id. A released handle has forgotten its token, and
     /// the notification falls through.
-    func handleAXNotification(notification: String, token: UInt) {
+    func handleAXNotification(
+        notification: String, token: UInt, pid: pid_t? = nil
+    ) {
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] notification %@ arrived", notification)
         }
-        // Creation notifications arrive with the app element's token,
-        // which names no window: route to the pid whose window list
-        // holds the newborn.
-        if notification == kAXWindowCreatedNotification as String,
-            let pid = creationPIDs[token]
-        {
-            windowCreated(pid: pid)
+        // A creation notification arrives with the newborn window's
+        // element, never the subscribed app element: the owner read off
+        // the delivered element names the pid, and the app element's
+        // token map stays as the fallback.
+        if notification == kAXWindowCreatedNotification as String {
+            if let pid = pid ?? creationPIDs[token] {
+                windowCreated(pid: pid)
+            }
             return
         }
         guard let handle = tokenIndex[token] else {

@@ -276,10 +276,16 @@
   "        if false { return .dead }"
  ],
  [
+  "LiveWindowGateway.swift",
+  "creation notification drops the delivered element's pid (births never route)",
+  "        var pid: pid_t = 0\n        return AXUIElementGetPid(element, &pid) == .success ? pid : nil",
+  "        return nil"
+ ],
+ [
   "TilingController.swift",
   "destroyed notification ignored (slots linger until the prune tick)",
-  "        guard let id = register.liveID(for: handle) else { return }\n        guard gateway.liveness(of: handle) == .dead else {",
-  "        guard let id = register.liveID(for: handle) else { return }\n        guard false, gateway.liveness(of: handle) == .dead else {"
+  "        guard let id = register.liveID(for: handle) else { return }\n        pendingBirthSizes.removeValue(forKey: id)\n        guard gateway.liveness(of: handle) == .dead else {",
+  "        guard let id = register.liveID(for: handle) else { return }\n        pendingBirthSizes.removeValue(forKey: id)\n        guard false, gateway.liveness(of: handle) == .dead else {"
  ],
  [
   "FrameWriter.swift",

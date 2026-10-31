@@ -222,6 +222,73 @@ final class WindowBirthTests: XCTestCase {
             gateway.frame(of: handle), birthFrame,
             "untile restores the sized frame, not a stale one")
     }
+
+    func testBirthMidDragParksUnsizedUntilMouseUp() {
+        // Tearing a tab off Firefox delivers the birth while the button
+        // is down: nothing is written mid-gesture, so the resize never
+        // fights the drag.
+        controller.isMouseDown = { true }
+        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
+
+        let handle = gateway.simulateWindowCreated(frame: birth)
+
+        XCTAssertEqual(
+            gateway.frame(of: handle), birth,
+            "a mid-drag birth leaves the window where the app put it")
+        XCTAssertTrue(
+            gateway.writes.isEmpty,
+            "a mid-drag birth draws no write until the drop")
+        XCTAssertNotNil(controller.registeredID(for: handle))
+    }
+
+    func testBirthMidDragSizesAtDropPointOnMouseUp() {
+        // The parked birth lands at the drop point's quarter footprint
+        // on mouse-up: the drag decides where, Tiled decides how big.
+        controller.isMouseDown = { true }
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        gateway.clearWrites()
+        gateway.simulateSilentChange(
+            handle, to: CGRect(x: 300, y: 400, width: 800, height: 600))
+        controller.isMouseDown = { false }
+
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 300, y: 500, width: 800, height: 500),
+            "the parked birth sizes hung from the drop frame's top edge")
+        XCTAssertEqual(gateway.writes.count, 1, "one drop, one write")
+        let id = controller.registeredID(for: handle)!
+        XCTAssertNil(
+            canvas.state.slot(of: id), "a sized birth still never tiles")
+        XCTAssertEqual(
+            canvas.record(of: id)?.preTileFrame, gateway.frame(of: handle),
+            "the record reads the sized drop frame as its pre-tile frame")
+    }
+
+    func testBirthTiledMidDragKeepsTileOnMouseUp() {
+        // A hotkey while holding the button tiles the parked birth: the
+        // mouse-up flush must never yank it back to the quarter size.
+        controller.isMouseDown = { true }
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let id = controller.registeredID(for: handle)!
+        let tiled = gateway.frame(of: handle)!
+        XCTAssertEqual(canvas.state.slot(of: id), .topLeft)
+        gateway.clearWrites()
+        controller.isMouseDown = { false }
+
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            gateway.frame(of: handle), tiled,
+            "a birth tiled mid-drag keeps its tile on mouse-up")
+        XCTAssertTrue(
+            gateway.writes.isEmpty,
+            "the flush writes nothing for a window that already tiled")
+    }
 }
 
 /// The canvas exits that share the sizing: drag-out and hidden-Space

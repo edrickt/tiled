@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import XCTest
 
@@ -263,6 +264,82 @@ final class LiveGatewayWiringTests: XCTestCase {
 
         XCTAssertEqual(changes, 2)
         XCTAssertEqual(destroys, 0)
+    }
+
+    func testCreationPidResolvesTheDeliveredElementsOwner() {
+        // The regression: a creation notification arrives with the
+        // newborn window's element, never the subscribed app element, so
+        // the app element's hash cannot route it. The owner is read off
+        // the delivered element itself, with no Accessibility grant: the
+        // pid travels with the proxy, nothing is read from the app.
+        let me = ProcessInfo.processInfo.processIdentifier
+        XCTAssertEqual(
+            LiveAXObserverDriver.creationPid(
+                from: AXUIElementCreateApplication(me)),
+            me,
+            "the delivered element must name its owning pid")
+        XCTAssertEqual(
+            LiveAXObserverDriver.creationPid(from: AXUIElementCreateApplication(1)),
+            1,
+            "resolution reads the proxy, never the app")
+    }
+
+    func testCreationNotificationWithExplicitPidIgnoresTheTokenMap() {
+        // A known pid from the delivered element wins over whatever the
+        // token map says: an unlistable pid draws no birth instead of
+        // routing somewhere stale.
+        let gateway = makeGateway()
+        var births = 0
+        gateway.observeWindowCreations { _ in births += 1 }
+
+        gateway.handleAXNotification(
+            notification: kAXWindowCreatedNotification as String, token: 12345, pid: 999999)
+
+        XCTAssertEqual(births, 0, "an unlistable pid draws no birth")
+    }
+
+    func testCreationNotificationWithoutPidOrMapEntryMissesSilently() {
+        // Neither an owner nor a mapped token: the creation is
+        // unroutable and must miss without crashing, exactly as before.
+        let gateway = makeGateway()
+        var births = 0
+        gateway.observeWindowCreations { _ in births += 1 }
+
+        gateway.handleAXNotification(
+            notification: kAXWindowCreatedNotification as String, token: 12345)
+
+        XCTAssertEqual(births, 0, "an unroutable creation draws no birth")
+    }
+
+    func testManagedBirthNeedsAnObservedTokenOrIdentity() {
+        // The rule behind focus-transparent births: only observed
+        // bindings shadow a newborn. A focus-only token or element alone
+        // never does, so a window adopted by a focus read still routes.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let mine = AXUIElementCreateApplication(me)
+        let mineAgain = AXUIElementCreateApplication(me)
+        let other = AXUIElementCreateApplication(1)
+        let myToken = UInt(CFHash(mine))
+        XCTAssertTrue(
+            LiveWindowGateway.isManagedBirth(
+                token: myToken, element: mineAgain,
+                observedTokens: [myToken], observedElements: []),
+            "an observed token shadows even a reissued element")
+        XCTAssertTrue(
+            LiveWindowGateway.isManagedBirth(
+                token: 12345, element: mineAgain,
+                observedTokens: [], observedElements: [mine]),
+            "identity with an observed window shadows without the token")
+        XCTAssertFalse(
+            LiveWindowGateway.isManagedBirth(
+                token: UInt(CFHash(other)), element: other,
+                observedTokens: [myToken], observedElements: [mine]),
+            "a focus-only stranger routes: nothing observed matches it")
+        XCTAssertFalse(
+            LiveWindowGateway.isManagedBirth(
+                token: myToken, element: mineAgain,
+                observedTokens: [], observedElements: []),
+            "a focus-only token alone never shadows")
     }
 
     func testDeliveredDestroyedNotificationCallsTheDestroyHandler() {

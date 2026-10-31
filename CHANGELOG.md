@@ -6,6 +6,22 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- New windows are sized at birth again. Two silent drops, both in the
+  birth pipeline: creation notifications arrive with the newborn
+  window's element, never the subscribed app element, so the app
+  element's hash could never route them — the owner is now read off
+  the delivered element (`AXUIElementGetPid`), with the token map as
+  fallback. And a focus read adopts a window before its creation
+  notification is processed, so that focus-only binding shadowed the
+  birth — only observed bindings shadow one now, and the newborn loop
+  reuses the focus-first handle instead of forking a second identity.
+- Windows born mid-drag (tearing a tab off Firefox into a new window)
+  no longer resize mid-gesture: the birth parks unsized and lands at the
+  quarter footprint at the drop point on mouse-up. Tiling the window
+  mid-drag supersedes the parked size.
+
 ## [1.3.0] - 2026-10-31
 
 ### Changed

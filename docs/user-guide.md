@@ -191,7 +191,9 @@ tell you which app took it.
   it belongs. The menu names the effect and how to undo it ("Switched to
   Sixths · 3 windows untiled. Undo from the Tiled menu.").
 - New windows open at quarter size — top edge kept —
-  and stay floating; Tiled never auto-tiles.
+  and stay floating; Tiled never auto-tiles. A window born while the
+  mouse button is down (tearing a tab off Firefox) sizes at the drop
+  point on mouse-up, so the resize never fights the drag.
 - A display change (unplug, rearrange, resolution) re-asserts every visible
   canvas immediately. Canvas identity follows the physical display's
   CoreGraphics display number, so reordering screens never moves a display's

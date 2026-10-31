@@ -176,6 +176,18 @@ final class TilingController {
     /// once and the menu carries it instead of only logging it.
     var onLateReceipt: ((ActionReceipt) -> Void)?
 
+    /// Whether the mouse button is currently down. A birth delivered
+    /// mid-drag (tearing a tab off Firefox, dragging a link out) sizes
+    /// after the drop, never mid-gesture: sizing mid-drag fights the
+    /// user's hand for the window. Injectable so tests can stage a drag
+    /// without a real mouse.
+    var isMouseDown: () -> Bool
+
+    /// Births parked while the button was down: the window is already
+    /// claimed and recorded at its live frame, and `mouseLifted` sizes
+    /// each survivor to the quarter footprint at its drop point.
+    private var pendingBirthSizes: [WindowID: (handle: WindowHandle, birthKey: TilingSpaceKey)] = [:]
+
     private static let debugLogging = ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1"
 
     private func dbg(_ message: @autoclosure () -> String) {
@@ -183,6 +195,7 @@ final class TilingController {
             NSLog("Tiled: %@", message())
         }
     }
+
 
     init(
         gateway: WindowGateway = LiveWindowGateway(),
@@ -197,7 +210,8 @@ final class TilingController {
         observeMouseUp: (@escaping () -> Void) -> Void = { _ in },
         observeMouseDown: (@escaping (CGPoint) -> Void) -> Void = { _ in },
         observeMouseDragged: (@escaping () -> Void) -> Void = { _ in },
-        observeCursorMove: (@escaping (CGPoint) -> Void) -> Void = { _ in }
+        observeCursorMove: (@escaping (CGPoint) -> Void) -> Void = { _ in },
+        isMouseDown: @escaping () -> Bool = { NSEvent.pressedMouseButtons != 0 }
     ) {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
@@ -205,6 +219,7 @@ final class TilingController {
         self.deathConfirmation = deathConfirmation
         self.now = now
         self.uptime = uptime
+        self.isMouseDown = isMouseDown
         self.screens = screens ?? { NSScreen.screens.enumerated().map { ScreenInfo(appKit: $0.element, index: $0.offset) } }
         // Windows closed while tiled otherwise linger as ghosts until the
         // next hotkey; release their slots within seconds instead.
@@ -419,6 +434,9 @@ final class TilingController {
     private func place(
         slot: Slot, requester handle: WindowHandle, id: WindowID, on key: TilingSpaceKey
     ) -> ActionReceipt {
+        // A slot request supersedes a parked birth size: the tile owns
+        // the window now, so the mouse-up flush must never yank it.
+        pendingBirthSizes.removeValue(forKey: id)
         let hadSlot = directory.storedCanvas(for: key)?.state.slot(of: id) != nil
         let context = placementContext(for: key)
         // An expanded window getting a slot hotkey comes back to earth
@@ -1256,9 +1274,101 @@ final class TilingController {
     /// The user released the mouse button: the tracker names each pending
     /// edge drag as a resize decision, which the coordinator routes to the
     /// canvas's reassert, and decides each in-flight title-bar drag's drop.
+    /// Parked birth sizes land here too, at the drop point.
     /// Wired from the production mouse-up monitor; tests call it directly.
     func mouseLifted() {
         tracker.mouseLifted()
+        flushPendingBirths()
+    }
+
+    /// Sizes every birth parked while the button was down, now that the
+    /// drag is over. Each survivor takes the quarter footprint hung from
+    /// its drop frame's top edge, on the cursor display's canvas (the
+    /// drop display when a tab tear crosses monitors). Windows that died
+    /// mid-drag are forgotten; windows tiled mid-drag keep their tile
+    /// and are simply unparked. One menu refresh covers the whole flush.
+    private func flushPendingBirths() {
+        guard !pendingBirthSizes.isEmpty else { return }
+        let pending = pendingBirthSizes
+        pendingBirthSizes = [:]
+        dbg("flush: sizing \(pending.count) parked birth(s) at drop")
+        var changed = false
+        for (id, entry) in pending {
+            guard register.liveID(for: entry.handle) == id else {
+                dbg("flush win\(id): handle reissued mid-drag, dropping park")
+                continue
+            }
+            guard gateway.liveness(of: entry.handle) != .dead else {
+                directory.withCanvas(entry.birthKey) {
+                    $0.discard(window: id, context: placementContext(for: entry.birthKey))
+                }
+                register.forget(id)
+                gateway.release(entry.handle)
+                dbg("flush win\(id): dead at drop, forgetting")
+                changed = true
+                continue
+            }
+            guard let drop = gateway.frame(of: entry.handle), drop != .zero else {
+                pendingBirthSizes[id] = entry
+                dbg("flush win\(id): unreadable at drop, re-parked for next mouse-up")
+                continue
+            }
+            // Tiled mid-drag (hotkey while holding the button): the tile
+            // owns the window now, so the parked size must never yank it.
+            let owner = directory.owner(of: id)
+            if let owner, owner != entry.birthKey {
+                dbg("flush win\(id): migrated canvases mid-drag, dropping park")
+                continue
+            }
+            if let owner,
+                directory.storedCanvas(for: owner)?.state.slot(of: id) != nil
+            {
+                dbg("flush win\(id): tiled mid-drag, keeping tile")
+                continue
+            }
+            let key = directory.cursorKey()
+            if key != entry.birthKey {
+                directory.withCanvas(entry.birthKey) {
+                    $0.discard(window: id, context: placementContext(for: entry.birthKey))
+                }
+            }
+            let snapshot = directory.withCanvas(key) { $0 }
+            let target = snapshot.grid.sizedUntileFrame(
+                keepingTopOf: drop, in: snapshot.visibleFrame)
+            let result = frameWriter.write(
+                id, handle: entry.handle, to: target, bounds: snapshot.visibleFrame,
+                on: key, check: .none)
+            switch result {
+            case .written, .skippedNoOp:
+                directory.withCanvas(key) {
+                    $0.recordBirth(id, handle: entry.handle, frame: target)
+                }
+                discardDeferredRestores(for: entry.handle)
+                dbg("flush win\(id): sized at drop to \(target) (result=\(result))")
+                changed = true
+            case .deferredOffSpace:
+                directory.withCanvas(key) {
+                    $0.recordBirth(id, handle: entry.handle, frame: target)
+                }
+                discardDeferredRestores(for: entry.handle)
+                directory.withCanvas(key) {
+                    $0.parkBirthRestore(id: id, handle: entry.handle, frame: target)
+                }
+                dbg("flush win\(id): deferred off-Space at drop")
+                changed = true
+            case .refused:
+                directory.withCanvas(key) {
+                    $0.discard(window: id, context: placementContext(for: key))
+                }
+                register.forget(id)
+                directory.withCanvas(key) {
+                    $0.error = TilingSpace.refusalMessage(count: 1)
+                }
+                dbg("flush win\(id): refused at drop, left alone")
+                changed = true
+            }
+        }
+        if changed { onChange?() }
     }
 
     /// Routes one drag-end decision to the owning canvas. The tracker
@@ -1414,6 +1524,7 @@ final class TilingController {
     /// thread by both adapters.
     private func windowDestroyed(_ handle: WindowHandle) {
         guard let id = register.liveID(for: handle) else { return }
+        pendingBirthSizes.removeValue(forKey: id)
         guard gateway.liveness(of: handle) == .dead else {
             dbg("destroyed win\(id): still live by the death standard; prune cadence decides")
             return
@@ -1431,20 +1542,45 @@ final class TilingController {
     /// A window the OS just created: size it to the quarter footprint in
     /// place, never auto-tiled. The birth canvas is the cursor display's
     /// canvas (the display the user's attention is on), matching the status
-    /// glyph. Only a landed or deferred write claims state: a refused or
-    /// unreadable birth leaves the window exactly as its app opened it, and
-    /// any deferred restore parked for the handle stays live. The birth key
-    /// always resolves a visible canvas, so the deferred arm below is
+    /// glyph. A birth delivered while the button is down (tearing a tab
+    /// off Firefox) parks unsized and lands at the drop point on
+    /// mouse-up, so the resize never fights the drag. Only a landed or
+    /// deferred write claims sized state: a refused or unreadable birth
+    /// leaves the window exactly as its app opened it, and any deferred
+    /// restore parked for the handle stays live. The birth key always
+    /// resolves a visible canvas, so the deferred arm below is
     /// defense-in-depth, never a path births take today.
     func handleWindowCreated(_ handle: WindowHandle) {
         // A duplicate delivery: the first birth already won.
-        guard register.liveID(for: handle) == nil else { return }
+        guard register.liveID(for: handle) == nil else {
+            dbg("birth: duplicate delivery, first birth already won")
+            return
+        }
         // Dead on arrival: never owned a frame; drop without a write.
-        guard gateway.liveness(of: handle) != .dead else { return }
+        guard gateway.liveness(of: handle) != .dead else {
+            dbg("birth: dead on arrival, no write")
+            return
+        }
         // Unreadable (or zero): the window has no sane geometry, so
         // refuse to guess, like the expand toggle's no-readable-frame
         // no-op.
-        guard let live = gateway.frame(of: handle), live != .zero else { return }
+        guard let live = gateway.frame(of: handle), live != .zero else {
+            dbg("birth: unreadable or zero frame, no write")
+            return
+        }
+        if isMouseDown() {
+            let key = directory.cursorKey()
+            let id = register.claim(handle, on: key)
+            directory.withCanvas(key) {
+                $0.recordBirth(id, handle: handle, frame: live)
+            }
+            observe(window: id)
+            discardDeferredRestores(for: handle)
+            pendingBirthSizes[id] = (handle: handle, birthKey: key)
+            dbg("birth win\(id): parked mid-drag, sizing on mouse-up")
+            onChange?()
+            return
+        }
         let key = directory.cursorKey()
         let id = register.claim(handle, on: key)
         // Established with its display's visible frame when new, so the
@@ -1463,6 +1599,7 @@ final class TilingController {
             }
             observe(window: id)
             discardDeferredRestores(for: handle)
+            dbg("birth win\(id): sized to \(target) (result=\(result))")
             onChange?()
         case .deferredOffSpace:
             directory.withCanvas(key) {
@@ -1475,12 +1612,14 @@ final class TilingController {
                 $0.parkBirthRestore(id: id, handle: handle, frame: target)
             }
             observe(window: id)
+            dbg("birth win\(id): deferred off-Space, parked \(target)")
             onChange?()
         case .refused:
             register.forget(id)
             directory.withCanvas(key) {
                 $0.error = TilingSpace.refusalMessage(count: 1)
             }
+            dbg("birth win\(id): refused, left alone")
             onChange?()
         }
     }
