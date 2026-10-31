@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-31
+
 ### Fixed
 
 - New windows are sized at birth again. Two silent drops, both in the
