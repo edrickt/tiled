@@ -11,3 +11,5 @@ build/
 # Local tool state, never distributed.
 .headroom/
 .pi/
+
+.worktrees/
