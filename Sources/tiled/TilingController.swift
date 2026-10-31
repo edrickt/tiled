@@ -1428,13 +1428,14 @@ final class TilingController {
         onChange?()
     }
 
-    /// A window the OS just created: size it to the birth canvas's
-    /// layout footprint in place, never auto-tiled. The birth canvas is
-    /// the cursor display's canvas (the display the user's attention is
-    /// on), matching the status glyph. Only a landed or deferred write
-    /// claims state: a refused or unreadable birth leaves the window
-    /// exactly as its app opened it, and any deferred restore parked for
-    /// the handle stays live.
+    /// A window the OS just created: size it to the quarter footprint in
+    /// place, never auto-tiled. The birth canvas is the cursor display's
+    /// canvas (the display the user's attention is on), matching the status
+    /// glyph. Only a landed or deferred write claims state: a refused or
+    /// unreadable birth leaves the window exactly as its app opened it, and
+    /// any deferred restore parked for the handle stays live. The birth key
+    /// always resolves a visible canvas, so the deferred arm below is
+    /// defense-in-depth, never a path births take today.
     func handleWindowCreated(_ handle: WindowHandle) {
         // A duplicate delivery: the first birth already won.
         guard register.liveID(for: handle) == nil else { return }

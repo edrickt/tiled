@@ -115,12 +115,30 @@ final class WindowBirthTests: XCTestCase {
     func testZeroFrameBirthDrawsNoWrite() {
         gateway.clearWrites()
 
-        controller.handleWindowCreated(
-            gateway.addWindow(frame: .zero))
+        let handle = gateway.simulateWindowCreated(frame: .zero)
 
         XCTAssertTrue(
             gateway.writes.isEmpty,
             "a window with no readable geometry draws no birth write")
+        XCTAssertNil(
+            controller.registeredID(for: handle),
+            "a window with no readable geometry claims no record")
+    }
+
+    func testUnreadableBirthDrawsNoWriteAndClaimsNothing() {
+        let handle = gateway.addWindow(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        gateway.hideFrames.insert(handle)
+        gateway.clearWrites()
+
+        controller.handleWindowCreated(handle)
+
+        XCTAssertTrue(
+            gateway.writes.isEmpty,
+            "an unreadable birth draws no birth write")
+        XCTAssertNil(
+            controller.registeredID(for: handle),
+            "an unreadable birth claims no record")
     }
 
     func testBirthOnQuartersCanvasUsesQuarterSize() {
