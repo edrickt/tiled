@@ -16,16 +16,23 @@ Usage:
     python3 tools/mutation/mutate.py --since HEAD~2  # only files changed since a ref
     python3 tools/mutation/mutate.py --resume     # only mutants the last run did not catch
     python3 tools/mutation/mutate.py --list       # show the mutant table
-    python3 tools/mutation/mutate.py --workers 2  # fewer workers (default 4)
+    python3 tools/mutation/mutate.py --workers 2  # fewer workers (default 4-6 by core count)
     python3 tools/mutation/test_mutate.py         # the tool's own tests
 
-The table runs in parallel copy-sandboxes: the master copies Sources,
-Tests, and Package.swift into one scratch copy per worker, hands out
-mutants as workers free up, and never touches the real tree, so
-uncommitted edits are safe. Before fanning out it runs the unmutated
+The table runs in parallel copy-sandboxes under build/mutation-workers:
+the master refreshes Sources, Tests, and Package.swift into one directory
+per worker, hands out mutants as workers free up, and never touches the
+real tree, so uncommitted edits are safe. The directories persist across
+runs, so each worker's .build cache stays warm and only files changed
+since the last run recompile. Before fanning out it runs the unmutated
 suite once; a red baseline aborts the run rather than scoring mutants.
-Each worker rebuilds the mutated module (`swift build --build-tests`)
-and then runs the suite (`swift test --skip-build`).
+Each worker rebuilds the mutated module (`swift build --build-tests`,
+with `--jobs` scaled down so workers don't oversubscribe the machine)
+and then judges in two tiers: first the focused tests for the mutated
+file (`swift test --skip-build --filter <FOCUSED_TESTS[file]>`), then
+the full suite (`swift test --skip-build`) only when the focused run
+does not catch. A focused failure implies a full-suite failure, so the
+fast path never flips a verdict; it only skips redundant confirmations.
 
 While a stage is in flight, `--since <its base commit>` (optionally with a
 positional filter) keeps the run to the mutants the stage can affect. A
@@ -39,17 +46,19 @@ test, run the full table so a weakened assertion cannot hide. Run the
 full table once before committing.
 
 Exits non-zero if any mutant survives or is unresolved, so it can gate
-a release branch. This is a development tool, not part of CI: a full
-143-mutant table takes several minutes on the 8 GB M1 Air.
+a release branch. This is a development tool, not part of CI: a warm run
+of the full table takes a few minutes (roughly half the old wall time;
+the first run after this tool or the sources change pays for cold
+per-worker builds).
 """
 import argparse
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -60,11 +69,53 @@ SOURCE_PREFIX = "Sources/tiled/"
 SUITE_PREFIX = "Tests/"
 SUITE_FILES = ("Package.swift",)
 
-DEFAULT_WORKERS = 4
+# Measured on the 8 GB M1 Air: 4-6 workers run the table in the same wall
+# time, while 8 workers are markedly slower (memory contention between
+# parallel swiftc/test processes outweighs the extra parallelism).
+DEFAULT_WORKERS = max(4, min(6, os.cpu_count() or 4))
 STEP_TIMEOUT = 900
 BUILD_COMMAND = ["swift", "build", "--build-tests"]
 TEST_COMMAND = ["swift", "test", "--skip-build"]
 PREFLIGHT_COMMAND = ["swift", "test"]
+WORKER_BASE = os.path.join(ROOT, "build", "mutation-workers")
+
+# Tier-1 `swift test --filter` regex per mutated source file: the test
+# classes likely to catch its mutants. Anything tier-1 does not catch
+# falls back to the full suite, so a missing class only costs speed,
+# never a wrong verdict. Files not listed here default to their own
+# basename stem (e.g. DragTracker.swift -> DragTrackerTests).
+FOCUSED_TESTS = {
+    "TilingSpace.swift": (
+        "TilingSpace|TilingState|Reflow|Swap|Undo|Evict|Expand|"
+        "SpaceIndependence|Minimum|Untiled|Mirror|Splitter|"
+        "ScreenOwnership|Matrix|Reassert|WindowBirth|HideIcon|"
+        "PerMonitor|Neighbour|ActionReceipt|ExpectedWrite|FakeGateway"
+    ),
+    "Layout.swift": (
+        "Layout|Reflow|Swap|TilingSpace|TilingState|MenuModel|MenuText|"
+        "Matrix|SpaceIndependence|Undo"
+    ),
+    "TilingController.swift": (
+        "Controller|LidSleep|AXLiveness|Reassert|TilingState|GridLayout|"
+        "Reflow|Swap|Evict|Minimum|Undo|StatusIcon|MenuReads|ActionReceipt"
+    ),
+    "LiveWindowGateway.swift": (
+        "LiveGateway|AXConversion|AXFocus|AXLiveness|AXWrite|"
+        "HandleIdentity|ObservationRegistry"
+    ),
+    "DragTracker.swift": "DragTracker|SplitterBackup",
+    "FrameWriter.swift": "FrameWriter",
+    "HotkeyService.swift": "HotkeyService|HotkeyRegistration|HotkeyBinding",
+    "AppLaunchPlan.swift": "AppLaunchPlan|AppSettings",
+    "CanvasDirectory.swift": "Canvas|ScreenOwnership",
+    "HotkeyActionRouter.swift": "HotkeyActionRouter",
+    "MenuBarPresenter.swift": "MenuBar|StatusIcon|AppDelegateMenu",
+    "SettingsShortcutsTab.swift": "Shortcuts",
+    "DisplaySpace.swift": "Display|PerMonitor|Screen",
+    "StatusIcon.swift": "StatusIcon|MenuBar|AppDelegateMenu",
+    "WindowRegister.swift": "WindowRegister",
+    "MenuReads.swift": "MenuReads|AppDelegateMenu",
+}
 JUDGED_STATUSES = ("CAUGHT", "SURVIVED")
 
 
@@ -240,38 +291,75 @@ def patch_sandbox(sandbox, mutant):
     return None
 
 
+def focused_filter_for(path):
+    """The tier-1 `swift test --filter` regex for a mutant's source file."""
+    if path in FOCUSED_TESTS:
+        return FOCUSED_TESTS[path]
+    return re.escape(os.path.splitext(os.path.basename(path))[0])
+
+
+def focused_test_command(path):
+    """The tier-1 screen: only the mutated file's likely tests."""
+    return [*TEST_COMMAND, "--filter", focused_filter_for(path)]
+
+
 def create_sandbox(base, index, root=ROOT):
-    """One worker's scratch copy of the build inputs."""
+    """One worker's scratch copy of the build inputs.
+
+    The directory persists across runs, so the worker's .build cache stays
+    warm: only files changed since the last run recompile. Sources, Tests,
+    and Package.swift are refreshed from the working tree every run (a
+    stale file from another branch must never leak in); anything else the
+    worker owns, notably .build, is left alone.
+    """
     sandbox = os.path.join(base, f"worker-{index + 1}")
-    os.makedirs(sandbox)
+    if os.path.isdir(sandbox):
+        for name in ("Sources", "Tests", "Package.swift"):
+            target = os.path.join(sandbox, name)
+            if os.path.isdir(target) and not os.path.islink(target):
+                shutil.rmtree(target, ignore_errors=True)
+            elif os.path.lexists(target):
+                os.remove(target)
+    else:
+        os.makedirs(sandbox)
     shutil.copytree(os.path.join(root, "Sources"), os.path.join(sandbox, "Sources"))
     shutil.copytree(os.path.join(root, "Tests"), os.path.join(sandbox, "Tests"))
     shutil.copy2(os.path.join(root, "Package.swift"), sandbox)
     return sandbox
 
 
-def process_mutant(mutant, sandbox):
+def process_mutant(mutant, sandbox, build_command=BUILD_COMMAND):
     """Judge one mutant in its sandbox; never raises.
 
     Each verdict comes from a pristine tree with exactly this mutant
     applied: the sandbox is reset first, then the mutant patched, then the
     module rebuilt and the suite run. The rebuild is as load-bearing as the
     reset — skipping it would silently run the previous mutant's binary.
+
+    The suite runs in two tiers: the focused tests first, then the full
+    suite only when the focused run does not catch. Returns (status,
+    ran_full_suite); a build failure or stale target never reaches either
+    tier, and a timeout reports TIMEOUT without a second tier (a hung
+    focused run would hang the full one too).
     """
+    ran_full_suite = False
     try:
         reset_sandbox(sandbox)
         status = patch_sandbox(sandbox, mutant)
         if status is None:
-            build = run_command(BUILD_COMMAND, sandbox)
+            build = run_command(build_command, sandbox)
             if build.returncode == 0:
-                status = classify(run_command(TEST_COMMAND, sandbox))
+                status = classify(run_command(focused_test_command(mutant[0]), sandbox))
+                if status != "CAUGHT":
+                    ran_full_suite = True
+                    status = classify(run_command(TEST_COMMAND, sandbox))
             else:
                 status = "INVALID(compile)"
     except subprocess.TimeoutExpired:
         status = "TIMEOUT"
     except Exception as error:
         status = error_status(error)
-    return status
+    return status, ran_full_suite
 
 
 def preflight():
@@ -401,15 +489,27 @@ def main():
     worker_count = min(args.workers, len(mutants))
     print(f"pre-flight: suite green; scoring {len(mutants)} mutants "
           f"with {worker_count} workers", flush=True)
-    sandbox_base = tempfile.mkdtemp(prefix="tiled-mutants-")
-    try:
-        sandboxes = [create_sandbox(sandbox_base, slot) for slot in range(worker_count)]
-        results = run_parallel(
-            mutants, worker_count,
-            lambda mutant, slot: process_mutant(mutant, sandboxes[slot]),
-        )
-    finally:
-        shutil.rmtree(sandbox_base, ignore_errors=True)
+    # Cap jobs per build so parallel cold builds fit in memory, but never
+    # --jobs 1: a single job drops SwiftPM out of batch mode and turns a
+    # one-file incremental rebuild from ~1s into a ~20s near-full rebuild.
+    jobs = max(2, (os.cpu_count() or 4) // worker_count)
+    build_command = [*BUILD_COMMAND, "--jobs", str(jobs)]
+    os.makedirs(WORKER_BASE, exist_ok=True)
+    sandboxes = [create_sandbox(WORKER_BASE, slot) for slot in range(worker_count)]
+    full_suite_runs = [0]
+    full_lock = threading.Lock()
+
+    def judge(mutant, slot):
+        status, ran_full_suite = process_mutant(mutant, sandboxes[slot], build_command)
+        if ran_full_suite:
+            with full_lock:
+                full_suite_runs[0] += 1
+        return status
+
+    results = run_parallel(mutants, worker_count, judge)
+    print(f"tiers: focused suite decided "
+          f"{len(mutants) - full_suite_runs[0]}/{len(mutants)} mutants; "
+          f"{full_suite_runs[0]} needed the full suite", flush=True)
 
     text, exit_code = summarize(results)
     print(text)

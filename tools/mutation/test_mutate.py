@@ -321,5 +321,149 @@ class PatchSandboxTests(unittest.TestCase):
         self.assertEqual(self.read(self.sandbox, "Other.swift"), "let other = 9")
 
 
+class FocusedFilterTests(unittest.TestCase):
+    def test_listed_files_use_their_table_entry(self):
+        self.assertIn("Reflow", mutate.focused_filter_for("TilingSpace.swift"))
+
+    def test_unlisted_files_default_to_their_basename_stem(self):
+        self.assertEqual(mutate.focused_filter_for("Sub/Thing.swift"), "Thing")
+
+    def test_default_stem_escapes_regex_characters(self):
+        self.assertEqual(mutate.focused_filter_for("Foo+Bar.swift"), r"Foo\+Bar")
+
+    def test_focused_command_appends_the_filter_to_the_test_command(self):
+        self.assertEqual(
+            mutate.focused_test_command("DragTracker.swift"),
+            ["swift", "test", "--skip-build", "--filter",
+             mutate.focused_filter_for("DragTracker.swift")],
+        )
+
+
+class CreateSandboxTests(unittest.TestCase):
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="mutate-test-")
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.root = os.path.join(self.base, "root")
+        os.makedirs(os.path.join(self.root, "Sources"))
+        os.makedirs(os.path.join(self.root, "Tests"))
+        self.write_root(os.path.join("Sources", "A.swift"), "a")
+        self.write_root(os.path.join("Tests", "B.swift"), "b")
+        self.write_root("Package.swift", "p")
+        self.workers = os.path.join(self.base, "workers")
+
+    def write_root(self, name, text):
+        path = os.path.join(self.root, name)
+        with open(path, "w") as handle:
+            handle.write(text)
+
+    def test_first_run_populates_the_inputs(self):
+        sandbox = mutate.create_sandbox(self.workers, 0, root=self.root)
+        for name in (os.path.join("Sources", "A.swift"),
+                      os.path.join("Tests", "B.swift"), "Package.swift"):
+            self.assertTrue(os.path.isfile(os.path.join(sandbox, name)))
+
+    def test_second_run_refreshes_inputs_but_keeps_the_build_cache(self):
+        sandbox = mutate.create_sandbox(self.workers, 0, root=self.root)
+        os.makedirs(os.path.join(sandbox, ".build"))
+        with open(os.path.join(sandbox, ".build", "cache"), "w") as handle:
+            handle.write("warm")
+        with open(os.path.join(sandbox, "Sources", "stale.swift"), "w") as handle:
+            handle.write("stale")
+        os.remove(os.path.join(self.root, "Sources", "A.swift"))
+        self.write_root(os.path.join("Sources", "C.swift"), "c")
+        self.assertEqual(
+            mutate.create_sandbox(self.workers, 0, root=self.root), sandbox)
+        self.assertFalse(
+            os.path.exists(os.path.join(sandbox, "Sources", "stale.swift")))
+        self.assertFalse(
+            os.path.exists(os.path.join(sandbox, "Sources", "A.swift")))
+        self.assertTrue(
+            os.path.isfile(os.path.join(sandbox, "Sources", "C.swift")))
+        self.assertTrue(
+            os.path.isfile(os.path.join(sandbox, ".build", "cache")))
+
+
+class ProcessMutantTiersTests(unittest.TestCase):
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="mutate-test-")
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.sandbox = os.path.join(self.base, "sandbox")
+        os.makedirs(os.path.join(self.sandbox, "Sources", "tiled"))
+        self.write_sandbox("let value = 1")
+        self.commands = []
+        self.plan = {}
+        # reset copies the real tree; these tests only need the patch step
+        self._reset = mutate.reset_sandbox
+        mutate.reset_sandbox = lambda sandbox, root=mutate.ROOT: None
+        self.addCleanup(setattr, mutate, "reset_sandbox", self._reset)
+        self._run = mutate.run_command
+        mutate.run_command = self.fake_run_command
+        self.addCleanup(setattr, mutate, "run_command", self._run)
+
+    def write_sandbox(self, text):
+        path = os.path.join(self.sandbox, "Sources", "tiled", "Thing.swift")
+        with open(path, "w") as handle:
+            handle.write(text)
+
+    def fake_run_command(self, command, cwd):
+        self.commands.append(command)
+        if command[1] == "build":
+            return self.plan["build"]
+        if "--filter" in command:
+            return self.plan["focused"]
+        return self.plan["full"]
+
+    def mutant(self):
+        return ("Thing.swift", "value bumped", "let value = 1", "let value = 2")
+
+    def caught(self):
+        return completed(1, "Executed 10 tests, with 1 failure")
+
+    def survived(self):
+        return completed(0, "Executed 10 tests, with 0 failures")
+
+    def built(self):
+        return completed(0, "Build complete!")
+
+    def test_focused_catch_never_runs_the_full_suite(self):
+        self.plan = {"build": self.built(), "focused": self.caught(),
+                     "full": self.survived()}
+        self.assertEqual(
+            mutate.process_mutant(self.mutant(), self.sandbox), ("CAUGHT", False))
+        self.assertEqual(len(self.commands), 2)
+        self.assertIn("--filter", self.commands[1])
+
+    def test_focused_miss_falls_back_to_the_full_suite(self):
+        self.plan = {"build": self.built(), "focused": self.survived(),
+                     "full": self.caught()}
+        self.assertEqual(
+            mutate.process_mutant(self.mutant(), self.sandbox), ("CAUGHT", True))
+        self.assertEqual(len(self.commands), 3)
+        self.assertNotIn("--filter", self.commands[2])
+
+    def test_full_suite_decides_when_focused_misses(self):
+        self.plan = {"build": self.built(), "focused": self.survived(),
+                     "full": self.survived()}
+        self.assertEqual(
+            mutate.process_mutant(self.mutant(), self.sandbox),
+            ("SURVIVED", True))
+
+    def test_build_failure_never_reaches_either_tier(self):
+        self.plan = {"build": completed(1, "error: build failed")}
+        self.assertEqual(
+            mutate.process_mutant(self.mutant(), self.sandbox),
+            ("INVALID(compile)", False))
+        self.assertEqual(len(self.commands), 1)
+
+    def test_stale_target_runs_nothing(self):
+        self.write_sandbox("let value = 9")
+        self.plan = {"build": self.built(), "focused": self.caught(),
+                     "full": self.caught()}
+        self.assertEqual(
+            mutate.process_mutant(self.mutant(), self.sandbox),
+            ("STALE(find x0)", False))
+        self.assertEqual(self.commands, [])
+
+
 if __name__ == "__main__":
     unittest.main()
