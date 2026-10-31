@@ -115,8 +115,10 @@ func hotkey(_ slot: String) {
 }
 
 /// The explicit layout switch, `⌥⇧\`. A slot key never switches; this is
-/// the one action that does.
+/// the one action that does. Every window it untiles floats at the quarter
+/// footprint.
 func switchLayout() {
+    for t in tiled.keys { sized.insert(t) }
     let src = CGEventSource(stateID: .hidSystemState)
     for down in [true, false] {
         let e = CGEvent(keyboardEventSource: src, virtualKey: 42, keyDown: down) // backslash
@@ -154,7 +156,7 @@ func pressUndo() {
 }
 
 /// Evicts a tiled window with the app's ⌥⇧⌫: it leaves the grid and
-/// returns to its pre-tile frame, which `verify` then asserts.
+/// floats at the quarter footprint, which `verify` then asserts.
 @discardableResult
 func evict(_ t: String) -> Bool {
     guard tiled[t] != nil else { return false }
@@ -167,6 +169,7 @@ func evict(_ t: String) -> Bool {
     }
     usleep(900_000)
     untileMirror(t)
+    sized.insert(t)
     return true
 }
 
@@ -183,6 +186,7 @@ func axRect(_ appkit: CGRect) -> CGRect {
 
 var tiled: [String: String] = [:]        // title -> slot
 var preTile: [String: CGRect] = [:]      // title -> AX frame captured at first tile
+var sized: Set<String> = []              // titles the app untiled to the quarter footprint
 var col: CGFloat = 0.5
 // One column split, but a row split per column: the app keeps
 // `leftRowSplit` and `rightRowSplit` apart, so dragging the left
@@ -319,7 +323,23 @@ func reflow(_ freed: Set<String>, requester: String) {
     }
 }
 
-/// Whether a frame is one of the grid's slot rects under the current
+/// Mirrors GridLayout.sizedUntileFrame (quarter-only): the fresh
+/// even-split quarter hung from the frame's top edge, repinned inside the
+/// visible frame. Frames here are AX (y down); the app computes in AppKit
+/// (y up), but hang-from-top plus repin is symmetric, so this matches to
+/// the ulp and the 2px `tol` absorbs the rest.
+func sizedQuarter(_ f: CGRect) -> CGRect {
+    let axVF = CGRect(
+        x: vf.minX, y: primaryTop - vf.maxY, width: vf.width, height: vf.height)
+    let hung = CGRect(x: f.minX, y: f.minY, width: vf.width * 0.5, height: vf.height * 0.5)
+    guard axVF.width > 0, axVF.height > 0 else { return hung }
+    var dx: CGFloat = 0, dy: CGFloat = 0
+    if hung.maxX > axVF.maxX { dx = axVF.maxX - hung.maxX }
+    if hung.minX < axVF.minX { dx = axVF.minX - hung.minX }
+    if hung.maxY > axVF.maxY { dy = axVF.maxY - hung.maxY }
+    if hung.minY < axVF.minY { dy = axVF.minY - hung.minY }
+    return hung.offsetBy(dx: dx, dy: dy)
+}
 /// splitters. A window the app still has tiled reports one of these.
 func isOnGrid(_ f: CGRect) -> Bool {
     (["TL", "TR", "BL", "BR", "LH", "RH"] + sixthsSlots).contains { close(f, gridRect($0)) }
@@ -419,9 +439,11 @@ func doTile(_ t: String, _ slot: String) {
 
     for (other, _) in blockers {
         untileMirror(other)
+        sized.insert(other)
     }
     if let (evictee, home) = rehouse {
         tiled[evictee] = home
+        sized.remove(evictee)
     }
     // Only a really-floating frame becomes a restore target: a grid rect
     // means the app still has the window tiled (the mirror can lag the
@@ -535,9 +557,13 @@ func verify(_ label: String, except excluded: Set<String> = []) {
     }
     for (t, pf) in preTile where tiled[t] == nil {
         guard frameOf(t) != nil else { continue }
-        if let act = frameOf(t), !close(act, pf) {
+        // Windows the app untiled float at the quarter footprint hung from
+        // their pre-tile top edge; never-tiled windows (a requester the app
+        // refused or that never landed) keep the raw frame.
+        let exp = sized.contains(t) ? sizedQuarter(pf) : pf
+        if let act = frameOf(t), !close(act, exp) {
             ok = false
-            print("  FAIL \(label): \(t) (floating) exp=\(pf) act=\(act)")
+            print("  FAIL \(label): \(t) (floating) exp=\(exp) act=\(act)")
         }
     }
     if ok { pass += 1; print("PASS \(label)") } else { fail += 1; print(">>>> FAILED: \(label)") }
@@ -556,10 +582,9 @@ for w in hostWindows() {
 }
 usleep(400_000)
 
-// A fresh canvas starts in Sixths. Switch it explicitly to Quarters for
-// the quarters family below; a slot key never switches a layout.
+// A fresh canvas starts in Quarters, so the quarters family below needs
+// no switch; a slot key never switches a layout.
 focus("HOSTA")
-switchLayout()
 
 // MARK: S1 - tile four quarters
 
@@ -581,11 +606,12 @@ verify("S1b sixths-only key changed neither layout nor occupancy")
 // The switch is the newest chapter, so one undo must put back both the
 // four quarter windows and the quarters layout. `preTile` holds each
 // window's setup frame, captured when S1 first tiled it; after the switch
-// the empty `tiled` map makes `verify` assert exactly those frames.
+// the empty `tiled` map makes `verify` assert the quarter footprint hung
+// from each of those frames.
 let quartersBefore = tiled
 switchLayout()
 tiled = [:]
-verify("S1c switch untiled all four windows to their pre-tile frames")
+verify("S1c switch untiled all four windows to the quarter footprint")
 pressUndo()
 tiled = quartersBefore
 verify("S1d undo restored the four quarter windows and the layout")
