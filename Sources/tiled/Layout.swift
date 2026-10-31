@@ -525,6 +525,30 @@ struct GridLayout: Equatable {
         }
     }
 
+    /// The frame a floating window takes on this canvas: always the
+    /// quarters even-split footprint (a quarter) hung from `frame`'s top
+    /// edge, kept inside `bounds`, regardless of canvas layout. Every new
+    /// window and every tiling exit lands here, so all floating windows
+    /// match one predictable size.
+    ///
+    /// A window leaving tiling keeps its top edge and pulls its bottom
+    /// edge up to the grid's size, so it reads as belonging to the canvas
+    /// it now floats over. The size always comes from a fresh even-split
+    /// grid, never this canvas's drag-edited splitters: a freed window
+    /// must not inherit the resize it just escaped. The pin reuses the write policy's post-clamp shape: a frame that
+    /// covers the screen edge it already hugged stops at that edge instead
+    /// of spilling off screen, and every other frame keeps its top edge
+    /// exactly.
+    ///
+    /// Degenerate `bounds` (a display whose visible frame has no extent)
+    /// has no edge to pin against, so the frame is left unpinned at the
+    /// reference size, which is itself zero: top edge kept, never a NaN.
+    func sizedUntileFrame(
+        keepingTopOf frame: CGRect, in bounds: CGRect
+    ) -> CGRect {
+        sizedUntileFrame(keepingTopOf: frame, for: .quarters, in: bounds)
+    }
+
     /// The frame an untiled window takes on this canvas: the layout's
     /// regular even-split footprint (a quarter in quarters, a small sixth
     /// in sixths) hung from `frame`'s top edge, kept inside `bounds`.

@@ -61,6 +61,15 @@ final class UntiledSizeTests: XCTestCase {
         XCTAssertTrue(
             [frame.origin.x, frame.origin.y, frame.width, frame.height].allSatisfy(\.isFinite))
     }
+
+    func testQuarterOnlyHelperAlwaysUsesTopLeft() {
+        let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        XCTAssertEqual(
+            GridLayout().sizedUntileFrame(
+                keepingTopOf: CGRect(x: 10, y: 10, width: 800, height: 600),
+                in: bounds),
+            CGRect(x: 10, y: 110, width: 800, height: 500))
+    }
 }
 
 /// Windows are sized to the birth canvas's layout at creation: the
