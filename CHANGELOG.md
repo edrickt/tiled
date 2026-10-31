@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-31
+
 ### Changed
 
 - Every floating window lands at quarter size regardless of layout: new
