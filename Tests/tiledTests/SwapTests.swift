@@ -191,11 +191,9 @@ final class SwapTests: XCTestCase {
             gateway.frame(of: c)?.origin.y, 0,
             "the expanded window keeps its untangled top edge")
         XCTAssertEqual(gateway.frame(of: c)?.height, 500)
-        XCTAssertEqual(
-            gateway.frame(of: c)!.origin.x, 3200.0 / 3.0, accuracy: 0.0001)
-        XCTAssertEqual(
-            gateway.frame(of: c)!.width, 1600.0 / 3.0, accuracy: 0.0001,
-            "the expanded window untangles to the sixth footprint, repinned inside")
+        XCTAssertEqual(gateway.frame(of: c)!.origin.x, 800)
+        XCTAssertEqual(gateway.frame(of: c)!.width, 800,
+            "the expanded window untangles to the quarter footprint, repinned inside")
         XCTAssertEqual(canvas.state.slot(of: 1), .sixthMiddle, "the requester still lands")
     }
 }

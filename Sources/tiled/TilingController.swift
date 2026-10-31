@@ -1450,8 +1450,7 @@ final class TilingController {
         // footprint below always derives from the canvas's own geometry.
         let snapshot = directory.withCanvas(key) { $0 }
         let target = snapshot.grid.sizedUntileFrame(
-            keepingTopOf: live, for: snapshot.state.layout,
-            in: snapshot.visibleFrame)
+            keepingTopOf: live, in: snapshot.visibleFrame)
         let context = placementContext(for: key)
         let result = frameWriter.write(
             id, handle: handle, to: target, bounds: snapshot.visibleFrame,

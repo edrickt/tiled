@@ -22,7 +22,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-make check             # unit suite (1005 tests) and the published count
+make check             # unit suite (1009 tests) and the published count
 make test              # same suite with the full transcript
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel

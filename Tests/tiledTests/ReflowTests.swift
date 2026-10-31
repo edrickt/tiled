@@ -393,8 +393,8 @@ extension ReflowTests {
         XCTAssertEqual(gateway.frame(of: a)?.origin, CGPoint(x: 0, y: 100))
         XCTAssertEqual(gateway.frame(of: a)?.height, 500)
         XCTAssertEqual(
-            gateway.frame(of: a)!.width, 1600.0 / 3.0, accuracy: 0.0001,
-            "the evicted window floats at the sixth footprint")
+            gateway.frame(of: a)!.width, 800,
+            "the evicted window floats at the quarter footprint")
     }
 
     func testRefusedReflowWriteRollsTheSurvivorBack() {
@@ -505,7 +505,7 @@ extension ReflowTests {
         XCTAssertEqual(gateway.frame(of: a)?.origin, CGPoint(x: 0, y: 100))
         XCTAssertEqual(gateway.frame(of: a)?.height, 500)
         XCTAssertEqual(
-            gateway.frame(of: a)!.width, 1600.0 / 3.0, accuracy: 0.0001,
+            gateway.frame(of: a)!.width, 800,
             "undo leaves the evicted window at its sized frame")
     }
 

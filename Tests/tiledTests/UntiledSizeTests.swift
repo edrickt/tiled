@@ -2,7 +2,7 @@ import CoreGraphics
 import XCTest
 @testable import tiled
 
-/// The pure sizing every untile exit shares: the layout's regular
+/// The pure sizing every untile exit shares: the quarters regular
 /// even-split footprint, hung from the window's top edge, kept inside
 /// the visible frame.
 final class UntiledSizeTests: XCTestCase {
@@ -10,17 +10,8 @@ final class UntiledSizeTests: XCTestCase {
         let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
         let source = CGRect(x: 100, y: 100, width: 700, height: 900)
         XCTAssertEqual(
-            GridLayout().sizedUntileFrame(
-                keepingTopOf: source, for: .quarters, in: bounds),
+            GridLayout().sizedUntileFrame(keepingTopOf: source, in: bounds),
             CGRect(x: 100, y: 500, width: 800, height: 500))
-        // A sixth's width is 1600 x (1/3) in the grid, one ulp away from
-        // 1600 / 3, so it is read at the suite's sixth-width tolerance.
-        let sixths = GridLayout().sizedUntileFrame(
-            keepingTopOf: source, for: .sixths, in: bounds)
-        XCTAssertEqual(sixths.minX, 100)
-        XCTAssertEqual(sixths.maxY, 1000, "the top edge stays, the bottom rises")
-        XCTAssertEqual(sixths.height, 500)
-        XCTAssertEqual(sixths.width, 1600.0 / 3.0, accuracy: 0.0001)
     }
 
     func testSizedUntileFrameRepinsInsideBounds() {
@@ -28,7 +19,7 @@ final class UntiledSizeTests: XCTestCase {
         XCTAssertEqual(
             GridLayout().sizedUntileFrame(
                 keepingTopOf: CGRect(x: 1500, y: 900, width: 200, height: 200),
-                for: .quarters, in: bounds),
+                in: bounds),
             CGRect(x: 800, y: 500, width: 800, height: 500))
     }
 
@@ -42,20 +33,14 @@ final class UntiledSizeTests: XCTestCase {
         XCTAssertEqual(
             edited.sizedUntileFrame(
                 keepingTopOf: CGRect(x: 12, y: 34, width: 700, height: 900),
-                for: .quarters, in: bounds),
+                in: bounds),
             CGRect(x: 12, y: 434, width: 800, height: 500))
-        let sixths = edited.sizedUntileFrame(
-            keepingTopOf: CGRect(x: 12, y: 34, width: 700, height: 900),
-            for: .sixths, in: bounds)
-        XCTAssertEqual(sixths.maxY, 934, "the top edge stays, the bottom rises")
-        XCTAssertEqual(sixths.height, 500)
-        XCTAssertEqual(sixths.width, 1600.0 / 3.0, accuracy: 0.0001)
     }
 
     func testSizedUntileFrameDegenerateBoundsSkips() {
         let frame = GridLayout().sizedUntileFrame(
             keepingTopOf: CGRect(x: 12, y: 34, width: 0, height: 0),
-            for: .quarters, in: .zero)
+            in: .zero)
         XCTAssertEqual(frame.origin, CGPoint(x: 12, y: 34))
         XCTAssertEqual(frame.size, .zero)
         XCTAssertTrue(
@@ -72,11 +57,9 @@ final class UntiledSizeTests: XCTestCase {
     }
 }
 
-/// Windows are sized to the birth canvas's layout at creation: the
-/// cursor display's canvas decides the footprint, the window stays
-/// floating, and only a landed write claims state. A sixth's width is
-/// 1600 x (1/3) in the grid, one ulp off the 1600 / 3 literal, so every
-/// sixths width below reads at the suite's sixth-width tolerance.
+/// Windows are always sized to a quarter at creation: the cursor
+/// display's canvas decides where, never how big. The window stays
+/// floating, and only a landed write claims state.
 final class WindowBirthTests: XCTestCase {
     private static let screen = ScreenInfo(
         id: ScreenID(rawValue: 1),
@@ -101,20 +84,43 @@ final class WindowBirthTests: XCTestCase {
         harness.fireCursorMove(to: CGPoint(x: 500, y: 500))
     }
 
-    func testNewWindowIsSizedToCanvasLayoutAtBirth() {
+    func testNewWindowIsSizedToQuarterRegardlessOfLayout() {
+        // A Sixths canvas still births a quarter: the layout never decides
+        // the floating size.
         controller.handleSwitchLayout(to: .sixths)
         let handle = gateway.simulateWindowCreated(
             frame: CGRect(x: 10, y: 10, width: 800, height: 600))
 
         let landed = gateway.frame(of: handle)!
-        XCTAssertEqual(landed.origin, CGPoint(x: 10, y: 110))
-        XCTAssertEqual(landed.height, 500)
-        XCTAssertEqual(landed.width, 1600.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(landed, CGRect(x: 10, y: 110, width: 800, height: 500))
         let id = controller.registeredID(for: handle)
         XCTAssertNotNil(id)
         XCTAssertNil(
             canvas.state.slot(of: id!), "a birth sizes, never tiles")
         XCTAssertEqual(gateway.writes.count, 1, "one birth, one write")
+    }
+
+    func testBirthNearScreenEdgeRepinsInsideAtQuarterSize() {
+        // A Sixths-canvas birth spilling off the canvas repins inside at
+        // quarter size, hugging the screen edge instead of spilling off.
+        controller.handleSwitchLayout(to: .sixths)
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 1500, y: 900, width: 200, height: 200))
+
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 800, y: 500, width: 800, height: 500))
+    }
+
+    func testZeroFrameBirthDrawsNoWrite() {
+        gateway.clearWrites()
+
+        controller.handleWindowCreated(
+            gateway.addWindow(frame: .zero))
+
+        XCTAssertTrue(
+            gateway.writes.isEmpty,
+            "a window with no readable geometry draws no birth write")
     }
 
     func testBirthOnQuartersCanvasUsesQuarterSize() {
@@ -173,7 +179,7 @@ final class WindowBirthTests: XCTestCase {
         let handle = gateway.simulateWindowCreated(
             frame: CGRect(x: 10, y: 10, width: 800, height: 600))
         XCTAssertEqual(
-            gateway.frame(of: handle)!.width, 1600.0 / 3.0, accuracy: 0.0001,
+            gateway.frame(of: handle), CGRect(x: 10, y: 110, width: 800, height: 500),
             "the latest subscription still sizes births")
     }
 
@@ -226,12 +232,11 @@ final class UntiledExitTests: XCTestCase {
             deathConfirmation: 0)
     }
 
-    func testDragOutDropIsSizedToLayout() {
+    func testDragOutDropIsSizedToQuarter() {
         // Two stacked sixths; b is dragged out and dropped at (300, 400).
-        // The drop's top edge takes the sixth footprint, the freed cells
+        // The drop's top edge takes the quarter footprint, the freed cells
         // still reflow into the survivor, and the growth still shares one
-        // undo chapter. A sixth's width is 1600 x (1/3) in the grid, one
-        // ulp off the 1600 / 3 literal.
+        // undo chapter.
         let a = harness.addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
         controller.handle(slot: .sixthTopLeft)
         let b = harness.addFocusedWindow(frame: CGRect(x: 40, y: 500, width: 600, height: 300))
@@ -243,12 +248,34 @@ final class UntiledExitTests: XCTestCase {
         controller.untileFromDrag(bID)
 
         let landed = gateway.frame(of: b)!
-        XCTAssertEqual(landed.origin, CGPoint(x: 300, y: 200))
-        XCTAssertEqual(landed.height, 500)
-        XCTAssertEqual(landed.width, 1600.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(landed, CGRect(x: 300, y: 200, width: 800, height: 500))
         XCTAssertEqual(
             canvas.state.slot(of: aID), .sixthLeft, "the freed cells still reflow")
         XCTAssertEqual(canvas.undoStack.count, 1, "the reflow still shares one chapter")
+    }
+
+    func testSwitchToSixthsFloatsAtQuarterSize() {
+        // Quarters -> sixths: every window still lands at the quarter
+        // footprint, and one undo restores the windows and the layout.
+        let a = harness.addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
+        controller.handle(slot: .topLeft)
+        let b = harness.addFocusedWindow(frame: CGRect(x: 900, y: 50, width: 600, height: 450))
+        controller.handle(slot: .topRight)
+
+        controller.handleSwitchLayout(to: .sixths)
+
+        XCTAssertEqual(canvas.state.layout, .sixths)
+        XCTAssertTrue(canvas.state.occupants.isEmpty)
+        XCTAssertEqual(
+            gateway.frame(of: a), CGRect(x: 12, y: 0, width: 800, height: 500))
+        XCTAssertEqual(
+            gateway.frame(of: b), CGRect(x: 800, y: 0, width: 800, height: 500))
+
+        XCTAssertTrue(controller.undoLastDisplacement())
+        XCTAssertEqual(canvas.state.layout, .quarters, "undo restores the layout")
+        XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "a returns to its quad")
+        XCTAssertNotNil(canvas.state.occupant(of: .topRight), "b returns to its quad")
+        XCTAssertEqual(canvas.state.tiledWindows.count, 2)
     }
 
     func testSizedUntileOnHiddenSpaceDefers() {
@@ -280,10 +307,7 @@ final class UntiledExitTests: XCTestCase {
         gateway.simulateSpaceChange()
 
         let landed = gateway.frame(of: handle)!
-        XCTAssertEqual(landed.origin, CGPoint(x: 12, y: 0))
-        XCTAssertEqual(landed.height, 500)
-        XCTAssertEqual(
-            landed.width, 1600.0 / 3.0, accuracy: 0.0001,
+        XCTAssertEqual(landed, CGRect(x: 12, y: 0, width: 800, height: 500),
             "the deferred restore lands sized on return")
     }
 }

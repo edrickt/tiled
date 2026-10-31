@@ -573,8 +573,8 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(harness.frame(of: r)?.origin, .zero)
         XCTAssertEqual(harness.frame(of: r)?.height, 600)
         XCTAssertEqual(
-            harness.frame(of: r)!.width, 1600.0 / 3.0, accuracy: 0.0001,
-            "its sixth footprint sits at the pre-tile origin")
+            harness.frame(of: r)!.width, 800,
+            "its quarter footprint sits at the pre-tile origin")
         XCTAssertFalse(
             space.notice?.contains("to make room") ?? false,
             "no re-house notice for a request that never landed")
@@ -661,8 +661,8 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(harness.frame(of: b)?.origin, .zero)
         XCTAssertEqual(harness.frame(of: b)?.height, 600)
         XCTAssertEqual(
-            harness.frame(of: b)!.width, 1600.0 / 3.0, accuracy: 0.0001,
-            "the untiled window floats at the sixth footprint")
+            harness.frame(of: b)!.width, 800,
+            "the untiled window floats at the quarter footprint")
         XCTAssertEqual(outcome.forget, [b])
         XCTAssertTrue(outcome.raise)
         XCTAssertEqual(
@@ -714,7 +714,7 @@ final class TilingSpaceTests: XCTestCase {
         harness.apply(slot: .sixthTopLeft, requester: a)
         harness.apply(slot: .sixthBottomLeft, requester: b)
         // The drop moved b; drag-out never restores the pre-tile frame.
-        // The drop's top edge takes the sixth footprint instead, repinned
+        // The drop's top edge takes the quarter footprint instead, repinned
         // where the taller footprint would spill off the canvas.
         let dropped = CGRect(x: 300, y: 700, width: 500, height: 300)
         harness.gateway.setFrame(harness.handle(of: b)!, to: dropped)
@@ -724,8 +724,8 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(harness.frame(of: b)?.origin, CGPoint(x: 300, y: 400))
         XCTAssertEqual(harness.frame(of: b)?.height, 600)
         XCTAssertEqual(
-            harness.frame(of: b)!.width, 1600.0 / 3.0, accuracy: 0.0001,
-            "the drop is the placement, at the layout's footprint")
+            harness.frame(of: b)!.width, 800,
+            "the drop is the placement, at the quarter footprint")
         XCTAssertEqual(space.state.slot(of: a), .sixthLeft, "the freed cells reflow")
         XCTAssertEqual(outcome.forget, [b])
         XCTAssertNil(space.error)

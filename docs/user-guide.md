@@ -36,7 +36,7 @@ layout owns the position.
 
 | Key    | Action |
 |--------|--------|
-| ⌥⇧\   | Switch the layout of the display under the pointer (the menu's Switch Layout row follows focus instead): untiles every tiled window on that canvas (each keeps its top edge and takes the adopted layout's slot footprint); one undo restores the windows and the previous layout. On an empty canvas it just switches. |
+| ⌥⇧\   | Switch the layout of the display under the pointer (the menu's Switch Layout row follows focus instead): untiles every tiled window on that canvas (each keeps its top edge and takes the quarter footprint); one undo restores the windows and the previous layout. On an empty canvas it just switches. |
 
 ### App actions
 
@@ -48,7 +48,7 @@ slot combo:
 | Key    | Action |
 |--------|--------|
 | ⌥⇧⏎    | Expand the focused window to fill the screen (not fullscreen mode) |
-| ⌥⇧⌫    | Evict the focused window: untile it and leave it floating at the layout's slot footprint |
+| ⌥⇧⌫    | Evict the focused window: untile it and leave it floating at the quarter footprint |
 | ⌥⇧R    | Reset Splitters: snap the focused canvas's splitters back to even splits, keeping every window tiled |
 | ⌥⇧\    | Switch the layout of the display under the pointer (see above) |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden, as long as this shortcut is enabled and registered; otherwise quit and reopen Tiled) |
@@ -64,7 +64,7 @@ the expanded window alone.
 
 ### Evict (⌥⇧⌫)
 
-Evicting leaves the focused window floating at the layout's slot
+Evicting leaves the focused window floating at the quarter
 footprint (top edge kept, kept inside the visible frame) and releases
 its slot. When a tiling request evicts a window, the victim keeps its
 tiling whenever a whole slot fits: if its own slot overlaps the target and
@@ -123,7 +123,7 @@ tell you which app took it.
 
 - One window per slot.
 - Tiling a window into a slot **evicts** any window occupying an overlapping
-  slot. Evicted windows float at the layout's slot footprint, top edge kept.
+  slot. Evicted windows float at the quarter footprint, top edge kept.
   - **Mirror:** with two or more windows in the way, each moves to its own
     slot on the other side instead of untangling, so a left half tiled to the
     right half sends the two right quads to the two left quads, and a left
@@ -154,13 +154,13 @@ tell you which app took it.
 - A window re-tiling itself into an overlapping slot just moves (never evicts
   itself) and keeps its original pre-tile frame.
 - **Drag a tiled window by its title bar**: past ~25pt of drag it untiles
-  right where you dropped it (the drop's top edge takes the layout's slot
+  right where you dropped it (the drop's top edge takes the quarter
   footprint); a shorter drag snaps back into its tile. A single far jump
   with no recent hand press on the window (a programmatic move, not a
   hand drag) still snaps back, even if an unrelated click follows.
 - Use the untile row in the menu (**Untile 1 Window** / **Untile N
   Windows**, titled by count) to float every tiled window on the focused
-  canvas at the layout's slot footprint, or open a
+  canvas at the quarter footprint, or open a
   tiled window's submenu to focus it, untile just that window, or tile the
   focused window into its slot. The untile row is omitted when the focused
   canvas has no tiled windows; the window list still names windows on every
@@ -184,14 +184,13 @@ tell you which app took it.
   history; they simply wait off-menu until you swipe back.
 - Quarters and sixths are mutually exclusive per canvas: ⌥⇧\ switches the
   layout of the display under the pointer, untiling every tiled window on
-  that canvas at the adopted layout's slot footprint. One undo returns
+  that canvas at the quarter footprint. One undo returns
   the windows and the previous layout.
   A canvas keeps its layout when the board empties. A slot key never
   switches: a key with no slot in the active layout is inert and says where
   it belongs. The menu names the effect and how to undo it ("Switched to
   Sixths · 3 windows untiled. Undo from the Tiled menu.").
-- New windows open at the cursor display's canvas footprint — quarter
-  size on a Quarters canvas, sixth size on a Sixths canvas, top edge kept —
+- New windows open at quarter size — top edge kept —
   and stay floating; Tiled never auto-tiles.
 - A display change (unplug, rearrange, resolution) re-asserts every visible
   canvas immediately. Canvas identity follows the physical display's

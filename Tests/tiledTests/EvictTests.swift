@@ -194,6 +194,6 @@ final class EvictTests: XCTestCase {
         XCTAssertEqual(
             gateway.frame(of: handle),
             CGRect(x: 12, y: 0, width: 800, height: 500),
-            "evict resizes in place to the layout's slot footprint")
+            "evict resizes in place to the quarter footprint")
     }
 }

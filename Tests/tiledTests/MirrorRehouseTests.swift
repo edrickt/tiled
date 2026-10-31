@@ -296,11 +296,11 @@ final class MirrorRehouseTests: XCTestCase {
             "an evicted window keeps its origin")
         XCTAssertEqual(harness.frame(of: b)?.height, 600)
         XCTAssertEqual(
-            harness.frame(of: b)!.width, 1600.0 / 3.0, accuracy: 0.0001,
-            "an evicted window lands at the sixth footprint")
+            harness.frame(of: b)!.width, 800,
+            "an evicted window lands at the quarter footprint")
         XCTAssertEqual(harness.frame(of: c)?.origin, .zero)
         XCTAssertEqual(harness.frame(of: c)?.height, 600)
-        XCTAssertEqual(harness.frame(of: c)!.width, 1600.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(harness.frame(of: c)!.width, 800)
     }
 
     func testExpandedBlockerForcesTheGroupToUntangle() {

@@ -6,6 +6,13 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Every floating window lands at quarter size regardless of layout: new
+  windows, manual untile, eviction, untile-all, layout switch, and drag-out
+  all float at the quarter footprint (top edge kept, kept inside the
+  visible frame) instead of the canvas layout's slot size.
+
 ## [1.2.0] - 2026-10-30
 
 ### Changed
