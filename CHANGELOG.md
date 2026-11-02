@@ -6,6 +6,41 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-02
+
+### Fixed
+
+- New windows now size on their own display. Births were sized from
+  the cursor display's canvas, so a window opening on another display
+  was pinned into the wrong screen (and a hidden-Space birth could
+  write blind through the cursor's visible canvas, bypassing the
+  off-Space deferral). The birth and drop canvases resolve from the
+  window's frame, falling back to the cursor only when the frame
+  resolves to no display. Churn adoption between same-frame candidates
+  is deterministic: closest frame wins, ties break to the smallest
+  handle id.
+
+- Opening or switching Terminal tabs no longer resizes the tiled
+  window. Terminal replaces its window element on every tab switch
+  while still reporting one window, and the birth pipeline read that
+  churned identity as a newborn window and quarter-sized the tile on
+  every switch. A newborn whose frame matches an observed window of
+  the same app, and whose held element the app no longer lists, now
+  adopts that window's handle instead of birthing: genuine new
+  windows (the app still lists the old one, as in a Firefox tab
+  tear-off) still size at birth.
+
+- Churn matches within two points instead of one. Rounding plus the
+  nudge a display change or Dock shift lands between the baseline read
+  and the newborn read is still the same window; a genuinely different
+  window differs by tens of points, so the extra point buys jitter
+  tolerance without buying false adoptions.
+
+- Every canvas action re-resolves its stored frame from the live
+  display set first. A Dock toggle that fires no display-change
+  notification no longer leaves births and untiles sized from stale
+  geometry; detached displays keep their frame as before.
+
 ## [1.3.1] - 2026-10-31
 
 ### Fixed
