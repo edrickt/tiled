@@ -4,8 +4,6 @@ Native macOS window tiling with global hotkeys. It covers quarters, sixths, and 
 
 **1.0.3 · macOS 13+ · Apple Silicon + Intel · MIT**
 
-![Tiled demo](docs/assets/tiled-demo.png)
-
 <!-- TODO: capture demo still/GIF at ~1512x982 showing quarters + sixths -->
 
 ## Features
