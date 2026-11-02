@@ -1,4 +1,4 @@
-# Tiled
+# <img src="docs/assets/app-icon.png" width="48" alt="Tiled app icon"> Tiled
 
 A native macOS window manager. Tile windows into quarters (2×2 plus halves)
 or sixths (3×2 grid plus thirds and two-thirds), with global hotkeys or from
