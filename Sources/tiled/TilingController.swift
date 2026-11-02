@@ -1283,8 +1283,8 @@ final class TilingController {
 
     /// Sizes every birth parked while the button was down, now that the
     /// drag is over. Each survivor takes the quarter footprint hung from
-    /// its drop frame's top edge, on the cursor display's canvas (the
-    /// drop display when a tab tear crosses monitors). Windows that died
+    /// its drop frame's top edge, on the drop frame's display's canvas.
+    /// Windows that died
     /// mid-drag are forgotten; windows tiled mid-drag keep their tile
     /// and are simply unparked. One menu refresh covers the whole flush.
     private func flushPendingBirths() {
@@ -1326,7 +1326,7 @@ final class TilingController {
                 dbg("flush win\(id): tiled mid-drag, keeping tile")
                 continue
             }
-            let key = directory.cursorKey()
+            let key = birthKey(for: drop)
             if key != entry.birthKey {
                 directory.withCanvas(entry.birthKey) {
                     $0.discard(window: id, context: placementContext(for: entry.birthKey))
@@ -1539,17 +1539,28 @@ final class TilingController {
         onChange?()
     }
 
+    /// The canvas a birth sizes on: the display showing the window's frame,
+    /// so the footprint derives from the geometry the window is actually
+    /// on. Falls back to the cursor display's canvas only when the frame
+    /// resolves to no display. Sizing on the window's canvas also keeps the
+    /// visibility gate honest: a birth for a hidden-Space window defers
+    /// through the swipe-back reconcile instead of writing blind through
+    /// the cursor's visible canvas.
+    private func birthKey(for frame: CGRect) -> TilingSpaceKey {
+        directory.screenInfo(for: frame).map { directory.key(for: $0.id) }
+            ?? directory.cursorKey()
+    }
+
     /// A window the OS just created: size it to the quarter footprint in
-    /// place, never auto-tiled. The birth canvas is the cursor display's
-    /// canvas (the display the user's attention is on), matching the status
-    /// glyph. A birth delivered while the button is down (tearing a tab
-    /// off Firefox) parks unsized and lands at the drop point on
-    /// mouse-up, so the resize never fights the drag. Only a landed or
-    /// deferred write claims sized state: a refused or unreadable birth
-    /// leaves the window exactly as its app opened it, and any deferred
-    /// restore parked for the handle stays live. The birth key always
-    /// resolves a visible canvas, so the deferred arm below is
-    /// defense-in-depth, never a path births take today.
+    /// place, never auto-tiled. The birth canvas is the window's own
+    /// display's canvas. A birth delivered while the button is down
+    /// (tearing a tab off Firefox) parks unsized and lands at the drop
+    /// point on mouse-up, so the resize never fights the drag. Only a
+    /// landed or deferred write claims sized state: a refused or unreadable
+    /// birth leaves the window exactly as its app opened it, and any
+    /// deferred restore parked for the handle stays live. A birth for a
+    /// window on a hidden Space defers through the same swipe-back
+    /// reconcile every off-Space write shares.
     func handleWindowCreated(_ handle: WindowHandle) {
         // A duplicate delivery: the first birth already won.
         guard register.liveID(for: handle) == nil else {
@@ -1568,8 +1579,10 @@ final class TilingController {
             dbg("birth: unreadable or zero frame, no write")
             return
         }
+        dbg(
+            "birth: pid handle=\(handle.id) app=\(gateway.appName(of: handle) ?? "?") live=\(live)")
         if isMouseDown() {
-            let key = directory.cursorKey()
+            let key = birthKey(for: live)
             let id = register.claim(handle, on: key)
             directory.withCanvas(key) {
                 $0.recordBirth(id, handle: handle, frame: live)
@@ -1581,7 +1594,7 @@ final class TilingController {
             onChange?()
             return
         }
-        let key = directory.cursorKey()
+        let key = birthKey(for: live)
         let id = register.claim(handle, on: key)
         // Established with its display's visible frame when new, so the
         // footprint below always derives from the canvas's own geometry.

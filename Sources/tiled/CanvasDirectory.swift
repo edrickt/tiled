@@ -77,14 +77,18 @@ final class CanvasDirectory {
 
     var allKeys: [TilingSpaceKey] { Array(spaces.keys) }
 
-    /// One canvas mutation funnel: an existing canvas is updated in
-    /// place, a new one is established with its own display's visible
-    /// frame. Every state change goes through here so no surface can
-    /// write around the stored frame.
+    /// One canvas mutation funnel: the stored frame is re-resolved from
+    /// the live display set first, so a Dock toggle that fired no
+    /// display-change notification never leaves an action sized from
+    /// stale geometry; an existing canvas is then updated in place, a new
+    /// one established with its own display's visible frame. Every state
+    /// change goes through here so no surface can write around the
+    /// stored frame.
     @discardableResult
     func withCanvas<T>(
         _ space: TilingSpaceKey, _ body: (inout TilingSpace) -> T
     ) -> T {
+        refreshFrames([space])
         var value = spaces[space] ?? establishedCanvas(for: space)
         let result = body(&value)
         spaces[space] = value

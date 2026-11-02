@@ -342,6 +342,175 @@ final class LiveGatewayWiringTests: XCTestCase {
             "a focus-only token alone never shadows")
     }
 
+    func testChurnAdoptsStaleObservedWindowWithMatchingFrame() {
+        // Terminal replaces its window element on every tab switch while
+        // still reporting one window: the newborn shares the tile's
+        // frame, and the held element is gone from the fresh list.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let held = AXUIElementCreateApplication(me)
+        let stranger = AXUIElementCreateApplication(1)
+        let frame = CGRect(x: 0, y: 4, width: 839, height: 1015)
+        let handle = WindowHandle(id: 7)
+        let binding = LiveWindowGateway.WindowBinding(
+            element: held, pid: me,
+            frames: FakeWindowFrames(frame: frame), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: frame)
+
+        XCTAssertEqual(
+            LiveWindowGateway.churnedHandle(
+                frame: frame, listed: [stranger],
+                candidates: [handle: binding]),
+            handle,
+            "the same window under a new identity adopts, never births")
+    }
+
+    func testChurnIgnoresObservedWindowTheAppStillLists() {
+        // A Firefox tab tear-off shares the source frame mid-drag, but
+        // the source window is still listed: that birth still parks for
+        // the drop instead of adopting the source's handle.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let held = AXUIElementCreateApplication(me)
+        let heldAgain = AXUIElementCreateApplication(me)
+        let frame = CGRect(x: 0, y: 4, width: 839, height: 1015)
+        let handle = WindowHandle(id: 7)
+        let binding = LiveWindowGateway.WindowBinding(
+            element: held, pid: me,
+            frames: FakeWindowFrames(frame: frame), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: frame)
+
+        XCTAssertNil(
+            LiveWindowGateway.churnedHandle(
+                frame: frame, listed: [heldAgain],
+                candidates: [handle: binding]),
+            "a live window the app still lists never adopts")
+    }
+
+    func testChurnIgnoresDistantFrame() {
+        // A closed window replaced by a cascaded newcomer keeps the
+        // count flat, but the frame moved: that birth still sizes.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let held = AXUIElementCreateApplication(me)
+        let stranger = AXUIElementCreateApplication(1)
+        let oldFrame = CGRect(x: 840, y: 0, width: 840, height: 1019)
+        let handle = WindowHandle(id: 7)
+        let binding = LiveWindowGateway.WindowBinding(
+            element: held, pid: me,
+            frames: FakeWindowFrames(frame: oldFrame), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: oldFrame)
+
+        XCTAssertNil(
+            LiveWindowGateway.churnedHandle(
+                frame: CGRect(x: 10, y: 10, width: 800, height: 600),
+                listed: [stranger], candidates: [handle: binding]),
+            "a frame that moved is a new window, not churn")
+    }
+
+    func testChurnNeedsALastFrame() {
+        // No baseline read yet: membership is undeterminable, never an
+        // adoption.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let held = AXUIElementCreateApplication(me)
+        let stranger = AXUIElementCreateApplication(1)
+        let frame = CGRect(x: 0, y: 4, width: 839, height: 1015)
+        let handle = WindowHandle(id: 7)
+        let binding = LiveWindowGateway.WindowBinding(
+            element: held, pid: me,
+            frames: FakeWindowFrames(frame: frame), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: nil)
+
+        XCTAssertNil(
+            LiveWindowGateway.churnedHandle(
+                frame: frame, listed: [stranger],
+                candidates: [handle: binding]),
+            "without a baseline the match is a maybe, never an adopt")
+    }
+
+    func testChurnNeedsAHeldElement() {
+        // A test binding with no AX element carries no identity to prove
+        // stale: it never adopts.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let stranger = AXUIElementCreateApplication(1)
+        let frame = CGRect(x: 0, y: 4, width: 839, height: 1015)
+        let handle = WindowHandle(id: 7)
+        let binding = LiveWindowGateway.WindowBinding(
+            element: nil, pid: me,
+            frames: FakeWindowFrames(frame: frame), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: frame)
+
+        XCTAssertNil(
+            LiveWindowGateway.churnedHandle(
+                frame: frame, listed: [stranger],
+                candidates: [handle: binding]),
+            "without a held element staleness cannot be shown")
+    }
+
+    func testChurnPicksClosestFrameBreakingTiesByHandleID() {
+        // Two stale observed windows of one pid both within tolerance:
+        // the adoption must be deterministic — closest frame wins, ties
+        // go to the smallest handle id — never Dictionary order.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let stranger = AXUIElementCreateApplication(1)
+        let frame = CGRect(x: 0, y: 4, width: 839, height: 1015)
+        let drifted = CGRect(x: 0.9, y: 4, width: 839, height: 1015)
+        let driftedBinding = LiveWindowGateway.WindowBinding(
+            element: AXUIElementCreateApplication(me), pid: me,
+            frames: FakeWindowFrames(frame: drifted), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: drifted)
+        let exactBinding = LiveWindowGateway.WindowBinding(
+            element: AXUIElementCreateApplication(me), pid: me,
+            frames: FakeWindowFrames(frame: frame), token: 43,
+            observedKey: 43, changeHandler: nil,
+            destructionHandler: nil, lastFrame: frame)
+        XCTAssertEqual(
+            LiveWindowGateway.churnedHandle(
+                frame: frame, listed: [stranger],
+                candidates: [
+                    WindowHandle(id: 7): driftedBinding,
+                    WindowHandle(id: 9): exactBinding,
+                ]),
+            WindowHandle(id: 9),
+            "the closest frame wins, not the first iterated")
+        XCTAssertEqual(
+            LiveWindowGateway.churnedHandle(
+                frame: frame, listed: [stranger],
+                candidates: [
+                    WindowHandle(id: 9): exactBinding,
+                    WindowHandle(id: 7): exactBinding,
+                ]),
+            WindowHandle(id: 7),
+            "exact ties break to the smallest handle id")
+    }
+
+    func testChurnAdoptsWithinTwoPoints() {
+        // Rounding plus a one-point nudge (display change, Dock shift)
+        // between the baseline and the newborn read is still the same
+        // window: a 1.5-point drift adopts instead of quarter-sizing the
+        // tile.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let stranger = AXUIElementCreateApplication(1)
+        let frame = CGRect(x: 0, y: 4, width: 839, height: 1015)
+        let drifted = CGRect(x: 1.5, y: 4, width: 839, height: 1015)
+        let handle = WindowHandle(id: 7)
+        let binding = LiveWindowGateway.WindowBinding(
+            element: AXUIElementCreateApplication(me), pid: me,
+            frames: FakeWindowFrames(frame: drifted), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: drifted)
+
+        XCTAssertEqual(
+            LiveWindowGateway.churnedHandle(
+                frame: frame, listed: [stranger],
+                candidates: [handle: binding]),
+            handle,
+            "a jitter-scale drift is churn, not a birth")
+    }
+
     func testDeliveredDestroyedNotificationCallsTheDestroyHandler() {
         let driver = FakeAXObserverDriver()
         let gateway = makeGateway(observerDriver: driver)

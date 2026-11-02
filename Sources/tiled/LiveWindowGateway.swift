@@ -762,6 +762,21 @@ final class LiveWindowGateway: WindowGateway {
             && abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
     }
 
+    /// Churn matches within two points: rounding, plus a point of
+    /// allowance for the nudge a display change or Dock shift lands
+    /// between the baseline read and the newborn read. A genuinely
+    /// different window differs by tens of points (cascade offsets), so
+    /// the extra point buys jitter tolerance without buying false
+    /// adoptions.
+    private static let churnTolerance: CGFloat = 2
+
+    private static func churnFramesClose(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX - b.minX) <= churnTolerance
+            && abs(a.minY - b.minY) <= churnTolerance
+            && abs(a.width - b.width) <= churnTolerance
+            && abs(a.height - b.height) <= churnTolerance
+    }
+
     func observe(
         _ handle: WindowHandle, onChange: @escaping () -> Void,
         onDestroyed: @escaping () -> Void
@@ -971,6 +986,49 @@ final class LiveWindowGateway: WindowGateway {
         return observedElements.contains { CFEqual($0, element) }
     }
 
+    /// The observed handle a newborn element churns from, if any: an
+    /// observed window of the same pid whose last-read frame matches the
+    /// newborn's, and whose held element the app no longer lists. That
+    /// triple is a tab switch (Terminal replaces its window element on
+    /// every switch while still reporting one window), never a new
+    /// window: the caller adopts instead of birthing, or every switch
+    /// quarter-sizes the tile. A held element the app still lists is a
+    /// live window (a Firefox tab tear-off shares the source frame
+    /// mid-drag), so it never matches — that birth still parks for the
+    /// drop. When several candidates match, the closest frame wins and
+    // exact ties break to the smallest handle id, so the adoption never
+    /// depends on Dictionary iteration order. Internal so the rule is
+    /// pinned without an Accessibility grant.
+    static func churnedHandle(
+        frame: CGRect, listed: [AXUIElement],
+        candidates: [WindowHandle: WindowBinding]
+    ) -> WindowHandle? {
+        var best: WindowHandle?
+        var bestDistance = CGFloat.greatestFiniteMagnitude
+        for handle in candidates.keys.sorted(by: { $0.id < $1.id }) {
+            guard let binding = candidates[handle],
+                let held = binding.element,
+                let base = binding.lastFrame,
+                Self.churnFramesClose(base, frame),
+                !listed.contains(where: { CFEqual($0, held) })
+            else { continue }
+            let distance =
+                abs(base.minX - frame.minX) + abs(base.minY - frame.minY)
+                + abs(base.width - frame.width)
+                + abs(base.height - frame.height)
+            if distance < bestDistance {
+                bestDistance = distance
+                best = handle
+            }
+        }
+        if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+            NSLog(
+                "Tiled: [DEBUG-churn] frame=%@ candidates=%d chosen=%d",
+                "\(frame)", candidates.count, best?.id ?? -1)
+        }
+        return best
+    }
+
     /// One window-creation notification for `pid`: diffs the app's window
     /// list against its observed bindings and baseline, and routes each
     /// genuine newborn to the birth callback. Dead-on-arrival windows are
@@ -982,11 +1040,11 @@ final class LiveWindowGateway: WindowGateway {
         // is processed; that focus-only binding (never observed, never
         // sized) must not shadow the birth the way a managed window's
         // does.
-        let observed = bindings.values.filter {
-            $0.pid == pid && $0.observedKey != nil
+        let observedBindings = bindings.filter {
+            $0.value.pid == pid && $0.value.observedKey != nil
         }
-        let observedTokens = Set(observed.map(\.token))
-        let observedElements = observed.compactMap(\.element)
+        let observedTokens = Set(observedBindings.values.map(\.token))
+        let observedElements = observedBindings.values.compactMap(\.element)
         var seen = creationSeenTokens[pid] ?? []
         var newborns: [AXUIElement] = []
         for element in listed {
@@ -1002,16 +1060,30 @@ final class LiveWindowGateway: WindowGateway {
             newborns.append(element)
         }
         creationSeenTokens[pid] = seen
+        if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1", !newborns.isEmpty {
+            let frames = newborns.map { Self.frame(of: $0).map { "\($0)" } ?? "unreadable" }
+            NSLog(
+                "Tiled: [DEBUG-birth] pid=%d listed=%d observed=%d newborn=%d frames=%@",
+                pid, listed.count, observedBindings.count, newborns.count, frames.joined(separator: "; "))
+        }
         for element in newborns {
             // A focus read may have adopted this window first: reuse that
             // handle so focus and birth share one identity instead of
             // forking a second record for the same window. A managed
             // window re-notified this way reuses its handle too, and the
             // birth callback's duplicate delivery drops it.
-            if let existing = bindings.first(where: {
+            var existing = bindings.first(where: {
                 $0.value.pid == pid
                     && ($0.value.element.map { CFEqual($0, element) } ?? false)
-            })?.key {
+            })?.key
+            if existing == nil, let newbornFrame = Self.frame(of: element) {
+                // Tab churn: the same on-screen window under a new
+                // identity adopts its observed handle, never births.
+                existing = Self.churnedHandle(
+                    frame: newbornFrame, listed: listed,
+                    candidates: observedBindings)
+            }
+            if let existing {
                 let token = UInt(CFHash(element))
                 let frames = AXWindowFrames(element: element)
                 adopt(

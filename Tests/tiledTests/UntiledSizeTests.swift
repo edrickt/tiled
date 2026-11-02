@@ -289,6 +289,133 @@ final class WindowBirthTests: XCTestCase {
             gateway.writes.isEmpty,
             "the flush writes nothing for a window that already tiled")
     }
+
+    func testBirthSizesOnTheWindowsOwnDisplay() {
+        // Cursor on display 1, window opens on display 2: the birth is
+        // sized from display 2's visible frame and recorded there — never
+        // pinned into the cursor's display.
+        let second = ScreenInfo(
+            id: ScreenID(rawValue: 2),
+            frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            name: "Display 2",
+            displayID: CGDirectDisplayID(43))
+        let secondSpace = SpaceID(rawValue: 102)
+        harness = ControllerHarness(
+            screens: [Self.screen, second],
+            activeSpaces: [
+                Self.screen.displayID: Self.spaceA,
+                second.displayID: secondSpace,
+            ],
+            deathConfirmation: 0)
+        harness.fireCursorMove(to: CGPoint(x: 500, y: 500))
+        gateway.clearWrites()
+
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 1700, y: 100, width: 800, height: 600))
+
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 1700, y: 200, width: 800, height: 500),
+            "a birth sizes in place, on the window's own display")
+        let id = controller.registeredID(for: handle)!
+        XCTAssertNotNil(
+            controller.canvas(
+                for: TilingSpaceKey(screen: second.id, space: secondSpace)
+            ).record(of: id),
+            "the birth record lives on the window's canvas")
+        XCTAssertNil(
+            controller.canvas(
+                for: TilingSpaceKey(screen: Self.screen.id, space: Self.spaceA)
+            ).record(of: id),
+            "the cursor's canvas claims nothing")
+    }
+
+    func testBirthRefreshesStaleCanvasGeometry() {
+        // The canvas was established, then the visible frame shrank with
+        // no display-change notification (Dock shown): the next birth
+        // sizes from the live geometry, not the stored one.
+        let shrunk = ScreenInfo(
+            id: Self.screen.id,
+            frame: Self.screen.frame,
+            visibleFrame: CGRect(x: 0, y: 50, width: 1600, height: 950),
+            name: Self.screen.name,
+            displayID: Self.screen.displayID)
+        _ = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        gateway.clearWrites()
+        harness.screens = [shrunk]
+
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 10, y: 135, width: 800, height: 475),
+            "a birth sizes from the live visible frame")
+    }
+
+    func testBirthAfterSwipeSizesOnTheActiveCanvas() {
+        // Swiped to Space B, a window opens: the birth targets the active
+        // canvas and writes immediately — no deferral, no stale restore.
+        let secondSpace = SpaceID(rawValue: 102)
+        gateway.activeSpaces[Self.screen.displayID] = secondSpace
+        gateway.simulateSpaceChange()
+        gateway.clearWrites()
+
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 10, y: 110, width: 800, height: 500),
+            "a birth on the active Space sizes at once")
+        let id = controller.registeredID(for: handle)!
+        XCTAssertNotNil(
+            controller.canvas(
+                for: TilingSpaceKey(screen: Self.screen.id, space: secondSpace)
+            ).record(of: id))
+        XCTAssertTrue(
+            controller.canvas(
+                for: TilingSpaceKey(screen: Self.screen.id, space: secondSpace)
+            ).deferredRestores.isEmpty,
+            "an active-Space birth parks no restore")
+    }
+
+    func testParkedBirthFlushesOnTheDropDisplay() {
+        // Mid-drag birth on display 2 while the cursor sits on display 1:
+        // the mouse-up sizes from the drop frame's display, not the
+        // cursor's.
+        let second = ScreenInfo(
+            id: ScreenID(rawValue: 2),
+            frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            name: "Display 2",
+            displayID: CGDirectDisplayID(43))
+        let secondSpace = SpaceID(rawValue: 102)
+        harness = ControllerHarness(
+            screens: [Self.screen, second],
+            activeSpaces: [
+                Self.screen.displayID: Self.spaceA,
+                second.displayID: secondSpace,
+            ],
+            deathConfirmation: 0)
+        harness.fireCursorMove(to: CGPoint(x: 500, y: 500))
+        controller.isMouseDown = { true }
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 1700, y: 100, width: 800, height: 600))
+        gateway.clearWrites()
+        gateway.simulateSilentChange(
+            handle, to: CGRect(x: 2000, y: 400, width: 800, height: 600))
+        controller.isMouseDown = { false }
+
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 2000, y: 500, width: 800, height: 500),
+            "the parked birth lands on the drop display's quarter")
+    }
 }
 
 /// The canvas exits that share the sizing: drag-out and hidden-Space
@@ -361,6 +488,29 @@ final class UntiledExitTests: XCTestCase {
         XCTAssertNotNil(canvas.state.occupant(of: .topLeft), "a returns to its quad")
         XCTAssertNotNil(canvas.state.occupant(of: .topRight), "b returns to its quad")
         XCTAssertEqual(canvas.state.tiledWindows.count, 2)
+    }
+
+    func testUntileRefreshesStaleCanvasGeometry() {
+        // Tiled on the old geometry, then the visible frame shrank with
+        // no display-change notification: untiling restores from the live
+        // frame, not the stored one.
+        let handle = harness.addFocusedWindow(
+            frame: CGRect(x: 100, y: 100, width: 700, height: 900))
+        controller.handle(slot: .sixthTopLeft)
+        let id = controller.registeredID(for: handle)!
+        harness.screens = [ScreenInfo(
+            id: Self.screen.id,
+            frame: Self.screen.frame,
+            visibleFrame: CGRect(x: 0, y: 50, width: 1600, height: 950),
+            name: Self.screen.name,
+            displayID: Self.screen.displayID)]
+
+        _ = controller.untile(window: id)
+
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 100, y: 525, width: 800, height: 475),
+            "an untile restores from the live visible frame")
     }
 
     func testSizedUntileOnHiddenSpaceDefers() {

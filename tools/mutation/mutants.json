@@ -282,6 +282,24 @@
   "        return nil"
  ],
  [
+  "LiveWindowGateway.swift",
+  "tab churn never adopts (every tab switch quarter-sizes the tile)",
+  "            if distance < bestDistance {\n                bestDistance = distance\n                best = handle\n            }",
+  "            if distance < bestDistance {\n                continue\n            }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "churn ignores the window list (a tear-off adopts the source and never sizes)",
+  "                !listed.contains(where: { CFEqual($0, held) })",
+  "                true"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "churn ignores geometry (any same-app birth adopts instead of sizing)",
+  "                Self.churnFramesClose(base, frame),",
+  "                true,"
+ ],
+ [
   "TilingController.swift",
   "destroyed notification ignored (slots linger until the prune tick)",
   "        guard let id = register.liveID(for: handle) else { return }\n        pendingBirthSizes.removeValue(forKey: id)\n        guard gateway.liveness(of: handle) == .dead else {",
@@ -958,5 +976,23 @@
   "a refused requester skips restoring the group",
   "            guard clean else {\n                let failures = restore([wid], context: context)",
   "            guard clean else {\n                let failures: [Failure] = []"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "churn tolerates no jitter (a nudge quarter-sizes the tile)",
+  "    private static let churnTolerance: CGFloat = 2",
+  "    private static let churnTolerance: CGFloat = 0"
+ ],
+ [
+  "TilingController.swift",
+  "births size on the cursor display (multi-display windows jump screens)",
+  "        directory.screenInfo(for: frame).map { directory.key(for: $0.id) }\n            ?? directory.cursorKey()",
+  "        directory.cursorKey()"
+ ],
+ [
+  "CanvasDirectory.swift",
+  "actions never refresh stale canvas geometry (Dock toggle skews sizes)",
+  "        refreshFrames([space])\n        var value = spaces[space] ?? establishedCanvas(for: space)",
+  "        var value = spaces[space] ?? establishedCanvas(for: space)"
  ]
 ]
