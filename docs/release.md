@@ -94,7 +94,7 @@ cd ..
 `README.md` § Installing a release build tells users to check the download
 with `shasum -a 256 -c Tiled-<version>.zip.sha256`, so the `.sha256` file is a
 deliverable, not a convenience. It records the bare filename, so that check
-only resolves from the directory the download landed in — verifying it from
+only resolves from the directory the download landed in. Verifying it from
 anywhere else reports `FAILED open or read` on a perfectly good asset.
 
 ## 6. Tag and publish
@@ -122,7 +122,7 @@ and a moved tag breaks anybody who already fetched it.
 
 ## If something is wrong after publishing
 
-The published assets are immutable in practice — people download them. Fix
+The published assets are immutable in practice. People download them, so fix
 forward: bump to the next patch version, cut a new release, and say in its
 notes what the previous one got wrong. Deleting a release that has downloads
 does not un-download it.

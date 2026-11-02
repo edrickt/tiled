@@ -22,7 +22,7 @@ Requires a recent Swift toolchain (tested with Swift 6.2).
 
 ```bash
 swift build            # debug build
-make check             # unit suite (1017 tests) and the published count
+make check             # unit suite (1022 tests) and the published count
 make test              # same suite with the full transcript
 make app               # release build bundled as build/Tiled.app
 make app-universal     # same, fat binary for Apple Silicon + Intel
@@ -83,8 +83,8 @@ window's hidden splitter). Drag-out has its own focused probes
 (`tools/repro/dragout-sixth-test.swift`, `tools/repro/evict-drag-test.swift`). Handle
 identity has one too (`tools/repro/handle-collision-repro.swift`): a
 freshly focused same-app window sitting on a tiled window's exact frame
-— the shape Firefox's tab tear-out produces — must not inherit its
-handle and untile the original. Sixths boards stay disjoint in the suite: it
+must not inherit its
+handle and untile the original. The shape matches what Firefox's tab tear-out produces. Sixths boards stay disjoint in the suite: it
 models the quarters eviction algebra, not a second occupancy model. The multi-display
 suite checks same-slot coexistence, per-display moves, and splitter isolation
 on two attached displays; unplug/replug, rearrange, and Mission Control
@@ -127,7 +127,7 @@ is necessary, not proof of the live adapter.
 
 ### Focused loops
 
-Focused harnesses cover bugs whose signal is the status icon's
+Focused loops cover bugs whose signal is the status icon's
 occupancy or the menu's rows rather than a window frame, and they must
 stop any installed
 `/Applications/Tiled.app` first (it owns the same global hotkeys; two
@@ -144,8 +144,8 @@ swift tools/repro/destroy-notification-probe.swift <pid> <close|kill>
 third) and then either closes one through AX (the reported gesture's
 shape: Firefox closes the window a dragged tab left) or kills the whole
 app. A closed window's slot must release inside a two-second budget
-(observed releases are milliseconds) — the
-adapter observes `AXUIElementDestroyed` and prunes on the spot — while a
+(observed releases are milliseconds). The
+adapter observes `AXUIElementDestroyed` and prunes on the spot, while a
 killed process has no notifications left to send and releases on the 5s
 tick plus 3s confirmation. The icon's cell count alone cannot tell a
 reflowed survivor from a ghost (both light the same cells), so the suite
@@ -159,8 +159,8 @@ event-driven release safe to promise.
 `handle-collision-repro.swift` parks a second host window on a tiled
 window's exact frame and tiles it: the tiled window's handle must
 survive the newcomer (the menu keeps both rows, both frames stay
-correct). Firefox's tab tear-out is the live gesture this models — the
-detached window opens on the source window's frame — and the original
+correct). Firefox's tab tear-out is the live gesture this models. The
+detached window opens on the source window's frame, and the original
 bug moved the tiled window's record to the newcomer's element, dropping
 the original from the menu mid-layout.
 
@@ -173,8 +173,8 @@ would these tests notice if the code stopped working? Each entry in
 a mutant that survives is a test gap. The table runs in parallel: each worker
 gets a scratch copy of `Sources`, `Tests`, and `Package.swift` (the real tree
 is never touched, so uncommitted work is safe), and mutants are handed out as
-workers free up. Before fanning out, the tool runs the unmutated suite once —
-a red baseline aborts instead of scoring mutants. It exits non-zero on any
+workers free up. Before fanning out, the tool runs the unmutated suite once.
+A red baseline aborts instead of scoring mutants. It exits non-zero on any
 survivor or unresolved mutant, so it can gate a release branch. While a stage
 is in flight, `--since <its base commit>` keeps the run to the mutants the
 stage can affect: a source change selects that file's mutants, and a test or

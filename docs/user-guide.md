@@ -15,22 +15,22 @@ layout is a stored canvas choice that sticks even when the canvas empties.
 
 The same physical key means the same position in both layouts; the active
 layout decides which slot it selects. Five keys have no Quarters slot and are
-inert there (the dashes below); an inert press changes nothing and says which
+inert there (the none entries below); an inert press changes nothing and says which
 layout owns the position.
 
 | Key    | Quarters     | Sixths             |
 |--------|--------------|--------------------|
 | ⌥⇧U   | Top left     | Top left sixth     |
-| ⌥⇧I   | —            | Top middle sixth   |
+| ⌥⇧I   | none         | Top middle sixth   |
 | ⌥⇧O   | Top right    | Top right sixth    |
 | ⌥⇧M   | Bottom left  | Bottom left sixth  |
-| ⌥⇧,   | —            | Bottom middle sixth |
+| ⌥⇧,   | none         | Bottom middle sixth |
 | ⌥⇧.   | Bottom right | Bottom right sixth |
 | ⌥⇧J   | Left half    | Left third         |
-| ⌥⇧K   | —            | Middle third       |
+| ⌥⇧K   | none         | Middle third       |
 | ⌥⇧L   | Right half   | Right third        |
-| ⌥⇧H   | —            | Left two-thirds    |
-| ⌥⇧;   | —            | Right two-thirds   |
+| ⌥⇧H   | none         | Left two-thirds    |
+| ⌥⇧;   | none         | Right two-thirds   |
 
 ### Switch layout (⌥⇧\)
 
@@ -52,7 +52,7 @@ slot combo:
 | ⌥⇧R    | Reset Splitters: snap the focused canvas's splitters back to even splits, keeping every window tiled |
 | ⌥⇧\    | Switch the layout of the display under the pointer (see above) |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden, as long as this shortcut is enabled and registered; otherwise quit and reopen Tiled) |
-| ⌃⌥⇧⌘Z   | Undo the focused canvas's last displacement (a layout switch, an eviction, or a swap — any reflow it caused is undone with it) |
+| ⌃⌥⇧⌘Z   | Undo the focused canvas's last displacement (a layout switch, an eviction, or a swap. Any reflow it caused is undone with it) |
 
 ### Expand (⌥⇧⏎)
 
@@ -74,7 +74,7 @@ steps down into the bottom-left sixth); otherwise, when the request leaves
 exactly one whole slot free, the victim re-tiles into that slot (the middle
 third making room for the right two-thirds moves into the top-left sixth).
 It untangles only when neither fits. The freed cells reflow: a neighboring tile that merges with
-them into a whole slot grows into it — evict the bottom-left sixth and
+them into a whole slot grows into it. For example, evict the bottom-left sixth and
 the top-left sixth expands into the left third; free the middle third
 and the right third becomes the right two-thirds (the right side wins
 when both flanks could grow). The same reflow runs whenever a tiled
@@ -104,7 +104,7 @@ reopen it anytime from the menu bar menu → Tiled Guide.
 The full list lives in the app too: menu bar → **Settings… → Shortcuts**.
 
 Shortcuts are remappable: open the Shortcuts tab, click a shortcut, and
-press a new combo. This covers every hotkey Tiled registers — the 11 slot
+press a new combo. This covers every hotkey Tiled registers. Those are the 11 slot
 keys and the 6 app actions (Expand, Evict, Reset Splitters, Switch Layout,
 Settings, Undo). Esc keeps the old one, ⌫ disables that action.
 Disable or re-enable all eleven slot keys at once with the Enable/Disable
@@ -124,7 +124,7 @@ tell you which app took it.
 - One window per slot.
 - Tiling a window into a slot **evicts** any window occupying an overlapping
   slot. Evicted windows float at the quarter footprint, top edge kept.
-  - **Mirror:** with two or more windows in the way, each moves to its own
+  - **Mirror.** With two or more windows in the way, each moves to its own
     slot on the other side instead of untangling, so a left half tiled to the
     right half sends the two right quads to the two left quads, and a left
     two-thirds tiled to the right two-thirds sends the two right corner
@@ -136,8 +136,8 @@ tell you which app took it.
     other side, or both are evicted when the mirror cannot fit.
   - A half occupied + a quad key on that side → the half window steps aside
     into the other quad on that side when it's free; only then is it evicted.
-- **Swap:** a tiled window tiling into a slot blocked by exactly one other
-  tiled window swaps with it instead of evicting — unless the blocker's
+- **Swap.** A tiled window tiling into a slot blocked by exactly one other
+  tiled window swaps with it instead of evicting, unless the blocker's
   slot overlaps the target and its leftover (its slot minus the target) is
   exactly one whole slot, in which case the blocker steps aside into that
   leftover instead (see the re-house rule under Evict). Otherwise the
@@ -190,8 +190,7 @@ tell you which app took it.
   switches: a key with no slot in the active layout is inert and says where
   it belongs. The menu names the effect and how to undo it ("Switched to
   Sixths · 3 windows untiled. Undo from the Tiled menu.").
-- New windows open at quarter size — top edge kept —
-  and stay floating; Tiled never auto-tiles. A window born while the
+- New windows open at quarter size, top edge kept, and stay floating; Tiled never auto-tiles. A window born while the
   mouse button is down (tearing a tab off Firefox) sizes at the drop
   point on mouse-up, so the resize never fights the drag.
 - A display change (unplug, rearrange, resolution) re-asserts every visible
@@ -215,8 +214,8 @@ tell you which app took it.
 ## Live resizing
 
 Drag any edge of a tiled window and the shared grid splitter's fraction
-updates as you drag; the neighbor windows on the other side — and the
-dragged window's own tile — are rewritten when the mouse button is
+updates as you drag; the neighbor windows on the other side, and the
+dragged window's own tile, are rewritten when the mouse button is
 released. The row splitters are independent per column (quarters) or per
 third (sixths), so resizing one column's rows never moves the other, and
 the same independence holds between displays and Spaces, so dragging an
@@ -233,7 +232,7 @@ achieved edge makes them flush again. (A window that lands a few pixels
 *short* of its target by rounding or an inset still owns the splitter,
 so no gap opens.) Dragging an edge that coincides with the screen edge
 itself (the top edge of a right two-thirds window, say) moves no
-splitter — screen edges are fixed — and the edge snaps back to the
+splitter. Screen edges are fixed, and the edge snaps back to the
 screen edge when you release: the drag is free while the button is
 down, and the mouse-up re-assert pulls the edge home. A corner that
 mixes a screen edge with a real splitter (the top-left corner of a
