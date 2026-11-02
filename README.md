@@ -1,8 +1,6 @@
 # <img src="docs/assets/app-icon.png" width="48" alt="Tiled app icon"> Tiled
 
-A native macOS window manager. Tile windows into quarters (2×2 plus halves)
-or sixths (3×2 grid plus thirds and two-thirds), with global hotkeys or from
-the menu bar. Drag a tiled window's edge to resize it live.
+Native macOS window tiling with global hotkeys — quarters, sixths, live edge resizing.
 
 **1.0.3 · macOS 13+ · Apple Silicon + Intel · MIT**
 
