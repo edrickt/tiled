@@ -10,7 +10,7 @@ Native macOS window tiling with global hotkeys. It covers quarters, sixths, and 
 
 [![Release](https://img.shields.io/github/v/release/edrickt/tiled)](https://github.com/edrickt/tiled/releases/latest) ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
-<!-- Screenshot: docs/assets/tiled-demo.png — capture pending at ~1512x982 showing quarters + sixths -->
+<!-- Screenshot: docs/assets/tiled-demo.png, capture pending at ~1512x982 showing quarters + sixths -->
 
 ## Features
 
