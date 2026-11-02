@@ -1,10 +1,16 @@
-# <img src="docs/assets/app-icon.png" width="48" alt="Tiled app icon"> Tiled
+<p align="center">
+  <img src="docs/assets/app-icon.png" width="128" alt="Tiled app icon">
+</p>
+
+# Tiled
 
 Native macOS window tiling with global hotkeys. It covers quarters, sixths, and live edge resizing.
 
-**1.0.3 · macOS 13+ · Apple Silicon + Intel · MIT**
+**1.3.2 · macOS 13+ · Apple Silicon + Intel · MIT**
 
-<!-- TODO: capture demo still/GIF at ~1512x982 showing quarters + sixths -->
+[![Release](https://img.shields.io/github/v/release/edrickt/tiled)](https://github.com/edrickt/tiled/releases/latest) ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
+
+<!-- Screenshot: docs/assets/tiled-demo.png — capture pending at ~1512x982 showing quarters + sixths -->
 
 ## Features
 
@@ -49,7 +55,7 @@ The app is the source of truth. Check menu bar → **Settings… → Shortcuts**
 Layout, Settings, Undo) are remappable there; the menu names conflicts
 and dead combos.
 
-## Building & testing
+## For developers
 
 ```bash
 swift build            # debug build
