@@ -6,6 +6,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-11-04
 ### Fixed
 
 - Fullscreening a tiled window (e.g. presenting a PowerPoint from
