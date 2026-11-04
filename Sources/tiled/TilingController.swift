@@ -74,7 +74,8 @@ final class TilingController {
             occupants: { [weak self] in self?.trackedOccupants ?? [:] },
             spaceOf: { [weak self] in self?.directory.owner(of: $0) },
             occupantsOf: { [weak self] space in self?.trackedOccupants(on: space) ?? [:] },
-            liveFrameOf: { [weak self] id in self?.liveFrameForTracker(id) }),
+            liveFrameOf: { [weak self] id in self?.liveFrameForTracker(id) },
+            isMouseDown: { [weak self] in self?.isMouseDown() ?? false }),
         gridProvider: DragTracker.GridProvider(
             grid: { [weak self] space in
                 guard let self else { return GridLayout() }
@@ -89,6 +90,10 @@ final class TilingController {
                 guard let self else { return .zero }
                 return self.directory.storedCanvas(for: space ?? .displayless)?.visibleFrame
                     ?? .zero
+            },
+            screenFrame: { [weak self] space in
+                guard let self else { return .zero }
+                return self.directory.screenFrame(for: space ?? .displayless)
             }),
         onDragEnd: { [weak self] decision in self?.handleDragEnd(decision) },
         scheduleDragEnd: scheduleDragEnd,
@@ -1381,17 +1386,67 @@ final class TilingController {
         switch decision {
         case .resize(let id):
             guard let handle = handle(of: id) else { return }
+            let achieved = gateway.frame(of: handle)
+            // A fullscreen achieved frame on a plain tiled window is the
+            // presentation mid-flight (a pending reassert armed before
+            // the transition): reconciling splitters from it would
+            // corrupt the canvas, and mapping tile rects would yank the
+            // presentation back to its tile. Drop it; the window keeps
+            // its slot. Expanded windows are exempt: covering the screen
+            // is their own state, and their reassert already reconciles
+            // nothing from them.
+            if let achieved, isPresentation(achieved, id: id) {
+                dbg("dragend win\(id): fullscreen achieved; dropping resize")
+                return
+            }
             // An unreadable achieved frame (the lid-close transient) is
             // not a reason to drop the release: keep the stored splitters
             // and still map every rect, so neighbours never go stale.
             reassert(
                 id,
-                source: .resize(dragged: id, achieved: gateway.frame(of: handle)))
+                source: .resize(dragged: id, achieved: achieved))
         case .snapback(let id):
+            if isPresentationLiveFrame(of: id) {
+                dbg("dragend win\(id): fullscreen; dropping snapback")
+                return
+            }
             reassert(id, source: .grid)
         case .untile(let id):
+            if isPresentationLiveFrame(of: id) {
+                dbg("dragend win\(id): fullscreen; dropping untile")
+                return
+            }
             untileFromDrag(id)
         }
+    }
+
+    /// Whether `frame` covers any attached display's full frame: a native
+    /// fullscreen presentation, never a settled drag position.
+    private func isFullscreen(_ frame: CGRect) -> Bool {
+        screens().contains { DragTracker.isFullscreenFrame(frame, on: $0.frame) }
+    }
+
+    /// Whether `frame` is a fullscreen presentation for `id`: the window
+    /// still holds a plain (never expanded) tile and its live frame
+    /// covers the display. Expanded windows cover the screen by design;
+    /// only a presentation suspends drag-end writes.
+    private func isPresentation(_ frame: CGRect, id: WindowID) -> Bool {
+        guard let key = directory.owner(of: id),
+            let canvas = directory.storedCanvas(for: key),
+            !canvas.isExpanded(id)
+        else { return false }
+        return isFullscreen(frame)
+    }
+
+    /// Whether the window's live frame is currently a fullscreen
+    /// presentation. A drag-end decision for such a window is dropped:
+    /// the presentation owns the frame until it exits, and the window
+    /// keeps its slot throughout.
+    private func isPresentationLiveFrame(of id: WindowID) -> Bool {
+        guard let handle = handle(of: id), let frame = gateway.frame(of: handle) else {
+            return false
+        }
+        return isPresentation(frame, id: id)
     }
 
     /// Reasserts the canvas owning `id` for the given source, then applies

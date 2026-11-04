@@ -14,8 +14,14 @@ import Foundation
 /// Protocol: the controller feeds each gateway callback to
 /// `handleChange`. Echo suppression swallows our own writes, edge
 /// detection maps a dragged edge onto the canvas's splitters and commits
-/// the fraction live (the only mutation the tracker performs), and a
-/// title-bar drag is tracked to its end. The dragged window's own frame
+/// the fraction live (the only mutation the tracker performs, and only
+/// while the button is down — a programmatic resize carries no hand, so
+/// it never moves a splitter), and a title-bar drag is tracked to its
+/// end. A native fullscreen frame is never a gesture at all: it is
+/// swallowed on arrival (baseline only, no commit, no track, no
+/// decision), so a presentation neither moves a splitter nor borrows the
+/// clicked button's press evidence for a drag-out. The dragged window's
+/// own frame
 /// is the source of truth for the splitter it moves; the tracker never
 /// re-pushes it mid-drag.
 ///
@@ -24,10 +30,11 @@ import Foundation
 /// (`mousePressed`/`mouseLifted`, wired by the controller's global event
 /// displays). Resizing the tiles under a held button fights the user's
 /// drag; on release the canvas reasserts the whole layout at once — a
-/// screen edge the drag pulled away included. A resize tick
-/// that trails the mouse-up (AX streams the drag's final frame) re-arms
-/// its canvas's pending resize, and the next mouse-up anywhere commits
-/// it.
+/// screen edge the drag pulled away included. A resize tick with the
+/// button down that trails the mouse-up (AX streams the drag's final
+/// frame) re-arms its canvas's pending resize, and the next mouse-up
+/// anywhere commits it; a resize-shaped tick with the button up updates
+/// the baseline only.
 ///
 /// Title-bar drags (origin-only changes) are tracked separately from
 /// edge drags: moved ticks stream in, and the drag ends at the mouse-up
@@ -53,6 +60,10 @@ final class DragTracker {
         /// window's own geometry is exactly the bug the canvas's stored
         /// frame replaced.
         var visibleFrame: (TilingSpaceKey?) -> CGRect
+        /// The canvas's display full frame, menu bar and Dock included:
+        /// the geometry a native fullscreen window covers. A frame
+        /// covering it is never a user drag (see `handleChange`).
+        var screenFrame: (TilingSpaceKey?) -> CGRect = { _ in .zero }
     }
 
     /// What a drag's end asks the coordinator to do. The tracker decides
@@ -95,6 +106,14 @@ final class DragTracker {
         /// convergence check consults it before calling echo silence an
         /// ignore.
         var liveFrameOf: (WindowID) -> CGRect? = { _ in nil }
+        /// Whether the mouse button is currently down. Edge-splitter
+        /// commits require the hand: a resize-shaped tick with the button
+        /// up is a programmatic change (a fullscreen animation, an app
+        /// self-resize), which updates the diff baseline but never moves
+        /// a splitter or arms a reassert. Defaults to down so tests
+        /// driving bare `handleChange` streams keep simulating hand
+        /// drags; production wires the live button state.
+        var isMouseDown: () -> Bool = { true }
     }
 
     /// What one axis's two edge deltas say about a tick. The tracker sees
@@ -284,6 +303,23 @@ final class DragTracker {
     private static let settleOverrideTolerance: CGFloat = 8
     /// Origin drag distance past which a title-bar drag untiles the window.
     private static let untileDragDistance: CGFloat = 25
+    /// How far a frame's edges may sit inside the display's full frame
+    /// and still read as fullscreen. Rounding and shadow insets cost
+    /// points; the menu bar and Dock cost two dozen, so an expanded
+    /// window (which covers only the visible frame) never qualifies.
+    static let fullscreenTolerance: CGFloat = 8
+
+    /// Whether `frame` covers the display's full frame: a native
+    /// fullscreen presentation, never a user drag. Pure, so the
+    /// controller applies the same rule to a drag-end's achieved frame
+    /// without AX.
+    static func isFullscreenFrame(_ frame: CGRect, on screen: CGRect) -> Bool {
+        guard screen.width > 0, screen.height > 0 else { return false }
+        return frame.minX <= screen.minX + fullscreenTolerance
+            && frame.minY <= screen.minY + fullscreenTolerance
+            && frame.maxX >= screen.maxX - fullscreenTolerance
+            && frame.maxY >= screen.maxY - fullscreenTolerance
+    }
     /// Move silence after which a title-bar drag counts as finished: the
     /// fallback end for a mouse-up that never fired (`mouseLifted` ends
     /// an in-progress drag immediately).
@@ -421,6 +457,23 @@ final class DragTracker {
         return .ignored
     }
 
+    /// Swallows a native fullscreen frame: the baseline advances so the
+    /// return diffs correctly, but no splitter moves, no drag tracks, and
+    /// no decision fires. The pending echo is cancelled rather than left
+    /// to judge: a write the window never had a chance to converge (the
+    /// user fullscreened mid-flight) must read as inconclusive, never as
+    /// a silent ignore that rolls the placement back. Any in-flight
+    /// gesture state is dropped: the frame supersedes it, and the click's
+    /// press evidence must not authorize a drag-out on mouse-up.
+    private func swallowFullscreen(id: WindowID, frame: CGRect) {
+        lastKnownFrames[id] = frame
+        cancelExpected(id)
+        clearDrag(id)
+        pendingReasserts.remove(id)
+        settleOverrides[id] = nil
+        log("notif win\(id) fullscreen; swallowed")
+    }
+
     /// Forgets a window: untile, restore, and prune paths call this so
     /// stale echo entries never swallow a future drag on a recycled id.
     /// The echo entry and diff baseline are dropped together; a fresh
@@ -437,10 +490,15 @@ final class DragTracker {
 
     /// Feeds one gateway change callback through echo suppression and edge
     /// detection. `slotOf` returning nil means untiled: ignored, since
-    /// observation registrations outlive records.
+    /// observation registrations outlive records. A fullscreen frame is
+    /// swallowed before any of it: it is never a gesture.
     func handleChange(id: WindowID, frame: CGRect) {
         guard context.slotOf(id) != nil else { return }
         log("notif win\(id) frame=\(frame)")
+        if Self.isFullscreenFrame(frame, on: gridProvider.screenFrame(context.spaceOf(id))) {
+            swallowFullscreen(id: id, frame: frame)
+            return
+        }
         guard !recordSettleSighting(id: id, frame: frame) else { return }
 
         switch echoMatch(id: id, frame: frame) {
@@ -661,6 +719,17 @@ final class DragTracker {
             handPressPoint = nil
             handPressAt = nil
         }
+        if Self.isFullscreenFrame(
+            drag.lastFrame, on: gridProvider.screenFrame(context.spaceOf(id)))
+        {
+            // The drag landed in a native fullscreen presentation (a
+            // mouse-up mid-transition, or a debounce that outlived the
+            // animation): neither a snapback (which would reassert-write
+            // the presentation back to its tile) nor an untile. The
+            // window keeps its slot; the return trip is swallowed too.
+            log("dragend win\(id) fullscreen landing; dropped")
+            return
+        }
         let distance = hypot(
             drag.lastFrame.origin.x - drag.startFrame.origin.x,
             drag.lastFrame.origin.y - drag.startFrame.origin.y)
@@ -694,6 +763,16 @@ final class DragTracker {
         windowID id: WindowID, from old: CGRect, to new: CGRect
     ) -> Bool {
         settleOverrides[id] = nil // a new edge movement supersedes a stale arm
+        guard context.isMouseDown() else {
+            // Button-up edge movement is programmatic: a fullscreen
+            // animation mid-flight, an app self-resize. The baseline
+            // already advanced in `handleChange`, but no splitter moves
+            // and no reassert arms. An in-flight title-bar drag stands:
+            // only a fullscreen frame supersedes a gesture (see
+            // `swallowFullscreen`).
+            log("resize win\(id) button up; baseline only")
+            return false
+        }
         guard let slot = context.slotOf(id) else { return false }
         let space = context.spaceOf(id)
         let bounds = gridProvider.visibleFrame(space)

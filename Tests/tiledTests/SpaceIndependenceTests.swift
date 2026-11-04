@@ -44,7 +44,8 @@ final class SpaceIndependenceTests: XCTestCase {
         harness = ControllerHarness(
             screens: [Self.display],
             activeSpaces: [Self.displayID: Self.spaceA],
-            deathConfirmation: 0)
+            deathConfirmation: 0,
+            isMouseDown: { true })
     }
 
     /// This suite's windows start on the display's first slot; the harness

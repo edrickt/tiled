@@ -281,6 +281,21 @@ final class CanvasDirectory {
             ?? NSScreen.main?.visibleFrame ?? .zero
     }
 
+    /// The full frame of a canvas's own display, menu bar and Dock
+    /// included: the geometry a native fullscreen window covers. The
+    /// drag loop compares candidate frames against it so a fullscreen
+    /// transition never reads as a user gesture. Same fallback chain as
+    /// `visibleFrame(for:)`.
+    func screenFrame(for space: TilingSpaceKey) -> CGRect {
+        if let screen = space.screen,
+            let info = screens().first(where: { $0.id == screen })
+        {
+            return info.frame
+        }
+        return screens().first?.frame
+            ?? NSScreen.main?.frame ?? .zero
+    }
+
     // MARK: Stale marks and frame refresh
 
     /// Whether a canvas's own display is currently attached. A key with no

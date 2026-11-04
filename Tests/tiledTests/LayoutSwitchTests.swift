@@ -20,7 +20,8 @@ final class LayoutSwitchTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        harness = ControllerHarness(screens: [Self.main], deathConfirmation: 0)
+        harness = ControllerHarness(
+            screens: [Self.main], deathConfirmation: 0, isMouseDown: { true })
     }
 
     /// The two user steps a quarters setup now takes: switch the empty

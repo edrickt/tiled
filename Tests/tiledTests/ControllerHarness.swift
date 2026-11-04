@@ -95,7 +95,8 @@ final class ControllerHarness {
         schedulePrune: TilingController.PruneScheduler? = nil,
         deathConfirmation: TimeInterval = 0,
         now: @escaping () -> Date = Date.init,
-        uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+        uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        isMouseDown: @escaping () -> Bool = { false }
     ) {
         let values = ScreenValues(screens)
         let dragEnd = dragEndLog
@@ -126,7 +127,8 @@ final class ControllerHarness {
             deathConfirmation: deathConfirmation,
             now: now,
             uptime: uptime,
-            observeCursorMove: { fire in cursor.fires.append(fire) })
+            observeCursorMove: { fire in cursor.fires.append(fire) },
+            isMouseDown: isMouseDown)
     }
 
     /// Delivers one cursor-move event to the controller through the

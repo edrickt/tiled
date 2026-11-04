@@ -81,7 +81,8 @@ final class AppHotkeyPerformerTests: XCTestCase {
         super.setUp()
         gateway = FakeWindowGateway()
         controller = TilingController(
-            gateway: gateway, pruneInterval: nil, screens: { [Self.screen] })
+            gateway: gateway, pruneInterval: nil, screens: { [Self.screen] },
+            isMouseDown: { true })
         presentedReceipts = []
         settingsOpened = 0
         undoPerformed = 0

@@ -38,7 +38,8 @@ final class DisplayIdentityTests: XCTestCase {
     ) -> TilingController {
         TilingController(
             gateway: gateway, pruneInterval: nil,
-            screens: screens, deathConfirmation: 0)
+            screens: screens, deathConfirmation: 0,
+            isMouseDown: { true })
     }
 
     @discardableResult

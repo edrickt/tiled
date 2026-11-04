@@ -470,7 +470,7 @@
  [
   "TilingController.swift",
   "resize reassert downgraded to a grid reassert (clamp not reconciled)",
-  "            reassert(\n                id,\n                source: .resize(dragged: id, achieved: gateway.frame(of: handle)))",
+  "            reassert(\n                id,\n                source: .resize(dragged: id, achieved: achieved))",
   "            reassert(id, source: .grid)"
  ],
  [
@@ -994,5 +994,41 @@
   "actions never refresh stale canvas geometry (Dock toggle skews sizes)",
   "        refreshFrames([space])\n        var value = spaces[space] ?? establishedCanvas(for: space)",
   "        var value = spaces[space] ?? establishedCanvas(for: space)"
+ ],
+ [
+  "DragTracker.swift",
+  "fullscreen tick falls through to gesture processing (splitters corrupted)",
+  "        if Self.isFullscreenFrame(frame, on: gridProvider.screenFrame(context.spaceOf(id))) {\n            swallowFullscreen(id: id, frame: frame)\n            return\n        }\n",
+  ""
+ ],
+ [
+  "DragTracker.swift",
+  "resize commits without the hand (programmatic frames move splitters)",
+  "        guard context.isMouseDown() else {",
+  "        guard !context.isMouseDown() else {"
+ ],
+ [
+  "TilingController.swift",
+  "fullscreen achieved frame reconciles the canvas (presentation yanked, splitters corrupted)",
+  "            if let achieved, isPresentation(achieved, id: id) {\n                dbg(\"dragend win\\(id): fullscreen achieved; dropping resize\")\n                return\n            }",
+  "            if let achieved, isPresentation(achieved, id: id) {\n                dbg(\"dragend win\\(id): fullscreen achieved; dropping resize\")\n            }"
+ ],
+ [
+  "TilingController.swift",
+  "expanded windows read as presentations (plain fullscreen not dropped)",
+  "            !canvas.isExpanded(id)",
+  "            canvas.isExpanded(id)"
+ ],
+ [
+  "DragTracker.swift",
+  "fullscreen landing untiles instead of dropping",
+  "            log(\"dragend win\\(id) fullscreen landing; dropped\")\n            return",
+  "            log(\"dragend win\\(id) fullscreen landing; dropped\")"
+ ],
+ [
+  "DragTracker.swift",
+  "fullscreen keeps a pending echo (late rollback after presentation)",
+  "        lastKnownFrames[id] = frame\n        cancelExpected(id)",
+  "        lastKnownFrames[id] = frame\n        _ = id"
  ]
 ]

@@ -29,7 +29,8 @@ final class SplitterBackupDragTests: XCTestCase {
             pruneInterval: nil,
             scheduleDragEnd: { _ in {} },
             scheduleVerify: { _ in {} },
-            screens: { [Self.screen] })
+            screens: { [Self.screen] },
+            isMouseDown: { true })
         handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 500))
         gateway.focused = handle
         controller.handle(slot: .topLeft)

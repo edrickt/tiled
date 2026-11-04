@@ -25,7 +25,8 @@ final class PerMonitorTests: XCTestCase {
     override func setUp() {
         super.setUp()
         harness = ControllerHarness(
-            screens: [Self.left, Self.right], deathConfirmation: 0)
+            screens: [Self.left, Self.right], deathConfirmation: 0,
+            isMouseDown: { true })
     }
 
     private var leftID: ScreenID { Self.left.id }

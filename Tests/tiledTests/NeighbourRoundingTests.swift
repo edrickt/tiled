@@ -43,7 +43,8 @@ final class NeighbourRoundingTests: XCTestCase {
         }
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
-            screens: { [Self.screen] }, deathConfirmation: 0)
+            screens: { [Self.screen] }, deathConfirmation: 0,
+            isMouseDown: { true })
     }
 
     private func tile(_ handle: WindowHandle, into slot: Slot) {

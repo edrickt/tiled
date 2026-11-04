@@ -24,6 +24,13 @@ final class DragTrackerTests: XCTestCase {
     /// The canvas's stored visible frame the live splitter commit divides
     /// against. The tracker never resolves one from a window's geometry.
     private var visibleFrame = CGRect(x: 0, y: 0, width: 1000, height: 800)
+    /// The display's full frame, menu bar and Dock included: the geometry
+    /// a native fullscreen window covers. Zero until a test stages one.
+    private var screenFrame = CGRect.zero
+    /// The button state the resize-commit gate reads. Down by default so
+    /// bare `handleChange` streams keep simulating hand drags; tests
+    /// staging programmatic ticks set it false.
+    private var isDown = true
 
     override func setUp() {
         super.setUp()
@@ -36,6 +43,8 @@ final class DragTrackerTests: XCTestCase {
         dragEndFires = []
         grids = [:]
         visibleFrame = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        screenFrame = .zero
+        isDown = true
         tracker = configuredTracker()
     }
 
@@ -46,7 +55,8 @@ final class DragTrackerTests: XCTestCase {
             context: DragTracker.Context(
                 slotOf: { [weak self] in self?.slots[$0] },
                 occupants: { [weak self] in self?.occupants ?? [:] },
-                now: { [weak self] in self?.now ?? Date() }),
+                now: { [weak self] in self?.now ?? Date() },
+                isMouseDown: { [weak self] in self?.isDown ?? true }),
             gridProvider: provider(),
             onDragEnd: { [weak self] in self?.decisions.append($0) },
             scheduleDragEnd: { [weak self] fire in
@@ -65,7 +75,8 @@ final class DragTrackerTests: XCTestCase {
                 slotOf: { [weak self] in self?.slots[$0] },
                 occupants: { [weak self] in self?.occupants ?? [:] },
                 now: { [weak self] in self?.now ?? Date() },
-                liveFrameOf: liveFrameOf),
+                liveFrameOf: liveFrameOf,
+                isMouseDown: { [weak self] in self?.isDown ?? true }),
             gridProvider: provider(),
             onDragEnd: { [weak self] in self?.decisions.append($0) },
             scheduleDragEnd: { [weak self] fire in
@@ -85,7 +96,8 @@ final class DragTrackerTests: XCTestCase {
             setGrid: { [weak self] updated, key in
                 self?.grids[key ?? .displayless] = updated
             },
-            visibleFrame: { [weak self] _ in self?.visibleFrame ?? .zero })
+            visibleFrame: { [weak self] _ in self?.visibleFrame ?? .zero },
+            screenFrame: { [weak self] _ in self?.screenFrame ?? .zero })
     }
 
     /// The current splitter set the tracker moved.
@@ -1088,5 +1100,82 @@ final class DragTrackerTests: XCTestCase {
         tile(2, .topRight, frame: farTarget, tracker: tracker)
         liveFrames[2] = CGRect(x: 0, y: 0, width: 100, height: 100)
         XCTAssertEqual(tracker.convergence(for: 2), .ignored)
+    }
+
+    // MARK: Fullscreen is never a gesture
+
+    func testFullscreenFrameRule() {
+        let screen = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        XCTAssertTrue(DragTracker.isFullscreenFrame(screen, on: screen))
+        XCTAssertTrue(
+            DragTracker.isFullscreenFrame(
+                CGRect(x: 2, y: 2, width: 1596, height: 996), on: screen),
+            "rounding insets still read as fullscreen")
+        XCTAssertFalse(
+            DragTracker.isFullscreenFrame(
+                CGRect(x: 0, y: 0, width: 1600, height: 950), on: screen),
+            "an expanded window covers only the visible frame, not the screen")
+        XCTAssertFalse(
+            DragTracker.isFullscreenFrame(
+                CGRect(x: 0, y: 400, width: 500, height: 400), on: screen))
+        XCTAssertFalse(
+            DragTracker.isFullscreenFrame(screen, on: .zero),
+            "no display geometry never reads as fullscreen")
+    }
+
+    func testButtonUpResizeTickMovesNoSplitter() {
+        // A programmatic resize carries no hand: the baseline advances,
+        // but no splitter moves and no reassert arms, so the next
+        // mouse-up decides nothing.
+        isDown = false
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+        armBaseline(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 400, width: 700, height: 400))
+        XCTAssertEqual(grid(), GridLayout(), "button-up edge movement never reaches the splitters")
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [], "no pending reassert means no decision")
+        // The baseline did advance: a later hand drag diffs from the
+        // programmatic frame, not from the stale tile.
+        isDown = true
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
+        tracker.handleChange(id: 1, frame: CGRect(x: 5, y: 405, width: 700, height: 400))
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testFullscreenTickIsSwallowed() {
+        screenFrame = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        tile(1, .topLeft, frame: tiled)
+        tracker.handleChange(id: 1, frame: tiled) // settle the placement echo
+        let gridBefore = grid()
+
+        // Click the fullscreen button, then the window covers the screen.
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
+        tracker.handleChange(id: 1, frame: screenFrame)
+        tracker.mouseLifted()
+
+        XCTAssertEqual(grid(), gridBefore, "fullscreen geometry never reaches the splitters")
+        XCTAssertEqual(decisions, [], "no drag tracks, so no decision fires")
+        XCTAssertNil(
+            tracker.convergence(for: 1),
+            "the cancelled echo reads inconclusive, never a silent ignore")
+    }
+
+    func testFullscreenLandingDropsSilently() {
+        // A drag in flight whose drop lands fullscreen: neither the
+        // snapback (which would reassert-write the presentation back to
+        // its tile) nor an untile.
+        screenFrame = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+        armBaseline(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+        tracker.mousePressed(at: CGPoint(x: 250, y: 600))
+        tracker.handleChange(id: 1, frame: CGRect(x: 400, y: 800, width: 500, height: 400))
+        // The display re-resolves mid-drag so the drop covers the screen.
+        screenFrame = CGRect(x: 400, y: 800, width: 500, height: 400)
+        tracker.mouseLifted()
+
+        XCTAssertEqual(decisions, [], "a fullscreen landing decides nothing")
     }
 }

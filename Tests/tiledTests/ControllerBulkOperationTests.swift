@@ -469,6 +469,8 @@ final class ControllerBulkOperationTests: XCTestCase {
     // MARK: Reset dividers
 
     func testResetDividersRestoresDefaultsAndRetiles() {
+        harness = ControllerHarness(
+            screens: [Self.screen], deathConfirmation: 0, isMouseDown: { true })
         let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         // Drag TL's right edge (echo tick, then escape) to move columnSplit.
@@ -549,6 +551,8 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testResetDividersReportsRefusals() {
+        harness = ControllerHarness(
+            screens: [Self.screen], deathConfirmation: 0, isMouseDown: { true })
         let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))
@@ -573,6 +577,8 @@ final class ControllerBulkOperationTests: XCTestCase {
     }
 
     func testResetDividersReportsRefusalsInPlural() {
+        harness = ControllerHarness(
+            screens: [Self.screen], deathConfirmation: 0, isMouseDown: { true })
         let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)
         let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 700, height: 500))

@@ -96,14 +96,14 @@ FOCUSED_TESTS = {
         "Matrix|SpaceIndependence|Undo"
     ),
     "TilingController.swift": (
-        "Controller|LidSleep|AXLiveness|Reassert|TilingState|GridLayout|"
+        "Controller|Fullscreen|LidSleep|AXLiveness|Reassert|TilingState|GridLayout|"
         "Reflow|Swap|Evict|Minimum|Undo|StatusIcon|MenuReads|ActionReceipt"
     ),
     "LiveWindowGateway.swift": (
         "LiveGateway|AXConversion|AXFocus|AXLiveness|AXWrite|"
         "HandleIdentity|ObservationRegistry"
     ),
-    "DragTracker.swift": "DragTracker|SplitterBackup",
+    "DragTracker.swift": "DragTracker|Fullscreen|SplitterBackup",
     "FrameWriter.swift": "FrameWriter",
     "HotkeyService.swift": "HotkeyService|HotkeyRegistration|HotkeyBinding",
     "AppLaunchPlan.swift": "AppLaunchPlan|AppSettings",

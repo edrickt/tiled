@@ -50,7 +50,8 @@ final class ControllerGatewayTests: XCTestCase {
         harness = ControllerHarness(
             screens: [Self.screen],
             deathConfirmation: 0,
-            now: { [self] in clock })
+            now: { [self] in clock },
+            isMouseDown: { true })
     }
 
     /// The canvas the test's single display tiles onto.

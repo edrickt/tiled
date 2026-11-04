@@ -28,7 +28,8 @@ final class ExpandToggleTests: XCTestCase {
         super.setUp()
         // No runloop timer: tests drive pruneDeadWindows directly.
         harness = ControllerHarness(
-            screens: [Self.screen], deathConfirmation: 3)
+            screens: [Self.screen], deathConfirmation: 3,
+            isMouseDown: { true })
         controller.onChange = {}
     }
 

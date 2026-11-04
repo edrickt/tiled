@@ -6,6 +6,23 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Fullscreening a tiled window (e.g. presenting a PowerPoint from
+  Firefox) no longer untiles it or corrupts the canvas's tile sizes.
+  The transition's frames arrive while the clicked button's press
+  evidence is fresh, or stream as an animation with the button up: a
+  translation-shaped frame started a title-bar drag the click's
+  mouse-up decided as a drag-out, and a resize-shaped frame committed
+  fullscreen geometry into the splitters and armed a reassert
+  reconciled from the fullscreen achieved frame. A frame covering the
+  display's full frame is now swallowed on arrival (baseline only, no
+  commit, no track, no decision), a drag landing fullscreen drops
+  silently, resize commits require the button down, and a drag-end
+  whose window is fullscreen is dropped instead of reasserting or
+  untiling. The window keeps its slot throughout; exiting fullscreen
+  lands back on its tile with the splitters untouched.
+
 ## [1.3.2] - 2026-11-02
 
 ### Fixed

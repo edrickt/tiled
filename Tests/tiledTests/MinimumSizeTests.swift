@@ -54,7 +54,8 @@ final class MinimumSizeTests: XCTestCase {
         }
         controller = TilingController(
             gateway: gateway, pruneInterval: nil,
-            screens: { [Self.screen] }, deathConfirmation: 0)
+            screens: { [Self.screen] }, deathConfirmation: 0,
+            isMouseDown: { true })
     }
 
     /// Tiles `handle`'s window into `slot` as a user hotkey would.
