@@ -728,14 +728,14 @@
  [
   "HotkeyService.swift",
   "failedActions never reset on reload (stale failure survives a fix)",
-  "        // Reload must recompute failures, never retain a stale set.\n        failedActions = []\n        for action in HotkeyAction.allCases {",
-  "        // Reload must recompute failures, never retain a stale set.\n        for action in HotkeyAction.allCases {"
+  "        // Reload must recompute failures, never retain a stale set.\n        failedActions = []",
+  "        // Reload must recompute failures, never retain a stale set."
  ],
  [
   "HotkeyService.swift",
   "reload drops tokens without unregistering (old combos stay live)",
-  "    func reload() {\n        retireRegistrations()\n        if !isSuspended { registerHotkeys() }\n    }",
-  "    func reload() {\n        registrations.removeAll()\n        if !isSuspended { registerHotkeys() }\n    }"
+  "    func reload() {\n        // A failed install is not latched, so a reload is the one retry\n        // point for a transient event-handler failure. Retry before the\n        // registration pass judges the tap.\n        router.retryEventTapInstallIfNeeded()\n        retireRegistrations()\n        if !isSuspended { registerHotkeys() }\n    }",
+  "    func reload() {\n        // A failed install is not latched, so a reload is the one retry\n        // point for a transient event-handler failure. Retry before the\n        // registration pass judges the tap.\n        router.retryEventTapInstallIfNeeded()\n        registrations.removeAll()\n        if !isSuspended { registerHotkeys() }\n    }"
  ],
  [
   "HotkeyService.swift",
