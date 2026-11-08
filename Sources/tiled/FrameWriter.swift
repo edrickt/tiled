@@ -43,9 +43,10 @@ struct FrameWriter {
     private let isVisible: (TilingSpaceKey) -> Bool
     private let markStale: (TilingSpaceKey) -> Void
     private let markExpected: (WindowID, CGRect) -> Void
-    /// Drops an expectation armed for a write the gateway then refused.
-    /// Without this a pending convergence check judges a frame that never
-    /// landed and can roll the window back.
+    /// Drops an expectation a write superseded or never landed: one the
+    /// gateway refused, or an earlier target a no-op skip now makes
+    /// stale. Without this a pending convergence check judges a frame
+    /// that never landed and can roll a correctly placed window back.
     private let cancelExpected: (WindowID) -> Void
     /// Seeds the tracker's diff baseline for a write that lands nowhere:
     /// a deferral, a no-op skip, or a refusal. None of them arms an echo
@@ -108,6 +109,12 @@ struct FrameWriter {
         if let live = liveBefore,
             DragTracker.framesClose(live, target, tolerance: DragTracker.noOpWriteTolerance)
         {
+            // The window already holds this target, so no write or echo
+            // will follow; any expectation an earlier write to a
+            // different target left armed now judges a frame the window
+            // left on purpose, and the late check would discard a
+            // correctly laid-out window. The skip supersedes it.
+            cancelExpected(id)
             seedBaseline(id, target)
             log("write win\(id) no-op skip target=\(target)")
             return .skippedNoOp

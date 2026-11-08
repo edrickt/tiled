@@ -548,6 +548,33 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(gateway.frame(of: handle), tileRect)
     }
 
+    func testNoOpWriteAtANewTargetLeavesTheWindowTiled() {
+        // Two writes to one window: the first armed an expectation at Top
+        // Left; the window then moved silently to Bottom Right (no echo,
+        // no notification), so the second placement's write there is a
+        // no-op skip. The skip must cancel the stale Top Left
+        // expectation: otherwise the late check reads total silence
+        // against a frame the window left on purpose and discards a
+        // correctly laid-out window.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let target = GridLayout().rect(for: .bottomRight, in: Self.screen.visibleFrame)
+        gateway.simulateSilentChange(handle, to: target)
+        verifyFires.removeAll()
+
+        controller.handle(slot: .bottomRight)
+
+        XCTAssertEqual(canvas.state.slot(of: 1), .bottomRight, "the second placement commits")
+        XCTAssertEqual(gateway.frame(of: handle), target, "the no-op write moved nothing")
+        for fire in verifyFires { fire() }
+
+        XCTAssertEqual(
+            canvas.state.slot(of: 1), .bottomRight,
+            "the no-op write supersedes the stale expectation: the window keeps its slot")
+        XCTAssertNil(canvas.error)
+    }
+
     func testGridRoundedPlacementStaysTiled() {
         // Terminal-style grid rounding: the app applies the write, but its
         // frame lands ~5pt off the target (rounded to its own internal
