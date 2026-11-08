@@ -6,16 +6,53 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-11-08
+
 ### Fixed
 
-- A display that returns from sleep/wake, a dock change, or a cable replug
-  under a new CoreGraphics display number now keeps its canvas. Display
-  identity is the persistent display UUID, not the transient number, so
-  the display's windows, splitters, undo chapters, and registered records
-  survive the renumber instead of stranding on a detached-screen key and
-  deferring every write. A number the OS reuses for another display never
-  adopts the old canvas, and a renumber that also recreates the Mission
-  Control Space retires the old canvas and tiles afresh on the new one.
+- Displays are identified by their persistent CoreGraphics UUID instead of
+  the transient display number. A display that returns from sleep/wake, a
+  dock change, or a cable replug under a new number keeps its canvas, its
+  windows, splitters, undo chapters, and registered records. A number the
+  OS reuses for another display never adopts the old canvas, and a renumber
+  that also recreates the Mission Control Space retires the old canvas and
+  tiles afresh on the new one.
+- Tiled no longer treats its own Settings and Welcome windows as new app
+  windows, so they open at their designed size instead of the quarter-screen
+  footprint. Other apps' new windows are still sized at birth.
+- The shortcut recorder now suspends global registrations while armed, so a
+  combo that is currently in use can be recorded and reported as a conflict
+  instead of firing behind Settings. Space no longer re-arms the recorder,
+  and a failed Carbon event tap is reported as a global-shortcut backend
+  failure instead of leaving every hotkey silently dead.
+- Pending edge reasserts no longer erase another window's live drag-out, and
+  a drag-out dropped on another display keeps that display's origin and
+  quarter footprint instead of being pinned back to the origin display.
+- Focus-only Accessibility bindings for closed windows are released, and an
+  app termination clears its bindings and token index, so long sessions no
+  longer accumulate stale window bindings.
+- A withheld-Space canvas stops writing once its display names a Space, so
+  hidden-Space windows are not pulled onto the visible Space. It stays
+  listed in the menu and defers like any hidden canvas.
+- Menu, undo, and receipt fixes: a late rollback's notice and spoken
+  sentence agree; a layout-only undo says only the layout returned;
+  background-canvas refusals appear in the menu with their display;
+  mixed-layout display headers no longer assert one layout; the status glyph
+  seeds the pointer before refreshing; and "Tile Focused Window Here" on a
+  window that lives on another canvas answers honestly instead of tiling the
+  focused window on the wrong canvas.
+- Settings and permissions fixes: granting Accessibility refreshes the open
+  Shortcuts and Welcome content; the Guide raises a visible Settings window;
+  a hidden-icon grant restores a visible surface; a login item awaiting
+  approval reads as checked; the permission poll stops when the explainer
+  closes; and a Shortcuts rebuild after a resize uses the live window size.
+- Resize and expand fixes: an expanded two-thirds window no longer moves the
+  hidden splitter on mouse-up; a refused collapse keeps the expanded state
+  and its saved frame; a no-op write cancels a stale convergence
+  expectation; an unreadable-frame expand reports not performed; and a
+  birth whose frame overlaps no display falls back to the cursor display.
+- The build is warning-free again, and the README, developing guide, and
+  glossary now state the shipped behavior and test counts.
 
 ## [1.3.3] - 2026-11-04
 ### Fixed
