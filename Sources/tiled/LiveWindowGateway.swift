@@ -336,6 +336,14 @@ final class LiveWindowGateway: WindowGateway {
     /// `FocusSource`). Injected so the fallback is testable without the
     /// running session; production reads NSWorkspace.
     private let frontmostPID: () -> pid_t?
+    /// The running apps whose births Tiled subscribes: their process ids.
+    /// Injected so the self-pid skip is testable without the running
+    /// session; production reads NSWorkspace. The app itself is in that
+    /// list, which is why the skip exists.
+    private let runningProcessIDs: () -> [pid_t]
+    /// This process's pid. Tiled never subscribes its own births (see
+    /// `subscribeCreations`).
+    private let ownProcessID: () -> pid_t
 
     init(
         observerDriver: AXObserverDriver = LiveAXObserverDriver(),
@@ -352,10 +360,18 @@ final class LiveWindowGateway: WindowGateway {
         },
         frontmostPID: @escaping () -> pid_t? = {
             NSWorkspace.shared.frontmostApplication?.processIdentifier
+        },
+        runningProcessIDs: @escaping () -> [pid_t] = {
+            NSWorkspace.shared.runningApplications.map(\.processIdentifier)
+        },
+        ownProcessID: @escaping () -> pid_t = {
+            ProcessInfo.processInfo.processIdentifier
         }
     ) {
         self.observerDriver = observerDriver
         self.frontmostPID = frontmostPID
+        self.runningProcessIDs = runningProcessIDs
+        self.ownProcessID = ownProcessID
         self.spaceTable = spaceTable
         self.existingSpacesTable = existingSpacesTable
         self.now = now
@@ -394,7 +410,8 @@ final class LiveWindowGateway: WindowGateway {
         }
         // An app that launches after the birth subscription still gets
         // its app element observed, so its first window fires like any
-        // other birth.
+        // other birth. Tiled's own pid is skipped by the same
+        // `subscribeCreations` guard the running-app pass uses.
         appLaunchObserver = workspaceNotifications.addObserver(
             forName: NSWorkspace.didLaunchApplicationNotification,
             object: nil, queue: .main
@@ -402,8 +419,8 @@ final class LiveWindowGateway: WindowGateway {
             let launched = notification.userInfo?[
                 NSWorkspace.applicationUserInfoKey
             ] as? NSRunningApplication
-            guard let pid = launched?.processIdentifier, pid > 0 else { return }
-            self?.subscribeCreations(for: pid)
+            guard let pid = launched?.processIdentifier else { return }
+            self?.appLaunched(pid: pid)
         }
     }
 
@@ -879,21 +896,45 @@ final class LiveWindowGateway: WindowGateway {
     /// app's app element now, and future launches via the launch
     /// observer, so a brand-new app's first window fires like any other
     /// birth. Windows already open are only baselined, never reported.
+    ///
+    /// Tiled's own pid is never subscribed: its Settings/Welcome windows
+    /// are born at their designed size, and a birth would resize them to
+    /// the quarter footprint and make them managed windows (the audited
+    /// 440×480 Settings window appearing at 840×510). The skip is
+    /// subscribe-time, in `subscribeCreations`, so both the running-app
+    /// pass and the launch observer share it; with no observer on the own
+    /// pid, its creation notifications never arrive.
+    ///
+    /// Other apps' dialogs and sheets are still sized. The creation
+    /// notification names a window, not a role, and a newly created
+    /// window of another app is a birth by product rule; filtering
+    /// subroles would add an AX role read to every app's first window
+    /// and protect nothing the audit found broken.
     func observeWindowCreations(_ onCreated: @escaping (WindowHandle) -> Void) {
         creationHandler = onCreated
-        for app in NSWorkspace.shared.runningApplications {
-            let pid = app.processIdentifier
-            guard pid > 0 else { continue }
+        for pid in runningProcessIDs() {
             subscribeCreations(for: pid)
         }
+    }
+
+    /// A workspace launch report: subscribe the new app's births. Split
+    /// out of the notification closure so the own-pid skip is pinned
+    /// without a live NSWorkspace launch report.
+    func appLaunched(pid: pid_t) {
+        guard pid > 0 else { return }
+        subscribeCreations(for: pid)
     }
 
     /// Subscribes one app's app element to window-creation on its shared
     /// observer, reusing the registry: the same begin/finish shape as
     /// `observe`, with the app element in place of a window element and
-    /// the creation notification in place of move/resize/destroy.
+    /// the creation notification in place of move/resize/destroy. Tiled's
+    /// own pid is rejected here, the one place both subscription paths
+    /// pass through: the app's own windows are never births.
     private func subscribeCreations(for pid: pid_t) {
-        guard creationHandler != nil else { return }
+        guard creationHandler != nil, pid > 0, pid != ownProcessID() else {
+            return
+        }
         let appElement = AXUIElementCreateApplication(pid)
         Self.applyMessagingTimeout(appElement)
         seedSeenWindows(appElement, pid: pid)

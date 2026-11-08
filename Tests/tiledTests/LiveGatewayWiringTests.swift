@@ -14,14 +14,18 @@ final class LiveGatewayWiringTests: XCTestCase {
         observerDriver: FakeAXObserverDriver = FakeAXObserverDriver(),
         spaceTable: @escaping () -> [CGDirectDisplayID: SpaceID] = { [:] },
         now: @escaping () -> Date = Date.init,
-        writeRetrySleep: @escaping (TimeInterval) -> Void = { _ in }
+        writeRetrySleep: @escaping (TimeInterval) -> Void = { _ in },
+        runningProcessIDs: @escaping () -> [pid_t] = { [] },
+        ownProcessID: @escaping () -> pid_t = { 0 }
     ) -> LiveWindowGateway {
         LiveWindowGateway(
             observerDriver: observerDriver,
             spaceTable: spaceTable,
             now: now,
             workspaceNotifications: NotificationCenter(),
-            writeRetrySleep: writeRetrySleep)
+            writeRetrySleep: writeRetrySleep,
+            runningProcessIDs: runningProcessIDs,
+            ownProcessID: ownProcessID)
     }
 
     // MARK: Space lookup and cache
@@ -309,6 +313,71 @@ final class LiveGatewayWiringTests: XCTestCase {
             notification: kAXWindowCreatedNotification as String, token: 12345)
 
         XCTAssertEqual(births, 0, "an unroutable creation draws no birth")
+    }
+
+    // MARK: Birth subscription
+
+    func testBirthSubscriptionSkipsTheAppsOwnProcess() {
+        // The audited bug: the running-app list contains Tiled itself, so
+        // its own Settings/Welcome window was subscribed as a birth and
+        // resized to the quarter footprint. The skip is subscribe-time.
+        let driver = FakeAXObserverDriver()
+        let ownPID: pid_t = 4242
+        let otherPID: pid_t = 777
+        let gateway = makeGateway(
+            observerDriver: driver,
+            runningProcessIDs: { [ownPID, otherPID] },
+            ownProcessID: { ownPID })
+        var births = 0
+        gateway.observeWindowCreations { _ in births += 1 }
+
+        XCTAssertEqual(
+            driver.observers.map(\.pid), [otherPID],
+            "only the other app's births are subscribed: Tiled's own pid never is")
+    }
+
+    func testLaunchSubscriptionSkipsTheAppsOwnProcess() {
+        // The launch observer funnels through the same guard: a launch
+        // report for the app itself can never subscribe its births.
+        let driver = FakeAXObserverDriver()
+        let ownPID: pid_t = 4242
+        let otherPID: pid_t = 777
+        let gateway = makeGateway(
+            observerDriver: driver,
+            runningProcessIDs: { [] },
+            ownProcessID: { ownPID })
+        var births = 0
+        gateway.observeWindowCreations { _ in births += 1 }
+
+        gateway.appLaunched(pid: ownPID)
+        gateway.appLaunched(pid: otherPID)
+
+        XCTAssertEqual(
+            driver.observers.map(\.pid), [otherPID],
+            "the launch path rejects the app's own pid too")
+    }
+
+    func testSelfPidCreationNotificationNeverDrawsABirth() {
+        // The gateway wiring the controller sees: even a creation
+        // delivered for the own pid (which no subscription can produce)
+        // routes no handle to `handleWindowCreated`.
+        let driver = FakeAXObserverDriver()
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let gateway = makeGateway(
+            observerDriver: driver,
+            runningProcessIDs: { [ownPID] },
+            ownProcessID: { ownPID })
+        var births: [WindowHandle] = []
+        gateway.observeWindowCreations { births.append($0) }
+
+        gateway.handleAXNotification(
+            notification: kAXWindowCreatedNotification as String,
+            token: 12345, pid: ownPID)
+
+        XCTAssertTrue(births.isEmpty, "a self-pid creation is never a birth")
+        XCTAssertTrue(
+            driver.observers.isEmpty,
+            "nothing subscribed the own pid, so no observer can deliver one")
     }
 
     func testManagedBirthNeedsAnObservedTokenOrIdentity() {
