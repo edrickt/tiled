@@ -428,8 +428,16 @@ final class UntiledExitTests: XCTestCase {
         name: "Display 1",
         displayID: CGDirectDisplayID(42))
 
+    private static let secondScreen = ScreenInfo(
+        id: ScreenID(rawValue: 2),
+        frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+        visibleFrame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+        name: "Display 2",
+        displayID: CGDirectDisplayID(43))
+
     private static let spaceA = SpaceID(rawValue: 101)
     private static let spaceB = SpaceID(rawValue: 102)
+    private static let secondDisplaySpace = SpaceID(rawValue: 202)
 
     private var harness: ControllerHarness!
     private var gateway: FakeWindowGateway { harness.gateway }
@@ -464,6 +472,60 @@ final class UntiledExitTests: XCTestCase {
         XCTAssertEqual(
             canvas.state.slot(of: aID), .sixthLeft, "the freed cells still reflow")
         XCTAssertEqual(canvas.undoStack.count, 1, "the reflow still shares one chapter")
+    }
+
+    func testDragOutDroppedOnAnotherDisplayKeepsTheDropOrigin() {
+        // The audited A5: a window tiled on display 1, dragged to display
+        // 2, and dropped at x≈1700 was pinned back to display 1's right
+        // edge (x≈800) and sized against display 1. The drop display owns
+        // the floating frame: the window keeps its drop origin and takes
+        // that display's quarter, while the slot release, reflow, and undo
+        // chapter stay on the canvas that owned the window.
+        harness = ControllerHarness(
+            screens: [Self.screen, Self.secondScreen],
+            activeSpaces: [
+                Self.screen.displayID: Self.spaceA,
+                Self.secondScreen.displayID: Self.secondDisplaySpace,
+            ],
+            deathConfirmation: 0)
+        let a = harness.addFocusedWindow(frame: CGRect(x: 12, y: 34, width: 500, height: 400))
+        controller.handle(slot: .sixthTopLeft)
+        let b = harness.addFocusedWindow(frame: CGRect(x: 40, y: 500, width: 600, height: 300))
+        controller.handle(slot: .sixthBottomLeft)
+        let aID = controller.registeredID(for: a)!
+        let bID = controller.registeredID(for: b)!
+
+        // The drop lands on display 2, past display 1's right edge.
+        _ = gateway.setFrame(b, to: CGRect(x: 1700, y: 100, width: 800, height: 600))
+        gateway.clearWrites()
+
+        controller.untileFromDrag(bID)
+
+        XCTAssertEqual(
+            gateway.frame(of: b),
+            CGRect(x: 1700, y: 200, width: 800, height: 500),
+            "the drop display's quarter at the drop origin, not display 1's edge")
+        let origin = TilingSpaceKey(screen: Self.screen.id, space: Self.spaceA)
+        let drop = TilingSpaceKey(
+            screen: Self.secondScreen.id, space: Self.secondDisplaySpace)
+        XCTAssertNil(
+            controller.canvas(for: origin).state.slot(of: bID),
+            "the slot releases on the origin canvas")
+        XCTAssertEqual(
+            controller.canvas(for: origin).state.slot(of: aID), .sixthLeft,
+            "the freed cells still reflow on the origin canvas")
+        XCTAssertEqual(
+            controller.canvas(for: origin).undoStack.count, 1,
+            "the undo chapter stays on the origin canvas")
+        XCTAssertNil(
+            controller.canvas(for: drop).record(of: bID),
+            "the drop canvas holds no record: the window is not migrated")
+        XCTAssertTrue(
+            controller.canvas(for: drop).state.occupants.isEmpty,
+            "the drop canvas gains no occupancy")
+        XCTAssertEqual(
+            gateway.writes.filter { $0.handle == b }.count, 1,
+            "one drag-out, one floating write: the window is not emitted twice")
     }
 
     func testSwitchToSixthsFloatsAtQuarterSize() {

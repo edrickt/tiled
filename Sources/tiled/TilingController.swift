@@ -1960,14 +1960,39 @@ final class TilingController {
     /// dropped: no pre-tile restore, the drag IS the placement. (Short
     /// drags snap back inside the tracker and never reach here.)
     func untileFromDrag(_ id: WindowID) {
-        guard record(of: id) != nil else { return }
+        guard let record = record(of: id) else { return }
         let key = directory.owner(of: id) ?? directory.focusedKey()
+        // The drop display owns the floating frame: a window dropped on
+        // another display takes that display's quarter and keeps its drop
+        // origin, never display 1's edge. Resolved from the live frame the
+        // way a birth resolves its display; the slot release and reflow
+        // stay on the owning canvas.
+        let drop = gateway.frame(of: record.handle).map(dragOutPlacement(for:))
         let outcome = directory.withCanvas(key) {
-            $0.untileFromDrag(window: id, context: placementContext(for: key))
+            $0.untileFromDrag(
+                window: id, context: placementContext(for: key),
+                placement: drop)
         }
         apply(outcome, on: key)
         dbg("drag-untile win\(id)")
         onChange?()
+    }
+
+    /// The floating frame a drag-out's drop owns: sized and pinned against
+    /// the canvas of the display the window was dropped on, the same
+    /// display resolution a birth uses (`birthKey(for:)`). A nil frame
+    /// (unreadable drop) leaves the canvas's own fallback in charge.
+    private func dragOutPlacement(
+        for frame: CGRect
+    ) -> TilingSpace.DragOutPlacement {
+        let dropKey = birthKey(for: frame)
+        return directory.withCanvas(dropKey) { canvas in
+            TilingSpace.DragOutPlacement(
+                target: canvas.grid.sizedUntileFrame(
+                    keepingTopOf: frame, in: canvas.visibleFrame),
+                bounds: canvas.visibleFrame,
+                space: dropKey)
+        }
     }
 
     private func appName(for id: WindowID) -> String? {

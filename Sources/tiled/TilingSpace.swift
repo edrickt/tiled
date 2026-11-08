@@ -123,6 +123,18 @@ struct TilingSpace {
     /// the occupancy they describe.
     static let undoDepth = 5
 
+    /// Where a drag-out's floating frame lands: the drop display's canvas
+    /// (display plus Space), that canvas's one visible frame, and the sized
+    /// target. The slot release and reflow stay on the canvas the window
+    /// left; only the frame's sizing and write use the drop canvas, so a
+    /// window dropped on another display stays where the user let go
+    /// instead of being pinned back into the origin display.
+    struct DragOutPlacement {
+        let target: CGRect
+        let bounds: CGRect
+        let space: TilingSpaceKey
+    }
+
     /// Everything an action needs from the coordinator: the collaborators
     /// that reach back into live state. Records, expansion, splitters, and
     /// undo chapters are this canvas's own; the context never carries them.
@@ -1552,25 +1564,42 @@ struct TilingSpace {
     /// is never restored — but the drop takes the quarter footprint at the
     /// drop origin, written through the one write policy every other exit
     /// shares. The freed cells still reflow and the survivor is raised,
-    /// chapter and all.
-    mutating func untileFromDrag(window id: WindowID, context: Context) -> Outcome {
+    /// chapter and all. `placement` names the drop display's canvas and
+    /// visible frame when the window was dropped on another display (the
+    /// coordinator resolves it the way a birth resolves its display);
+    /// nil sizes and writes against this canvas, as every single-display
+    /// exit does.
+    mutating func untileFromDrag(
+        window id: WindowID, context: Context,
+        placement: DragOutPlacement? = nil
+    ) -> Outcome {
         error = nil
         notice = nil
         if let record = records[id] {
             // The live drop frame owns the origin; an unreadable drop
             // falls back to the pre-tile origin, and a zero record writes
-            // nothing, exactly like a zero restore.
-            let source = context.gateway.frame(of: record.handle)
+            // nothing, exactly like a zero restore. An explicit placement
+            // already carries the readable drop frame's sized target.
+            let drop: DragOutPlacement?
+            if let placement {
+                drop = placement
+            } else if let source = context.gateway.frame(of: record.handle)
                 ?? (record.preTileFrame == .zero ? nil : record.preTileFrame)
-            if let source {
-                let target = grid.sizedUntileFrame(
-                    keepingTopOf: source, in: visibleFrame)
+            {
+                drop = DragOutPlacement(
+                    target: grid.sizedUntileFrame(
+                        keepingTopOf: source, in: visibleFrame),
+                    bounds: visibleFrame, space: context.space)
+            } else {
+                drop = nil
+            }
+            if let drop {
                 let result = context.frameWriter.write(
-                    id, handle: record.handle, to: target,
-                    bounds: visibleFrame, on: context.space, check: .none)
+                    id, handle: record.handle, to: drop.target,
+                    bounds: drop.bounds, on: drop.space, check: .none)
                 if result == .deferredOffSpace {
                     deferredRestores[record.handle] = DeferredRestore(
-                        id: id, frame: target)
+                        id: id, frame: drop.target)
                 } else if result == .refused {
                     error = MenuText.restoreFailureMessage(
                         [appName(id, context: context) ?? "A window"])
