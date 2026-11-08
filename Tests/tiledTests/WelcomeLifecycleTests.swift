@@ -145,4 +145,55 @@ final class WelcomeLifecycleTests: XCTestCase {
             instructions.contains("Top Left's shortcut is disabled."),
             "the rebuilt guide reads the current binding, not the first-launch one")
     }
+
+    /// Puts a second window in front of the visible Settings window, so a
+    /// following call must actually raise Settings to pass.
+    private func obscure(_ window: NSWindow) -> NSWindow {
+        let other = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        other.orderFront(nil)
+        XCTAssertGreaterThan(
+            window.orderedIndex, other.orderedIndex,
+            "precondition: the Settings window sits behind another window")
+        return other
+    }
+
+    func testReopeningTheVisibleGuideRaisesSettings() throws {
+        // Welcome is already in the tab view; selecting it must also raise
+        // a visible-but-behind Settings window. The real ordering needs an
+        // active app (and makeFirstResponder already raises within this
+        // process), so the shell's raise seam pins the call path.
+        let controller = makeController()
+        defer { controller.close() }
+        controller.show(selecting: .welcome)
+        var raises = 0
+        controller.onRaise = { raises += 1 }
+
+        controller.showWelcomeAgain()
+
+        XCTAssertEqual(
+            raises, 1,
+            "Tiled Guide must raise and activate Settings, not only select Welcome")
+    }
+
+    func testReopeningTheGuideOnAVisibleWindowWithoutTheTabRaisesSettings() throws {
+        // The other visible branch: the Welcome item is inserted into an
+        // already-visible window, which must be raised as well.
+        settings.didDismissWelcome = true
+        let controller = makeController()
+        defer { controller.close() }
+        controller.show(selecting: .general)
+        let content = try XCTUnwrap(controller.window?.contentView)
+        let window = try XCTUnwrap(controller.window)
+        let other = obscure(window)
+        defer { other.close() }
+
+        controller.showWelcomeAgain()
+
+        XCTAssertLessThan(
+            window.orderedIndex, other.orderedIndex,
+            "Tiled Guide must raise Settings when it inserts the Welcome tab")
+        XCTAssertEqual(selectedIdentifier(in: content), "welcome")
+    }
 }

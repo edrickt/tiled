@@ -79,6 +79,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// content rect, which would hide a stale build size.
     var onShortcutsRebuilt: ((NSView) -> Void)?
 
+    /// Test seam: observes every raise before the window is ordered front
+    /// and the app activated. Whether that raises a window behind another
+    /// app cannot be observed headlessly, so a test pins the call path.
+    var onRaise: (() -> Void)?
+
     init(settings: AppSettings, hotkeyStore: HotkeyStore = HotkeyStore()) {
         self.settings = settings
         self.welcomeTab = WelcomeTab(hotkeyStore: hotkeyStore)
@@ -131,9 +136,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         loadValues()
         shortcutsTab.reload()
         selectTab(tab)
+        raiseSettings()
+        focusInitialControl(for: tab)
+    }
+
+    /// Orders Settings front and activates the app. Selecting a tab on an
+    /// already-visible window is not a raise by itself: the window can sit
+    /// behind another app, so every show and guide-reopen path calls this.
+    private func raiseSettings() {
+        onRaise?()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activateAsFrontmost()
-        focusInitialControl(for: tab)
     }
 
     /// Selects by identifier: the Welcome tab shifts indices when present,
@@ -225,21 +238,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// the dismissal flag, so the next launch still opens on General.
     /// When the window is hidden, the tab view is rebuilt first so the
     /// Welcome item exists before selection (selectTab is identifier-safe
-    /// and no-ops on a missing tab, never a wrong tab).
+    /// and no-ops on a missing tab, never a wrong tab). Every branch raises
+    /// the window: "Tiled Guide" must bring Settings forward even when it
+    /// is visible but behind another app.
     func showWelcomeAgain() {
         if window?.isVisible != true {
             rebuildTabView(includingWelcome: true)
             loadValues()
             shortcutsTab.reload()
             selectTab(.welcome)
-            window?.makeKeyAndOrderFront(nil)
-            NSApp.activateAsFrontmost()
+            raiseSettings()
             focusInitialControl(for: .welcome)
             return
         }
         refreshWelcome()
         if tabView.tabViewItems.contains(where: { ($0.identifier as? String) == "welcome" }) {
             selectTab(.welcome)
+            raiseSettings()
             focusInitialControl(for: .welcome)
             return
         }
@@ -249,6 +264,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         welcome.view = welcomeTab.build(size: frame.size)
         tabView.insertTabViewItem(welcome, at: 0)
         selectTab(.welcome)
+        raiseSettings()
         focusInitialControl(for: .welcome)
     }
 
