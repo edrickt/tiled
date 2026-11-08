@@ -16,7 +16,8 @@ final class LiveGatewayWiringTests: XCTestCase {
         now: @escaping () -> Date = Date.init,
         writeRetrySleep: @escaping (TimeInterval) -> Void = { _ in },
         runningProcessIDs: @escaping () -> [pid_t] = { [] },
-        ownProcessID: @escaping () -> pid_t = { 0 }
+        ownProcessID: @escaping () -> pid_t = { 0 },
+        windowList: @escaping (pid_t) -> [AXUIElement]? = { _ in nil }
     ) -> LiveWindowGateway {
         LiveWindowGateway(
             observerDriver: observerDriver,
@@ -25,7 +26,8 @@ final class LiveGatewayWiringTests: XCTestCase {
             workspaceNotifications: NotificationCenter(),
             writeRetrySleep: writeRetrySleep,
             runningProcessIDs: runningProcessIDs,
-            ownProcessID: ownProcessID)
+            ownProcessID: ownProcessID,
+            windowList: windowList)
     }
 
     // MARK: Space lookup and cache
@@ -725,6 +727,65 @@ final class LiveGatewayWiringTests: XCTestCase {
         XCTAssertNil(
             gateway.frame(of: handle),
             "a focus-only binding does not outlive its app")
+    }
+
+    // MARK: Binding lifetime
+
+    func testFocusReadReleasesAFocusOnlyBindingForAClosedWindow() {
+        // A window that merely held focus, then closed while its app kept
+        // running: the next focus read in that app proves it absent from
+        // the app's window list and releases it, so `handle(for:)`'s
+        // linear scan stays bounded by live windows instead of growing
+        // with every window ever focused.
+        let closed = AXUIElementCreateApplication(999_990)
+        let live = AXUIElementCreateApplication(999_991)
+        var clock = Date(timeIntervalSince1970: 0)
+        let gateway = makeGateway(
+            now: { clock },
+            windowList: { _ in [live] })
+        let frame = CGRect(x: 10, y: 20, width: 200, height: 100)
+        let closedHandle = gateway.registerTestWindow(
+            pid: 4242, token: 1, frames: FakeWindowFrames(frame: frame),
+            element: closed)
+        XCTAssertEqual(gateway.frame(of: closedHandle), frame)
+
+        gateway.setTestFocusedAXWindow { (live, 4242) }
+        clock = clock.addingTimeInterval(0.1)
+        let focused = gateway.focusedWindow()
+
+        XCTAssertNotNil(focused)
+        XCTAssertNotEqual(focused, closedHandle)
+        XCTAssertNil(
+            gateway.frame(of: closedHandle),
+            "the closed window's focus-only binding is released on the next focus read")
+    }
+
+    func testAppTerminationDropsAnObservedBindingForAnUntiledWindow() {
+        // A window that was tiled, then untiled, keeps its observation
+        // binding but has no record: when its app quits, the controller's
+        // death pass has nothing to release, so `appTerminated` itself
+        // must drop the whole pid table and its token index.
+        let driver = FakeAXObserverDriver()
+        let gateway = makeGateway(observerDriver: driver)
+        let frame = CGRect(x: 0, y: 0, width: 300, height: 200)
+        let handle = gateway.registerTestWindow(
+            pid: 4242, token: 7, frames: FakeWindowFrames(frame: frame))
+        var changes = 0
+        gateway.observe(handle, onChange: { changes += 1 }, onDestroyed: {})
+
+        gateway.appTerminated(pid: 4242)
+
+        XCTAssertNil(gateway.frame(of: handle), "the quit app's binding is gone")
+        driver.deliver(kAXWindowResizedNotification as String, token: 7)
+        XCTAssertEqual(changes, 0, "the quit app's stale token no longer routes")
+        XCTAssertEqual(
+            driver.removedRunLoopSources.count, 1,
+            "the quit prunes the pid's observer once")
+
+        gateway.appTerminated(pid: 4242)
+        XCTAssertEqual(
+            driver.removedRunLoopSources.count, 1,
+            "a repeated termination report never prunes the same pid twice")
     }
 
     // MARK: Frame reads and the write pair

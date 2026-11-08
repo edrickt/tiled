@@ -259,6 +259,10 @@ final class LiveWindowGateway: WindowGateway {
     /// lifetime and release invalidation run without an Accessibility
     /// grant. Production leaves it nil.
     private var testFocusedWindow: (() -> WindowHandle?)?
+    /// Test seam: replaces the system-wide focus pair read so the
+    /// handle-resolution path (including the focus-only binding prune)
+    /// runs without an Accessibility grant. Production leaves it nil.
+    private var testFocusedAXWindow: (() -> (element: AXUIElement, pid: pid_t)?)?
     /// Observer per pid; registrations outlive untiled records and can
     /// never be unregistered, so they are created once and shared.
     private var observers: [pid_t: AXObserverHandle] = [:]
@@ -344,6 +348,11 @@ final class LiveWindowGateway: WindowGateway {
     /// This process's pid. Tiled never subscribes its own births (see
     /// `subscribeCreations`).
     private let ownProcessID: () -> pid_t
+    /// The owning app's fresh window list, the membership read that
+    /// proves a focus-only binding stale. Injected so the
+    /// close-while-running prune runs without an Accessibility grant;
+    /// production reads AX.
+    private let windowList: (pid_t) -> [AXUIElement]?
 
     init(
         observerDriver: AXObserverDriver = LiveAXObserverDriver(),
@@ -366,12 +375,16 @@ final class LiveWindowGateway: WindowGateway {
         },
         ownProcessID: @escaping () -> pid_t = {
             ProcessInfo.processInfo.processIdentifier
+        },
+        windowList: @escaping (pid_t) -> [AXUIElement]? = {
+            LiveWindowGateway.appWindowList(pid: $0)
         }
     ) {
         self.observerDriver = observerDriver
         self.frontmostPID = frontmostPID
         self.runningProcessIDs = runningProcessIDs
         self.ownProcessID = ownProcessID
+        self.windowList = windowList
         self.spaceTable = spaceTable
         self.existingSpacesTable = existingSpacesTable
         self.now = now
@@ -447,6 +460,12 @@ final class LiveWindowGateway: WindowGateway {
             if let testFocusedWindow {
                 return testFocusedWindow()
             }
+            if let testFocusedAXWindow {
+                guard let (element, pid) = testFocusedAXWindow() else {
+                    return nil
+                }
+                return handle(for: element, pid: pid)
+            }
             guard let (element, pid) = self.focusedAXWindow() else {
                 return nil
             }
@@ -458,6 +477,15 @@ final class LiveWindowGateway: WindowGateway {
     /// read. Production never calls this.
     func setTestFocusedWindow(_ read: (() -> WindowHandle?)?) {
         testFocusedWindow = read
+    }
+
+    /// Test seam: supplies the system-wide focused element and pid, so
+    /// `handle(for:)` runs exactly as production's focus read drives it.
+    /// Production never calls this.
+    func setTestFocusedAXWindow(
+        _ read: (() -> (element: AXUIElement, pid: pid_t)?)?
+    ) {
+        testFocusedAXWindow = read
     }
 
     func frame(of handle: WindowHandle) -> CGRect? {
@@ -535,11 +563,21 @@ final class LiveWindowGateway: WindowGateway {
     /// observation-token entry. The shared observer outlives any one
     /// window and only goes when the pid's last handle does.
     func release(_ handle: WindowHandle) {
-        guard let binding = bindings.removeValue(forKey: handle) else { return }
-        focusMemo.invalidate(handle)
+        release(handle, invalidatingFocusMemo: true)
+    }
+
+    /// The shared release body. `invalidatingFocusMemo` is false for the
+    /// focus-only prune: it runs inside `focusedWindow()`'s memoized
+    /// resolution, which owns the memo and writes the fresh answer when
+    /// it returns, so touching the memo there would be an overlapping
+    /// access to the same value.
+    private func release(_ handle: WindowHandle, invalidatingFocusMemo: Bool) {
+        guard
+            let binding = dropBinding(
+                handle, invalidatingFocusMemo: invalidatingFocusMemo)
+        else { return }
         if let key = binding.observedKey {
             registry.forget(key: key)
-            if tokenIndex[key] == handle { tokenIndex[key] = nil }
         }
         if !bindings.values.contains(where: { $0.pid == binding.pid }) {
             // A birth subscription outlives any one window: the app is
@@ -551,18 +589,41 @@ final class LiveWindowGateway: WindowGateway {
         }
     }
 
+    /// Removes one handle's binding and every index derived from it,
+    /// without touching the pid's shared observer. `release` and
+    /// `appTerminated` own the observer lifetime; keeping the removal
+    /// here means an app-quit drop can clear all of a pid's bindings
+    /// without a per-handle last-binding check (and so without a second
+    /// prune of the same pid).
+    @discardableResult
+    private func dropBinding(
+        _ handle: WindowHandle, invalidatingFocusMemo: Bool = true
+    ) -> WindowBinding? {
+        guard let binding = bindings.removeValue(forKey: handle) else {
+            return nil
+        }
+        if invalidatingFocusMemo { focusMemo.invalidate(handle) }
+        if let key = binding.observedKey, tokenIndex[key] == handle {
+            tokenIndex[key] = nil
+        }
+        return binding
+    }
+
     /// Test seam: registers a handle with a scripted AXUIElement token and
     /// frame source, so the observation and frame wiring run without a
     /// live `AXUIElement` or an Accessibility grant. Production never
-    /// calls this; a test window has no AX element, so liveness, focus,
-    /// and raise are outside this seam.
+    /// calls this; a test window normally has no AX element, so liveness,
+    /// focus, and raise are outside this seam. The binding-lifetime tests
+    /// pass an element proxy to exercise the stale-binding prune.
     @discardableResult
     func registerTestWindow(
-        pid: pid_t, token: UInt, frames: WindowFrames
+        pid: pid_t, token: UInt, frames: WindowFrames,
+        element: AXUIElement? = nil
     ) -> WindowHandle {
         let handle = WindowHandle(id: nextHandleID)
         nextHandleID += 1
-        bindings[handle] = WindowBinding(pid: pid, frames: frames, token: token)
+        bindings[handle] = WindowBinding(
+            element: element, pid: pid, frames: frames, token: token)
         return handle
     }
 
@@ -575,19 +636,21 @@ final class LiveWindowGateway: WindowGateway {
         adopt(handle, element: nil, token: token, frames: frames, pid: pid)
     }
 
-    /// An app quit. Its windows are gone; drop the bindings opened only for
-    /// focus reads (menu builds, the status glyph), which have no record
-    /// for the controller's death pass to release. Observed bindings stay:
-    /// the controller's prune owns their record, and the undo chapter skips
-    /// a dead handle by itself.
+    /// An app quit. Its windows are gone: drop every binding for the pid
+    /// and every index derived from it, then retire the pid's shared
+    /// observer and birth bookkeeping. Observed bindings go too: a window
+    /// that was tiled, then untiled, has no record for the controller's
+    /// death pass to release, and the app will never focus again, so
+    /// nothing else would ever drop it. The controller's prune still
+    /// releases the tiled records (liveness reads dead with no binding
+    /// left), and undo skips a dead handle by itself. One prune for the
+    /// whole pid, after the drop, so no per-handle release prunes twice.
     func appTerminated(pid: pid_t) {
         if pid == focusObserverPID { releaseFocusObserver() }
-        pruneObserver(for: pid)
-        let stale = bindings.filter { $0.value.pid == pid && $0.value.observedKey == nil }
-        for handle in stale.keys {
-            bindings[handle] = nil
-            focusMemo.invalidate(handle)
+        for handle in bindings.filter({ $0.value.pid == pid }).keys {
+            dropBinding(handle)
         }
+        pruneObserver(for: pid)
     }
 
     func liveness(of handle: WindowHandle) -> Liveness {
@@ -1439,11 +1502,62 @@ final class LiveWindowGateway: WindowGateway {
 
     // MARK: Handle registry
 
+    /// Drops focus-only bindings for `pid` that its app no longer lists,
+    /// so `handle(for:)`'s linear scan stays bounded by the app's live
+    /// windows. A focus read creates a binding for any focused window,
+    /// and nothing else releases one: a window that closes while its app
+    /// keeps running has no record for the controller's death pass to
+    /// prune, so the next focus read in that app is the proving moment.
+    /// The focused element is never a candidate: it is the live answer.
+    private func pruneClosedFocusOnlyBindings(
+        for pid: pid_t, keeping element: AXUIElement
+    ) {
+        let hasAnother = bindings.contains {
+            $0.value.pid == pid && $0.value.observedKey == nil
+                && !($0.value.element.map { CFEqual($0, element) } ?? false)
+        }
+        guard hasAnother else { return }
+        pruneStaleFocusOnlyBindings(
+            for: pid, listed: windowList(pid), excluding: element)
+    }
+
+    /// Releases the pid's unobserved bindings whose held element the app
+    /// no longer lists. `listed` is the app's fresh window list, or nil
+    /// when it would not answer; an unreadable list falls back to each
+    /// element's own position probe, exactly as `heldElementIsStale` does
+    /// for churn adoption. Internal so the close-while-running rule is
+    /// pinned with a scripted list and no Accessibility grant.
+    func pruneStaleFocusOnlyBindings(
+        for pid: pid_t, listed: [AXUIElement]?, excluding excluded: AXUIElement? = nil
+    ) {
+        let candidates = bindings.filter {
+            $0.value.pid == pid && $0.value.observedKey == nil
+        }
+        guard !candidates.isEmpty else { return }
+        for (handle, binding) in candidates {
+            guard let held = binding.element else { continue }
+            if let excluded, CFEqual(held, excluded) { continue }
+            let listedByApp = listed.map { list in
+                list.contains { CFEqual($0, held) }
+            }
+            guard
+                Self.heldElementIsStale(
+                    listedByApp: listedByApp,
+                    probeAnswers: { Self.elementAnswers(held) })
+            else { continue }
+            release(handle, invalidatingFocusMemo: false)
+        }
+    }
+
     /// Stable handle for a live element: reuses the existing handle when
     /// the element is already registered, issues a fresh one otherwise.
     /// (The controller used to scan records with `CFEqual`; the registry
     /// does that once, here, behind the seam.)
     private func handle(for element: AXUIElement, pid: pid_t) -> WindowHandle {
+        // This focus read is also the only cheap moment to prove a
+        // previous focus-only binding in the same app stale: without the
+        // prune, the scan below grows with every window ever focused.
+        pruneClosedFocusOnlyBindings(for: pid, keeping: element)
         for (handle, binding) in bindings {
             if let registered = binding.element, CFEqual(registered, element) {
                 return handle
@@ -1578,7 +1692,7 @@ final class LiveWindowGateway: WindowGateway {
     /// The owning app's fresh window list, for CFEqual membership of held
     /// elements. Nil when the app element does not answer; an app that
     /// answers an empty list genuinely lists nothing.
-    private static func appWindowList(pid: pid_t) -> [AXUIElement]? {
+    static func appWindowList(pid: pid_t) -> [AXUIElement]? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, messagingTimeout)
         var value: CFTypeRef?
