@@ -341,6 +341,25 @@ final class CanvasDirectoryTests: XCTestCase {
             "the replacement's Space table says nothing about the old display's canvas")
     }
 
+    /// The birth path needs "no display owns this frame" as a distinct
+    /// answer from the main-screen policy: only then can its cursor
+    /// fallback be reached instead of silently picking display one.
+    func testOwningScreenInfoRefusesTheMainPolicyFallbackForAnUnownedFrame() {
+        let off = CGRect(x: 4000, y: 3000, width: 400, height: 300)
+
+        XCTAssertNil(
+            directory.owningScreenInfo(for: off),
+            "no display owns an off-screen frame")
+        XCTAssertEqual(
+            directory.screenInfo(for: off)?.id, Self.screen.id,
+            "the policy lookup still falls back to the main display")
+        XCTAssertEqual(
+            directory.owningScreenInfo(
+                for: CGRect(x: 2000, y: 100, width: 800, height: 600))?.id,
+            Self.otherScreen.id,
+            "an on-display frame keeps its own display")
+    }
+
     /// A withheld-Space canvas is the display's sole entry. A renumber
     /// that keeps the Space unknown must not add a second entry, and once
     /// the renumbered display names a Space the fallback keeps A7's rule:

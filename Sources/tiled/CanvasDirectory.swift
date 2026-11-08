@@ -199,10 +199,13 @@ final class CanvasDirectory {
         return infos.first?.id
     }
 
-    /// The provider-backed screen owning `frame`, or the main screen when
-    /// nothing overlaps (off-screen or inter-Space windows still tile
-    /// somewhere sane). Nil only when the provider reports no displays.
-    func screenInfo(for frame: CGRect) -> ScreenInfo? {
+    /// The provider-backed screen showing the largest share of `frame`,
+    /// else the screen containing its midpoint; nil when no display owns
+    /// the frame. Unlike `screenInfo(for:)` there is no main-screen policy
+    /// fallback, so a caller with its own fallback (the birth path's
+    /// cursor display) can distinguish "no display owns this frame" from
+    /// "the main display by policy".
+    func owningScreenInfo(for frame: CGRect) -> ScreenInfo? {
         let infos = screens()
         if let index = Self.owningScreenIndex(frames: infos.map(\.frame), for: frame) {
             return infos[index]
@@ -210,7 +213,14 @@ final class CanvasDirectory {
         if let index = Self.midpointScreenIndex(frames: infos.map(\.frame), for: frame) {
             return infos[index]
         }
-        return infos.first
+        return nil
+    }
+
+    /// The provider-backed screen owning `frame`, or the main screen when
+    /// nothing overlaps (off-screen or inter-Space windows still tile
+    /// somewhere sane). Nil only when the provider reports no displays.
+    func screenInfo(for frame: CGRect) -> ScreenInfo? {
+        owningScreenInfo(for: frame) ?? screens().first
     }
 
     /// The canvas currently shown on every display, in screen order, plus

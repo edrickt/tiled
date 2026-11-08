@@ -331,6 +331,46 @@ final class WindowBirthTests: XCTestCase {
             "the cursor's canvas claims nothing")
     }
 
+    func testAnOffDisplayBirthFallsToTheCursorDisplayNotTheMainOne() {
+        // Cursor on display 2, frame owned by no display: the birth sizes
+        // on the cursor's canvas, never on the main display by policy.
+        let second = ScreenInfo(
+            id: ScreenID(rawValue: 2),
+            frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            name: "Display 2",
+            displayID: CGDirectDisplayID(43))
+        let secondSpace = SpaceID(rawValue: 102)
+        harness = ControllerHarness(
+            screens: [Self.screen, second],
+            activeSpaces: [
+                Self.screen.displayID: Self.spaceA,
+                second.displayID: secondSpace,
+            ],
+            deathConfirmation: 0)
+        harness.fireCursorMove(to: CGPoint(x: 2000, y: 500))
+        gateway.clearWrites()
+
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 4000, y: 3000, width: 800, height: 600))
+
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 2400, y: 500, width: 800, height: 500),
+            "an unowned birth takes the cursor display's quarter, not main's")
+        let id = controller.registeredID(for: handle)!
+        XCTAssertNotNil(
+            controller.canvas(
+                for: TilingSpaceKey(screen: second.id, space: secondSpace)
+            ).record(of: id),
+            "the birth record lives on the cursor display's canvas")
+        XCTAssertNil(
+            controller.canvas(
+                for: TilingSpaceKey(screen: Self.screen.id, space: Self.spaceA)
+            ).record(of: id),
+            "the main display's canvas claims nothing")
+    }
+
     func testBirthRefreshesStaleCanvasGeometry() {
         // The canvas was established, then the visible frame shrank with
         // no display-change notification (Dock shown): the next birth

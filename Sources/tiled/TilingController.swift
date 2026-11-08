@@ -1636,15 +1636,17 @@ final class TilingController {
         onChange?()
     }
 
-    /// The canvas a birth sizes on: the display showing the window's frame,
+    /// The canvas a birth sizes on: the display owning the window's frame,
     /// so the footprint derives from the geometry the window is actually
-    /// on. Falls back to the cursor display's canvas only when the frame
-    /// resolves to no display. Sizing on the window's canvas also keeps the
-    /// visibility gate honest: a birth for a hidden-Space window defers
-    /// through the swipe-back reconcile instead of writing blind through
-    /// the cursor's visible canvas.
+    /// on. Falls back to the cursor display's canvas only when no display
+    /// owns the frame (an off-screen or degenerate one); the main screen is
+    /// not a policy fallback here, so that cursor branch is reachable.
+    /// Sizing on the window's canvas also keeps the visibility gate honest:
+    /// a birth for a hidden-Space window defers through the swipe-back
+    /// reconcile instead of writing blind through the cursor's visible
+    /// canvas.
     private func birthKey(for frame: CGRect) -> TilingSpaceKey {
-        directory.screenInfo(for: frame).map { directory.key(for: $0.id) }
+        directory.owningScreenInfo(for: frame).map { directory.key(for: $0.id) }
             ?? directory.cursorKey()
     }
 

@@ -998,7 +998,7 @@
  [
   "TilingController.swift",
   "births size on the cursor display (multi-display windows jump screens)",
-  "        directory.screenInfo(for: frame).map { directory.key(for: $0.id) }\n            ?? directory.cursorKey()",
+  "        directory.owningScreenInfo(for: frame).map { directory.key(for: $0.id) }\n            ?? directory.cursorKey()",
   "        directory.cursorKey()"
  ],
  [
