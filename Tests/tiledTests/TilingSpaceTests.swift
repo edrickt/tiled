@@ -1317,6 +1317,35 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertNil(space.error, "there is no sane screen to expand onto: silent no-op")
     }
 
+    /// A refused collapse must not lose the expansion: the window still
+    /// covers the screen, so it must still read as expanded with its
+    /// saved pre-expand frame, or the next press would have nowhere to
+    /// return it.
+    func testRefusedCollapseKeepsTheWindowExpandedAndItsSavedFrame() {
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let id = harness.addWindow(frame: original)
+        _ = space.expandToggle(window: id, context: context())
+        XCTAssertTrue(space.isExpanded(id))
+        XCTAssertEqual(harness.frame(of: id), bounds)
+
+        harness.gateway.refuseNextWrites(harness.handle(of: id)!)
+        let outcome = space.expandToggle(window: id, context: context())
+
+        XCTAssertEqual(outcome.result, .expandRefused(windowName: "TestApp"))
+        XCTAssertTrue(
+            space.isExpanded(id),
+            "the refused collapse leaves the window covering the screen")
+        XCTAssertEqual(harness.frame(of: id), bounds, "the refused write moved nothing")
+        XCTAssertEqual(
+            space.expanded[id], original,
+            "the saved pre-expand frame survives the refusal")
+
+        // The next press retries the collapse and returns the saved frame.
+        space.expandToggle(window: id, context: context())
+        XCTAssertFalse(space.isExpanded(id))
+        XCTAssertEqual(harness.frame(of: id), original)
+    }
+
     // MARK: Splitter reset / restore
 
     func testResetSplittersParksTheBackupAndReasserts() {

@@ -754,6 +754,41 @@ final class ControllerGatewayTests: XCTestCase {
             "an expanded covering window does not drive the hidden divider")
     }
 
+    func testExpandedTwoThirdsDoesNotDriveTheHiddenDividerOnMouseUp() {
+        // The same exclusion on the reassert half of the gesture: the
+        // live loop already ignores the expanded window, and the mouse-up
+        // must not move the hidden divider the live loop left alone. A
+        // reassert that read every stored slot would move it only on
+        // release.
+        let covering = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = covering
+        controller.handle(slot: .sixthsLeftTwoThirds)
+        controller.handleExpandToggle()
+        let third = tileFocused(.sixthRight)
+        let bounds = Self.screen.visibleFrame
+
+        var echo = gateway.frame(of: third)!
+        echo.origin.x += 5
+        echo.size.width -= 5
+        gateway.simulateChange(third, to: echo)
+        var dragged = echo
+        dragged.origin.x = 0.5 * bounds.width
+        dragged.size.width = bounds.maxX - dragged.minX
+        gateway.simulateChange(third, to: dragged)
+
+        controller.mouseLifted()
+
+        XCTAssertEqual(
+            canvas.grid.sixthsRightSplit, 0.5, accuracy: 0.01,
+            "the dragged third's splitter stays where the drag left it")
+        XCTAssertEqual(
+            canvas.grid.sixthsLeftSplit, 1.0 / 3.0, accuracy: 0.01,
+            "mouse-up does not move the hidden divider for a covering window")
+        XCTAssertEqual(
+            gateway.frame(of: covering), bounds,
+            "the expanded window is never written by the reassert")
+    }
+
     func testShortDragSnapsBackIntoTile() {
         let drag = tileAndDrag(5, 5) // net displacement ~14pt
         let expectation = XCTestExpectation(description: "snapback")

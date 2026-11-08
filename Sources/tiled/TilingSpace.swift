@@ -1762,7 +1762,6 @@ struct TilingSpace {
     @discardableResult
     mutating func collapseExpanded(_ id: WindowID, context: Context) -> Outcome {
         guard let saved = expanded[id] else { return Outcome() }
-        expanded[id] = nil
         error = nil
         notice = nil
         // A fresh toggle supersedes any request already retained for this
@@ -1778,6 +1777,7 @@ struct TilingSpace {
         guard let result else { return Outcome() }
         switch result {
         case .written, .skippedNoOp:
+            expanded[id] = nil
             // A landed collapse supersedes a stale edge drag exactly as an
             // expansion does.
             context.tracker.clearPendingReassert(id)
@@ -1789,7 +1789,9 @@ struct TilingSpace {
             // The canvas is not visible: retain the collapse so the
             // swipe-back reassert issues it. A tiled collapse re-tiles
             // into its committed slot; an untiled one returns to the
-            // saved frame.
+            // saved frame. The retained request owns the saved frame, so
+            // the expansion is over in state now.
+            expanded[id] = nil
             if state.slot(of: id) != nil {
                 deferredRequests[id] = .slot
             } else {
@@ -1797,6 +1799,9 @@ struct TilingSpace {
             }
             return Outcome(result: .deferred)
         case .refused:
+            // The window still covers the screen: keep it expanded with
+            // its saved frame, or the next press would read it as an
+            // ordinary tile and have nowhere to return it.
             error = Self.refusalMessage(count: 1)
             return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
         }
@@ -1927,6 +1932,16 @@ struct TilingSpace {
         return ReassertPlan(grid: reconciled, rects: rects)
     }
 
+    /// The slots the splitter symmetry reads: occupied by windows on the
+    /// grid. An expanded window covers the layout but keeps its slot, so
+    /// it is not one of them; the live drag loop's `trackedOccupants`
+    /// applies the same exclusion. One definition, so the reassert's two
+    /// occupant reads cannot drift from the live loop about which hidden
+    /// splitter follows an edge.
+    private var unexpandedOccupiedSlots: Set<Slot> {
+        Set(state.occupants.filter { expanded[$0.value] == nil }.keys)
+    }
+
     /// The grid a reassert maps against. `.grid` leaves the splitters
     /// alone; `.resize` moves each of the dragged window's movable edges
     /// back to the achieved frame's edge, so the splitter sits where the
@@ -1942,7 +1957,7 @@ struct TilingSpace {
             expanded[dragged] == nil,
             let slot = state.slot(of: dragged)
         else { return grid }
-        let occupied = Set(state.occupants.keys)
+        let occupied = unexpandedOccupiedSlots
         var reconciled = grid
         for edge in TileEdge.allCases {
             reconciled.update(
@@ -2027,7 +2042,7 @@ struct TilingSpace {
         _ written: [(id: WindowID, target: CGRect)], context: Context
     ) -> Bool {
         var reconciled = grid
-        let occupied = Set(state.occupants.keys)
+        let occupied = unexpandedOccupiedSlots
         var changed = false
         for entry in written {
             guard let slot = state.slot(of: entry.id),
