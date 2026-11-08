@@ -194,7 +194,7 @@
  [
   "CanvasDirectory.swift",
   "hidden canvas treated as visible (reflow writes off-Space windows)",
-  "    func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen else { return true }\n        guard screens().contains(where: { $0.id == screen }) else { return false }\n        guard let id = space.space else { return true }\n        // No answer names the visible Space: unknown, not different.\n        guard let active = activeSpaceID(on: screen) else { return true }\n        return active == id\n    }",
+  "    func isVisible(_ space: TilingSpaceKey) -> Bool {\n        guard let screen = space.screen else { return true }\n        guard screens().contains(where: { $0.id == screen }) else { return false }\n        // No answer names the visible Space: unknown, not different.\n        guard let active = activeSpaceID(on: screen) else { return true }\n        guard let id = space.space else {\n            // The display names a Space, so the withheld fallback is not\n            // the canvas the user is looking at.\n            return false\n        }\n        return active == id\n    }",
   "    func isVisible(_ space: TilingSpaceKey) -> Bool {\n        true\n    }"
  ],
  [
@@ -308,7 +308,7 @@
  [
   "FrameWriter.swift",
   "no-op write pushed anyway (expectation never converges)",
-  "        if let live = liveBefore,\n            DragTracker.framesClose(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            seedBaseline(id, target)\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
+  "        if let live = liveBefore,\n            DragTracker.framesClose(live, target, tolerance: DragTracker.noOpWriteTolerance)\n        {\n            // The window already holds this target, so no write or echo\n            // will follow; any expectation an earlier write to a\n            // different target left armed now judges a frame the window\n            // left on purpose, and the late check would discard a\n            // correctly laid-out window. The skip supersedes it.\n            cancelExpected(id)\n            seedBaseline(id, target)\n            log(\"write win\\(id) no-op skip target=\\(target)\")\n            return .skippedNoOp\n        }\n",
   ""
  ],
  [
@@ -350,8 +350,8 @@
  [
   "TilingSpace.swift",
   "resize reassert never reconciles the splitter to the achieved edge",
-  "        let occupied = Set(state.occupants.keys)\n        var reconciled = grid\n        for edge in TileEdge.allCases {",
-  "        let occupied = Set(state.occupants.keys)\n        var reconciled = grid\n        for edge in TileEdge.allCases where false {"
+  "        let occupied = unexpandedOccupiedSlots\n        var reconciled = grid\n        for edge in TileEdge.allCases {",
+  "        let occupied = unexpandedOccupiedSlots\n        var reconciled = grid\n        for edge in TileEdge.allCases where false {"
  ],
  [
   "TilingSpace.swift",
@@ -806,8 +806,8 @@
  [
   "LiveWindowGateway.swift",
   "release keeps the released window's frame access (a forgotten handle still reads)",
-  "        guard let binding = bindings.removeValue(forKey: handle) else { return }",
-  "        guard let binding = bindings[handle] else { return }"
+  "        guard let binding = bindings.removeValue(forKey: handle) else {\n            return nil\n        }",
+  "        guard let binding = bindings[handle] else {\n            return nil\n        }"
  ],
  [
   "LiveWindowGateway.swift",
