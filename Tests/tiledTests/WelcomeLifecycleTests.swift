@@ -159,7 +159,7 @@ final class WelcomeLifecycleTests: XCTestCase {
         return other
     }
 
-    func testReopeningTheVisibleGuideRaisesSettings() throws {
+    func testReopeningTheVisibleGuideRaisesSettings() {
         // Welcome is already in the tab view; selecting it must also raise
         // a visible-but-behind Settings window. The real ordering needs an
         // active app (and makeFirstResponder already raises within this
