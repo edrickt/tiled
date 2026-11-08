@@ -145,4 +145,29 @@ final class WelcomeInstructionsTests: XCTestCase {
             behavior.contains("⌥⇧\\"),
             "a failed switch combo must never be printed as if it works")
     }
+
+    func testHotkeysStartingRefreshesTheVisibleGuidesCombos() throws {
+        // The guide can be open while the permission explainer is up. The
+        // grant starts the hotkey service, and its failure set must reach
+        // the already-built guide: teaching a combo that lost global
+        // registration would promise a keypress that does nothing.
+        var failed: [HotkeyAction] = []
+        let controller = SettingsWindowController(
+            settings: AppSettings(defaults: defaults), hotkeyStore: store)
+        defer { controller.close() }
+        controller.failedActionsProvider = { failed }
+        controller.show(selecting: .welcome)
+        let view = try XCTUnwrap(controller.window?.contentView)
+        XCTAssertTrue(textLabels(in: view).contains { $0.contains("Press ⌥⇧U") })
+
+        failed = [.slotKey(.topLeft)]
+        controller.hotkeysDidStart()
+
+        XCTAssertTrue(
+            textLabels(in: view).contains { $0.contains("couldn't be registered") },
+            "the open guide must re-read the registration failure set")
+        XCTAssertFalse(
+            textLabels(in: view).contains { $0.contains("Press ⌥⇧U") },
+            "the guide must stop teaching a combo that just failed to register")
+    }
 }

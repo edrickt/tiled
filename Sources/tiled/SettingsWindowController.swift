@@ -324,6 +324,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         shortcutsTab.refreshPermissionState()
     }
 
+    /// Tiling has started (the permission grant or a trusted launch): the
+    /// first moment global hotkeys can report a registration failure. An
+    /// open Settings window must re-read the failure set in the Shortcuts
+    /// tab and the guide's live combos now, not only its permission rows;
+    /// otherwise a combo refused at start stays unlisted until the window
+    /// is reopened.
+    func hotkeysDidStart() {
+        permissionStateDidChange()
+        // Reload recomputes the failure notice and refreshes the recorder
+        // rows (including a recorder left armed while permission arrived).
+        shortcutsTab.reload()
+        welcomeTab.refreshShortcutInstructions()
+    }
+
     /// Keeps the Shortcuts tab's rebuild size current during live resize
     /// (the controller is the window's delegate, set in init); without
     /// this, a collapse/bulk rebuild after resizing would use the size

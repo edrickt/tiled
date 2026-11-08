@@ -200,10 +200,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // highest-friction step with no picture of the product, so
             // open Welcome once instead of leaving them at the menu.
             showSettings(selecting: .welcome)
-        case .refreshPermissionRows:
-            // An already-open Settings window must re-probe now: its
-            // permission rows are only refreshed on show() otherwise.
-            settingsController?.permissionStateDidChange()
+        case .refreshSettings:
+            // An already-open Settings window must re-read the first
+            // hotkey registration pass now: its failure rows and the
+            // guide's live combos are only refreshed on show() otherwise.
+            settingsController?.hotkeysDidStart()
         }
     }
 

@@ -30,6 +30,19 @@ final class SettingsPermissionButtonTests: XCTestCase {
         return nil
     }
 
+    private func visibleLabel(containing text: String, in view: NSView) -> NSTextField? {
+        if let field = view as? NSTextField,
+           field.stringValue.contains(text),
+           !field.isHiddenOrHasHiddenAncestor
+        {
+            return field
+        }
+        for subview in view.subviews {
+            if let hit = visibleLabel(containing: text, in: subview) { return hit }
+        }
+        return nil
+    }
+
     private func temporaryDefaults() -> UserDefaults {
         UserDefaults(suiteName: suiteName)!
     }
@@ -150,5 +163,34 @@ final class SettingsPermissionButtonTests: XCTestCase {
         XCTAssertFalse(button!.isHiddenOrHasHiddenAncestor)
         button?.performClick(nil)
         XCTAssertTrue(opened, "The button must open the Accessibility pane.")
+    }
+
+    func testShortcutsTabListsAFailureThatAppearsWhenHotkeysStart() throws {
+        // Settings can be sitting on Shortcuts while the permission
+        // explainer is up; the first hotkey registration pass happens on
+        // the grant, so without a reload here the newly failed combos
+        // would stay unlisted until the window was reopened.
+        var failed: [HotkeyAction] = []
+        let controller = SettingsWindowController(
+            settings: AppSettings(defaults: temporaryDefaults()),
+            hotkeyStore: HotkeyStore(defaults: temporaryDefaults()))
+        defer { controller.close() }
+        controller.failedActionsProvider = { failed }
+        controller.show(selecting: .shortcuts)
+
+        let content = try XCTUnwrap(controller.window?.contentView)
+        let tabs = try XCTUnwrap(selectedTabView(in: content))
+        XCTAssertEqual(tabs.selectedTabViewItem?.identifier as? String, "shortcuts")
+        let view = try XCTUnwrap(tabs.selectedTabViewItem?.view)
+        XCTAssertNil(
+            visibleLabel(containing: "could not be registered", in: view),
+            "precondition: no failure has been reported yet")
+
+        failed = [.slotKey(.topLeft)]
+        controller.hotkeysDidStart()
+
+        XCTAssertNotNil(
+            visibleLabel(containing: "could not be registered", in: view),
+            "the open Shortcuts tab must list the newly failed hotkey without reopening")
     }
 }

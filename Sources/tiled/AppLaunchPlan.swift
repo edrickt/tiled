@@ -43,16 +43,17 @@ struct AppLaunchPlan: Equatable {
 
 /// What `start(afterPermissionWait:)` does once tiling is live. A grant
 /// that arrives on a first run is the teaching moment, so it opens
-/// Welcome; every other start only refreshes an already-open Settings
-/// window's permission rows.
+/// Welcome; every other start refreshes an already-open Settings window:
+/// its permission rows, but also the Shortcuts tab's new registration
+/// failures and the guide's live combos.
 enum AppStartCompletion: Equatable {
     case showWelcome
-    case refreshPermissionRows
+    case refreshSettings
 
     static func make(afterPermissionWait: Bool, didDismissWelcome: Bool) -> Self {
         if afterPermissionWait, !didDismissWelcome {
             return .showWelcome
         }
-        return .refreshPermissionRows
+        return .refreshSettings
     }
 }

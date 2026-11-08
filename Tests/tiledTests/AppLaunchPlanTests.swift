@@ -114,19 +114,19 @@ final class AppLaunchPlanTests: XCTestCase {
             .showWelcome)
     }
 
-    func testPermissionGrantAfterDismissalRefreshesPermissionRows() {
+    func testPermissionGrantAfterDismissalRefreshesSettings() {
         XCTAssertEqual(
             AppStartCompletion.make(
                 afterPermissionWait: true, didDismissWelcome: true),
-            .refreshPermissionRows)
+            .refreshSettings)
     }
 
-    func testImmediateStartRefreshesPermissionRows() {
+    func testImmediateStartRefreshesSettings() {
         // No wait means no teaching moment, even on a first run: this is
         // the already-trusted launch, not the grant arrival.
         XCTAssertEqual(
             AppStartCompletion.make(
                 afterPermissionWait: false, didDismissWelcome: false),
-            .refreshPermissionRows)
+            .refreshSettings)
     }
 }
