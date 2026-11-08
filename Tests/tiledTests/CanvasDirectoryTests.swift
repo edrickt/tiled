@@ -200,17 +200,32 @@ final class CanvasDirectoryTests: XCTestCase {
             "the new resolution is stored, not the clamped fallback")
     }
 
-    func testVisibilityTreatsAWithheldCanvasAsTheDisplayTheUserSees() {
+    func testVisibilityTreatsAWithheldCanvasAsVisibleOnlyWhileTheSpaceIsUnknown() {
+        // The audited rule (A7): a withheld-Space canvas is visible only
+        // while the display's active Space is unknown. Once the display
+        // names a Space, the old fallback stays enumerated for the manage
+        // list but writes defer like any hidden canvas, even when it is
+        // populated.
+        holdAChapter(withheld)
         XCTAssertTrue(directory.isVisible(identified))
-        XCTAssertTrue(directory.isVisible(withheld), "a withheld Space id is not a hidden canvas")
+        XCTAssertFalse(
+            directory.isVisible(withheld),
+            "a named active Space makes the withheld fallback hidden, even when it holds work")
+        XCTAssertTrue(
+            directory.visibleKeys().contains(withheld),
+            "the manage list still enumerates the withheld fallback")
 
         activeSpaces[Self.displayID] = SpaceID(rawValue: 999)
         XCTAssertFalse(directory.isVisible(identified), "another Space is hidden")
+        XCTAssertFalse(directory.isVisible(withheld))
 
         activeSpaces = [:]
         XCTAssertTrue(
             directory.isVisible(identified),
             "an unknown active Space is unknown, not hidden")
+        XCTAssertTrue(
+            directory.isVisible(withheld),
+            "with no named Space the withheld fallback is the display the user sees")
 
         screens = [Self.otherScreen]
         XCTAssertFalse(

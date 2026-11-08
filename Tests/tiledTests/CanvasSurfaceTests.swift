@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import XCTest
 
@@ -141,5 +142,73 @@ final class CanvasSurfaceTests: XCTestCase {
         XCTAssertEqual(
             controller.canvas(for: named).state.occupant(of: .topLeft), namedWindow.id,
             "the named canvas is untouched by the window's own request")
+    }
+
+    /// The audited hazard (A7): once the display names a Space, a
+    /// populated withheld canvas is no longer the display the user sees.
+    /// It stays in the manage list, but a display change's reassert must
+    /// defer instead of writing those windows against the visible frame
+    /// of a Space they are not on.
+    func testDisplayChangeDefersAWithheldCanvasOnceTheDisplayNamesASpace() {
+        let window = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        gateway.activeSpaces = [Self.displayID: Self.namedSpace]
+        // Off the grid, so the reassert has a write to issue if the
+        // canvas is (wrongly) treated as visible.
+        gateway.simulateSilentChange(
+            window, to: CGRect(x: 60, y: 60, width: 500, height: 400))
+        gateway.clearWrites()
+
+        postDisplayChange()
+
+        XCTAssertTrue(
+            gateway.writes.isEmpty,
+            "applyAll must not write a withheld canvas once the display names a Space")
+        XCTAssertEqual(
+            controller.canvas(for: withheld).state.occupant(of: .topLeft), window.id,
+            "the deferred reassert leaves the window tiled on its canvas")
+        XCTAssertEqual(
+            controller.allTiledWindowsInfo().map(\.id), [window.id],
+            "the manage list still reaches the withheld canvas's window")
+    }
+
+    /// Untile All resolves the display's withheld canvas while the named
+    /// one is empty, but its restore must defer there too; the record is
+    /// released and the sized frame lands when the canvas is visible.
+    func testUntileAllDefersAWithheldCanvasRestoreOnceTheDisplayNamesASpace() {
+        let window = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        gateway.activeSpaces = [Self.displayID: Self.namedSpace]
+        gateway.clearWrites()
+
+        let receipt = controller.untileAll()
+
+        XCTAssertTrue(receipt.performed, "a deferral stands, never a refusal")
+        XCTAssertTrue(
+            gateway.writes.isEmpty,
+            "Untile All must not write a withheld canvas once the display names a Space")
+        XCTAssertNil(
+            controller.canvas(for: withheld).state.occupant(of: .topLeft),
+            "the slot is released even though the restore deferred")
+        XCTAssertTrue(
+            controller.canvas(for: withheld).state.tiledWindows.isEmpty,
+            "the deferred untile leaves no tiled window")
+        XCTAssertTrue(
+            controller.isMarkedStale(withheld),
+            "the deferred restore waits for the canvas to become visible")
+    }
+
+    /// Fires the controller's display-change observer and waits for it,
+    /// the same way the bulk-operation tests drive the notification.
+    private func postDisplayChange() {
+        let reasserted = expectation(description: "display change reassert")
+        let token = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { _ in reasserted.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+        NotificationCenter.default.post(
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        wait(for: [reasserted], timeout: 1.0)
     }
 }

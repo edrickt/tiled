@@ -232,8 +232,9 @@ final class CanvasDirectory {
             if !keys.contains(identified) { keys.append(identified) }
         }
         for info in infos {
-            // A withheld-Space canvas is visible like the identified one:
-            // it is the same display, just unnamed.
+            // A withheld-Space canvas stays enumerated even after the
+            // display names a Space: it is the same display's fallback,
+            // and its windows must stay reachable from the manage list.
             if let fallback = withheldCanvas(on: info.id),
                 !keys.contains(fallback)
             {
@@ -250,19 +251,24 @@ final class CanvasDirectory {
     /// it stays visible. A key whose display is no longer attached is never
     /// visible, even when its Space id is withheld: its stored frame may
     /// already belong to another display, so writing it would lay the
-    /// window out against the wrong geometry. On an attached display a
-    /// withheld Space id is the per-display fallback the user is looking
-    /// at, so it stays visible; an identified canvas is visible when it is
-    /// the Space shown there. When the window server cannot name the
-    /// visible Space at all, the canvas is *unknown*, not hidden: the
-    /// unnameable answer is the same fallback a withheld id is, so the
-    /// canvas stays visible and the write proceeds.
+    /// window out against the wrong geometry. On an attached display, an
+    /// identified canvas is visible when it is the Space shown there. A
+    /// withheld canvas is visible only while the window server cannot name
+    /// the visible Space at all: the unnameable answer is the same fallback
+    /// a withheld id is, so the write proceeds. Once the display names a
+    /// Space, its old withheld canvas is a stale fallback kept for the
+    /// manage list and defers writes like any hidden canvas. An unnameable
+    /// Space also leaves every identified canvas *unknown*, not hidden.
     func isVisible(_ space: TilingSpaceKey) -> Bool {
         guard let screen = space.screen else { return true }
         guard screens().contains(where: { $0.id == screen }) else { return false }
-        guard let id = space.space else { return true }
         // No answer names the visible Space: unknown, not different.
         guard let active = activeSpaceID(on: screen) else { return true }
+        guard let id = space.space else {
+            // The display names a Space, so the withheld fallback is not
+            // the canvas the user is looking at.
+            return false
+        }
         return active == id
     }
 
@@ -384,9 +390,9 @@ final class CanvasDirectory {
     }
 
     /// A display's withheld-Space canvas, when it still holds windows or
-    /// chapters. This is not a hidden Space: it is the canvas the window
-    /// server would not name when those windows tiled, so it must stay
-    /// reachable or its windows vanish from the menu and bulk actions.
+    /// chapters. It stays reachable or its windows vanish from the menu
+    /// and bulk actions; once the display names a Space it is a stale
+    /// fallback, so writes to it defer like any hidden canvas.
     private func withheldCanvas(on screen: ScreenID?) -> TilingSpaceKey? {
         guard let screen else { return nil }
         let key = TilingSpaceKey(screen: screen, space: nil)
