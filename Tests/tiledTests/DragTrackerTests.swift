@@ -460,6 +460,65 @@ final class DragTrackerTests: XCTestCase {
             "the live drop decides; the pending reassert is dropped with it")
     }
 
+    func testPendingReassertOnOneWindowDoesNotEraseAnotherWindowsLiveDrag() {
+        // Window 1 has a pending edge reassert (a trailing tick re-armed
+        // it after its own drag ended); window 2 is in a live title-bar
+        // drag past the untile distance. A reassert of window 1 writes
+        // every occupant of the canvas, including window 2, and the
+        // write's echo clears window 2's drag state. If the pending loop
+        // runs first, window 2's endDrag finds no drag and its drop is
+        // erased: it snaps back into its tile instead of untiling. The
+        // drop owns the gesture, so the live drag must be decided first.
+        var liveTracker: DragTracker!
+        var liveDecisions: [DragTracker.DragDecision] = []
+        let aFrame = CGRect(x: 0, y: 0, width: 500, height: 400)
+        let bFrame = CGRect(x: 0, y: 400, width: 500, height: 400)
+        liveTracker = DragTracker(
+            context: DragTracker.Context(
+                slotOf: { [weak self] in self?.slots[$0] },
+                occupants: { [weak self] in self?.occupants ?? [:] },
+                now: { [weak self] in self?.now ?? Date() }),
+            gridProvider: provider(),
+            onDragEnd: { decision in
+                liveDecisions.append(decision)
+                if case .resize = decision {
+                    // Model the coordinator's synchronous reassert write:
+                    // every occupant of the canvas is marked expected,
+                    // which clears any in-flight drag for it.
+                    liveTracker.markExpected(1, aFrame)
+                    liveTracker.markExpected(2, bFrame)
+                }
+            },
+            scheduleDragEnd: { [weak self] fire in
+                self?.dragEndFires.append(fire)
+                return {}
+            })
+        tracker = liveTracker
+        tile(1, .bottomLeft, frame: aFrame)
+        tile(2, .topLeft, frame: bFrame)
+
+        // Window 1's edge drag arms a pending reassert, then ends.
+        drag(
+            1, from: aFrame,
+            to: CGRect(x: 0, y: 0, width: 500, height: 320),
+            tracker: liveTracker)
+        XCTAssertTrue(liveDecisions.isEmpty, "window 1's reassert waits for the release")
+
+        // Window 2's title-bar drag is live at the release: a hand press
+        // inside its start frame and two moved ticks past untile distance.
+        liveTracker.forget(2)
+        liveTracker.mousePressed(at: CGPoint(x: 250, y: 600))
+        dragTicks(
+            2, size: bFrame.size,
+            to: [(0, 400), (40, 440), (100, 500)])
+
+        liveTracker.mouseLifted()
+
+        XCTAssertEqual(
+            liveDecisions, [.untile(2), .resize(1)],
+            "window 2's drop is decided before window 1's reassert can erase it")
+    }
+
     func testSettledWriteRevertedByTheSessionIsReissued() {
         // The other order the race loses in, observed live: the write
         // APPLIES (its echo settles) and the app's own resize session

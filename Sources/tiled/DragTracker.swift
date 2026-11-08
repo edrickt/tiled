@@ -867,6 +867,13 @@ final class DragTracker {
         pendingReasserts.subtract(inFlight)
         let pending = pendingReasserts
         pendingReasserts = []
+        // Decide the live drops before flushing the remaining pending
+        // reasserts: a reassert's write covers every occupant of its
+        // canvas, so flushing one for window A first clears window B's
+        // in-flight drag and erases B's undecided drop.
+        for id in inFlight {
+            endDrag(id: id, decidedAtMouseUp: true)
+        }
         for id in pending.sorted() {
             // The settle about to be committed can be overridden by the
             // app's own resize session ending just after it; remember the
@@ -875,9 +882,6 @@ final class DragTracker {
                 settleOverrides[id] = SettleOverride(gesture: gesture, sightings: 0)
             }
             onDragEnd(.resize(id))
-        }
-        for id in inFlight {
-            endDrag(id: id, decidedAtMouseUp: true)
         }
     }
 
