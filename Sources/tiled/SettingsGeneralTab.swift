@@ -1,6 +1,38 @@
 import AppKit
 import ServiceManagement
 
+/// What the "Launch at login" row shows for one `SMAppService` status.
+/// The system can leave a registered login item in `.requiresApproval`
+/// (the user must allow it in Login Items): that is not off, and calling
+/// `register()` again throws rather than approving it, so the row says
+/// what is actually happening instead of reading as disabled.
+enum LaunchAtLoginPresentation: Equatable {
+    case enabled
+    case awaitingApproval
+    case off
+
+    static func make(status: SMAppService.Status) -> Self {
+        switch status {
+        case .enabled: return .enabled
+        case .requiresApproval: return .awaitingApproval
+        case .notRegistered, .notFound: return .off
+        @unknown default: return .off
+        }
+    }
+
+    /// Both a live item and one awaiting approval are checked: neither
+    /// means "not registered", and an unchecked box would invite the
+    /// user to press it again.
+    var isChecked: Bool { self != .off }
+
+    /// nil unless the system is waiting on the user's approval.
+    var approvalExplanation: String? {
+        guard self == .awaitingApproval else { return nil }
+        return "Launch at login is waiting for approval: allow Tiled in "
+            + "System Settings → General → Login Items."
+    }
+}
+
 /// The General tab: two checkboxes plus the guide re-entry.
 ///
 /// Owns its controls and their actions; the shell reads `firstControl`
@@ -170,9 +202,24 @@ final class GeneralTab: NSObject {
     }
 
     func loadValues() {
-        launchAtLoginCheckbox?.state = currentLaunchAtLogin ? .on : .off
+        refreshLaunchAtLoginState()
         hideIconCheckbox?.state = settings.hideMenuBarIcon ? .on : .off
         refreshPermissionState()
+    }
+
+    /// Re-reads the live `SMAppService` status: the checkbox never decides
+    /// this from a cached "enabled" answer, and `.requiresApproval` gets its
+    /// own checked state plus the explanation of what the user must do.
+    private func refreshLaunchAtLoginState() {
+        let presentation = LaunchAtLoginPresentation.make(
+            status: SMAppService.mainApp.status)
+        launchAtLoginCheckbox?.state = presentation.isChecked ? .on : .off
+        if let explanation = presentation.approvalExplanation {
+            loginFailureLabel?.stringValue = explanation
+            loginFailureLabel?.isHidden = false
+        } else {
+            loginFailureLabel?.isHidden = true
+        }
     }
 
     /// Re-probes trust so the permission row tracks reality without
@@ -202,23 +249,30 @@ final class GeneralTab: NSObject {
         onOpenAccessibilitySettings?()
     }
 
-    private var currentLaunchAtLogin: Bool {
-        SMAppService.mainApp.status == .enabled
-    }
-
     @objc private func showGuideTapped(_ sender: NSButton) {
         onShowGuide?()
     }
 
     @objc private func launchAtLoginToggled(_ sender: NSButton) {
         let enable = sender.state == .on
+        let presentation = LaunchAtLoginPresentation.make(
+            status: SMAppService.mainApp.status)
+        if presentation == .awaitingApproval {
+            // The item exists; the system is waiting for the user to allow
+            // it in Login Items. register() throws in this state and would
+            // hide the real step behind a bundle-error message, so the row
+            // stays checked and points at the approval instead.
+            sender.state = .on
+            refreshLaunchAtLoginState()
+            return
+        }
         do {
             if enable {
                 try SMAppService.mainApp.register()
             } else {
                 try SMAppService.mainApp.unregister()
             }
-            loginFailureLabel.isHidden = true
+            refreshLaunchAtLoginState()
         } catch {
             // SMAppService can fail outside a properly bundled app (e.g. a
             // raw `swift run` binary); say why inline, not only in the log.
