@@ -768,7 +768,11 @@ final class TilingController {
                 $0.error = TilingSpace.refusalMessage(windowName: name)
             }
         }
-        let error = directory.storedCanvas(for: errorSpace)?.error
+        // The receipt tells one story about this window. The canvas's
+        // error is not borrowed into the notice: an existing one belongs
+        // to another action and already renders as its own menu row, so
+        // borrowing it would print that sentence twice while the spoken
+        // announcement named this window.
         let announcement = MenuText.refusedAnnouncement(windowName: name)
         // Refresh first: `onChange` bumps the notice generation, and a
         // receipt presented before the bump is superseded in the same
@@ -776,7 +780,7 @@ final class TilingController {
         onChange?()
         onLateReceipt?(ActionReceipt(
             canvas: errorSpace, performed: false,
-            notice: error ?? announcement, announcement: announcement))
+            notice: announcement, announcement: announcement))
         dbg("verify FAILED win\(id): silent ignore, rolled back")
     }
 

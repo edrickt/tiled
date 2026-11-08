@@ -1020,4 +1020,45 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertTrue(canvas.state.occupants.isEmpty)
         XCTAssertNil(canvas.error)
     }
+
+    func testLateRollbackWithAnEarlierCanvasErrorKeepsOneStory() {
+        // Safari's placement draws AX silence; before its verification
+        // fires, Mail's placement is refused, leaving Mail's error on the
+        // canvas. The late rollback must still speak about Safari: the
+        // receipt's notice may not borrow Mail's error (which already has
+        // its own menu row) while the announcement names Safari.
+        let safari = gateway.addWindow(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600), appName: "Safari")
+        gateway.focused = safari
+        gateway.silentIgnore.insert(safari)
+        controller.handle(slot: .topLeft)
+        let safariVerification = verifyFires.last!
+
+        let mail = gateway.addWindow(
+            frame: CGRect(x: 900, y: 0, width: 800, height: 600), appName: "Mail")
+        gateway.focused = mail
+        gateway.refuseNextWrites(mail)
+        controller.handle(slot: .topRight)
+        XCTAssertEqual(
+            canvas.error,
+            "Mail couldn't be tiled: the app refused to resize it.",
+            "a newer refusal owns the canvas error")
+
+        var late: ActionReceipt?
+        controller.onLateReceipt = { late = $0 }
+        safariVerification()
+
+        XCTAssertEqual(
+            late?.notice, late?.announcement,
+            "the menu notice and the spoken sentence are one story")
+        XCTAssertEqual(
+            late?.announcement,
+            "Safari couldn't be tiled: the app refused to resize it.",
+            "the late rollback names the window it rolled back")
+        XCTAssertFalse(late?.performed ?? true)
+        XCTAssertEqual(
+            canvas.error,
+            "Mail couldn't be tiled: the app refused to resize it.",
+            "the newer error keeps its own row, never overwritten")
+    }
 }
