@@ -902,8 +902,11 @@ final class TilingController {
             for id in canvas?.records.keys ?? [:].keys {
                 // The window is alive (only its Space vanished): forget the
                 // ownership, but keep the handle binding so the next focus
-                // re-adopts it instead of re-resolving from scratch.
+                // re-adopts it instead of re-resolving from scratch. The
+                // tracker's echo, drag, and pending-reassert entries go with
+                // the record: the retired canvas will never reassert them.
                 register.forget(id)
+                tracker.forget(id)
             }
             directory.dropCanvas(key)
             dbg("prune canvas \(key): its Space no longer exists")
