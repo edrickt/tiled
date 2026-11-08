@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import XCTest
 
 @testable import tiled
@@ -22,6 +23,23 @@ final class CanvasDirectoryTests: XCTestCase {
         name: "Display 2",
         displayID: otherDisplayID)
     private static let space = SpaceID(rawValue: 101)
+    private static let firstUUID = UUID(
+        uuidString: "7A3C1B20-0D8E-4F52-9C61-2B4A5D6E7F80")!
+    private static let secondUUID = UUID(
+        uuidString: "9F8E7D6C-5B4A-4392-8170-6F5E4D3C2B1A")!
+
+    /// A live display whose identity is `uuid`; `displayID` is only the
+    /// window server's live number, so it can change across a renumber.
+    private static func uuidScreen(
+        displayID: CGDirectDisplayID, uuid: UUID
+    ) -> ScreenInfo {
+        ScreenInfo(
+            id: ScreenID(displayID: displayID, fallbackIndex: 0, uuid: uuid),
+            frame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            name: "Display \(displayID)",
+            displayID: displayID)
+    }
 
     private var activeSpaces: [CGDirectDisplayID: SpaceID] = [:]
     private var screens: [ScreenInfo] = []
@@ -231,5 +249,130 @@ final class CanvasDirectoryTests: XCTestCase {
         XCTAssertFalse(
             directory.isVisible(withheld),
             "an absent display is never visible, withheld or not")
+    }
+
+    // MARK: Display renumbering
+
+    /// The canvas table keys on the persistent display UUID: the same
+    /// canvas answering under a new display number must be one entry, not
+    /// a second canvas for the same physical display.
+    func testRenumberedDisplayFindsTheSameCanvasByUUID() {
+        let before = Self.uuidScreen(displayID: 101, uuid: Self.firstUUID)
+        let after = Self.uuidScreen(displayID: 501, uuid: Self.firstUUID)
+        screens = [before]
+        activeSpaces = [101: Self.space]
+        let key = TilingSpaceKey(screen: before.id, space: Self.space)
+        directory.withCanvas(key) { $0.notice = "kept" }
+
+        screens = [after]
+        activeSpaces = [501: Self.space]
+
+        XCTAssertEqual(
+            directory.canvas(for: directory.key(for: after.id)).notice, "kept",
+            "the renumbered display resolves the same canvas")
+        XCTAssertEqual(
+            directory.allKeys.count, 1,
+            "the renumber adds no second entry to the canvas table")
+    }
+
+    func testRememberedUUIDCanvasesStillOrderByDisplayNumber() {
+        screens = []
+        let high = TilingSpaceKey(
+            screen: Self.uuidScreen(displayID: 501, uuid: Self.firstUUID).id,
+            space: Self.space)
+        let low = TilingSpaceKey(
+            screen: Self.uuidScreen(displayID: 101, uuid: Self.secondUUID).id,
+            space: Self.space)
+        directory.withCanvas(high) { _ in }
+        directory.withCanvas(low) { _ in }
+
+        XCTAssertEqual(
+            directory.visibleKeys(), [low, high],
+            "display order comes from the display number, not insertion order")
+    }
+
+    func testCursorKeepsItsCanvasAcrossARenumber() {
+        let before = Self.uuidScreen(displayID: 101, uuid: Self.firstUUID)
+        let after = Self.uuidScreen(displayID: 501, uuid: Self.firstUUID)
+        screens = [before]
+        activeSpaces = [101: Self.space]
+        XCTAssertTrue(directory.noteCursor(at: CGPoint(x: 500, y: 500)))
+        let key = TilingSpaceKey(screen: before.id, space: Self.space)
+        XCTAssertEqual(directory.cursorKey(), key)
+
+        screens = [after]
+        activeSpaces = [501: Self.space]
+
+        XCTAssertFalse(
+            directory.noteCursor(at: CGPoint(x: 500, y: 500)),
+            "the same physical display renumbered, so the cursor did not move")
+        XCTAssertEqual(
+            directory.cursorKey(), key,
+            "the glyph still depicts the kept canvas under the new number")
+    }
+
+    func testVanishedCanvasesFindARenumberedDisplayByUUID() {
+        let before = Self.uuidScreen(displayID: 101, uuid: Self.firstUUID)
+        let after = Self.uuidScreen(displayID: 501, uuid: Self.firstUUID)
+        let old = TilingSpaceKey(screen: before.id, space: Self.space)
+        screens = [after]
+        directory.withCanvas(old) { _ in }
+
+        XCTAssertEqual(
+            directory.vanishedCanvases(known: [501: [Self.space]]), [],
+            "the same Space id survived the renumber, so nothing vanished")
+        XCTAssertEqual(
+            directory.vanishedCanvases(known: [501: [SpaceID(rawValue: 999)]]),
+            [old],
+            "a recreated Space retires the renumbered display's old canvas")
+    }
+
+    func testAReusedDisplayNumberWithANewUUIDIsNotTheOldDisplay() {
+        let before = Self.uuidScreen(displayID: 101, uuid: Self.firstUUID)
+        let replacement = Self.uuidScreen(
+            displayID: 101, uuid: Self.secondUUID)
+        let old = TilingSpaceKey(screen: before.id, space: Self.space)
+        screens = [replacement]
+        directory.withCanvas(old) { _ in }
+
+        XCTAssertEqual(
+            directory.vanishedCanvases(known: [101: [SpaceID(rawValue: 999)]]),
+            [],
+            "the replacement's Space table says nothing about the old display's canvas")
+    }
+
+    /// A withheld-Space canvas is the display's sole entry. A renumber
+    /// that keeps the Space unknown must not add a second entry, and once
+    /// the renumbered display names a Space the fallback keeps A7's rule:
+    /// enumerated, hidden, and deferred.
+    func testWithheldCanvasOfARenumberedDisplayStaysOneEntry() {
+        let before = Self.uuidScreen(displayID: 101, uuid: Self.firstUUID)
+        let after = Self.uuidScreen(displayID: 501, uuid: Self.firstUUID)
+        screens = [before]
+        activeSpaces = [:]
+        let withheld = TilingSpaceKey(screen: before.id, space: nil)
+        holdAChapter(withheld)
+
+        XCTAssertEqual(
+            directory.visibleKeys(), [withheld],
+            "the display's sole canvas is its withheld fallback")
+
+        screens = [after]
+        XCTAssertEqual(
+            directory.visibleKeys(), [withheld],
+            "the renumbered display's withheld canvas stays one entry")
+        XCTAssertTrue(
+            directory.isVisible(withheld),
+            "no named Space means the withheld fallback is visible (A7)")
+
+        activeSpaces = [501: Self.space]
+        let identified = TilingSpaceKey(screen: after.id, space: Self.space)
+        XCTAssertEqual(
+            directory.visibleKeys(), [identified, withheld],
+            "the named canvas comes first, then the still-enumerated fallback")
+        XCTAssertTrue(directory.isVisible(identified))
+        XCTAssertFalse(
+            directory.isVisible(withheld),
+            "once the renumbered display names a Space the fallback defers (A7)")
     }
 }

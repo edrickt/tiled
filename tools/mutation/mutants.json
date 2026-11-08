@@ -212,8 +212,20 @@
  [
   "DisplaySpace.swift",
   "live screen identity falls back to provider order",
-  "            id: ScreenID(displayID: displayID, fallbackIndex: index),",
+  "            id: ScreenID(displayID: displayID, fallbackIndex: index, uuid: uuid),",
   "            id: ScreenID(rawValue: index),"
+ ],
+ [
+  "DisplaySpace.swift",
+  "live screen identity ignores the UUID (equality keyed on the display number)",
+  "    static func == (lhs: ScreenID, rhs: ScreenID) -> Bool {\n        lhs.identity == rhs.identity\n    }",
+  "    static func == (lhs: ScreenID, rhs: ScreenID) -> Bool {\n        lhs.rawValue == rhs.rawValue\n    }"
+ ],
+ [
+  "DisplaySpace.swift",
+  "display identity hashes the display number (renumber misses its canvas)",
+  "    func hash(into hasher: inout Hasher) {\n        hasher.combine(identity)\n    }",
+  "    func hash(into hasher: inout Hasher) {\n        hasher.combine(rawValue)\n    }"
  ],
  [
   "Layout.swift",

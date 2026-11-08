@@ -6,6 +6,17 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A display that returns from sleep/wake, a dock change, or a cable replug
+  under a new CoreGraphics display number now keeps its canvas. Display
+  identity is the persistent display UUID, not the transient number, so
+  the display's windows, splitters, undo chapters, and registered records
+  survive the renumber instead of stranding on a detached-screen key and
+  deferring every write. A number the OS reuses for another display never
+  adopts the old canvas, and a renumber that also recreates the Mission
+  Control Space retires the old canvas and tiles afresh on the new one.
+
 ## [1.3.3] - 2026-11-04
 ### Fixed
 
