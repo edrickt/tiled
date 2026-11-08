@@ -807,7 +807,7 @@
   "AppLaunchPlan.swift",
   "permission grant never opens Welcome",
   "        if afterPermissionWait, !didDismissWelcome {\n            return .showWelcome\n        }",
-  "        if afterPermissionWait, !didDismissWelcome {\n            return .refreshPermissionRows\n        }"
+  "        if afterPermissionWait, !didDismissWelcome {\n            return .refreshSettings\n        }"
  ],
  [
   "AppLaunchPlan.swift",
