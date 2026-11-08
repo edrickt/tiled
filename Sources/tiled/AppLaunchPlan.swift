@@ -46,13 +46,27 @@ struct AppLaunchPlan: Equatable {
 /// Welcome; every other start refreshes an already-open Settings window:
 /// its permission rows, but also the Shortcuts tab's new registration
 /// failures and the guide's live combos.
+///
+/// A hidden menu bar icon leaves Settings as the app's only visible
+/// surface. If the user closed the auto-opened window before granting,
+/// the grant would otherwise refresh an invisible window and leave
+/// nothing on screen, so that combination opens Settings instead.
 enum AppStartCompletion: Equatable {
     case showWelcome
+    case showSettings
     case refreshSettings
 
-    static func make(afterPermissionWait: Bool, didDismissWelcome: Bool) -> Self {
+    static func make(
+        afterPermissionWait: Bool,
+        didDismissWelcome: Bool,
+        hideMenuBarIcon: Bool,
+        settingsVisible: Bool
+    ) -> Self {
         if afterPermissionWait, !didDismissWelcome {
             return .showWelcome
+        }
+        if afterPermissionWait, hideMenuBarIcon, !settingsVisible {
+            return .showSettings
         }
         return .refreshSettings
     }

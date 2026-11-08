@@ -193,13 +193,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.refresh()
         switch AppStartCompletion.make(
             afterPermissionWait: afterPermissionWait,
-            didDismissWelcome: settings.didDismissWelcome
+            didDismissWelcome: settings.didDismissWelcome,
+            hideMenuBarIcon: settings.hideMenuBarIcon,
+            settingsVisible: settingsController?.window?.isVisible == true
         ) {
         case .showWelcome:
             // Permission-grant teaching moment: the user waited at the
             // highest-friction step with no picture of the product, so
             // open Welcome once instead of leaving them at the menu.
             showSettings(selecting: .welcome)
+        case .showSettings:
+            // Hidden icon and no visible Settings window: the user closed
+            // the auto-opened one before granting, so the grant must
+            // restore the app's only visible surface.
+            showSettings(nil)
         case .refreshSettings:
             // An already-open Settings window must re-read the first
             // hotkey registration pass now: its failure rows and the

@@ -107,17 +107,28 @@ final class AppLaunchPlanTests: XCTestCase {
 
     // MARK: Start completion
 
+    private func completion(
+        afterPermissionWait: Bool,
+        didDismissWelcome: Bool,
+        hideMenuBarIcon: Bool = false,
+        settingsVisible: Bool = true
+    ) -> AppStartCompletion {
+        AppStartCompletion.make(
+            afterPermissionWait: afterPermissionWait,
+            didDismissWelcome: didDismissWelcome,
+            hideMenuBarIcon: hideMenuBarIcon,
+            settingsVisible: settingsVisible)
+    }
+
     func testPermissionGrantOnFirstRunShowsWelcome() {
         XCTAssertEqual(
-            AppStartCompletion.make(
-                afterPermissionWait: true, didDismissWelcome: false),
+            completion(afterPermissionWait: true, didDismissWelcome: false),
             .showWelcome)
     }
 
     func testPermissionGrantAfterDismissalRefreshesSettings() {
         XCTAssertEqual(
-            AppStartCompletion.make(
-                afterPermissionWait: true, didDismissWelcome: true),
+            completion(afterPermissionWait: true, didDismissWelcome: true),
             .refreshSettings)
     }
 
@@ -125,8 +136,48 @@ final class AppLaunchPlanTests: XCTestCase {
         // No wait means no teaching moment, even on a first run: this is
         // the already-trusted launch, not the grant arrival.
         XCTAssertEqual(
-            AppStartCompletion.make(
-                afterPermissionWait: false, didDismissWelcome: false),
+            completion(afterPermissionWait: false, didDismissWelcome: false),
+            .refreshSettings)
+    }
+
+    func testHiddenIconGrantWithNoVisibleSettingsShowsIt() {
+        // The user closed the auto-opened window before granting. With no
+        // status item either, refreshing an invisible window would leave
+        // the app with no visible surface at all.
+        XCTAssertEqual(
+            completion(
+                afterPermissionWait: true, didDismissWelcome: true,
+                hideMenuBarIcon: true, settingsVisible: false),
+            .showSettings)
+    }
+
+    func testHiddenIconGrantWithVisibleSettingsOnlyRefreshes() {
+        // The window is already on screen; reopening it would yank the
+        // user back to General and lose the tab they were reading.
+        XCTAssertEqual(
+            completion(
+                afterPermissionWait: true, didDismissWelcome: true,
+                hideMenuBarIcon: true, settingsVisible: true),
+            .refreshSettings)
+    }
+
+    func testVisibleIconGrantWithNoSettingsDoesNotOpenIt() {
+        // The status item is the visible surface; only a hidden icon needs
+        // Settings restored on the grant.
+        XCTAssertEqual(
+            completion(
+                afterPermissionWait: true, didDismissWelcome: true,
+                hideMenuBarIcon: false, settingsVisible: false),
+            .refreshSettings)
+    }
+
+    func testImmediateHiddenIconStartLeavesSettingsToTheLaunchPlan() {
+        // A trusted launch shows Settings after start; start must not open
+        // it twice (and would otherwise reset the tab to General).
+        XCTAssertEqual(
+            completion(
+                afterPermissionWait: false, didDismissWelcome: true,
+                hideMenuBarIcon: true, settingsVisible: false),
             .refreshSettings)
     }
 }
