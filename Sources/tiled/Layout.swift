@@ -4,9 +4,10 @@ import CoreGraphics
 ///
 /// Layouts are mutually exclusive on a canvas. A canvas stores its choice
 /// (`TilingState.layout`), and `⌥⇧\` switches it explicitly: every tiled
-/// window is restored to its pre-tile frame and the canvas adopts the other
-/// layout. A slot request never switches; a key with no slot in the active
-/// layout is inert.
+/// window is restored to its quarter-sized floating frame hung from the
+/// pre-tile top edge, and the canvas adopts the other layout. A slot
+/// request never switches; a key with no slot in the active layout is
+/// inert.
 enum LayoutKind: String {
     case quarters
     case sixths

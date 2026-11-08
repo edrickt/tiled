@@ -1656,7 +1656,6 @@ final class TilingController {
         let snapshot = directory.withCanvas(key) { $0 }
         let target = snapshot.grid.sizedUntileFrame(
             keepingTopOf: live, in: snapshot.visibleFrame)
-        let context = placementContext(for: key)
         let result = frameWriter.write(
             id, handle: handle, to: target, bounds: snapshot.visibleFrame,
             on: key, check: .none)
@@ -1776,8 +1775,9 @@ final class TilingController {
         gateway.focus(handle)
     }
 
-    /// Evicts the focused window (⌥⇧⌫): restores its pre-tile frame and
-    /// releases the slot. Untiled focused windows and failed focuses are
+    /// Evicts the focused window (⌥⇧⌫): restores its quarter-sized
+    /// floating frame, hung from the pre-tile top edge, and releases the
+    /// slot. Untiled focused windows and failed focuses are
     /// safe no-ops whose receipt answers once instead of opening a second
     /// outcome channel; like `untile`, eviction
     /// keeps no undo chapter (the restoration IS the frame) — unless the
@@ -1819,7 +1819,8 @@ final class TilingController {
             noOp: MenuText.nothingToEvictAnnouncement())
     }
 
-    /// Untiles one window, restoring its pre-tile frame. The freed cells
+    /// Untiles one window, restoring its quarter-sized floating frame hung
+    /// from the pre-tile top edge. The freed cells
     /// reflow to the mergeable survivor; undo's preparatory untiles pass
     /// `reflowing: false` (they make room for a restoration that follows
     /// immediately, and must not churn the layout nor push a chapter).
