@@ -360,13 +360,15 @@ final class AppDelegateMenuTests: XCTestCase {
     }
 
     /// A presenter with its status item installed while only the first
-    /// display is attached. `showIcon` seeds the cursor display from the
-    /// live mouse location, which a test cannot control, so keeping the
-    /// second display detached during creation makes the seed resolve to
-    /// — or hold — the first display either way. The second display
-    /// attaches before the helper returns, so the baseline glyph is the
-    /// first display's, now named.
-    private func makeCursorPresenter() -> (
+    /// display is attached. Tests drive the cursor with `noteCursor`
+    /// instead of the live mouse location, so the presenter's seed is a
+    /// no-op here by default; the seed itself is pinned by
+    /// `testRefreshAndMenuCloseSeedTheCursorDisplayBeforeResolvingTheGlyph`.
+    /// The second display attaches before the helper returns, so the
+    /// baseline glyph is the first display's, now named.
+    private func makeCursorPresenter(
+        seedCursorDisplay: @escaping () -> Void = {}
+    ) -> (
         presenter: MenuBarPresenter, controller: TilingController, gateway: FakeWindowGateway
     ) {
         let gateway = FakeWindowGateway()
@@ -380,7 +382,8 @@ final class AppDelegateMenuTests: XCTestCase {
             hotkeyStore: HotkeyStore(
                 defaults: UserDefaults(suiteName: "cursor-glyph-\(UUID())")!),
             hotkeyService: { nil },
-            actionTarget: NSObject())
+            actionTarget: NSObject(),
+            seedCursorDisplay: seedCursorDisplay)
         presenter.showIcon()
         screens.values = [Self.firstDisplay, Self.secondDisplay]
         return (presenter, controller, gateway)
@@ -430,6 +433,56 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertFalse(
             presenter.statusButton?.image === baseline,
             "the close handler runs a fresh pass and catches up")
+        presenter.hideIcon()
+    }
+
+    func testRefreshAndMenuCloseSeedTheCursorDisplayBeforeResolvingTheGlyph() {
+        // A display change or menu-bar/Dock move while the menu is open
+        // fires no cursor event, and event tracking may not deliver one.
+        // Every pass that resolves the glyph's key — not just the first
+        // draw and menu open — must seed the cursor display first, or the
+        // glyph can freeze on a display the pointer has left.
+        let gateway = FakeWindowGateway()
+        let screens = ScreenBox([Self.firstDisplay])
+        let controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { screens.values }, deathConfirmation: 0)
+        controller.onChange = {}
+        var seeds = 0
+        var seedPoint = CGPoint(x: 2000, y: 500)
+        let presenter = MenuBarPresenter(
+            controller: controller,
+            hotkeyStore: HotkeyStore(
+                defaults: UserDefaults(suiteName: "cursor-seed-\(UUID())")!),
+            hotkeyService: { nil },
+            actionTarget: NSObject(),
+            seedCursorDisplay: {
+                seeds += 1
+                controller.noteCursor(at: seedPoint)
+            })
+        presenter.showIcon()
+        XCTAssertEqual(seeds, 1, "the first draw seeds the cursor display")
+        let builtIn = presenter.statusButton?.image
+
+        // Attach the second display after the item exists, exactly like a
+        // replug. A refresh must seed before resolving, so the glyph
+        // follows the pointer rather than a stale cursor key.
+        screens.values = [Self.firstDisplay, Self.secondDisplay]
+        presenter.refresh()
+        XCTAssertEqual(seeds, 2, "a plain refresh seeds the cursor display first")
+        let studio = presenter.statusButton?.image
+        XCTAssertNotEqual(
+            studio, builtIn, "the glyph resolved the freshly seeded display")
+
+        // The close pass is the one that catches up after a deferred
+        // display change; it must seed too.
+        presenter.menuWillOpen(NSMenu())
+        seedPoint = CGPoint(x: 100, y: 100)
+        presenter.menuDidClose(NSMenu())
+        XCTAssertEqual(seeds, 3, "the close handler's pass seeds the cursor display")
+        XCTAssertNotEqual(
+            presenter.statusButton?.image, studio,
+            "the close pass resolved the seeded display, not the stale one")
         presenter.hideIcon()
     }
 

@@ -43,6 +43,12 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     private let controller: TilingController
     private let hotkeyStore: HotkeyStore
     private let hotkeyService: () -> HotkeyService?
+    /// Seeds the cursor display before a pass resolves the glyph's key.
+    /// Production asks the live mouse location, because no mouse-move
+    /// event may arrive (and event delivery during menu tracking is not
+    /// guaranteed); tests inject a counter so every seeding path is
+    /// pinned.
+    private let seedCursorDisplay: () -> Void
     /// The object carrying the menu's action selectors (the AppDelegate).
     private weak var actionTarget: AnyObject?
     /// The latest receipt's overlay, bounded to the focus and generation it
@@ -58,12 +64,15 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         controller: TilingController,
         hotkeyStore: HotkeyStore,
         hotkeyService: @escaping () -> HotkeyService?,
-        actionTarget: AnyObject
+        actionTarget: AnyObject,
+        seedCursorDisplay: (() -> Void)? = nil
     ) {
         self.controller = controller
         self.hotkeyStore = hotkeyStore
         self.hotkeyService = hotkeyService
         self.actionTarget = actionTarget
+        self.seedCursorDisplay = seedCursorDisplay
+            ?? { [weak controller] in controller?.noteCursorFromMouseLocation() }
     }
 
     /// A controller change: the receipt a later action presents is bounded
@@ -108,7 +117,7 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         // Seed the cursor display before the first draw: no mouse-move
         // event may have arrived yet, and the glyph must depict the
         // display the cursor is on from the start.
-        controller.noteCursorFromMouseLocation()
+        seedCursorDisplay()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let snapshot = snapshot(
             menu: controller.focusedTilingSpace,
@@ -130,6 +139,12 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     /// or cursor change landing between the reads can never cross the
     /// halves' canvases.
     func refresh() {
+        // Seed the cursor display before resolving the glyph's key. A
+        // display change (or a Dock/menu-bar move) while the menu is open
+        // fires no cursor event, and the close handler's fresh pass is the
+        // only chance to depict the display the pointer actually left for;
+        // without the seed the glyph keeps the stale cursor key.
+        seedCursorDisplay()
         let snapshot = snapshot(
             menu: controller.focusedTilingSpace,
             icon: controller.cursorTilingSpace)
@@ -288,7 +303,7 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         // Event delivery during menu tracking is not guaranteed to reach
         // the monitors, so seed the cursor display from the live mouse
         // location before resolving the glyph's key.
-        controller.noteCursorFromMouseLocation()
+        seedCursorDisplay()
         // One pair of canvas keys for the whole pass, exactly as
         // `refresh`: resolving each once and handing it to its own half
         // is what keeps the menu and the glyph from describing crossed
