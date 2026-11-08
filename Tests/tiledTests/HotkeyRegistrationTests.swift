@@ -27,7 +27,7 @@ final class HotkeyRegistrationTests: XCTestCase {
         store: HotkeyStore, registrar: FakeHotkeyRegistrar
     ) -> HotkeyService {
         HotkeyService(
-            store: store, registrar: registrar, eventHandlerInstaller: {})
+            store: store, registrar: registrar, eventHandlerInstaller: { noErr })
     }
 
     /// A fresh store has 11 slot-key bindings plus 6 app-action bindings, all
@@ -145,6 +145,53 @@ final class HotkeyRegistrationTests: XCTestCase {
         XCTAssertEqual(registrar.activeTokens.count, 16)
     }
 
+    /// A dead Carbon event tap means no registration can fire, so every
+    /// enabled action is a failure and the registrar is never asked for a
+    /// token that could not deliver.
+    func testAnUnavailableEventTapFailsEveryEnabledActionAndRegistersNothing() {
+        let registrar = FakeHotkeyRegistrar()
+        let store = makeStore()
+        store.set(
+            HotkeyBinding(modifiers: 0, keyCode: nil),
+            for: .undo)
+        let router = CarbonHotkeyEventRouter(installer: { OSStatus(-1) })
+
+        let service = HotkeyService(
+            store: store, registrar: registrar, router: router)
+
+        XCTAssertFalse(service.isEventTapAvailable)
+        XCTAssertEqual(
+            service.failedActions, HotkeyAction.allCases.filter { $0 != .undo },
+            "every enabled action is dead; the disabled one stays neutrally skipped")
+        XCTAssertTrue(
+            registrar.requests.isEmpty,
+            "no registration can deliver without the process-wide event tap")
+        XCTAssertTrue(registrar.activeTokens.isEmpty)
+    }
+
+    /// The install latch arms only on success, so a reload retries a
+    /// transient backend failure before it judges the registrations.
+    func testReloadRetriesATransientEventTapFailureAndRegisters() {
+        let registrar = FakeHotkeyRegistrar()
+        let store = makeStore()
+        var attempts = 0
+        let router = CarbonHotkeyEventRouter(installer: {
+            attempts += 1
+            return attempts == 1 ? OSStatus(-1) : noErr
+        })
+        let service = HotkeyService(
+            store: store, registrar: registrar, router: router)
+        XCTAssertEqual(service.failedActions.count, 17)
+        XCTAssertTrue(registrar.requests.isEmpty)
+
+        service.reload()
+
+        XCTAssertTrue(service.isEventTapAvailable)
+        XCTAssertTrue(service.failedActions.isEmpty)
+        XCTAssertEqual(registrar.requests.count, 17)
+        XCTAssertEqual(registrar.activeTokens.count, 17)
+    }
+
     /// Reload retires the whole old set before registering the edited
     /// store, and a failure is recomputed both ways: one that clears on
     /// reload disappears, a new one appears.
@@ -240,7 +287,7 @@ final class HotkeyRegistrationTests: XCTestCase {
     func testAReplacementServiceKeepsItsHandlerWhenTheOldOneTearsDown() {
         let registrar = FakeHotkeyRegistrar()
         let store = makeStore()
-        let router = CarbonHotkeyEventRouter(installer: {})
+        let router = CarbonHotkeyEventRouter(installer: { noErr })
         var old: HotkeyService? = HotkeyService(
             store: store, registrar: registrar, router: router)
         old?.setHandler { _ in }

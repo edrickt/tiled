@@ -380,6 +380,12 @@ final class ShortcutsTab: NSObject {
     /// A skipped restore must not erase them: both truths compete for the
     /// one live-region line, and the notice keeps failures first.
     private func hotkeyFailureMessages() -> [String] {
+        // A dead event tap fails every enabled action, but the combos are
+        // not the problem: name the one backend failure instead of
+        // stacking seventeen false conflict sentences.
+        if hotkeyServiceProvider?()?.isEventTapAvailable == false {
+            return [MenuText.eventTapUnavailableWarning()]
+        }
         guard let failedActionsProvider else { return [] }
         return failedActionsProvider().map { action in
             MenuText.hotkeyFailureWarning(

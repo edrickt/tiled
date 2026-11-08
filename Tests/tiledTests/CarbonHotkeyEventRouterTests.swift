@@ -7,7 +7,7 @@ import XCTest
 /// the installer is the same no-op seam the registration suite uses.
 final class CarbonHotkeyEventRouterTests: XCTestCase {
     func testDispatchResolvesTheHotkeyIDAndDeliversOnTheMainQueue() {
-        let router = CarbonHotkeyEventRouter(installer: {})
+        let router = CarbonHotkeyEventRouter(installer: { noErr })
         let delivered = expectation(description: "action delivered")
         var actions: [HotkeyAction] = []
 
@@ -23,7 +23,7 @@ final class CarbonHotkeyEventRouterTests: XCTestCase {
     }
 
     func testDispatchRejectsAnUnknownHotkeyIDWithoutDelivering() {
-        let router = CarbonHotkeyEventRouter(installer: {})
+        let router = CarbonHotkeyEventRouter(installer: { noErr })
         var actions: [HotkeyAction] = []
 
         let status = router.dispatch(hotKeyID: 10_000) { actions.append($0) }
@@ -35,7 +35,7 @@ final class CarbonHotkeyEventRouterTests: XCTestCase {
     }
 
     func testClearHandlerOnlyClearsForTheOwnerThatInstalledIt() {
-        let router = CarbonHotkeyEventRouter(installer: {})
+        let router = CarbonHotkeyEventRouter(installer: { noErr })
         let oldOwner = NSObject()
         let replacement = NSObject()
         router.setHandler({ _ in }, owner: oldOwner)
@@ -48,5 +48,35 @@ final class CarbonHotkeyEventRouterTests: XCTestCase {
 
         router.clearHandler(ifOwner: replacement)
         XCTAssertNil(router.handler)
+    }
+
+    /// A failed install is never the tap: the status is kept so the
+    /// service can report the backend, not a lost combo.
+    func testAFailedInstallReportsTheTapUnavailableWithItsStatus() {
+        let router = CarbonHotkeyEventRouter(installer: { OSStatus(-1) })
+
+        XCTAssertFalse(router.isEventTapAvailable)
+        XCTAssertEqual(router.eventTapStatus, OSStatus(-1))
+    }
+
+    /// The process latch arms only on success, so a transient failure is
+    /// retryable and a retry that succeeds becomes the live tap.
+    func testARetryAfterATransientFailureInstallsTheTap() {
+        var attempts = 0
+        let router = CarbonHotkeyEventRouter(installer: {
+            attempts += 1
+            return attempts == 1 ? OSStatus(-1) : noErr
+        })
+
+        XCTAssertFalse(router.isEventTapAvailable)
+
+        XCTAssertEqual(router.retryEventTapInstallIfNeeded(), noErr)
+
+        XCTAssertTrue(router.isEventTapAvailable)
+        XCTAssertEqual(attempts, 2, "the failed install left the latch unset")
+        XCTAssertEqual(
+            router.retryEventTapInstallIfNeeded(), noErr,
+            "an available tap has nothing to retry")
+        XCTAssertEqual(attempts, 2, "a successful tap is installed once")
     }
 }

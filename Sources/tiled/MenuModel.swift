@@ -60,6 +60,10 @@ enum MenuModel {
         /// "shortcut problem" summary would misdiagnose it and point
         /// the user at the wrong subsystem.
         var tileError: String?
+        /// Carbon's one event tap could not be installed. Rendered
+        /// verbatim: every global shortcut is dead for one backend
+        /// reason, so the combo summary would misdiagnose it.
+        var hotkeyBackendError: String? = nil
         /// Other visible canvases' refusals, already display-qualified.
         /// A birth or reassert refusal returns no receipt, so the menu is
         /// its only visible surface; `tileError` carries the focused
@@ -137,6 +141,11 @@ enum MenuModel {
             // misdiagnose it and point the user at the wrong subsystem.
             if let tileError = snapshot.tileError {
                 items.append(Item(title: tileError, isEnabled: false))
+            }
+            // A dead Carbon event tap is its own row, not a combo problem:
+            // the fix is a relaunch, and no binding is to blame.
+            if let hotkeyBackendError = snapshot.hotkeyBackendError {
+                items.append(Item(title: hotkeyBackendError, isEnabled: false))
             }
             // Background canvases' refusals: same row treatment as the
             // scoped canvas's error. The display-qualified text says which
@@ -356,6 +365,7 @@ extension MenuModel.Snapshot {
             layoutTitle: presentation.statusLine,
             activeLayout: reads.canvas.state.layout,
             tileError: reads.tileError,
+            hotkeyBackendError: reads.hotkeyBackendError,
             backgroundTileErrors: reads.backgroundTileErrors,
             hasSplitterBackup: reads.canvas.hasSplitterBackup,
             expandState: reads.expandState,

@@ -157,8 +157,14 @@ final class HotkeyService {
 
     /// Actions whose global hotkey could not be registered (likely owned
     /// by another app). Surfaced in the status menu and the Shortcuts tab;
-    /// never just logged.
+    /// never just logged. When Carbon's event tap is unavailable every
+    /// enabled action belongs here: no registration can fire without it.
     private(set) var failedActions: [HotkeyAction] = []
+
+    /// Whether Carbon's event tap is installed. False means no global
+    /// hotkey can fire regardless of what each registration answered; the
+    /// menu names this backend failure instead of blaming a combo.
+    var isEventTapAvailable: Bool { router.isEventTapAvailable }
 
     /// Whether every global registration is currently retired so the
     /// Shortcuts recorder can receive a combo Carbon would otherwise
@@ -170,7 +176,7 @@ final class HotkeyService {
         store: HotkeyStore = HotkeyStore(),
         registrar: HotkeyRegistrar = CarbonHotkeyRegistrar(),
         router: CarbonHotkeyEventRouter? = nil,
-        eventHandlerInstaller: (() -> Void)? = nil
+        eventHandlerInstaller: (() -> OSStatus)? = nil
     ) {
         self.store = store
         self.registrar = registrar
@@ -204,6 +210,10 @@ final class HotkeyService {
     /// retires: the store is re-read on `resume`, and registering now
     /// would put Carbon back ahead of the recorder.
     func reload() {
+        // A failed install is not latched, so a reload is the one retry
+        // point for a transient event-handler failure. Retry before the
+        // registration pass judges the tap.
+        router.retryEventTapInstallIfNeeded()
         retireRegistrations()
         if !isSuspended { registerHotkeys() }
     }
@@ -227,6 +237,7 @@ final class HotkeyService {
     func resume() {
         guard isSuspended else { return }
         isSuspended = false
+        router.retryEventTapInstallIfNeeded()
         registerHotkeys()
     }
 
@@ -240,6 +251,19 @@ final class HotkeyService {
     private func registerHotkeys() {
         // Reload must recompute failures, never retain a stale set.
         failedActions = []
+        // Without the process-wide event tap Carbon can deliver nothing,
+        // however each registration answers. Report every enabled action
+        // as failed and name the backend once; the menu swaps the combo
+        // sentences for the event-tap sentence.
+        guard router.isEventTapAvailable else {
+            failedActions = HotkeyAction.allCases.filter {
+                store.binding(for: $0).keyCode != nil
+            }
+            NSLog(
+                "Tiled: global hotkey event tap unavailable (osstatus %d)",
+                router.eventTapStatus)
+            return
+        }
         for action in HotkeyAction.allCases {
             let binding = store.binding(for: action)
             // A disabled action registers nothing and warns about nothing.

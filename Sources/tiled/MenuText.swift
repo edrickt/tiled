@@ -53,6 +53,15 @@ enum MenuText {
             : "⚠ \(count) shortcut problems: combos are taken"
     }
 
+    /// Carbon's one event tap could not be installed: no global shortcut
+    /// can fire, however its own registration answered. Naming a combo
+    /// here would blame the wrong subsystem; the recovery is a relaunch,
+    /// not a rebind.
+    static func eventTapUnavailableWarning() -> String {
+        "Global shortcuts are unavailable: the event tap could not be installed. "
+            + "Quit and reopen Tiled to try again."
+    }
+
     // MARK: Warnings
 
     /// A hotkey lost registration. For app actions the sentence names the

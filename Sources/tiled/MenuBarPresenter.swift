@@ -192,10 +192,12 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     /// alone, so a focus or cursor move landing mid-pass can never pair
     /// one canvas's rows with another canvas's glyph.
     func snapshot(menu focus: TilingSpaceKey, icon cursor: TilingSpaceKey) -> MenuBarSnapshot {
+        let hotkeys = hotkeyService()
         let reads = MenuReads(
             space: focus,
             controller: controller,
-            failedActions: hotkeyService()?.failedActions ?? [],
+            failedActions: hotkeys?.failedActions ?? [],
+            eventTapUnavailable: hotkeys.map { !$0.isEventTapAvailable } ?? false,
             binding: { self.hotkeyStore.binding(for: $0) })
         return MenuBarSnapshot(
             menu: MenuModel.Snapshot(

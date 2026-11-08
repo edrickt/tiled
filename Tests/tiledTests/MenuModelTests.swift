@@ -95,6 +95,24 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(model[2].title, "Open Shortcuts…")
     }
 
+    /// A dead event tap is one backend row, never a combo summary: no
+    /// binding is to blame and "Open Shortcuts…" would send the user to a
+    /// tab where nothing they change can help.
+    func testHotkeyBackendErrorRendersItsOwnRowNotAShortcutSummary() {
+        var snap = snapshot()
+        snap.hotkeyBackendError = MenuText.eventTapUnavailableWarning()
+
+        let model = items(snap)
+
+        XCTAssertEqual(
+            model.first?.title, MenuText.eventTapUnavailableWarning())
+        XCTAssertFalse(model.first!.isEnabled)
+        XCTAssertFalse(
+            model.contains { $0.title.contains("shortcut problem") },
+            "the backend failure must not claim a combo is taken")
+        XCTAssertFalse(model.contains { $0.action == .openShortcuts })
+    }
+
     func testWarningSummaryCounts() {
         XCTAssertEqual(
             MenuText.warningSummaryTitle(count: 1),

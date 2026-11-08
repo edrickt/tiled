@@ -37,6 +37,30 @@ final class ShortcutNoticeTests: XCTestCase {
         XCTAssertNil(ShortcutNotice(failures: [""], conflict: "", result: ""))
     }
 
+    func testAnUnavailableEventTapShowsTheBackendSentenceNotComboFailures() {
+        let suite = "ShortcutNoticeTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = HotkeyStore(defaults: defaults)
+        let router = CarbonHotkeyEventRouter(installer: { OSStatus(-1) })
+        let service = HotkeyService(
+            store: store, registrar: FakeHotkeyRegistrar(), router: router)
+        let tab = ShortcutsTab(hotkeyStore: store, defaults: defaults)
+        tab.onContentRebuilt = { _ in }
+        tab.hotkeyServiceProvider = { service }
+        tab.failedActionsProvider = { service.failedActions }
+
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        tab.reload()
+
+        XCTAssertNotNil(
+            label(containing: "event tap could not be installed", in: view),
+            "the tab names the one backend failure")
+        XCTAssertNil(
+            label(containing: "could not be registered", in: view),
+            "seventeen combo sentences would blame bindings that never failed")
+    }
+
     func testReloadAnnouncesAPersistentFailureOnlyWhenItsIdentityChanges() {
         let suite = "ShortcutNoticeTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

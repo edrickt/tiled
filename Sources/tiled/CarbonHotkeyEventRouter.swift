@@ -29,11 +29,41 @@ final class CarbonHotkeyEventRouter {
     /// owner would already read nil when teardown tries to clear it.
     private var ownerID: ObjectIdentifier?
 
-    /// Installs Carbon's event handler once. Tests inject a no-op installer
-    /// and drive `dispatch` directly, so the registration suite never
-    /// touches the live application event target.
-    init(installer: () -> Void = CarbonHotkeyEventRouter.installEventHandlerOnce) {
-        installer()
+    /// The OSStatus of the process's one event-handler installation.
+    /// `noErr` means Carbon delivers hotkey events to this router; any
+    /// other answer means every registration is dead however its own
+    /// registration call answered.
+    private(set) var eventTapStatus: OSStatus
+
+    /// Whether Carbon's application event target delivers hotkey events.
+    /// A service reads this before judging its registrations: a dead tap
+    /// must surface as a backend failure, never as a lost combo.
+    var isEventTapAvailable: Bool { eventTapStatus == noErr }
+
+    /// The installation attempt, stored so a transient failure can be
+    /// retried without a second `InstallEventHandler` callback ever being
+    /// armed for the same event.
+    private let installer: () -> OSStatus
+
+    /// Installs Carbon's event handler once. Tests inject an installer
+    /// that answers an error or `noErr` and drive `dispatch` directly, so
+    /// the suites never touch the live application event target.
+    init(
+        installer: @escaping () -> OSStatus =
+            CarbonHotkeyEventRouter.installEventHandlerOnce
+    ) {
+        self.installer = installer
+        eventTapStatus = installer()
+    }
+
+    /// Retries a failed install: a transient failure leaves the process
+    /// latch unset, so a later reload can recover without the duplicate
+    /// callback a second successful install would add.
+    @discardableResult
+    func retryEventTapInstallIfNeeded() -> OSStatus {
+        guard !isEventTapAvailable else { return eventTapStatus }
+        eventTapStatus = installer()
+        return eventTapStatus
     }
 
     /// Claims the action handler for `owner` (a `HotkeyService`). The owner
@@ -93,18 +123,21 @@ final class CarbonHotkeyEventRouter {
         eventKind: UInt32(kEventHotKeyPressed))
 
     /// One `InstallEventHandler` per process: a second install would add a
-    /// second callback for the same event, firing every hotkey twice.
-    private static func installEventHandlerOnce() {
-        guard !eventHandlerInstalled else { return }
-        eventHandlerInstalled = true
+    /// second callback for the same event, firing every hotkey twice. The
+    /// latch arms only on `noErr`, so a failed install is retryable and
+    /// never claims a tap it does not have.
+    private static func installEventHandlerOnce() -> OSStatus {
+        guard !eventHandlerInstalled else { return noErr }
         var eventType = Self.eventType
-        InstallEventHandler(
+        let status = InstallEventHandler(
             GetApplicationEventTarget(),
             carbonCallback,
             1,
             &eventType,
             nil,
             nil)
+        if status == noErr { eventHandlerInstalled = true }
+        return status
     }
 
     /// The callback has no per-service context: it always parses through the

@@ -31,11 +31,13 @@ final class MenuReadsTests: XCTestCase {
 
     private func reads(
         for space: TilingSpaceKey,
-        failedActions: [HotkeyAction] = []
+        failedActions: [HotkeyAction] = [],
+        eventTapUnavailable: Bool = false
     ) -> MenuReads {
         MenuReads(
             space: space, controller: controller,
             failedActions: failedActions,
+            eventTapUnavailable: eventTapUnavailable,
             binding: { $0.defaultBinding })
     }
 
@@ -107,6 +109,26 @@ final class MenuReadsTests: XCTestCase {
         XCTAssertEqual(snapshot.monitorSections, [
             .init(title: "Studio Display · Quarters · 1 tiled", key: Self.right.id),
         ])
+    }
+
+    /// A dead Carbon event tap fails every enabled action, but the menu
+    /// names the backend once: seventeen combo sentences would blame
+    /// bindings that never caused the outage.
+    func testAnUnavailableEventTapReplacesComboWarningsWithTheBackendError() {
+        let pass = reads(
+            for: controller.focusedTilingSpace,
+            failedActions: HotkeyAction.allCases,
+            eventTapUnavailable: true)
+
+        XCTAssertEqual(pass.hotkeyWarnings, [])
+        XCTAssertEqual(
+            pass.hotkeyBackendError, MenuText.eventTapUnavailableWarning())
+
+        let snapshot = MenuModel.Snapshot(reads: pass, notice: nil)
+        XCTAssertEqual(snapshot.warnings, [])
+        XCTAssertEqual(
+            snapshot.hotkeyBackendError, MenuText.eventTapUnavailableWarning())
+        XCTAssertNil(snapshot.tileError, "a backend failure is not a tiling refusal")
     }
 
     func testReadsCarryTheCanvasLayoutWithNoFocusedWindow() {

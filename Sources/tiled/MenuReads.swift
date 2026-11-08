@@ -21,6 +21,10 @@ struct MenuReads {
     /// distinguish them) is dropped here.
     let backgroundTileErrors: [String]
     let hotkeyWarnings: [String]
+    /// Carbon's event tap could not be installed: no global shortcut can
+    /// fire, so the backend sentence replaces the per-combo warnings
+    /// instead of blaming a binding that was never the problem.
+    let hotkeyBackendError: String?
     let rows: [TilingController.TiledWindowInfo]
     let expandState: ExpandToggleState
     /// The live combo label for every action that has one; absent means
@@ -36,6 +40,7 @@ struct MenuReads {
         space: TilingSpaceKey,
         controller: TilingController,
         failedActions: [HotkeyAction],
+        eventTapUnavailable: Bool = false,
         binding: (HotkeyAction) -> HotkeyBinding
     ) {
         let canvas = controller.canvas(for: space)
@@ -53,12 +58,20 @@ struct MenuReads {
             backgroundErrors.append(error)
         }
         self.backgroundTileErrors = backgroundErrors
-        self.hotkeyWarnings = failedActions.map { action in
-            MenuText.hotkeyFailureWarning(
-                label: binding(action).label,
-                title: action.title,
-                recovery: action.registrationRecovery)
-        }
+        self.hotkeyBackendError =
+            eventTapUnavailable ? MenuText.eventTapUnavailableWarning() : nil
+        // A dead event tap marks every enabled action failed so the tab
+        // and the guide stop promising dead combos, but the menu must not
+        // repeat that as one combo sentence per action: the backend
+        // sentence above is the whole truth.
+        self.hotkeyWarnings = eventTapUnavailable
+            ? []
+            : failedActions.map { action in
+                MenuText.hotkeyFailureWarning(
+                    label: binding(action).label,
+                    title: action.title,
+                    recovery: action.registrationRecovery)
+            }
         let rows = controller.tiledWindowsInfo
         self.rows = rows
         self.expandState = controller.focusedExpandState

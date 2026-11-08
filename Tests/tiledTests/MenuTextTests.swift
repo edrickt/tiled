@@ -266,6 +266,13 @@ final class MenuTextTests: XCTestCase {
             "That window isn't tiled: nothing to untile.")
     }
 
+    func testEventTapUnavailableWarningNamesTheBackendNotACombo() {
+        XCTAssertEqual(
+            MenuText.eventTapUnavailableWarning(),
+            "Global shortcuts are unavailable: the event tap could not be installed. "
+                + "Quit and reopen Tiled to try again.")
+    }
+
     func testUndoAnnouncement() {
         XCTAssertEqual(MenuText.undoAnnouncement(), "Displaced windows restored.")
     }

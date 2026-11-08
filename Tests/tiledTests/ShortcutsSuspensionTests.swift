@@ -31,7 +31,7 @@ final class ShortcutsSuspensionTests: XCTestCase {
 
     private func makeService(_ registrar: FakeHotkeyRegistrar) -> HotkeyService {
         HotkeyService(
-            store: store, registrar: registrar, eventHandlerInstaller: {})
+            store: store, registrar: registrar, eventHandlerInstaller: { noErr })
     }
 
     private func makeTab(_ service: HotkeyService) -> ShortcutsTab {
