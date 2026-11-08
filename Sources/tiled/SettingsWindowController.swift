@@ -4,7 +4,7 @@ import AppKit
 /// Owns tab assembly, selection, rebuild, and initial-focus placement;
 /// every tab's content, state, and actions live in its own module
 /// (WelcomeTab, GeneralTab, ShortcutsTab).
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     enum Tab: Int {
         case welcome
         case general
@@ -73,12 +73,21 @@ final class SettingsWindowController: NSWindowController {
     /// forwarding is testable without presenting the modal alert.
     var hideIconRecoveryText: String { generalTab.hideIconRecoveryText }
 
+    /// Test seam: receives each rebuilt Shortcuts view before the shell
+    /// installs it in the tab item. The pre-install geometry is what the
+    /// tab built for; AppKit then stretches the installed view to the tab's
+    /// content rect, which would hide a stale build size.
+    var onShortcutsRebuilt: ((NSView) -> Void)?
+
     init(settings: AppSettings, hotkeyStore: HotkeyStore = HotkeyStore()) {
         self.settings = settings
         self.welcomeTab = WelcomeTab(hotkeyStore: hotkeyStore)
         self.generalTab = GeneralTab(settings: settings)
         self.shortcutsTab = ShortcutsTab(hotkeyStore: hotkeyStore)
         super.init(window: Self.makeWindow())
+        // The window reports live resizes here so a Shortcuts rebuild uses
+        // the size the user actually resized to, not the build-time one.
+        window?.delegate = self
         welcomeTab.onDismiss = { [weak self] in self?.dismissWelcome() }
         generalTab.onHideIconChange = { [weak self] in self?.onHideIconChange?($0) }
         generalTab.onShowGuide = { [weak self] in self?.showWelcomeAgain() }
@@ -206,6 +215,7 @@ final class SettingsWindowController: NSWindowController {
 
     /// Swaps the Shortcuts tab item's view after a collapse/bulk rebuild.
     private func replaceShortcutsView(_ view: NSView) {
+        onShortcutsRebuilt?(view)
         guard let index = shortcutsItemIndex else { return }
         tabView.tabViewItem(at: index).view = view
     }
@@ -298,9 +308,10 @@ final class SettingsWindowController: NSWindowController {
         shortcutsTab.refreshPermissionState()
     }
 
-    /// Keeps the Shortcuts tab's rebuild size current during live
-    /// resize; without this, a collapse/bulk rebuild after resizing
-    /// would use the size captured at build time.
+    /// Keeps the Shortcuts tab's rebuild size current during live resize
+    /// (the controller is the window's delegate, set in init); without
+    /// this, a collapse/bulk rebuild after resizing would use the size
+    /// captured at build time.
     func windowDidResize(_ notification: Notification) {
         if let size = window?.contentView?.bounds.size {
             shortcutsTab.buildSize = size
