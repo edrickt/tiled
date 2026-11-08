@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-11-08
+
 ### Fixed
 
 - A fast drag out of a tile no longer snaps back. Accessibility can
