@@ -176,6 +176,10 @@ struct TilingSpace {
             case nothingToEvict
             /// An expand or retile write was refused.
             case expandRefused(windowName: String?)
+            /// Expanding was refused because no frame could be read: with
+            /// no geometry to return to on collapse, the canvas will not
+            /// guess. Nothing was written, and this is not an app refusal.
+            case expandNoFrame
             /// An explicit layout switch untiled `untiled` windows. The
             /// layout changed even when a restore was refused.
             case switched(layout: LayoutKind, untiled: Int)
@@ -1722,11 +1726,14 @@ struct TilingSpace {
     }
 
     private mutating func expand(_ id: WindowID, context: Context) -> Outcome {
-        guard let record = records[id] else { return Outcome() }
+        // No record and no live frame: the window has no sane geometry to
+        // return to on collapse, so refuse to guess. A distinct result
+        // keeps the receipt from reporting an expansion that never
+        // happened (and from blaming an app that did nothing).
+        guard let record = records[id] else { return Outcome(result: .expandNoFrame) }
         let current = context.gateway.frame(of: record.handle) ?? record.preTileFrame
-        // No readable frame anywhere: the window has no sane geometry to
-        // return to on collapse, so refuse to guess.
-        guard current != .zero else { return Outcome() }
+        // No readable frame anywhere: same refusal, for the same reason.
+        guard current != .zero else { return Outcome(result: .expandNoFrame) }
         let target = visibleFrame
         error = nil
         notice = nil

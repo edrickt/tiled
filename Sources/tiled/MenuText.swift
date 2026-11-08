@@ -199,6 +199,13 @@ enum MenuText {
         "\(windowName ?? "That window") couldn't be expanded: the app refused to resize it."
     }
 
+    /// Expanding was refused because the window's frame could not be
+    /// read, so there is no geometry to return to on collapse. Nothing
+    /// was written and no app refused: the sentence must not blame one.
+    static func expandNoFrameAnnouncement() -> String {
+        "Couldn't read that window's frame, so it wasn't expanded."
+    }
+
     /// Pressing evict on an untiled window: nothing holds a slot, so the
     /// key answers instead of staying silent: the hotkey path never
     /// no-ops quietly.

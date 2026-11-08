@@ -1312,9 +1312,11 @@ final class TilingSpaceTests: XCTestCase {
 
         let outcome = space.expandToggle(window: id, context: context())
 
-        XCTAssertEqual(outcome.result, .placed)
+        XCTAssertEqual(
+            outcome.result, .expandNoFrame,
+            "no geometry to return to: the canvas refuses to guess")
         XCTAssertFalse(space.isExpanded(id))
-        XCTAssertNil(space.error, "there is no sane screen to expand onto: silent no-op")
+        XCTAssertNil(space.error, "no app refused: there is nothing to blame")
     }
 
     /// A refused collapse must not lose the expansion: the window still

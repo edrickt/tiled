@@ -59,7 +59,7 @@ and dead combos.
 
 ```bash
 swift build            # debug build
-make check             # unit suite (1057 tests) and the published count
+make check             # unit suite (1058 tests) and the published count
 make app               # release build bundled as build/Tiled.app
 ```
 

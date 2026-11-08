@@ -291,6 +291,24 @@ final class ExpandToggleTests: XCTestCase {
             receipt.announcement, "No focused window: click a window first.")
     }
 
+    func testExpandWithNoReadableFrameReportsNotPerformed() {
+        let handle = gateway.addWindow(frame: .zero)
+        gateway.focused = handle
+
+        let receipt = controller.handleExpandToggle()
+
+        XCTAssertFalse(
+            receipt.performed,
+            "an expansion that wrote nothing must not claim performed")
+        XCTAssertEqual(
+            receipt.announcement,
+            "Couldn't read that window's frame, so it wasn't expanded.")
+        XCTAssertEqual(receipt.notice, receipt.announcement, "the menu carries the one sentence")
+        XCTAssertNil(canvas.error, "an unreadable frame is not an app refusal")
+        XCTAssertFalse(canvas.isExpanded(1))
+        XCTAssertTrue(gateway.writes.isEmpty)
+    }
+
     func testRefusedExpandLeavesWindowPutAndReports() {
         let original = CGRect(x: 0, y: 0, width: 800, height: 600)
         let handle = gateway.addWindow(frame: original)

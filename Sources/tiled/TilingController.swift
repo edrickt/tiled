@@ -463,7 +463,8 @@ final class TilingController {
         switch outcome.result {
         case .placed, .alreadyTiled, .deferred: claimed = true
         case .refused: claimed = hadSlot
-        case .nothingToEvict, .expandRefused, .switched, .alreadyInLayout: claimed = false
+        case .nothingToEvict, .expandRefused, .expandNoFrame, .switched, .alreadyInLayout:
+            claimed = false
         }
         if claimed { discardDeferredRestores(for: handle) }
         let collapsed = collapse != nil
@@ -599,6 +600,12 @@ final class TilingController {
                 canvas: space, performed: false,
                 notice: canvas?.error ?? announcement,
                 announcement: announcement)
+        case .expandNoFrame:
+            let announcement = MenuText.expandNoFrameAnnouncement()
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: canvas?.error ?? announcement,
+                announcement: announcement)
         // `.nothingToEvict`, `.switched`, and `.alreadyInLayout` come from
         // the evict and switch entry points, not from `place`; the arms
         // keep the shared Result switch exhaustive. They are unreachable
@@ -650,6 +657,12 @@ final class TilingController {
                 announcement: MenuText.deferredOffSpaceAnnouncement())
         case .expandRefused(let windowName):
             let announcement = MenuText.expandRefusedAnnouncement(windowName: windowName)
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: canvas?.error ?? announcement,
+                announcement: announcement)
+        case .expandNoFrame:
+            let announcement = MenuText.expandNoFrameAnnouncement()
             return ActionReceipt(
                 canvas: space, performed: false,
                 notice: canvas?.error ?? announcement,
@@ -1632,7 +1645,7 @@ final class TilingController {
         }
         // Unreadable (or zero): the window has no sane geometry, so
         // refuse to guess, like the expand toggle's no-readable-frame
-        // no-op.
+        // refusal.
         guard let live = gateway.frame(of: handle), live != .zero else {
             dbg("birth: unreadable or zero frame, no write")
             return
@@ -1911,10 +1924,10 @@ final class TilingController {
                 window: id, context: placementContext(for: key))
         }
         // Only a landed toggle (or a deferred one whose state stands)
-        // claims the handle for this canvas. A refused expand, or the
-        // no-readable-frame no-op, leaves the window exactly where it
-        // was, so a deferred pre-tile restore on another canvas is still
-        // live and must not be discarded.
+        // claims the handle for this canvas. A refused expand (including
+        // the no-readable-frame refusal) leaves the window exactly where
+        // it was, so a deferred pre-tile restore on another canvas is
+        // still live and must not be discarded.
         let expandedNow = directory.storedCanvas(for: key)?.isExpanded(id) == true
         switch outcome.result {
         case .placed:
@@ -1922,7 +1935,7 @@ final class TilingController {
         case .deferred:
             discardDeferredRestores(for: handle)
         case .refused, .alreadyTiled, .nothingToEvict, .expandRefused,
-            .switched, .alreadyInLayout:
+            .expandNoFrame, .switched, .alreadyInLayout:
             break
         }
         onChange?()
