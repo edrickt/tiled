@@ -145,7 +145,7 @@ final class MenuBarCharacterizationTests: XCTestCase {
             "Untile This Window", "Focus Safari", "Tile Focused Window Here",
         ])
         XCTAssertEqual(safari.children?.map(\.action), [
-            .untileWindow(1), .focusWindow(1), .tileHere(.topLeft),
+            .untileWindow(1), .focusWindow(1), .tileHere(1),
         ])
 
         let mail = items.first { $0.title == "Left Half · Mail (⌥⇧J)" }!
@@ -153,7 +153,7 @@ final class MenuBarCharacterizationTests: XCTestCase {
             "Untile This Window", "Focus Mail", "Tile Focused Window Here",
         ])
         XCTAssertEqual(mail.children?.map(\.action), [
-            .untileWindow(2), .focusWindow(2), .tileHere(.leftColumn),
+            .untileWindow(2), .focusWindow(2), .tileHere(2),
         ])
     }
 

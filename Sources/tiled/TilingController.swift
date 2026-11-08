@@ -434,6 +434,39 @@ final class TilingController {
         return place(slot: slot, requester: target.handle, id: id, on: target.key)
     }
 
+    /// The manage row's "Tile Focused Window Here": the row names a tiled
+    /// window and the canvas it lives on. The action is a slot request on
+    /// that same canvas, so the focused window takes the row's slot and
+    /// same-canvas behavior matches pressing the row's slot key exactly.
+    /// A row on another canvas (a background display or Space) cannot
+    /// migrate the focused window, so it answers honestly instead of
+    /// tiling on the focused canvas; a row whose window has meanwhile been
+    /// untiled answers instead of committing a stale slot.
+    @discardableResult
+    func handleTileHere(window id: WindowID) -> ActionReceipt {
+        pruneDeadWindows()
+        guard let canvas = directory.owner(of: id),
+            let slot = directory.storedCanvas(for: canvas)?.state.slot(of: id)
+        else {
+            let sentence = MenuText.tileHereNoLongerTiledAnnouncement()
+            return ActionReceipt(
+                canvas: focusedTilingSpace, performed: false,
+                notice: sentence, announcement: sentence)
+        }
+        // No focused window keeps the standard no-focused answer, exactly
+        // as the slot key would answer it.
+        guard let target = focusedTarget() else {
+            return handle(slotKey: slot.key)
+        }
+        guard target.key == canvas else {
+            let sentence = MenuText.tileHereOnAnotherCanvasAnnouncement()
+            return ActionReceipt(
+                canvas: canvas, performed: false,
+                notice: sentence, announcement: sentence)
+        }
+        return handle(slotKey: slot.key)
+    }
+
     /// The old slot-request body: an expanded window comes back to earth,
     /// the canvas plans and settles, and the receipt names the result.
     private func place(

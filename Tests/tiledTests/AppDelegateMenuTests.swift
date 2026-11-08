@@ -572,7 +572,7 @@ final class AppDelegateMenuTests: XCTestCase {
             (.switchLayout(to: .quarters), "switchLayout:", LayoutKind.quarters.rawValue, true),
             (.untileWindow(7), "untileTiledWindow:", 7, true),
             (.focusWindow(9), "focusTiledWindow:", 9, true),
-            (.tileHere(.middleColumn), "tileFocusedHere:", SlotKey.middleColumn.rawValue, true),
+            (.tileHere(7), "tileFocusedHere:", 7, true),
             (.undoSwitch, "undoSwitch:", nil, true),
             (.untileAll, "untileAll:", nil, true),
             (.resetDividers, "resetDividers:", nil, true),

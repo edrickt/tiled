@@ -266,8 +266,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return (#selector(AppDelegate.untileTiledWindow(_:)), id, true)
         case .focusWindow(let id):
             return (#selector(AppDelegate.focusTiledWindow(_:)), id, true)
-        case .tileHere(let key):
-            return (#selector(AppDelegate.tileFocusedHere(_:)), key.rawValue, true)
+        case .tileHere(let id):
+            return (#selector(AppDelegate.tileFocusedHere(_:)), id, true)
         case .undoSwitch:
             return (#selector(AppDelegate.undoSwitch(_:)), nil, true)
         case .untileAll:
@@ -474,11 +474,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.focus(window: id)
     }
 
+    /// The manage row's "Tile Focused Window Here": the row carried the
+    /// window id it described, so the controller can resolve that row's
+    /// canvas and refuse honestly when the focused window lives elsewhere.
     @objc private func tileFocusedHere(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let key = SlotKey(rawValue: raw)
-        else { return }
-        present(controller.handle(slotKey: key))
+        guard let id = sender.representedObject as? WindowID else { return }
+        present(controller.handleTileHere(window: id))
     }
 
     @objc private func openAccessibilitySettings(_ sender: Any?) {

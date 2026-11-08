@@ -295,7 +295,7 @@ final class MenuModelTests: XCTestCase {
             "Untile This Window", "Focus Safari", "Tile Focused Window Here",
         ])
         XCTAssertEqual(row.children?.map(\.action), [
-            .untileWindow(7), .focusWindow(7), .tileHere(.leftColumn),
+            .untileWindow(7), .focusWindow(7), .tileHere(7),
         ])
     }
 

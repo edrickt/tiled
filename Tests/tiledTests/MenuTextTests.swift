@@ -273,6 +273,15 @@ final class MenuTextTests: XCTestCase {
                 + "Quit and reopen Tiled to try again.")
     }
 
+    func testTileHereRefusalsNameTheOtherCanvasOrTheLostSlot() {
+        XCTAssertEqual(
+            MenuText.tileHereOnAnotherCanvasAnnouncement(),
+            "That window is on another display/Space; tile it there.")
+        XCTAssertEqual(
+            MenuText.tileHereNoLongerTiledAnnouncement(),
+            "That window is no longer tiled; choose a tile from Tile Focused Window.")
+    }
+
     func testUndoAnnouncement() {
         XCTAssertEqual(MenuText.undoAnnouncement(), "Displaced windows restored.")
     }

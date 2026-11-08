@@ -409,6 +409,67 @@ final class PerMonitorTests: XCTestCase {
         XCTAssertEqual(controller.canvas(for: leftID).state.occupant(of: .topLeft), 1)
     }
 
+    // MARK: "Tile Focused Window Here" follows the row's canvas
+
+    /// A manage row on a background display names a window there. "Tile
+    /// Focused Window Here" may not migrate the focused window across
+    /// displays, so it must answer instead of tiling on the focused canvas
+    /// and leaving the row's own canvas untouched by accident.
+    func testTileHereOnABackgroundDisplayAnswersInsteadOfTilingOnTheFocusedOne() {
+        let leftWindow = tileOnLeft()
+        controller.handle(slot: .topLeft)
+        let rightWindow = tileOnRight()
+        controller.handle(slot: .topLeft)
+        let leftID = controller.registeredID(for: leftWindow)!
+        let rightID = controller.registeredID(for: rightWindow)!
+        gateway.focused = leftWindow
+        let leftFrame = gateway.frame(of: leftWindow)
+        gateway.clearWrites()
+
+        let receipt = controller.handleTileHere(window: rightID)
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement, MenuText.tileHereOnAnotherCanvasAnnouncement())
+        XCTAssertEqual(
+            receipt.notice, receipt.announcement,
+            "the menu narrates the refusal, not the focused canvas's stale notice")
+        XCTAssertEqual(
+            receipt.canvas, TilingSpaceKey(screen: self.rightID, space: nil),
+            "the row's canvas owns the answer")
+        XCTAssertEqual(
+            controller.canvas(for: self.leftID).state.slot(of: leftID), .topLeft,
+            "the focused window keeps its tile on the focused canvas")
+        XCTAssertEqual(
+            controller.canvas(for: self.rightID).state.slot(of: rightID), .topLeft,
+            "the background row's window keeps its tile")
+        XCTAssertEqual(
+            gateway.frame(of: leftWindow), leftFrame,
+            "the refused request moves no window")
+        XCTAssertTrue(gateway.writes.isEmpty)
+    }
+
+    /// A row on the focused canvas means the slot key it names: the
+    /// controller resolves the row's current slot and commits exactly the
+    /// request the key would have committed.
+    func testTileHereOnTheFocusedCanvasKeepsTheSlotRequestIdentical() {
+        let window = tileOnLeft()
+        controller.handle(slot: .topLeft)
+        let id = controller.registeredID(for: window)!
+        gateway.focused = window
+        gateway.clearWrites()
+
+        let here = controller.handleTileHere(window: id)
+        let keyed = controller.handle(slotKey: .topLeft)
+
+        XCTAssertEqual(
+            here, keyed,
+            "a same-canvas row is the slot key it names, receipt and all")
+        XCTAssertEqual(
+            here.announcement, MenuText.alreadyTiledAnnouncement(slot: .topLeft))
+        XCTAssertTrue(gateway.writes.isEmpty)
+    }
+
     // MARK: A record dies with its tiling
 
     /// A refused first placement releases the window: no slot and no

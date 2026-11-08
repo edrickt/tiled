@@ -995,6 +995,25 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(canvas.notice, receipt.announcement, "the sentence is the canvas notice")
     }
 
+    /// A manage row can outlive the window's tile (the menu was built,
+    /// then the window was untiled). "Here" has no slot to place the
+    /// focused window into, so it answers once instead of guessing one.
+    func testTileHereOnAWindowNoLongerTiledAnswersInsteadOfGuessing() {
+        let handle = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let id = controller.registeredID(for: handle)!
+        XCTAssertTrue(controller.untile(window: id).performed)
+        gateway.clearWrites()
+
+        let receipt = controller.handleTileHere(window: id)
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement, MenuText.tileHereNoLongerTiledAnnouncement())
+        XCTAssertEqual(receipt.notice, receipt.announcement)
+        XCTAssertTrue(gateway.writes.isEmpty, "the refusal writes nothing")
+    }
+
     func testSwitchLayoutWithNoFocusedWindowSwitchesTheEmptyCanvas() {
         XCTAssertNil(gateway.focused)
 

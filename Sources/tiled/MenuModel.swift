@@ -15,7 +15,10 @@ enum MenuModel {
         case switchLayout(to: LayoutKind)
         case untileWindow(WindowID)
         case focusWindow(WindowID)
-        case tileHere(SlotKey)
+        /// The manage row's window id, not its slot key: the controller
+        /// resolves the row's canvas and slot at click time, so a row on
+        /// a background canvas cannot tile the focused window here.
+        case tileHere(WindowID)
         case undoSwitch
         case untileAll
         case resetDividers
@@ -345,7 +348,7 @@ enum MenuModel {
             children: [
                 Item(title: "Untile This Window", action: .untileWindow(window.id)),
                 Item(title: "Focus \(window.appName ?? "Window")", action: .focusWindow(window.id)),
-                Item(title: "Tile Focused Window Here", action: .tileHere(window.slot.key)),
+                Item(title: "Tile Focused Window Here", action: .tileHere(window.id)),
             ])
     }
 }

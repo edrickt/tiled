@@ -120,6 +120,22 @@ enum MenuText {
         "No focused window: click a window first."
     }
 
+    /// The manage row's "Tile Focused Window Here" when the row's window
+    /// lives on a canvas other than the focused window's. Tiling there
+    /// would migrate the focused window across a display or Space, which
+    /// tiling never does, so the row answers with where that window is
+    /// instead of quietly tiling on the focused canvas.
+    static func tileHereOnAnotherCanvasAnnouncement() -> String {
+        "That window is on another display/Space; tile it there."
+    }
+
+    /// The manage row's "Tile Focused Window Here" when its window no
+    /// longer holds a slot: there is no slot to place the focused window
+    /// into, so the click answers instead of guessing one.
+    static func tileHereNoLongerTiledAnnouncement() -> String {
+        "That window is no longer tiled; choose a tile from Tile Focused Window."
+    }
+
     /// Pressing undo with an empty stack: no destruction to reverse.
     /// Names the expiry honestly instead of staying silent: the one
     /// surface whose promise is "never silently disagree" must answer
