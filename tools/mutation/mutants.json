@@ -632,8 +632,8 @@
  [
   "TilingController.swift",
   "undo reports fully restored despite a refused frame",
-  "        return (restored > 0 || layoutRestored != nil) && failures.isEmpty",
-  "        return restored > 0 || layoutRestored != nil"
+  "        let performed = (restored > 0 || layoutRestored != nil) && failures.isEmpty",
+  "        let performed = restored > 0 || layoutRestored != nil"
  ],
  [
   "TilingController.swift",
