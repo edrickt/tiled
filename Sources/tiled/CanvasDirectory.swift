@@ -400,6 +400,19 @@ final class CanvasDirectory {
         return key
     }
 
+    /// Every visible canvas's refusal, in stable display + Space order.
+    /// Deliberately not `visibleKeys()`: a canvas whose only trace is an
+    /// error (a refused birth leaves no window or chapter behind) still
+    /// owes the menu its row.
+    func visibleErrors() -> [(space: TilingSpaceKey, error: String)] {
+        spaces
+            .compactMap { key, canvas -> (space: TilingSpaceKey, error: String)? in
+                guard let error = canvas.error, isVisible(key) else { return nil }
+                return (space: key, error: error)
+            }
+            .sorted { Self.spaceOrder($0.space, $1.space) }
+    }
+
     /// A brand-new canvas with its visible frame resolved from its own
     /// display. Existing canvases keep their frame until a refresh event.
     private func establishedCanvas(for space: TilingSpaceKey) -> TilingSpace {

@@ -185,4 +185,64 @@ final class MenuReadsTests: XCTestCase {
             .init(title: "Built-in · 2 tiled", key: display.id),
         ])
     }
+
+    func testABackgroundBirthRefusalReachesTheMenuWithItsDisplayName() {
+        // A birth on a display the user is not focused on is refused by
+        // its app. The birth returns no receipt and the focused canvas's
+        // error is empty, so the aggregated background row is the only
+        // place the refusal can surface.
+        let left = ScreenInfo(
+            id: ScreenID(rawValue: 1),
+            frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            name: "Built-in",
+            displayID: 42)
+        let right = ScreenInfo(
+            id: ScreenID(rawValue: 2),
+            frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
+            name: "Studio Display",
+            displayID: 43)
+        let gateway = FakeWindowGateway()
+        let controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { [left, right] }, deathConfirmation: 0)
+        controller.onChange = {}
+
+        let focused = gateway.addWindow(
+            frame: CGRect(x: 100, y: 100, width: 800, height: 600), appName: "Notes")
+        gateway.focused = focused
+
+        // Every write is refused: the new window's birth sizing on the
+        // other display cannot land.
+        gateway.willWrite = { handle in gateway.refuseNextWrites(handle) }
+        gateway.simulateWindowCreated(
+            frame: CGRect(x: 2000, y: 100, width: 800, height: 600))
+        gateway.willWrite = nil
+
+        let birthCanvas = TilingSpaceKey(screen: right.id, space: nil)
+        XCTAssertEqual(
+            controller.canvas(for: birthCanvas).error,
+            "Couldn't move that window: the app refused to resize it.")
+        XCTAssertEqual(controller.focusedTilingSpace.screen, left.id)
+
+        let reads = MenuReads(
+            space: controller.focusedTilingSpace, controller: controller,
+            failedActions: [], binding: { $0.defaultBinding })
+        XCTAssertNil(reads.tileError, "the focused canvas refused nothing")
+        XCTAssertEqual(reads.backgroundTileErrors, [
+            "Studio Display: Couldn't move that window: the app refused to resize it."
+        ])
+
+        let snapshot = MenuModel.Snapshot(reads: reads, notice: nil)
+        XCTAssertEqual(snapshot.backgroundTileErrors, reads.backgroundTileErrors)
+        let model = MenuModel.items(snapshot: snapshot)
+        XCTAssertTrue(
+            model.contains {
+                $0.title
+                    == "Studio Display: Couldn't move that window: the app refused to resize it."
+                    && !$0.isEnabled
+            },
+            "the background refusal renders as its own disabled row")
+    }
 }

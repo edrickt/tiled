@@ -277,6 +277,15 @@ enum MenuText {
         "No splitter changes to make."
     }
 
+    /// A sentence about a canvas other than the focused one: the display
+    /// name tells the user which display the row describes; the focused
+    /// display (or a single display) adds no name because it would
+    /// distinguish nothing.
+    static func displayQualified(_ error: String, displayName: String?) -> String {
+        guard let displayName else { return error }
+        return "\(displayName): \(error)"
+    }
+
     /// A background display's canvas refused an untile. The display name
     /// tells the user which display the menu row acted on; the focused
     /// display (or a single display) adds no name because it would
@@ -284,8 +293,7 @@ enum MenuText {
     static func untileWindowRefusalAnnouncement(
         displayName: String?, error: String
     ) -> String {
-        guard let displayName else { return error }
-        return "\(displayName): \(error)"
+        displayQualified(error, displayName: displayName)
     }
 
     // MARK: Restore failures

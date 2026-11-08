@@ -2,6 +2,10 @@
 /// canvas key a refresh pass resolved. The canvas's own notice, error,
 /// layout, undo chapter, and splitter backup all come from that key, and
 /// warnings, rows, trust, focus, and expand state are read once here too.
+/// The tiled window list and the background refusal rows are the
+/// deliberate aggregate exception: the menu describes every visible canvas
+/// there, so a background canvas's refusal (a birth or reassert has no
+/// receipt) cannot hide behind focus.
 ///
 /// Nothing re-resolves focus: a background canvas's menu can never carry
 /// the focused canvas's refusal, and the menu and glyph can never describe
@@ -11,6 +15,11 @@ struct MenuReads {
     let canvas: TilingSpace
     let isTrusted: Bool
     let tileError: String?
+    /// Other visible canvases' refusals, display-qualified. The scoped
+    /// canvas's own refusal is `tileError`, and a sentence that repeats it
+    /// (in the rare single-display case where no display name can
+    /// distinguish them) is dropped here.
+    let backgroundTileErrors: [String]
     let hotkeyWarnings: [String]
     let rows: [TilingController.TiledWindowInfo]
     let expandState: ExpandToggleState
@@ -34,6 +43,16 @@ struct MenuReads {
         self.canvas = canvas
         self.isTrusted = controller.isTrusted
         self.tileError = canvas.error
+        var backgroundErrors: [String] = []
+        for entry in controller.visibleCanvasErrors() where entry.space != space {
+            let error = MenuText.displayQualified(
+                entry.error, displayName: controller.displayName(for: entry.space))
+            guard error != canvas.error, !backgroundErrors.contains(error) else {
+                continue
+            }
+            backgroundErrors.append(error)
+        }
+        self.backgroundTileErrors = backgroundErrors
         self.hotkeyWarnings = failedActions.map { action in
             MenuText.hotkeyFailureWarning(
                 label: binding(action).label,

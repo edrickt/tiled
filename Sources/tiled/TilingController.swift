@@ -1766,6 +1766,15 @@ final class TilingController {
         allTiledWindowsInfo()
     }
 
+    /// Every visible canvas's refusal, in menu order. The manage list
+    /// already aggregates every visible canvas's windows; errors travel
+    /// the same route, so a birth or reassert refusal on a background
+    /// canvas — which returns no receipt of its own — reaches the menu
+    /// instead of only the canvas it happened on.
+    func visibleCanvasErrors() -> [(space: TilingSpaceKey, error: String)] {
+        directory.visibleErrors()
+    }
+
     /// The provider's display name for a canvas's display, or nil when the
     /// provider does not know that display (headless) or the key is
     /// display-less. The raw lookup shared by the menu header and the

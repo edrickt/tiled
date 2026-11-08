@@ -60,6 +60,11 @@ enum MenuModel {
         /// "shortcut problem" summary would misdiagnose it and point
         /// the user at the wrong subsystem.
         var tileError: String?
+        /// Other visible canvases' refusals, already display-qualified.
+        /// A birth or reassert refusal returns no receipt, so the menu is
+        /// its only visible surface; `tileError` carries the focused
+        /// canvas's own sentence.
+        var backgroundTileErrors: [String] = []
         /// Whether a splitter backup is parked: the manage row reads
         /// "Restore Previous Splitters" instead of "Reset Splitters".
         var hasSplitterBackup: Bool
@@ -132,6 +137,12 @@ enum MenuModel {
             // misdiagnose it and point the user at the wrong subsystem.
             if let tileError = snapshot.tileError {
                 items.append(Item(title: tileError, isEnabled: false))
+            }
+            // Background canvases' refusals: same row treatment as the
+            // scoped canvas's error. The display-qualified text says which
+            // display the refusal came from when the menu can name it.
+            for backgroundError in snapshot.backgroundTileErrors {
+                items.append(Item(title: backgroundError, isEnabled: false))
             }
             // Hotkey failures collapse to one summary row with the count: full
             // sentences used to stack here (a tiling error + fixed-combo
@@ -345,6 +356,7 @@ extension MenuModel.Snapshot {
             layoutTitle: presentation.statusLine,
             activeLayout: reads.canvas.state.layout,
             tileError: reads.tileError,
+            backgroundTileErrors: reads.backgroundTileErrors,
             hasSplitterBackup: reads.canvas.hasSplitterBackup,
             expandState: reads.expandState,
             tiledWindows: presentation.tiledWindows,
