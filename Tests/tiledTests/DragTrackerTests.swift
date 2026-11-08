@@ -689,6 +689,367 @@ final class DragTrackerTests: XCTestCase {
                 + "held, so it is a programmatic jump and snaps back")
     }
 
+    // MARK: A fast drag's drop tick trails the physical release
+
+    /// Stages the live-observed fast-drag ordering: the window is tiled
+    /// and its placement echo settled, the hand presses and moves, the
+    /// physical release fires with no AX frame tick yet, and only then the
+    /// whole coalesced drag arrives as one far tick (measured ~4-21ms after
+    /// the release on macOS 26).
+    private func fastDragRelease() {
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        tile(1, .topLeft, frame: tiled)
+        tracker.handleChange(id: 1, frame: tiled) // the placement echo settles
+        now += TimeInterval(5) // the user comes back after the settle window
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 790)) // on the title bar
+        tracker.mouseDragged() // the pointer moved with the button down
+        tracker.mouseLifted() // the release: no AX frame tick has arrived
+    }
+
+    func testLateCoalescedTickAfterTheMouseUpUntilesWhereDropped() {
+        // The reported bug: a genuinely fast drag past the untile
+        // distance snapped back into its tile, while a slow drag untiled.
+        // The whole drag coalesces in AX to one far tick that lands after
+        // the physical mouse-up. The release has no drag state to decide,
+        // so that tick used to read as a one-tick programmatic jump and
+        // its debounce snapped the window back. The release just made is
+        // the hand evidence the trailing tick inherits.
+        fastDragRelease()
+        XCTAssertTrue(decisions.isEmpty, "the release alone decides nothing")
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 400))
+
+        XCTAssertEqual(
+            decisions, [.untile(1)],
+            "the coalesced tick that trails the release is the drag's drop, not a programmatic jump")
+    }
+
+    func testADuplicateMouseUpKeepsTheTrailingRelease() {
+        // Live-observed: a title-bar gesture's release reaches the global
+        // monitors twice (the drag session's release and a second
+        // leftMouseUp a few milliseconds later). The second call carries no
+        // press evidence and must not clear the permit the first recorded,
+        // or the trailing drop tick snaps back again.
+        fastDragRelease()
+        tracker.mouseLifted() // the platform's duplicate release
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 400))
+
+        XCTAssertEqual(
+            decisions, [.untile(1)],
+            "a duplicate mouse-up does not erase the release the drag's tick claims")
+    }
+
+    func testAnEdgeDragReleaseArmsNoTrailingPermit() {
+        // A resize gesture ends with the pointer moved and the press inside
+        // the window's frame, but it is not a title-bar drag. Its release
+        // must not authorize a later programmatic translation of that
+        // window as a drag-out: the edge drag owns the gesture and its
+        // splitter reassert.
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        armBaseline(1, .topLeft, frame: tiled)
+        tracker.mousePressed(at: CGPoint(x: 250, y: 400)) // the bottom edge
+        tracker.mouseDragged()
+
+        // Drag the bottom edge up: commits the row splitter and arms the
+        // pending resize reassert.
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 0, y: 400, width: 500, height: 320))
+        tracker.mouseLifted()
+        XCTAssertEqual(decisions, [.resize(1)], "the edge drag's release reasserts")
+
+        // Within the release window the app translates the window
+        // programmatically. The press point sits inside its frame, but the
+        // release belonged to the edge drag, so this is no drag-out.
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 320))
+
+        XCTAssertEqual(
+            decisions, [.resize(1)],
+            "an edge drag's release must not decide a programmatic translation")
+        dragEndFires.last?()
+        XCTAssertEqual(decisions, [.resize(1), .snapback(1)])
+    }
+
+    func testATrailingTickJustInsideTheReleaseWindowClaimsTheDrag() {
+        // The release permit's boundary: 240ms after the release still
+        // claims it (the live tail arrives within ~20ms).
+        fastDragRelease()
+        now += 0.24
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 400))
+
+        XCTAssertEqual(decisions, [.untile(1)], "inside the release window the tick claims the drop")
+    }
+
+    func testATrailingTickJustOutsideTheReleaseWindowDoesNotClaim() {
+        // 260ms after the release is past the quarter-second permit: the
+        // tick is an ordinary programmatic move and snaps back.
+        fastDragRelease()
+        now += 0.26
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 400))
+
+        XCTAssertTrue(decisions.isEmpty, "past the release window nothing is claimed")
+        dragEndFires.last?()
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testATrailingTickJustShortOfTheUntileDistanceSnapsBack() {
+        // 24pt is inside the untile distance: snap back like any mouse-up
+        // decision would.
+        fastDragRelease()
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 24, y: 400, width: 500, height: 400))
+
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testATrailingTickJustPastTheUntileDistanceUntilse() {
+        // 26pt is past the untile distance: the drop releases the slot.
+        fastDragRelease()
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 26, y: 400, width: 500, height: 400))
+
+        XCTAssertEqual(decisions, [.untile(1)])
+    }
+
+    func testShortHandDragAtReleaseWaitsForItsTrailingDropTick() {
+        // Live-observed hybrid: a slow start emits one short pre-release
+        // tick, then the fast finish's only tick lands after the release.
+        // At the mouse-up the tracked frame still reads the start (the
+        // window itself is already at the drop), so a decision now would
+        // snap back a drop that visibly happened. The short decision waits
+        // one beat for the trailing tick and reads the drop.
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        tile(1, .topLeft, frame: tiled)
+        tracker.handleChange(id: 1, frame: tiled) // the placement echo settles
+        now += TimeInterval(5)
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 790)) // on the title bar
+        tracker.mouseDragged()
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 10, y: 400, width: 500, height: 400))
+        tracker.mouseLifted()
+        tracker.mouseLifted() // the platform delivers a title-bar release twice
+        XCTAssertTrue(decisions.isEmpty, "the short frame waits one beat for the drop tick")
+
+        let scheduled = dragEndFires.count
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 400))
+        XCTAssertEqual(
+            dragEndFires.count, scheduled,
+            "the released gesture's trailing tick must not restart the move-silence debounce")
+        XCTAssertTrue(decisions.isEmpty, "the trailing tick keeps the pending decision")
+
+        dragEndFires.last?() // the release beat
+        XCTAssertEqual(decisions, [.untile(1)], "the decision reads the drop the tick carried")
+    }
+
+    func testShortHandDragAtReleaseWithNoTrailingTickSnapsBackAfterTheBeat() {
+        // A plain short drag: no trailing drop tick, so the beat decides
+        // the short frame and the window goes back into its slot.
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        tile(1, .topLeft, frame: tiled)
+        tracker.handleChange(id: 1, frame: tiled)
+        now += TimeInterval(5)
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 790))
+        tracker.mouseDragged()
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 10, y: 400, width: 500, height: 400))
+        tracker.mouseLifted()
+        XCTAssertTrue(decisions.isEmpty, "the short drag waits its beat")
+
+        dragEndFires.last?()
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testANewPressDecidesThePendingShortDrag() {
+        // A new press is a new gesture: the previous release's pending
+        // decision must be made before the new hand replaces its evidence.
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        tile(1, .topLeft, frame: tiled)
+        tracker.handleChange(id: 1, frame: tiled)
+        now += TimeInterval(5)
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 790))
+        tracker.mouseDragged()
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 10, y: 400, width: 500, height: 400))
+        tracker.mouseLifted()
+        XCTAssertTrue(decisions.isEmpty)
+
+        tracker.mousePressed(at: CGPoint(x: 900, y: 100)) // a new gesture
+
+        XCTAssertEqual(
+            decisions, [.snapback(1)],
+            "the new press resolves the old drag before replacing its evidence")
+    }
+
+    func testAStaleReleaseBeatCannotDecideANewGesture() {
+        // The release beat is a timer. Ending the drag it belongs to must
+        // retire it, and a beat that fires anyway must not decide a new
+        // gesture the user started on the same window in the meantime.
+        var cancels = 0
+        var fires: [() -> Void] = []
+        tracker = DragTracker(
+            context: DragTracker.Context(
+                slotOf: { [weak self] in self?.slots[$0] },
+                occupants: { [weak self] in self?.occupants ?? [:] },
+                now: { [weak self] in self?.now ?? Date() },
+                isMouseDown: { [weak self] in self?.isDown ?? true }),
+            gridProvider: provider(),
+            onDragEnd: { [weak self] in self?.decisions.append($0) },
+            scheduleDragEnd: { fire in
+                fires.append(fire)
+                return { cancels += 1 }
+            })
+
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        tile(1, .topLeft, frame: tiled)
+        tracker.handleChange(id: 1, frame: tiled)
+        now += TimeInterval(5)
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 790))
+        tracker.mouseDragged()
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 10, y: 400, width: 500, height: 400))
+        tracker.mouseLifted() // a short hand drag: its beat is pending
+        let beat = fires.last
+        let cancelsBeforeTheNewPress = cancels
+
+        tracker.mousePressed(at: CGPoint(x: 900, y: 100)) // a new gesture flushes it
+        XCTAssertEqual(decisions, [.snapback(1)])
+        XCTAssertEqual(
+            cancels, cancelsBeforeTheNewPress + 1,
+            "the ended drag's pending beat is retired")
+
+        // A new long drag on the same window; the retired beat firing late
+        // must not decide this gesture.
+        tracker.mouseDragged()
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 400, y: 800, width: 500, height: 400))
+        beat?()
+
+        XCTAssertEqual(decisions, [.snapback(1)], "a stale beat cannot decide a new gesture")
+    }
+
+    func testAProgrammaticShortDragAtReleaseDecidesImmediately() {
+        // No hand press: a programmatic short move ending at a mouse-up
+        // carries no trailing-drop expectation and decides now, keeping
+        // the one-tick programmatic rule.
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        tile(1, .topLeft, frame: tiled)
+        tracker.handleChange(id: 1, frame: tiled)
+        now += TimeInterval(5)
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 10, y: 400, width: 500, height: 400))
+        tracker.mouseLifted()
+
+        XCTAssertEqual(
+            decisions, [.snapback(1)],
+            "a programmatic one-tick short move snaps back at the mouse-up")
+    }
+
+    func testLateCoalescedTickInsideTheUntileDistanceSnapsBack() {
+        // The same trailing tick for a short drag: the drop decides as it
+        // would have at a mouse-up, and a drag inside the untile distance
+        // goes back into its slot.
+        fastDragRelease()
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 10, y: 410, width: 500, height: 400))
+
+        XCTAssertEqual(
+            decisions, [.snapback(1)],
+            "a trailing tick's short drop snaps back like any title-bar drag")
+    }
+
+    func testLateTickPastTheReleaseGraceIsNotHandEvidence() {
+        // The release permit is short-lived: a programmatic jump long
+        // after the click cannot borrow the gesture the click ended.
+        fastDragRelease()
+        now += 1
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 400))
+
+        XCTAssertTrue(
+            decisions.isEmpty,
+            "a tick past the release grace tracks as an ordinary move")
+        dragEndFires.last?()
+        XCTAssertEqual(
+            decisions, [.snapback(1)],
+            "the ordinary two-tick programmatic rule decides it: one far tick snaps back")
+    }
+
+    func testAReleaseWithoutPointerMotionDoesNotAuthorizeALateTick() {
+        // A click is not a drag: the pointer never moved with the button
+        // down, so the release authorizes nothing and a programmatic jump
+        // that follows still snaps back.
+        let tiled = CGRect(x: 0, y: 400, width: 500, height: 400)
+        tile(1, .topLeft, frame: tiled)
+        tracker.handleChange(id: 1, frame: tiled)
+        now += TimeInterval(5)
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 790))
+        tracker.mouseLifted() // a click, not a drag
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 400))
+
+        XCTAssertTrue(decisions.isEmpty, "the click authorizes no trailing drag")
+        dragEndFires.last?()
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testAPressAfterTheReleaseCancelsTheTrailingRelease() {
+        // A new press is a new gesture: the previous release's evidence
+        // cannot be claimed by a tick that arrives after the new press.
+        fastDragRelease()
+        tracker.mousePressed(at: CGPoint(x: 900, y: 100)) // elsewhere
+
+        tracker.handleChange(
+            id: 1, frame: CGRect(x: 300, y: 800, width: 500, height: 400))
+
+        XCTAssertTrue(decisions.isEmpty, "the new press cancels the old release")
+        dragEndFires.last?()
+        XCTAssertEqual(decisions, [.snapback(1)])
+    }
+
+    func testALateTickForAnotherWindowDoesNotBorrowTheRelease() {
+        // The release's press point must fall inside the window the tick
+        // moves, the same containment rule a held-button tick obeys. A
+        // programmatic jump by a window the hand never pressed is not a
+        // drag-out.
+        tile(1, .topLeft, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+        tile(2, .bottomLeft, frame: CGRect(x: 0, y: 0, width: 500, height: 400))
+        tracker.handleChange(id: 1, frame: CGRect(x: 0, y: 400, width: 500, height: 400))
+        tracker.handleChange(id: 2, frame: CGRect(x: 0, y: 0, width: 500, height: 400))
+
+        tracker.mousePressed(at: CGPoint(x: 250, y: 790)) // window 1's title bar
+        tracker.mouseDragged()
+        tracker.mouseLifted()
+
+        // Window 2 jumps programmatically, far from its slot; the press
+        // point is not inside window 2's frame.
+        tracker.handleChange(
+            id: 2, frame: CGRect(x: 400, y: 0, width: 500, height: 400))
+
+        XCTAssertTrue(decisions.isEmpty, "window 2's jump is not the hand's drag")
+        dragEndFires.last?()
+        XCTAssertEqual(decisions, [.snapback(2)])
+    }
+
     func testAbsorbedSizeTickDuringTitleDragTracksAsAMove() {
         // Captured live: the app absorbed the placement write (its true
         // frame 559x505 vs the 560x509.5 target, no notification), then
@@ -1200,6 +1561,7 @@ final class DragTrackerTests: XCTestCase {
         tracker.mousePressed(at: CGPoint(x: 250, y: 600))
         tracker.handleChange(id: 1, frame: CGRect(x: 5, y: 405, width: 700, height: 400))
         tracker.mouseLifted()
+        dragEndFires.last?() // a short hand drag's drop is judged one beat after the release
         XCTAssertEqual(decisions, [.snapback(1)])
     }
 

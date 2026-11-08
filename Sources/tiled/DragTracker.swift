@@ -44,7 +44,10 @@ import Foundation
 /// mouse-up that never arrives (a missed display event, a drag the OS cancels).
 /// A single far jump with no recent hand press on the window is never a
 /// hand drag, so it snaps back too — even when an unrelated click lifts
-/// the button before the debounce.
+/// the button before the debounce. A fast drag coalesces in Accessibility
+/// to one frame tick that lands just after the physical release; the
+/// release is kept for a moment so that trailing tick still claims the
+/// gesture and its drop decides (see `claimHandRelease`).
 final class DragTracker {
     /// Reads and writes splitter fractions, and reads the canvas's one
     /// stored visible frame. The canvas owns them; the tracker only
@@ -226,6 +229,16 @@ final class DragTracker {
         /// per-window evidence; a programmatic jump followed by an
         /// unrelated click must not borrow the click's mouse-up.
         let beganUnderHandPress: Bool
+        /// The drag's first tick arrived after the physical release (a
+        /// fast drag coalesces to one tick that trails it): the gesture
+        /// is already over and that tick is its drop, so it decides at
+        /// once instead of waiting out the move-silence debounce.
+        let endedAtRelease: Bool
+        /// The hand released while the drag was still short of the untile
+        /// distance and its final frame may not have arrived: the decision
+        /// waits one short beat so the drop is read, not the stale start
+        /// of a fast finish.
+        var awaitingReleaseDecision = false
         var cancelDragEnd: (() -> Void)?
     }
     private var drags: [WindowID: DragState] = [:]
@@ -244,6 +257,27 @@ final class DragTracker {
     /// AX ticks; a press held still for longer only becomes a drag when
     /// the drag event refreshes this stamp.
     private static let handPressWindow: TimeInterval = 0.5
+
+    /// The hand gesture that ended at the last mouse-up, kept briefly so
+    /// the one frame tick a fast drag coalesces to can still claim it:
+    /// Accessibility delivers that tick a few milliseconds after the
+    /// physical release (measured 4-21ms live), when no drag state exists
+    /// to decide it.
+    private struct HandRelease {
+        /// The press that began the gesture: the containment witness
+        /// against the window's pre-tick frame when the tick arrives.
+        let pressPoint: CGPoint
+        let releasedAt: Date
+    }
+    private var handRelease: HandRelease?
+    /// Whether the pointer moved with the button down since the press. A
+    /// plain click leaves no gesture for a trailing tick to continue.
+    private var handMoved = false
+    /// How long after the release a frame tick may still claim the
+    /// gesture as its drop. The live trailing tick arrives within ~20ms;
+    /// a quarter second covers a busy app while keeping a later
+    /// programmatic move from borrowing the click.
+    private static let handReleaseWindow: TimeInterval = 0.25
 
     /// Windows whose edge drags await mouse-up. The splitter fractions (if
     /// any) already committed; the reassert the movement implies waits for
@@ -352,6 +386,21 @@ final class DragTracker {
         return { item.cancel() }
     }
 
+    /// One short beat after a hand title-bar release before a short drag is
+    /// judged. The tracked frame can lag the actual drop at the release: a
+    /// fast finish coalesces its final move into one tick that lands after
+    /// the mouse-up, and a drag that started slowly may have emitted a
+    /// short pre-release tick first. Reading the drop waits for that tick;
+    /// the live trailing tick arrived within ~21ms, so 100ms is margin
+    /// without a perceptible snapback delay.
+    static let releaseDecisionDelay: TimeInterval = 0.1
+    static let scheduleReleaseDecisionOnMain: DragEndScheduler = { fire in
+        let item = DispatchWorkItem(block: fire)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + DragTracker.releaseDecisionDelay, execute: item)
+        return { item.cancel() }
+    }
+
     private struct ExpectedWrite {
         let frame: CGRect
         /// Last observed sum-of-edge-deltas from `frame`. Starts at infinity;
@@ -372,16 +421,21 @@ final class DragTracker {
         gridProvider: GridProvider,
         onDragEnd: @escaping (DragDecision) -> Void,
         scheduleDragEnd: @escaping DragEndScheduler = DragTracker.scheduleDragEndOnMain,
+        scheduleReleaseDecision: DragEndScheduler? = nil,
         log: @escaping (String) -> Void = { _ in }
     ) {
         self.context = context
         self.gridProvider = gridProvider
         self.onDragEnd = onDragEnd
         self.scheduleDragEnd = scheduleDragEnd
+        // Tests that capture the drag-end scheduler capture the release
+        // beat with it unless they inject their own.
+        self.scheduleReleaseDecision = scheduleReleaseDecision ?? scheduleDragEnd
         self.log = log
     }
 
     private let scheduleDragEnd: DragEndScheduler
+    private let scheduleReleaseDecision: DragEndScheduler
 
     // MARK: Tracking
 
@@ -688,16 +742,93 @@ final class DragTracker {
                 && handPressAt.map {
                     context.now().timeIntervalSince($0) <= Self.handPressWindow
                 } == true
+            let trailing = claimHandRelease(in: previous)
             drags[id] = DragState(
                 startFrame: previous, lastFrame: frame,
-                beganUnderHandPress: handPress)
+                beganUnderHandPress: handPress || trailing,
+                endedAtRelease: trailing)
         }
         drags[id]?.lastFrame = frame
         drags[id]?.ticks += 1
         log("move win\(id) dragging tick=\(drags[id]?.ticks ?? 0) frame=\(frame)")
+        if drags[id]?.awaitingReleaseDecision == true {
+            // The release ended this gesture and its short-frame decision
+            // waits a beat; this tick is that gesture's final frame. Keep
+            // the pending decision and the frame it now reads.
+            log("move win\(id) trailing tick of the released drag; decision pending")
+            return
+        }
         drags[id]?.cancelDragEnd?()
+        if drags[id]?.endedAtRelease == true {
+            // The hand released before this tick arrived: the gesture is
+            // over and the tick is its coalesced drop. Decide it now; a
+            // debounce wait would hold the slot for a gesture already
+            // finished and could only fall back to the two-tick
+            // programmatic rule, snapping the drop back into its tile.
+            endDrag(id: id, decidedAtMouseUp: true)
+            return
+        }
         drags[id]?.cancelDragEnd = scheduleDragEnd { [weak self] in
             self?.endDrag(id: id, decidedAtMouseUp: false)
+        }
+    }
+
+    /// Claims the gesture a title-bar tick arriving after the physical
+    /// release belongs to. Same evidence a held-button tick gets: a moved
+    /// pointer with the press inside the window's pre-tick frame, bounded
+    /// to the moment just after the release. One-shot: the first tick that
+    /// qualifies is the drag's drop.
+    private func claimHandRelease(in previous: CGRect) -> Bool {
+        guard let release = handRelease else { return false }
+        guard context.now().timeIntervalSince(release.releasedAt)
+            <= Self.handReleaseWindow
+        else {
+            // Too late to be the release's own tick: retire the evidence
+            // so a later programmatic move cannot borrow it.
+            handRelease = nil
+            return false
+        }
+        guard previous.contains(release.pressPoint) else { return false }
+        handRelease = nil
+        return true
+    }
+
+    /// Ends one title-bar drag that the physical release ended. A hand drag
+    /// still short of the untile distance may not have its final frame yet:
+    /// a slow start emits a short pre-release tick, and the fast finish's
+    /// only tick then trails the release, so the tracked frame still reads
+    /// the flick's start. Wait one short beat so the decision reads the
+    /// drop; a long drag and a programmatic one decide now.
+    private func decideReleasedDrag(_ id: WindowID) {
+        guard let drag = drags[id] else { return }
+        // The platform delivers a title-bar gesture's release twice: the
+        // duplicate carries no new information and must not cut the beat.
+        if drag.awaitingReleaseDecision { return }
+        let distance = hypot(
+            drag.lastFrame.origin.x - drag.startFrame.origin.x,
+            drag.lastFrame.origin.y - drag.startFrame.origin.y)
+        let mayTrail = drag.beganUnderHandPress && !drag.awaitingReleaseDecision
+            && distance <= Self.untileDragDistance
+        guard mayTrail else {
+            endDrag(id: id, decidedAtMouseUp: true)
+            return
+        }
+        log("dragend win\(id) short at the release; waiting a beat for the final tick")
+        drags[id]?.awaitingReleaseDecision = true
+        drags[id]?.cancelDragEnd?()
+        drags[id]?.cancelDragEnd = scheduleReleaseDecision { [weak self] in
+            guard let self, self.drags[id]?.awaitingReleaseDecision == true
+            else { return }
+            self.endDrag(id: id, decidedAtMouseUp: true)
+        }
+    }
+
+    /// Decides every short drag whose release beat is still pending. A new
+    /// press is a new gesture: the old one must not straddle it.
+    private func flushReleaseDecisions() {
+        for id in drags.keys.sorted() where drags[id]?.awaitingReleaseDecision == true
+        {
+            endDrag(id: id, decidedAtMouseUp: true)
         }
     }
 
@@ -707,11 +838,17 @@ final class DragTracker {
     /// programmatic jumps carry no press, and an unrelated click — even
     /// one on another window — cannot decide their far tick as a
     /// drag-out. Such a hand drag may arrive as exactly one coalesced
-    /// tick — a fast drag does. The silence-debounce fallback has no
-    /// button signal and keeps the two-tick rule: a single far jump there
-    /// is a programmatic move, and snaps back.
+    /// tick — a fast drag does — and that tick may trail the physical
+    /// release: it claims the release's evidence (`claimHandRelease`) and
+    /// is decided the same way, as the drop. The silence-debounce fallback
+    /// has no button signal and keeps the two-tick rule: a single far jump
+    /// there is a programmatic move, and snaps back.
     private func endDrag(id: WindowID, decidedAtMouseUp: Bool) {
         guard context.slotOf(id) != nil, let drag = drags[id] else { return }
+        // Retire the pending timer (the silence debounce or the release
+        // beat): a fired beat landing after a new gesture began on this
+        // window must never decide that gesture.
+        drag.cancelDragEnd?()
         drags[id] = nil
         if drags.isEmpty {
             // A debounce fallback can end the gesture without a mouse-up;
@@ -833,8 +970,11 @@ final class DragTracker {
     /// recent press inside the window tells them apart when an unrelated
     /// click lifts the button.
     func mousePressed(at point: CGPoint) {
+        flushReleaseDecisions()
         handPressPoint = point
         handPressAt = context.now()
+        handMoved = false
+        handRelease = nil
     }
 
     /// The user moved the mouse with the button down. Refreshes the
@@ -843,21 +983,47 @@ final class DragTracker {
     /// containment witness, and a coalesced drag's latest point is the
     /// drop, outside the window's start frame.
     func mouseDragged() {
+        handMoved = true
         handPressAt = context.now()
+    }
+
+    /// The release evidence a frame tick arriving after the mouse-up may
+    /// claim as its drop, or nil when the release owns no trailing tick:
+    /// no press, no pointer motion (a click, not a drag), a title-bar
+    /// drag already in flight (its own drop decides at this release), or
+    /// an edge drag awaiting its reassert (the release is that gesture's,
+    /// not a title-bar drag's).
+    private func handReleaseForTrailingTick() -> HandRelease? {
+        guard drags.isEmpty, pendingReasserts.isEmpty, handMoved,
+            let point = handPressPoint
+        else {
+            return nil
+        }
+        return HandRelease(pressPoint: point, releasedAt: context.now())
     }
 
     /// The user released the mouse button: every deferred edge drag's
     /// settle is now due, and every in-progress title-bar drag ends now —
     /// the drop decides (snapback or untile) instead of waiting out the
     /// move-silence debounce, which reads as a second of occupied slot
-    /// and un-reflowed neighbours after a drag-out. A trailing AX frame
-    /// that arrives after this re-tracks its drag; the next mouse-up (or
-    /// the debounce fallback) decides it. The tracker decides only; the
-    /// coordinator reads each dragged window's achieved frame and
-    /// reasserts or untiles through the owning canvas.
+    /// and un-reflowed neighbours after a drag-out. A gesture whose frame
+    /// ticks are all still in flight (a fast drag coalesces to one tick)
+    /// leaves no drag to end here: its release is kept briefly so that
+    /// trailing tick claims the drop (see `claimHandRelease`). The tracker
+    /// decides only; the coordinator reads each dragged window's achieved
+    /// frame and reasserts or untiles through the owning canvas.
     func mouseLifted() {
+        // Recorded before the evidence is cleared: a release with pointer
+        // motion but no title-bar drag yet tracked is the fast-drag shape.
+        // A title-bar gesture's release reaches the monitors twice and the
+        // duplicate carries no press, so only a release that owns the
+        // evidence replaces it; the duplicate keeps the permit.
+        if let release = handReleaseForTrailingTick() {
+            handRelease = release
+        }
         handPressPoint = nil
         handPressAt = nil
+        handMoved = false
         // A window can hold both a pending edge reassert and a live
         // title-bar drag (an AX tick misread as an edge move). The drop
         // owns the gesture: decide in-flight drags first, and drop their
@@ -872,7 +1038,7 @@ final class DragTracker {
         // canvas, so flushing one for window A first clears window B's
         // in-flight drag and erases B's undecided drop.
         for id in inFlight {
-            endDrag(id: id, decidedAtMouseUp: true)
+            decideReleasedDrag(id)
         }
         for id in pending.sorted() {
             // The settle about to be committed can be overridden by the

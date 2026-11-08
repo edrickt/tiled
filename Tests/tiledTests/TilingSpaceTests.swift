@@ -77,6 +77,7 @@ final class TilingSpaceTests: XCTestCase {
         harness.tracker.mousePressed(at: CGPoint(x: target.midX, y: target.midY))
         harness.tracker.handleChange(id: id, frame: target.offsetBy(dx: 10, dy: 10))
         harness.tracker.mouseLifted()
+        harness.dragEndFires.last?() // the short drag's drop is judged one beat after the release
 
         XCTAssertEqual(
             harness.decisions, [.snapback(id)],
@@ -688,6 +689,7 @@ final class TilingSpaceTests: XCTestCase {
         harness.tracker.mousePressed(at: CGPoint(x: grown.midX, y: grown.midY))
         harness.tracker.handleChange(id: b, frame: grown.offsetBy(dx: 10, dy: 10))
         harness.tracker.mouseLifted()
+        harness.dragEndFires.last?() // the short drag's drop is judged one beat after the release
 
         XCTAssertEqual(
             harness.decisions, [.snapback(b)],
@@ -1174,6 +1176,7 @@ final class TilingSpaceTests: XCTestCase {
         harness.tracker.mousePressed(at: CGPoint(x: target.midX, y: target.midY))
         harness.tracker.handleChange(id: restored, frame: target.offsetBy(dx: 10, dy: 10))
         harness.tracker.mouseLifted()
+        harness.dragEndFires.last?() // the short drag's drop is judged one beat after the release
 
         XCTAssertEqual(
             harness.decisions, [.snapback(restored)],
@@ -1216,6 +1219,7 @@ final class TilingSpaceTests: XCTestCase {
         harness.tracker.mousePressed(at: CGPoint(x: bounds.midX, y: bounds.midY))
         harness.tracker.handleChange(id: id, frame: bounds.offsetBy(dx: 10, dy: 10))
         harness.tracker.mouseLifted()
+        harness.dragEndFires.last?() // the short drag's drop is judged one beat after the release
 
         XCTAssertEqual(
             harness.decisions, [.snapback(id)],

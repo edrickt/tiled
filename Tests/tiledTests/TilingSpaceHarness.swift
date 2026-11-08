@@ -29,6 +29,10 @@ final class TilingSpaceHarness {
     /// lets a canvas test drive the same drag loop the controller wires
     /// and pin what a skipped write's baseline makes detectable.
     private(set) var decisions: [DragTracker.DragDecision] = []
+    /// Drag-end and release-decision fires captured from the injected
+    /// schedulers, in order: a test fires one instead of waiting on the
+    /// runloop.
+    private(set) var dragEndFires: [() -> Void] = []
     private(set) var tracker: DragTracker!
     private(set) var writer: FrameWriter!
 
@@ -42,7 +46,11 @@ final class TilingSpaceHarness {
                 grid: { [weak self] _ in self?.space.grid ?? GridLayout() },
                 setGrid: { [weak self] updated, _ in self?.space.grid = updated },
                 visibleFrame: { [weak self] _ in self?.space.visibleFrame ?? .zero }),
-            onDragEnd: { [weak self] in self?.decisions.append($0) })
+            onDragEnd: { [weak self] in self?.decisions.append($0) },
+            scheduleDragEnd: { [weak self] fire in
+                self?.dragEndFires.append(fire)
+                return {}
+            })
         writer = FrameWriter(
             gateway: gateway,
             isVisible: { [weak self] _ in self?.canvasVisible ?? true },

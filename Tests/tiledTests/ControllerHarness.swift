@@ -91,6 +91,7 @@ final class ControllerHarness {
         activeSpaces: [CGDirectDisplayID: SpaceID]? = nil,
         pruneInterval: TimeInterval? = nil,
         scheduleDragEnd: DragTracker.DragEndScheduler? = nil,
+        scheduleReleaseDecision: DragTracker.DragEndScheduler? = nil,
         scheduleVerify: DragTracker.DragEndScheduler? = nil,
         schedulePrune: TilingController.PruneScheduler? = nil,
         deathConfirmation: TimeInterval = 0,
@@ -112,6 +113,10 @@ final class ControllerHarness {
             gateway: gateway,
             pruneInterval: pruneInterval,
             scheduleDragEnd: scheduleDragEnd ?? { fire in
+                dragEnd.fires.append(fire)
+                return {}
+            },
+            scheduleReleaseDecision: scheduleReleaseDecision ?? { fire in
                 dragEnd.fires.append(fire)
                 return {}
             },

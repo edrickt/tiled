@@ -295,6 +295,75 @@ final class ControllerGatewayTests: XCTestCase {
             "the drop's origin takes the quarter footprint, repinned inside the visible frame")
     }
 
+    func testLateCoalescedTickAfterTheReleaseUntilesWhereDropped() {
+        // The reported fast-drag bug: the whole drag coalesces in AX to
+        // one far tick delivered just after the physical mouse-up. The
+        // release has no drag state to end, so before the fix that tick
+        // read as a one-tick programmatic move and the drop snapped back
+        // into its tile. The release just made carries the hand evidence;
+        // the trailing tick is the drop.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tiled = CGRect(x: 0, y: 500, width: 800, height: 500)
+        XCTAssertEqual(gateway.frame(of: handle), tiled)
+        gateway.simulateChange(handle, to: tiled) // settle the placement echo
+
+        controller.mousePressed(at: CGPoint(x: tiled.midX, y: tiled.midY))
+        controller.mouseDragged() // the pointer moved with the button down
+        controller.mouseLifted() // the physical release, before the AX tick
+        XCTAssertEqual(
+            canvas.state.slot(of: 1), .topLeft,
+            "the release alone decides nothing while the drag's tick is in flight")
+
+        var far = tiled
+        far.origin.x += 200
+        far.origin.y += 200
+        gateway.simulateChange(handle, to: far)
+
+        XCTAssertNil(canvas.state.slot(of: 1), "the coalesced trailing tick drops the slot")
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 200, y: 500, width: 800, height: 500),
+            "the drop's origin takes the quarter footprint, repinned inside the visible frame")
+    }
+
+    func testSlowStartFastFinishDragUntilesWhereDropped() {
+        // The hybrid shape a live probe confirmed: a slow start emits one
+        // short pre-release frame tick, then the fast finish's only frame
+        // arrives after the release. The tracked frame is still short at
+        // the mouse-up while the window already sits at the drop; the
+        // release decision waits one beat for that trailing frame, so the
+        // window untiles where it was dropped instead of snapping back.
+        let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        let tiled = CGRect(x: 0, y: 500, width: 800, height: 500)
+        XCTAssertEqual(gateway.frame(of: handle), tiled)
+        gateway.simulateChange(handle, to: tiled) // settle the placement echo
+
+        controller.mousePressed(at: CGPoint(x: tiled.midX, y: tiled.maxY - 10))
+        controller.mouseDragged()
+        var short = tiled
+        short.origin.x += 10
+        short.origin.y += 10
+        gateway.simulateChange(handle, to: short) // the slow start's pre-release tick
+        controller.mouseLifted()
+        XCTAssertEqual(
+            canvas.state.slot(of: 1), .topLeft,
+            "the short tracked frame waits one beat for the trailing drop frame")
+
+        var far = tiled
+        far.origin.x += 200
+        far.origin.y += 200
+        gateway.simulateChange(handle, to: far) // the fast finish, after the release
+        dragEndFires.last?() // the release beat
+
+        XCTAssertNil(canvas.state.slot(of: 1), "the drop decides from the trailing frame")
+        XCTAssertEqual(
+            gateway.frame(of: handle), CGRect(x: 200, y: 500, width: 800, height: 500),
+            "the drop's origin takes the quarter footprint, repinned inside the visible frame")
+    }
+
     func testQuartzMouseDownAtTheWindowCenterAuthorizesAOneTickDrag() {
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
@@ -333,7 +402,7 @@ final class ControllerGatewayTests: XCTestCase {
             "a one-tick hand drag whose press arrived in Quartz coordinates still untiles")
     }
 
-    func testRefusedMoveSeedsTheBaselineForAnImmediateShortDrag() {
+    func testRefusedMoveSeedsTheBaselineForAShortDrag() {
         let handle = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
         gateway.focused = handle
         controller.handle(slot: .topLeft)
@@ -350,6 +419,7 @@ final class ControllerGatewayTests: XCTestCase {
         short.origin.y += 10
         gateway.simulateChange(handle, to: short)
         controller.mouseLifted()
+        dragEndFires.last?() // a short hand drag's drop is judged one beat after the release
 
         XCTAssertEqual(
             gateway.frame(of: handle), tiled,

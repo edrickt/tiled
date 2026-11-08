@@ -110,7 +110,7 @@ Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen 
 _Avoid_: maximize, zoom, fullscreen
 
 **Drag-out**:
-Untiling by dragging: a title-bar drag past the untile distance releases the slot and leaves the window where dropped: the drop is the placement, never a pre-tile restore. The drop decides the drag (a move-silence debounce is the fallback when the mouse-up is missed). A shorter drag snaps back into the tile. A single far tick is a hand drag only when a recent hand press landed on that window and mouse movement kept it live; an unrelated press elsewhere cannot turn a programmatic move into a drag-out.
+Untiling by dragging: a title-bar drag past the untile distance releases the slot and leaves the window where dropped: the drop is the placement, never a pre-tile restore. The drop decides the drag (a move-silence debounce is the fallback when the mouse-up is missed). A shorter drag snaps back into the tile. A single far tick is a hand drag only when a recent hand press landed on that window and mouse movement kept it live; an unrelated press elsewhere cannot turn a programmatic move into a drag-out. A fast hand drag's whole movement can coalesce into one frame tick that Accessibility delivers just after the release; the release just made is that tick's hand press, so the tick still counts as the drop. A hand drag still short of the distance at the release waits a short beat for the final frame its fast finish left in flight, so a slow start and a fast finish untiles where dropped instead of reading the stale start. The release that ends an edge drag is that gesture's, never a drag-out's.
 _Avoid_: drag-to-untile, fling
 
 **Requester**:

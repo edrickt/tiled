@@ -6,6 +6,22 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A fast drag out of a tile no longer snaps back. Accessibility can
+  coalesce the whole drag into a single frame tick delivered a few
+  milliseconds after the physical mouse-up; with no drag in flight to
+  decide, that tick read as a one-frame programmatic move, and the
+  release's move-silence debounce snapped the window back into its tile.
+  The release now keeps its hand evidence for a quarter second so a
+  trailing tick claims it as the drop, and a hand drag still short of the
+  untile distance at the release waits one short beat for the final frame
+  its fast finish left in flight, instead of deciding from a frame that
+  trailed the hand. Past the distance the window untiles where it was
+  released; a shorter drag still snaps back. A release that ends an edge
+  drag arms neither, and a slow drag whose frames streamed under the held
+  button decides at the mouse-up as before.
+
 ## [1.3.4] - 2026-11-08
 
 ### Fixed

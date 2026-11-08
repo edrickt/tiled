@@ -37,6 +37,9 @@ final class TilingController {
     /// Drag-end debounce scheduler for the tracker's drag-out loop.
     /// Injectable so tests fire drag ends without waiting on the runloop.
     private let scheduleDragEnd: DragTracker.DragEndScheduler
+    /// The short beat after a hand release before a short title-bar drag's
+    /// drop is judged (see `DragTracker.decideReleasedDrag`).
+    private let scheduleReleaseDecision: DragTracker.DragEndScheduler
     /// Convergence-check scheduler for the late silent-ignore verification.
     /// Injectable so tests fire verifications without waiting 3.5s.
     private let scheduleVerify: DragTracker.DragEndScheduler
@@ -97,6 +100,7 @@ final class TilingController {
             }),
         onDragEnd: { [weak self] decision in self?.handleDragEnd(decision) },
         scheduleDragEnd: scheduleDragEnd,
+        scheduleReleaseDecision: scheduleReleaseDecision,
         log: { [weak self] in self?.dbg($0) })
 
     /// Display set provider. Production returns one entry per NSScreen;
@@ -206,6 +210,7 @@ final class TilingController {
         gateway: WindowGateway = LiveWindowGateway(),
         pruneInterval: TimeInterval? = 5.0,
         scheduleDragEnd: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleDragEndOnMain,
+        scheduleReleaseDecision: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleReleaseDecisionOnMain,
         scheduleVerify: @escaping DragTracker.DragEndScheduler = DragTracker.scheduleVerifyOnMain,
         schedulePrune: @escaping PruneScheduler = TilingController.schedulePruneOnMain,
         screens: ScreenProvider? = nil,
@@ -220,6 +225,7 @@ final class TilingController {
     ) {
         self.gateway = gateway
         self.scheduleDragEnd = scheduleDragEnd
+        self.scheduleReleaseDecision = scheduleReleaseDecision
         self.scheduleVerify = scheduleVerify
         self.deathConfirmation = deathConfirmation
         self.now = now

@@ -155,9 +155,11 @@ tell you which app took it.
   itself) and keeps its original pre-tile frame.
 - **Drag a tiled window by its title bar**: past ~25pt of drag it untiles
   right where you dropped it (the drop's top edge takes the quarter
-  footprint); a shorter drag snaps back into its tile. A single far jump
-  with no recent hand press on the window (a programmatic move, not a
-  hand drag) still snaps back, even if an unrelated click follows.
+  footprint); a shorter drag snaps back into its tile. A fast finish whose
+  final frame is reported just after you release still counts: the drop is
+  where the window landed. A single far jump with no recent hand press on
+  the window (a programmatic move, not a hand drag) still snaps back, even
+  if an unrelated click follows.
 - Use the untile row in the menu (**Untile 1 Window** / **Untile N
   Windows**, titled by count) to float every tiled window on the focused
   canvas at the quarter footprint, or open a

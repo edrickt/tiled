@@ -686,8 +686,20 @@
  [
   "DragTracker.swift",
   "mouse-down point never recorded (a real one-tick hand drag snaps back)",
-  "    func mousePressed(at point: CGPoint) {\n        handPressPoint = point\n        handPressAt = context.now()\n    }",
-  "    func mousePressed(at point: CGPoint) {\n        _ = point\n        handPressAt = context.now()\n    }"
+  "    func mousePressed(at point: CGPoint) {\n        flushReleaseDecisions()\n        handPressPoint = point\n        handPressAt = context.now()\n        handMoved = false\n        handRelease = nil\n    }",
+  "    func mousePressed(at point: CGPoint) {\n        flushReleaseDecisions()\n        _ = point\n        handPressAt = context.now()\n        handMoved = false\n        handRelease = nil\n    }"
+ ],
+ [
+  "DragTracker.swift",
+  "a new press keeps the old release permit (an earlier gesture decides a later jump)",
+  "        handMoved = false\n        handRelease = nil\n    }",
+  "        handMoved = false\n    }"
+ ],
+ [
+  "DragTracker.swift",
+  "pointer motion never recorded (a fast drag's release authorizes no trailing tick)",
+  "    func mouseDragged() {\n        handMoved = true\n        handPressAt = context.now()\n    }",
+  "    func mouseDragged() {\n        handPressAt = context.now()\n    }"
  ],
  [
   "DragTracker.swift",
@@ -704,8 +716,92 @@
  [
   "DragTracker.swift",
   "mouse-up leaves the hand evidence set (a later jump borrows a click)",
-  "    func mouseLifted() {\n        handPressPoint = nil\n        handPressAt = nil",
-  "    func mouseLifted() {"
+  "    func mouseLifted() {\n        // Recorded before the evidence is cleared: a release with pointer\n        // motion but no title-bar drag yet tracked is the fast-drag shape.\n        // A title-bar gesture's release reaches the monitors twice and the\n        // duplicate carries no press, so only a release that owns the\n        // evidence replaces it; the duplicate keeps the permit.\n        if let release = handReleaseForTrailingTick() {\n            handRelease = release\n        }\n        handPressPoint = nil\n        handPressAt = nil",
+  "    func mouseLifted() {\n        // Recorded before the evidence is cleared: a release with pointer\n        // motion but no title-bar drag yet tracked is the fast-drag shape.\n        // A title-bar gesture's release reaches the monitors twice and the\n        // duplicate carries no press, so only a release that owns the\n        // evidence replaces it; the duplicate keeps the permit.\n        if let release = handReleaseForTrailingTick() {\n            handRelease = release\n        }\n        handMoved = false"
+ ],
+ [
+  "DragTracker.swift",
+  "duplicate release clears the trailing evidence (fast drag snaps back)",
+  "        if let release = handReleaseForTrailingTick() {\n            handRelease = release\n        }",
+  "        handRelease = handReleaseForTrailingTick()"
+ ],
+ [
+  "DragTracker.swift",
+  "release grace ignored (a fast drag's trailing tick snaps back)",
+  "        guard context.now().timeIntervalSince(release.releasedAt)\n            <= Self.handReleaseWindow\n        else {",
+  "        guard context.now().timeIntervalSince(release.releasedAt) < 0\n        else {"
+ ],
+ [
+  "DragTracker.swift",
+  "trailing release ignores the pointer-motion gate (a click authorizes a jump)",
+  "        guard drags.isEmpty, pendingReasserts.isEmpty, handMoved,\n            let point = handPressPoint\n        else {",
+  "        guard drags.isEmpty, pendingReasserts.isEmpty,\n            let point = handPressPoint\n        else {"
+ ],
+ [
+  "DragTracker.swift",
+  "an edge drag's release arms a trailing permit (a resize authorizes a drag-out)",
+  "        guard drags.isEmpty, pendingReasserts.isEmpty, handMoved,\n            let point = handPressPoint\n        else {",
+  "        guard drags.isEmpty, handMoved,\n            let point = handPressPoint\n        else {"
+ ],
+ [
+  "DragTracker.swift",
+  "a short hand drag decides before its trailing drop frame (a fast finish snaps back)",
+  "        let mayTrail = drag.beganUnderHandPress && !drag.awaitingReleaseDecision\n            && distance <= Self.untileDragDistance",
+  "        let mayTrail = drag.beganUnderHandPress && !drag.awaitingReleaseDecision\n            && false"
+ ],
+ [
+  "DragTracker.swift",
+  "a duplicate release cuts the short drag's beat (the trailing drop frame is lost)",
+  "        if drag.awaitingReleaseDecision { return }",
+  "        if drag.awaitingReleaseDecision { }"
+ ],
+ [
+  "DragTracker.swift",
+  "a new press leaves the short drag's decision pending (gestures straddle)",
+  "    func mousePressed(at point: CGPoint) {\n        flushReleaseDecisions()\n        handPressPoint = point",
+  "    func mousePressed(at point: CGPoint) {\n        handPressPoint = point"
+ ],
+ [
+  "DragTracker.swift",
+  "the release beat never decides (a short drag hangs until the next action)",
+  "        drags[id]?.cancelDragEnd = scheduleReleaseDecision { [weak self] in\n            guard let self, self.drags[id]?.awaitingReleaseDecision == true\n            else { return }\n            self.endDrag(id: id, decidedAtMouseUp: true)\n        }",
+  "        drags[id]?.cancelDragEnd = scheduleReleaseDecision { }"
+ ],
+ [
+  "DragTracker.swift",
+  "ending a drag leaves its decision timer armed (a stale beat can fire)",
+  "        drag.cancelDragEnd?()\n        drags[id] = nil",
+  "        drags[id] = nil"
+ ],
+ [
+  "DragTracker.swift",
+  "a stale release beat decides whatever drag the window now holds",
+  "            guard let self, self.drags[id]?.awaitingReleaseDecision == true\n            else { return }\n            self.endDrag(id: id, decidedAtMouseUp: true)",
+  "            self?.endDrag(id: id, decidedAtMouseUp: true)"
+ ],
+ [
+  "DragTracker.swift",
+  "the released gesture's trailing tick restarts the move-silence debounce",
+  "        if drags[id]?.awaitingReleaseDecision == true {\n            // The release ended this gesture and its short-frame decision\n            // waits a beat; this tick is that gesture's final frame. Keep\n            // the pending decision and the frame it now reads.\n            log(\"move win\\(id) trailing tick of the released drag; decision pending\")\n            return\n        }\n",
+  ""
+ ],
+ [
+  "DragTracker.swift",
+  "trailing release ignores press containment (an unpressed window untiles)",
+  "        guard previous.contains(release.pressPoint) else { return false }",
+  "        guard previous.width > 0 else { return false }"
+ ],
+ [
+  "DragTracker.swift",
+  "trailing tick waits for the debounce (fast drag snaps back)",
+  "        if drags[id]?.endedAtRelease == true {\n            // The hand released before this tick arrived: the gesture is\n            // over and the tick is its coalesced drop. Decide it now; a\n            // debounce wait would hold the slot for a gesture already\n            // finished and could only fall back to the two-tick\n            // programmatic rule, snapping the drop back into its tile.\n            endDrag(id: id, decidedAtMouseUp: true)\n            return\n        }\n        drags[id]?.cancelDragEnd = scheduleDragEnd { [weak self] in",
+  "        drags[id]?.cancelDragEnd = scheduleDragEnd { [weak self] in"
+ ],
+ [
+  "DragTracker.swift",
+  "trailing release sets no hand evidence (a fast drag snaps back)",
+  "                beganUnderHandPress: handPress || trailing,",
+  "                beganUnderHandPress: handPress,"
  ],
  [
   "FrameWriter.swift",
