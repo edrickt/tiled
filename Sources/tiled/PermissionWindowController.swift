@@ -14,6 +14,15 @@ final class PermissionWindowController: NSWindowController {
     /// free of URL/system knowledge (and tests can observe the click).
     var onOpenSettings: (() -> Void)?
 
+    /// Fired when the window closes for any reason: the user's close
+    /// button, the grant path's `close()`, or a future dismissal. The
+    /// delegate stops its permission poll here; without it, dismissing the
+    /// explainer leaves a timer waking the app and refreshing the menu
+    /// every second with nothing on screen waiting for the grant.
+    var onClose: (() -> Void)?
+
+    private var closeObserver: NSObjectProtocol?
+
     /// The one action the window offers, exposed for initial focus and
     /// for tests to click.
     let openSettingsButton: NSButton
@@ -140,9 +149,23 @@ final class PermissionWindowController: NSWindowController {
         window.defaultButtonCell = button.cell as? NSButtonCell
 
         super.init(window: window)
+        // The window outlives a close (`isReleasedWhenClosed` is false), so
+        // the controller observes the close itself instead of relying on
+        // NSWindowController to forward it.
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            self?.onClose?()
+        }
         // Target needs self, so it is wired after super.init.
         button.target = self
         button.action = #selector(openSettingsTapped(_:))
+    }
+
+    deinit {
+        if let closeObserver {
+            NotificationCenter.default.removeObserver(closeObserver)
+        }
     }
 
     @available(*, unavailable)

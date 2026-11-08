@@ -86,7 +86,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // never the bare system prompt: the request arrives with
                 // the reason attached, and granting is a deliberate click.
                 showPermissionWindow()
-                pollForPermission()
             })
         menuBar.refresh()
         // First run: land on Welcome so the one demonstrated combo plus
@@ -142,17 +141,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showPermissionWindow() {
+        // Reopening the explainer is the only thing that re-arms the poll;
+        // never leave an older timer running beside it.
+        stopPermissionPoll()
         let controller = PermissionWindowController()
         controller.onOpenSettings = { [weak self] in
             self?.openAccessibilitySettings(nil)
         }
+        // Once the explainer closes, nothing on screen is waiting for the
+        // grant: a user dismissal must stop the 1 Hz poll, not leave it
+        // refreshing the menu forever.
+        controller.onClose = { [weak self] in
+            self?.stopPermissionPoll()
+        }
         permissionWindowController = controller
         controller.show()
+        // The poll is armed with the window and its close hook disarms it:
+        // reopening the explainer is the one path that re-arms detection.
+        pollForPermission()
+    }
+
+    /// Stops the launch permission poll. The explainer owns the only
+    /// reason to poll, so closing it (grant or dismissal) ends the timer;
+    /// a later showPermissionWindow re-arms a fresh one.
+    private func stopPermissionPoll() {
+        permissionTimer?.invalidate()
+        permissionTimer = nil
     }
 
     private func start(afterPermissionWait: Bool = false) {
-        permissionTimer?.invalidate()
-        permissionTimer = nil
+        stopPermissionPoll()
         // Trust arrived (or was already there): the explainer's job is
         // done and it must not linger over the working app.
         permissionWindowController?.close()
