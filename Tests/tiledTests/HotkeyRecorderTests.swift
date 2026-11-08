@@ -119,7 +119,7 @@ final class HotkeyRecorderTests: XCTestCase {
 
     func testBareNavigationKeysPassThroughWhileArmed() {
         let codes = [
-            kVK_Tab, kVK_Return, kVK_Space,
+            kVK_Tab, kVK_Return,
             kVK_UpArrow, kVK_DownArrow, kVK_LeftArrow, kVK_RightArrow,
             kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown,
         ]
@@ -128,6 +128,14 @@ final class HotkeyRecorderTests: XCTestCase {
                 HotkeyRecorder.shouldPassThrough(keyDown(keyCode: UInt16(code))),
                 "bare keyCode \(code) must reach the responder chain")
         }
+    }
+
+    func testBareSpaceDoesNotPassThroughWhileArmed() {
+        // Passing Space through let AppKit press the focused recorder
+        // button: the capture cancelled silently, then the same keypress
+        // re-armed the recorder. While armed, Space is swallowed instead.
+        XCTAssertFalse(HotkeyRecorder.shouldPassThrough(
+            keyDown(keyCode: UInt16(kVK_Space))))
     }
 
     func testModifiedNavigationKeysDoNotPassThrough() {

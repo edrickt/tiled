@@ -29,16 +29,19 @@ enum HotkeyRecorder {
     /// Keycodes that must pass through to the responder chain even while
     /// armed: navigation keys are never bindings (a combo needs ≥1 of
     /// ⌃⌥⇧⌘), so swallowing them would trap keyboard users mid-record.
-    /// Space rides along: with the recorder focused it re-activates the
-    /// button, which is the same keep-the-old-binding cancel a second
-    /// click performs, never a swallowed, uncued keypress.
+    /// Space is deliberately not one of them: with the recorder focused
+    /// AppKit would treat it as a button press, cancelling the capture and
+    /// immediately re-arming through the button's action. While armed it
+    /// is an ordinary non-decisive key: swallowed, keeping the recorder
+    /// armed with its "Press shortcut…" cue intact. Tab and the arrows
+    /// still pass through so keyboard users can leave.
     /// The monitor checks this first and returns the event unswallowed.
     static func shouldPassThrough(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown,
               carbonFlags(from: event.modifierFlags) == 0
         else { return false }
         switch Int(event.keyCode) {
-        case kVK_Tab, kVK_Return, kVK_Space,
+        case kVK_Tab, kVK_Return,
             kVK_UpArrow, kVK_DownArrow, kVK_LeftArrow, kVK_RightArrow,
             kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown:
             return true

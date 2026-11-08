@@ -142,6 +142,35 @@ final class RecorderButtonRoutingTests: XCTestCase {
         _ = button.routeRecordedEvent(keyDown(keyCode: UInt16(kVK_Tab)))
         XCTAssertEqual(button.accessibilityValue() as? String, "disabled")
     }
+
+    func testSpaceIsSwallowedInsteadOfCancellingAndRearmingThroughTheButton() {
+        // Space used to pass through: AppKit pressed the focused recorder
+        // button, the button action found a silently cancelled recorder and
+        // re-armed it. Now the monitor swallows Space, so the recorder
+        // stays armed with its cue and neither callback fires again.
+        let button = RecorderButton(action: .slotKey(.topLeft))
+        button.showBinding(HotkeyBinding(
+            modifiers: UInt32(optionKey | shiftKey), keyCode: UInt32(kVK_ANSI_U)))
+        var armed: [HotkeyAction] = []
+        var silentCancels: [HotkeyAction] = []
+        button.onArmed = { armed.append($0) }
+        button.onSilentCancel = { silentCancels.append($0) }
+        button.beginRecording { _ in }
+        XCTAssertEqual(armed.count, 1)
+
+        let passed = button.routeRecordedEvent(keyDown(keyCode: UInt16(kVK_Space)))
+        if passed != nil {
+            // Model the old chain: a passed-through keypress activates the
+            // focused button, whose action is the recorder click.
+            button.performClick(nil)
+        }
+
+        XCTAssertNil(passed, "Space is swallowed while the recorder is armed")
+        XCTAssertTrue(button.isRecording, "the recorder stays armed to take a real combo")
+        XCTAssertEqual(button.accessibilityValue() as? String, "recording")
+        XCTAssertEqual(armed.count, 1, "the recorder was never cancelled and re-armed")
+        XCTAssertTrue(silentCancels.isEmpty, "Space is not a silent cancel")
+    }
 }
 
 /// The Enable-all bulk path must never silently destroy combos recorded
