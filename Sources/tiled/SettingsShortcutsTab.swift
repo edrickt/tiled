@@ -63,6 +63,14 @@ final class ShortcutsTab: NSObject {
     /// the recorder accepted but the system refused never masquerades as
     /// a success in this tab.
     var failedActionsProvider: (() -> [HotkeyAction])?
+    /// The running hotkey service. Arming a recorder suspends every
+    /// global registration and every disarm path resumes them: Carbon
+    /// consumes a registered combo before the recorder's local monitor,
+    /// so leaving registrations live makes the action's own combo (and
+    /// any other Tiled combo) impossible to record. One provider on the
+    /// tab; nil (headless tests, hotkeys not started) has nothing to
+    /// suspend.
+    var hotkeyServiceProvider: (() -> HotkeyService?)?
     /// Opens the Accessibility permission pane.
     var onOpenAccessibilitySettings: (() -> Void)?
     /// The reset confirmation decision, receiving the dialog's promise and
@@ -266,6 +274,10 @@ final class ShortcutsTab: NSObject {
     }
 
     private func reload(notice: ShortcutNotice?) {
+        // A reload disarms every recorder (the loop below rewrites the
+        // labels): an armed monitor must never outlive its rows, and the
+        // global registrations must not stay suspended behind it.
+        endArmedRecorders()
         for (action, button) in recorderButtons {
             button.showBinding(hotkeyStore.binding(for: action))
         }
@@ -273,6 +285,34 @@ final class ShortcutsTab: NSObject {
         refreshFooter()
         refreshPermissionState()
         render(notice)
+    }
+
+    /// Ends every recorder still armed without a decision (a reload, a
+    /// tab rebuild) and puts the global registrations back. The caller's
+    /// label refresh is separate: here the point is that an armed monitor
+    /// never outlives its rows and the hotkeys are never left suspended.
+    private func endArmedRecorders() {
+        var wasRecording = false
+        for (action, button) in recorderButtons where button.isRecording {
+            wasRecording = true
+            button.showBinding(hotkeyStore.binding(for: action))
+        }
+        if wasRecording { resumeHotkeys() }
+    }
+
+    /// Takes every global registration out of Carbon's hands while a
+    /// recorder is armed, so the recorder's local key monitor sees the
+    /// combo instead of the action firing behind Settings.
+    private func suspendHotkeys() {
+        hotkeyServiceProvider?()?.suspend()
+    }
+
+    /// Restores the global registrations after the recorder disarms. Every
+    /// disarm path calls this; the service's own guard makes overlapping
+    /// paths (Esc plus view removal, a rebuild plus a silent cancel)
+    /// register exactly once.
+    private func resumeHotkeys() {
+        hotkeyServiceProvider?()?.resume()
     }
 
     /// The footer's one two-state answer: Reset when no reset snapshot is
@@ -368,8 +408,11 @@ final class ShortcutsTab: NSObject {
     }
 
     /// Drops all rows; the shell calls this before rebuilding the tab view
-    /// so stale buttons never outlive their views.
+    /// so stale buttons never outlive their views. An armed recorder is
+    /// disarmed (and its global registrations restored) first: the rows
+    /// about to disappear are the only surface that could decide it.
     func reset() {
+        endArmedRecorders()
         recorderButtons = [:]
         bulkButtons = [:]
     }
@@ -402,6 +445,10 @@ final class ShortcutsTab: NSObject {
                 "Capturing a shortcut for \(armedAction.title): press a combo, or Esc to keep the old one.")
         }
         button.onSilentCancel = { [weak self] cancelledAction in
+            // Tab-away, a window close, and a recorder replaced by a tab
+            // rebuild all land here: no decision was made, so the global
+            // registrations go back now.
+            self?.resumeHotkeys()
             self?.announce("\(cancelledAction.title) kept its old shortcut.")
         }
         recorderButtons[action] = button
@@ -613,14 +660,22 @@ final class ShortcutsTab: NSObject {
         // leaves nothing stuck mid-record.
         if sender.isRecording {
             sender.showBinding(hotkeyStore.binding(for: sender.hotkeyAction))
+            resumeHotkeys()
             renderFailures()
             return
         }
         // End any other in-progress record first: exactly one recorder is
-        // armed at a time.
+        // armed at a time. A switch stays suspended (the sender re-arms
+        // below), so only this path's explicit resume above restores.
         for (action, button) in recorderButtons where button.isRecording && button !== sender {
             button.showBinding(hotkeyStore.binding(for: action))
         }
+        // Suspend before the monitor arms: a registered combo is consumed
+        // by Carbon before a local monitor sees it, so a live registration
+        // would make the action's own combo (and any other Tiled combo)
+        // impossible to record. Covers the switch path too, where the
+        // service is already suspended.
+        suspendHotkeys()
         sender.beginRecording { [weak self, weak sender] outcome in
             guard let self, let sender else { return }
             self.finishRecording(sender, outcome: outcome)
@@ -629,6 +684,11 @@ final class ShortcutsTab: NSObject {
 
     private func finishRecording(_ button: RecorderButton, outcome: HotkeyRecorder.Outcome) {
         let action = button.hotkeyAction
+        // The button is already disarmed when its completion fires. Put
+        // the global registrations back before this outcome re-registers
+        // a changed store, so the failure list rendered below reads the
+        // fresh pass rather than the set suspended at arm time.
+        resumeHotkeys()
         switch outcome {
         case .cancel:
             button.showBinding(hotkeyStore.binding(for: action))

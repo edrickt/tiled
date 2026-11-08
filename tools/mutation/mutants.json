@@ -722,8 +722,8 @@
  [
   "HotkeyService.swift",
   "reload drops tokens without unregistering (old combos stay live)",
-  "    func reload() {\n        retireRegistrations()\n        registerHotkeys()\n    }",
-  "    func reload() {\n        registrations.removeAll()\n        registerHotkeys()\n    }"
+  "    func reload() {\n        retireRegistrations()\n        if !isSuspended { registerHotkeys() }\n    }",
+  "    func reload() {\n        registrations.removeAll()\n        if !isSuspended { registerHotkeys() }\n    }"
  ],
  [
   "HotkeyService.swift",

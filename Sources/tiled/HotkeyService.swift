@@ -160,6 +160,12 @@ final class HotkeyService {
     /// never just logged.
     private(set) var failedActions: [HotkeyAction] = []
 
+    /// Whether every global registration is currently retired so the
+    /// Shortcuts recorder can receive a combo Carbon would otherwise
+    /// consume. While suspended no action can fire globally; `resume`
+    /// re-registers from the store and recomputes `failedActions`.
+    private(set) var isSuspended = false
+
     init(
         store: HotkeyStore = HotkeyStore(),
         registrar: HotkeyRegistrar = CarbonHotkeyRegistrar(),
@@ -194,9 +200,33 @@ final class HotkeyService {
     /// Unregisters everything and registers from the store again.
     /// Called after the user edits bindings in Settings; failedActions is
     /// recomputed, so newly freed (or newly conflicted) actions surface
-    /// in the menu without a relaunch.
+    /// in the menu without a relaunch. A reload while suspended only
+    /// retires: the store is re-read on `resume`, and registering now
+    /// would put Carbon back ahead of the recorder.
     func reload() {
         retireRegistrations()
+        if !isSuspended { registerHotkeys() }
+    }
+
+    /// Takes every global registration away from Carbon for the duration
+    /// of a recording. A registered combo is consumed before the app's
+    /// local key monitor, so without this the recorder can never see the
+    /// action's own combo or another Tiled action's combo: the pressed
+    /// action fires behind Settings instead. Idempotent: arming one
+    /// recorder suspends once, however many disarm paths later run.
+    func suspend() {
+        guard !isSuspended else { return }
+        isSuspended = true
+        retireRegistrations()
+    }
+
+    /// Restores every registration from the store after a recording ends
+    /// and recomputes `failedActions`, so a combo that is still owned by
+    /// another app keeps surfacing beside its recorder. Idempotent: only
+    /// the first resume after a suspend registers (disarm paths overlap).
+    func resume() {
+        guard isSuspended else { return }
+        isSuspended = false
         registerHotkeys()
     }
 

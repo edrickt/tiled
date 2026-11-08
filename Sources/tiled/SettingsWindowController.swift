@@ -50,6 +50,14 @@ final class SettingsWindowController: NSWindowController {
             welcomeTab.failedActionsProvider = failedActionsProvider
         }
     }
+    /// The running hotkey service, forwarded to the Shortcuts tab. An
+    /// armed recorder suspends every global registration so its local
+    /// key monitor can see a combo Carbon would otherwise consume; every
+    /// disarm path resumes. The delegate wires this once, beside the
+    /// other hotkey providers.
+    var hotkeyServiceProvider: (() -> HotkeyService?)? {
+        didSet { shortcutsTab.hotkeyServiceProvider = hotkeyServiceProvider }
+    }
     /// Live label of the Settings fallback hotkey (nil when disabled,
     /// unregistered, or hotkeys are not running), forwarded to General so
     /// the hide-icon confirm names the user's actual recovery combo and

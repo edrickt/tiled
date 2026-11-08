@@ -311,6 +311,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.failedActionsProvider = { [weak self] in
                 self?.hotkeys?.failedActions ?? []
             }
+            // An armed Shortcuts recorder suspends every global
+            // registration so its local monitor can see the combo, and
+            // resumes them on every disarm path.
+            controller.hotkeyServiceProvider = { [weak self] in
+                self?.hotkeys
+            }
             // General's hide-icon confirm names the user's live Settings
             // binding, and only when it is registered; without a running
             // hotkey service it names no combo at all.

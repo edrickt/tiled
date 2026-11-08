@@ -253,12 +253,95 @@ final class HotkeyRegistrationTests: XCTestCase {
         XCTAssertNotNil(
             router.handler, "the replacement service owns the live route")
     }
+
+    /// Recording a shortcut needs every global registration retired: a
+    /// registered combo is consumed before the recorder's local monitor.
+    /// Suspend retires the whole set; resume registers the store again
+    /// exactly once, so no combo is left dead after a recording.
+    func testSuspendRetiresEveryRegistrationAndResumeRestoresThemOnce() {
+        let registrar = FakeHotkeyRegistrar()
+        let store = makeStore()
+        let service = makeService(store: store, registrar: registrar)
+        XCTAssertEqual(registrar.activeTokens.count, 17)
+
+        service.suspend()
+
+        XCTAssertTrue(service.isSuspended)
+        XCTAssertTrue(registrar.activeTokens.isEmpty, "armed: nothing may reach Carbon")
+        XCTAssertEqual(registrar.unregisteredTokens.count, 17, "every token is retired")
+        service.suspend()
+        XCTAssertEqual(registrar.unregisteredTokens.count, 17, "suspend is idempotent")
+        XCTAssertEqual(registrar.requests.count, 17, "suspend never registers")
+
+        service.resume()
+
+        XCTAssertFalse(service.isSuspended)
+        XCTAssertEqual(registrar.activeTokens.count, 17, "disarm restores every binding")
+        XCTAssertEqual(registrar.requests.count, 34, "resume registers exactly once")
+        service.resume()
+        XCTAssertEqual(
+            registrar.requests.count, 34,
+            "overlapping disarm paths never register a second pass")
+    }
+
+    /// Resume recomputes the failure list from the registration pass, so
+    /// a combo another app owns still surfaces beside its recorder after
+    /// a recording ends, and one freed while suspended clears.
+    func testResumeRecomputesFailedActions() {
+        let registrar = FakeHotkeyRegistrar()
+        let store = makeStore()
+        registrar.statusesByID[HotkeyAction.expand.hotkeyID] = OSStatus(-1)
+        let service = makeService(store: store, registrar: registrar)
+        XCTAssertEqual(service.failedActions, [.expand])
+
+        service.suspend()
+        registrar.statusesByID[HotkeyAction.expand.hotkeyID] = noErr
+        registrar.statusesByID[HotkeyAction.undo.hotkeyID] = OSStatus(-2)
+        XCTAssertEqual(
+            service.failedActions, [.expand],
+            "suspending does not invent a new registration result")
+
+        service.resume()
+
+        XCTAssertEqual(
+            service.failedActions, [.undo],
+            "resume's pass replaces the suspended set with the live result")
+    }
+
+    /// A binding edit while the recorder is armed re-registers through the
+    /// tab's reload; that reload must not put Carbon back ahead of the
+    /// recorder. Resume is the one pass that registers.
+    func testReloadWhileSuspendedStaysRetiredUntilResume() {
+        let registrar = FakeHotkeyRegistrar()
+        let store = makeStore()
+        let service = makeService(store: store, registrar: registrar)
+
+        service.suspend()
+        let rebound = HotkeyBinding(
+            modifiers: UInt32(cmdKey), keyCode: UInt32(kVK_ANSI_A))
+        store.set(rebound, for: .slotKey(.topLeft))
+        service.reload()
+
+        XCTAssertTrue(registrar.activeTokens.isEmpty, "a suspended reload stays retired")
+        XCTAssertEqual(registrar.requests.count, 17, "no registration slipped through")
+
+        service.resume()
+
+        XCTAssertEqual(registrar.activeTokens.count, 17)
+        XCTAssertEqual(
+            registrar.requests(for: HotkeyAction.slotKey(.topLeft).hotkeyID).last,
+            HotkeyRequest(
+                keyCode: UInt32(kVK_ANSI_A), modifiers: UInt32(cmdKey),
+                hotKeyID: HotkeyAction.slotKey(.topLeft).hotkeyID,
+                signature: 0x54_49_4C_44),
+            "resume registers the store as it stands after the edit")
+    }
 }
 
 /// Records every registration request and answers from a per-action table.
 /// Tokens are stand-ins for Carbon's `EventHotKeyRef`; a token only leaves
 /// the active set through `unregister`, so forgotten teardown is visible.
-private final class FakeHotkeyRegistrar: HotkeyRegistrar {
+final class FakeHotkeyRegistrar: HotkeyRegistrar {
     final class Token: HotkeyRegistration {
         let request: HotkeyRequest
         fileprivate(set) var isActive = true
