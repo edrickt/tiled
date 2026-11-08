@@ -64,8 +64,11 @@ struct MenuReads {
     /// the display's `ScreenID` (identity); the display name is used only
     /// for the header text. One section per display that has windows, in
     /// controller order. Two same-named displays stay separate because
-    /// identity, not the name, groups them. Single display (or no screen
-    /// tags) renders the flat legacy list.
+    /// identity, not the name, groups them. A display whose windows span
+    /// both an identified and a withheld canvas runs two layouts at once,
+    /// so its header omits the layout rather than naming one canvas's for
+    /// the other's rows. Single display (or no screen tags) renders the
+    /// flat legacy list.
     static func monitorPresentation(
         rows: [TilingController.TiledWindowInfo],
         layoutForScreen: (ScreenID?) -> LayoutKind
@@ -85,13 +88,21 @@ struct MenuReads {
             var ordered: [MenuModel.Snapshot.TiledWindow] = []
             for row in rows {
                 if !built.contains(where: { $0.key == row.screen }) {
-                    let count = rows.filter { $0.screen == row.screen }.count
-                    let layout = layoutForScreen(row.screen)
+                    // One display can carry an identified canvas and a
+                    // withheld fallback at once, and they can run different
+                    // layouts. No single layout is then true for every row,
+                    // so the header omits it rather than naming one
+                    // canvas's layout for the other's windows.
+                    let displayRows = rows.filter { $0.screen == row.screen }
+                    let count = displayRows.count
+                    let layouts = Set(displayRows.map(\.slot.layout))
                     let display = row.screenName ?? "Display"
                     let noun = count == 1 ? "1 tiled" : "\(count) tiled"
-                    built.append(.init(
-                        title: "\(display) · \(layout.title) · \(noun)",
-                        key: row.screen))
+                    let title =
+                        layouts.count > 1
+                        ? "\(display) · \(noun)"
+                        : "\(display) · \(layoutForScreen(row.screen).title) · \(noun)"
+                    built.append(.init(title: title, key: row.screen))
                 }
                 ordered.append(.init(
                     id: row.id, slot: row.slot, appName: row.appName,

@@ -168,13 +168,15 @@ final class AppDelegateMenuTests: XCTestCase {
     func testOneDisplaysTwoCanvasesListEachWindowOnceUnderItsSection() {
         // A display can hold both an identified and a withheld canvas at
         // once, so `allTiledWindowsInfo` emits rows from both — same
-        // display, same name. They are one display: every window lists
-        // exactly once, under the one section keyed by that display's
-        // ScreenID (never split by canvas, never doubled).
+        // display, same name, same layout. They are one display: every
+        // window lists exactly once, under the one section keyed by that
+        // display's ScreenID (never split by canvas, never doubled). A
+        // mixed-layout case omits the layout instead (see
+        // MenuReadsTests.testOneDisplayWithTwoLayoutsOmitsTheLayoutFromItsHeader).
         let display = ScreenID(rawValue: 0)
         let rows = [
             row(1, .topLeft, screen: display, screenName: "Built-in"),
-            row(2, .sixthTopLeft, screen: display, screenName: "Built-in"),
+            row(2, .topRight, screen: display, screenName: "Built-in"),
         ]
 
         let presentation = MenuReads.monitorPresentation(

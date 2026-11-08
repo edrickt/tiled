@@ -126,4 +126,63 @@ final class MenuReadsTests: XCTestCase {
             reads(for: controller.focusedTilingSpace).canvas.state.layout, .quarters,
             "an empty switched canvas keeps its layout with nothing focused")
     }
+
+    func testOneDisplayWithTwoLayoutsOmitsTheLayoutFromItsHeader() {
+        // A display can show an identified canvas and still keep a
+        // withheld fallback holding windows. When the two canvases run
+        // different layouts, one section per display cannot name a single
+        // layout: the header (and the status line built from it) omits it
+        // rather than asserting one canvas's layout for the other's row.
+        let displayID: CGDirectDisplayID = 42
+        let display = ScreenInfo(
+            id: ScreenID(rawValue: 1),
+            frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            name: "Built-in",
+            displayID: displayID)
+        let gateway = FakeWindowGateway()
+        let controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { [display] }, deathConfirmation: 0)
+        controller.onChange = {}
+
+        // While the display's Space is withheld, Safari tiles on the
+        // per-display fallback canvas, which stays in quarters.
+        let safari = gateway.addWindow(
+            frame: CGRect(x: 100, y: 100, width: 800, height: 600), appName: "Safari")
+        gateway.focused = safari
+        controller.handle(slot: .topLeft)
+
+        // The display names its Space: Notes tiles on the identified
+        // canvas, which switches to sixths and re-tiles Notes there.
+        gateway.activeSpaces = [displayID: SpaceID(rawValue: 7)]
+        let notes = gateway.addWindow(
+            frame: CGRect(x: 900, y: 100, width: 800, height: 600), appName: "Notes")
+        gateway.focused = notes
+        controller.handle(slot: .topRight)
+        controller.handleSwitchLayout(to: .sixths)
+        controller.handle(slotKey: .topLeft)
+
+        let identified = TilingSpaceKey(screen: display.id, space: SpaceID(rawValue: 7))
+        let withheld = TilingSpaceKey(screen: display.id, space: nil)
+        XCTAssertEqual(controller.canvas(for: identified).state.layout, .sixths)
+        XCTAssertEqual(controller.canvas(for: withheld).state.layout, .quarters)
+        XCTAssertEqual(controller.canvas(for: identified).state.tiledWindows.count, 1)
+        XCTAssertEqual(controller.canvas(for: withheld).state.tiledWindows.count, 1)
+
+        let reads = MenuReads(
+            space: controller.focusedTilingSpace, controller: controller,
+            failedActions: [], binding: { $0.defaultBinding })
+        XCTAssertEqual(
+            Set(reads.rows.compactMap(\.appName)), ["Safari", "Notes"],
+            "both canvases' windows list under the one display")
+        XCTAssertEqual(
+            reads.layout(for: display.id), .sixths,
+            "a display-scoped action resolves the identified canvas")
+        let snapshot = MenuModel.Snapshot(reads: reads, notice: nil)
+        XCTAssertEqual(snapshot.layoutTitle, "Built-in · 2 tiled")
+        XCTAssertEqual(snapshot.monitorSections, [
+            .init(title: "Built-in · 2 tiled", key: display.id),
+        ])
+    }
 }
