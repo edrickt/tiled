@@ -302,6 +302,34 @@ final class ActionReceiptTests: XCTestCase {
         XCTAssertEqual(receipt.notice, receipt.announcement)
     }
 
+    func testLayoutOnlyUndoAnnouncesTheLayoutNeverRestoredWindows() {
+        // A switch chapter holds the windows and the previous layout. If
+        // every chapter window closes before undo, only the layout comes
+        // back: the receipt must still report performed and name the
+        // layout, but it may not claim displaced windows were restored.
+        harness.addFocusedWindow(appName: "Safari")
+        controller.handle(slot: .topLeft)
+        harness.addFocusedWindow(
+            frame: CGRect(x: 900, y: 0, width: 800, height: 600), appName: "Notes")
+        controller.handle(slot: .topRight)
+
+        controller.handleSwitchLayout()
+        XCTAssertEqual(canvas.state.layout, .sixths)
+
+        for handle in gateway.issued { gateway.kill(handle) }
+        controller.pruneDeadWindows()
+
+        let receipt = controller.undoAction()
+
+        XCTAssertTrue(receipt.performed, "the layout came back")
+        XCTAssertEqual(canvas.state.layout, .quarters)
+        XCTAssertEqual(receipt.notice, "Undid displacement \u{00B7} back to Quarters.")
+        XCTAssertEqual(receipt.announcement, "Layout back to Quarters.")
+        XCTAssertFalse(
+            receipt.announcement?.contains("restored") == true,
+            "a layout-only recovery must not claim windows were restored")
+    }
+
     // MARK: Bool seam
 
     func testUndoBoolSeamReturnsFalseOnEmptyStackWithoutFeedback() {

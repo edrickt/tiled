@@ -254,6 +254,13 @@ enum MenuText {
         "Displaced windows restored."
     }
 
+    /// Undo put the chapter's layout back but no window came with it: the
+    /// chapter's windows all closed first. The sentence must not claim
+    /// windows were restored.
+    static func undoLayoutAnnouncement(layout: LayoutKind) -> String {
+        "Layout back to \(layout.title)."
+    }
+
     /// A splitter reset parked the old fractions and re-tiled everyone.
     static func splittersResetAnnouncement() -> String {
         "Splitters reset to even splits."

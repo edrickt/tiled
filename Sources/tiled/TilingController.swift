@@ -1049,12 +1049,30 @@ final class TilingController {
                 failure: nil, success: MenuText.undoAnnouncement(),
                 noOp: MenuText.nothingToUndoAnnouncement())
         }
-        let performed = restoreChapter(chapter, on: space)
+        let restoration = restoreChapter(chapter, on: space)
         let error = directory.storedCanvas(for: space)?.error
+        // A layout-only recovery restored no windows: name the layout
+        // instead of claiming displaced windows came back.
+        let success: String
+        if restoration.restored == 0, let layout = restoration.layoutRestored {
+            success = MenuText.undoLayoutAnnouncement(layout: layout)
+        } else {
+            success = MenuText.undoAnnouncement()
+        }
         return receipt(
-            canvas: space, performed: performed,
-            failure: error, success: MenuText.undoAnnouncement(),
+            canvas: space, performed: restoration.performed,
+            failure: error, success: success,
             noOp: MenuText.nothingToUndoAnnouncement())
+    }
+
+    /// What one chapter restoration restored: the window count and the
+    /// layout it put back, so the undo receipt can tell a windows-returned
+    /// recovery from a layout-only one whose windows all closed first.
+    private struct ChapterRestoration {
+        let restored: Int
+        let layoutRestored: LayoutKind?
+        /// Whether the chapter restored everything it owed.
+        let performed: Bool
     }
 
     /// Chapter restoration, owned here because the controller routes the
@@ -1064,7 +1082,8 @@ final class TilingController {
     /// behaviour owns the cross-canvas rules — layout reconciliation, the
     /// per-canvas grouping, the requester's barrier, and the notice/error
     /// precedence that lets a partial failure surface ahead of the success
-    /// sentence. Returns whether the chapter restored everything it owed.
+    /// sentence. Returns what the chapter restored, so the receipt can
+    /// announce a layout-only recovery honestly.
     ///
     /// A chapter's layout comes from its entries, not a stored field. When
     /// the destination canvas now shows another layout (the user switched,
@@ -1076,7 +1095,7 @@ final class TilingController {
     @discardableResult
     private func restoreChapter(
         _ chapter: TilingSpace.UndoChapter, on space: TilingSpaceKey
-    ) -> Bool {
+    ) -> ChapterRestoration {
         pruneDeadWindows()
         directory.withCanvas(space) { $0.error = nil; $0.notice = nil }
         var failures: [String] = []
@@ -1246,7 +1265,10 @@ final class TilingController {
         // A refused frame means the chapter did not fully restore: report
         // not-performed so a caller cannot speak a success sentence over
         // the canvas's refusal.
-        return (restored > 0 || layoutRestored != nil) && failures.isEmpty
+        let performed = (restored > 0 || layoutRestored != nil) && failures.isEmpty
+        return ChapterRestoration(
+            restored: restored, layoutRestored: layoutRestored,
+            performed: performed)
     }
 
     /// The current occupants that must step aside before `chapter`
