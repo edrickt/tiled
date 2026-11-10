@@ -7,12 +7,20 @@ import AppKit
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
-func makeWindow(_ title: String, _ frame: CGRect) -> NSWindow {
+func makeWindow(_ title: String, _ frame: CGRect, color: NSColor) -> NSWindow {
     let w = NSWindow(
         contentRect: frame,
         styleMask: [.titled, .closable, .miniaturizable, .resizable],
         backing: .buffered, defer: false)
     w.title = title
+    // A distinct fill per window: in a recording, four grey rectangles are
+    // interchangeable; four colors make every tile, mirror, and eviction
+    // legible at a glance.
+    w.backgroundColor = color
+    let content = NSView(frame: .zero)
+    content.wantsLayer = true
+    content.layer?.backgroundColor = color.usingColorSpace(.sRGB)!.cgColor
+    w.contentView = content
     // The repro suite drives frames directly; macOS state restoration
     // would restore some earlier run's frame on key-in, silently
     // overwriting what the suite (or the window manager) just wrote.
@@ -26,9 +34,9 @@ func makeWindow(_ title: String, _ frame: CGRect) -> NSWindow {
 NSWindow.allowsAutomaticWindowTabbing = false
 
 // AppKit coords (bottom-left origin). Screen ~1512x982.
-let a = makeWindow("HOSTA", NSRect(x: 200, y: 500, width: 600, height: 350))
-let b = makeWindow("HOSTB", NSRect(x: 250, y: 120, width: 600, height: 300))
-let c = makeWindow("HOSTC", NSRect(x: 300, y: 300, width: 500, height: 200))
-let d = makeWindow("HOSTD", NSRect(x: 1050, y: 100, width: 400, height: 250))
+let a = makeWindow("HOSTA", NSRect(x: 200, y: 500, width: 600, height: 350), color: .systemRed)
+let b = makeWindow("HOSTB", NSRect(x: 250, y: 120, width: 600, height: 300), color: .systemBlue)
+let c = makeWindow("HOSTC", NSRect(x: 300, y: 300, width: 500, height: 200), color: .systemGreen)
+let d = makeWindow("HOSTD", NSRect(x: 1050, y: 100, width: 400, height: 250), color: .systemOrange)
 _ = a; _ = b; _ = c; _ = d
 app.run()

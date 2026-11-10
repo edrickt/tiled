@@ -137,11 +137,13 @@ let primaryTop = screen.frame.maxY
 /// A real hand drag of one tiled edge: press first, step the frame while
 /// the button is down, lift after the last tick lands (a splitter
 /// commits only under a held button — see suite.swift's dragEdge).
+/// Deliberately slow: a ~2.4s glide reads as a gesture in a recording
+/// instead of a jump cut.
 func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
     guard let f = actualFrame(t) else { return }
     let center = CGPoint(x: f.midX, y: f.midY)
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: center, mouseButton: .left))
-    let steps = 10
+    let steps = 40
     for i in 1...steps {
         let t2 = CGFloat(i) / CGFloat(steps)
         var nf = f
@@ -155,7 +157,7 @@ func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
         if let el = hostWindows().first(where: { $0.title == t })?.el {
             setRawFrame(el, nf)
         }
-        usleep(40_000)
+        usleep(60_000)
     }
     usleep(700_000)
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: center, mouseButton: .left))
@@ -163,15 +165,15 @@ func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
 }
 
 /// A real cursor drag across the screen (a title-bar grab, a drop
-/// wherever the hand lets go).
+/// wherever the hand lets go), paced like the edge drags.
 func drag(from: CGPoint, to: CGPoint) {
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left))
-    let steps = 30
+    let steps = 60
     for i in 1...steps {
         let t = CGFloat(i) / CGFloat(steps)
         let p = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
         post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: p, mouseButton: .left))
-        usleep(16_000)
+        usleep(40_000)
     }
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left))
     usleep(900_000)
@@ -190,48 +192,51 @@ func tile(_ t: String, _ slot: String) {
 
 // MARK: the demo
 
-hold(4.0, "a messy desktop")
+// Every state holds long enough that a 1s-interval recording gives it
+// several frames, and consecutive tiles sit two seconds apart so each
+// placement lands as its own visible step.
+hold(5.0, "a messy desktop")
 
-tile("HOSTA", "TL")
-tile("HOSTB", "TR")
-tile("HOSTC", "BL")
-tile("HOSTD", "BR")
-hold(4.0, "hotkeys tile the quarters")
+for (t, slot) in [("HOSTA", "TL"), ("HOSTB", "TR"), ("HOSTC", "BL"), ("HOSTD", "BR")] {
+    tile(t, slot)
+    usleep(2_000_000)
+}
+hold(5.0, "hotkeys tile the quarters")
 
 dragEdge("BL", "right", 150)
-hold(2.5, "a splitter drag reshapes the column")
+hold(4.0, "a splitter drag reshapes the column")
 dragEdge("TL", "bottom", -80)
-hold(2.5, "row dividers move independently")
+hold(4.0, "row dividers move independently")
 
 if let f = actualFrame("HOSTA") {
     let grab = CGPoint(x: f.midX, y: f.minY + 10)
     let drop = CGPoint(x: vf.midX, y: vf.midY + 120)
     drag(from: grab, to: drop)
 }
-hold(4.0, "drag a tile out: it floats where dropped")
+hold(5.0, "drag a tile out: it floats where dropped")
 
 pressUndo()
-hold(4.0, "undo snaps it back into its slot")
+hold(5.0, "undo snaps it back into its slot")
 
 pressLayoutSwitch()
-hold(3.5, "the layout switch untiles to the quarter footprint")
+hold(5.0, "the layout switch untiles to the quarter footprint")
 
-tile("HOSTA", "sixthTopLeft")
-tile("HOSTB", "sixthTopRight")
-tile("HOSTC", "sixthBottomLeft")
-tile("HOSTD", "sixthBottomRight")
-hold(4.0, "the same keys tile sixths")
+for (t, slot) in [("HOSTA", "sixthTopLeft"), ("HOSTB", "sixthTopRight"), ("HOSTC", "sixthBottomLeft"), ("HOSTD", "sixthBottomRight")] {
+    tile(t, slot)
+    usleep(2_000_000)
+}
+hold(5.0, "the same keys tile sixths")
 
 dragEdge("sixthBottomLeft", "top", 60)
-hold(3.0, "one third's row divider, the rest held")
+hold(4.0, "one third's row divider, the rest held")
 
 pressUndo()
-hold(3.0, "undo steps the drag back")
+hold(4.0, "undo steps the drag back")
 
 for t in ["HOSTA", "HOSTB", "HOSTC", "HOSTD"] {
     pressEvict(t)
-    usleep(400_000)
+    usleep(2_000_000)
 }
-hold(4.0, "evict everyone: back to a messy desktop")
+hold(5.0, "evict everyone: back to a messy desktop")
 
 print("demo done")
