@@ -6,6 +6,26 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Double-clicking a window's title bar now runs the `⌥⇧⏎` expand toggle for
+  that window, focused or not. Tiled consumes the click through a session
+  event tap, so the macOS title-bar double-click action (Zoom, Minimize, or
+  Do Nothing per System Settings) never runs for a recognized title bar. The
+  AX hit test at the point must report the window role: a double-click on
+  content keeps the app's own behavior, and Tiled's own Settings window is
+  never expanded by the gesture.
+
+### Changed
+
+- A display and Space shows one expanded window at a time. Expanding a
+  second window returns the covering window to its tile (or to its
+  pre-expand frame when it had none) and fills the screen with the new
+  window; if that return is refused, the new expansion is rolled back and
+  refused too, since two full-size windows would cover each other. A
+  retained off-Space expansion is superseded by a newer request, so the
+  newest expansion wins when the Space returns.
+
 ## [1.3.5] - 2026-11-08
 
 ### Fixed

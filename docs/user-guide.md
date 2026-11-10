@@ -47,17 +47,33 @@ slot combo:
 
 | Key    | Action |
 |--------|--------|
-| ⌥⇧⏎    | Expand the focused window to fill the screen (not fullscreen mode) |
+| ⌥⇧⏎    | Expand the focused window to fill the screen (not fullscreen mode); double-clicking a title bar runs the same toggle |
 | ⌥⇧⌫    | Evict the focused window: untile it and leave it floating at the quarter footprint |
 | ⌥⇧R    | Reset Splitters: snap the focused canvas's splitters back to even splits, keeping every window tiled |
 | ⌥⇧\    | Switch the layout of the display under the pointer (see above) |
 | ⌃⌥⇧⌘,   | Open Settings (works even with the menu bar icon hidden, as long as this shortcut is enabled and registered; otherwise quit and reopen Tiled) |
 | ⌃⌥⇧⌘Z   | Undo the focused canvas's last displacement (a layout switch, an eviction, or a swap. Any reflow it caused is undone with it) |
 
-### Expand (⌥⇧⏎)
+### Expand (⌥⇧⏎ or a title-bar double-click)
 
-Press ⌥⇧⏎ again and the window returns to its previous tile, or to its
-previous frame if it wasn't tiled. The layout is never erased: a tiled
+⌥⇧⏎ expands the focused window; double-clicking a window's title bar runs
+the same toggle for the window under the pointer, even when it is not
+focused. Tiled consumes that click, so the macOS "double-click a window's
+title bar" action (Zoom, Minimize, or whatever System Settings names) never
+runs for the title bars it recognizes; a double-click on a window's content
+is never mistaken for a title bar and stays with the app. Tiled's own
+Settings window keeps the system behavior.
+
+A display and Space shows one expanded window at a time. Expanding a second
+one fills the screen with the new window and returns the coverer to its tile
+— or to its previous frame when it wasn't tiled. If the coverer's app
+refuses to return it, the new expansion is rolled back and refused too (two
+full-size windows would cover each other); the spoken answer names the
+window that would not move. Expansions on another display or Space are
+independent.
+
+Press the toggle again and the window returns to its previous tile, or to
+its previous frame if it wasn't tiled. The layout is never erased: a tiled
 window keeps its slot while expanded (the expanded window just covers the
 others, like focusing does), and tiling a neighbor into a free tile leaves
 the expanded window alone.

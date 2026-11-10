@@ -76,6 +76,13 @@ protocol WindowGateway: AnyObject {
     /// launches) to the window-creation notification; the fake exposes
     /// `simulateWindowCreated` for tests.
     func observeWindowCreations(_ onCreated: @escaping (WindowHandle) -> Void)
+    /// Calls `onDoubleClick` with the window a title-bar double-click landed
+    /// on. Replaces any previous handler. The live adapter owns the gesture:
+    /// it hit-tests the click, treats the AX window role as the title bar
+    /// (content reports a child role), consumes the click so the app's own
+    /// double-click-title-bar action never runs, and hands over the window.
+    /// The fake exposes `simulateTitleBarDoubleClick(on:)` for tests.
+    func observeTitleBarDoubleClicks(_ onDoubleClick: @escaping (WindowHandle) -> Void)
     /// Brings the window forward without disturbing layout.
     func focus(_ handle: WindowHandle)
     /// Raises the window above its siblings without focusing it: the

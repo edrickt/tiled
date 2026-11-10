@@ -1352,6 +1352,163 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertEqual(harness.frame(of: id), original)
     }
 
+    // MARK: One expanded window per canvas
+
+    /// A canvas shows one full-size window at a time: a new expansion
+    /// returns the coverer to its tile before it covers the layout.
+    func testSecondExpansionReturnsTheTiledCovererToItsTile() {
+        let a = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        let tile = harness.rect(.topLeft)
+        _ = space.expandToggle(window: a, context: context())
+        XCTAssertEqual(harness.frame(of: a), bounds)
+
+        let b = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: b)
+        _ = space.expandToggle(window: b, context: context())
+
+        XCTAssertEqual(
+            harness.frame(of: a), tile,
+            "the coverer returns to the tile it kept while expanded")
+        XCTAssertEqual(space.state.slot(of: a), .topLeft, "returning to its tile keeps its slot")
+        XCTAssertFalse(space.isExpanded(a), "only one window stays full-size")
+        XCTAssertTrue(space.isExpanded(b))
+        XCTAssertEqual(harness.frame(of: b), bounds)
+        XCTAssertEqual(space.state.slot(of: b), .bottomRight)
+    }
+
+    /// An untiled coverer has no tile to return to: its saved pre-expand
+    /// frame is the return the documented collapse already promises.
+    func testSecondExpansionReturnsAnUntiledCovererToItsSavedFrame() {
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let a = harness.addWindow(frame: original)
+        _ = space.expandToggle(window: a, context: context())
+        let b = harness.addWindow(frame: CGRect(x: 200, y: 200, width: 700, height: 500))
+        _ = space.expandToggle(window: b, context: context())
+
+        XCTAssertEqual(
+            harness.frame(of: a), original,
+            "the untiled coverer returns to the frame it had before expanding")
+        XCTAssertFalse(space.isExpanded(a))
+        XCTAssertEqual(harness.frame(of: b), bounds)
+    }
+
+    /// The app that owns the coverer can refuse the return. State must
+    /// still describe the screen (that window is expanded), so the rule
+    /// cannot be honored: the new expansion is refused instead of staging
+    /// two full-size windows.
+    func testARefusedReturnBlocksTheNewExpansionAndKeepsTheCoverer() {
+        let a = harness.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+        _ = space.expandToggle(window: a, context: context())
+        let b = harness.addWindow(frame: CGRect(x: 200, y: 200, width: 700, height: 500))
+        let bFrame = harness.frame(of: b)!
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!)
+
+        let outcome = space.expandToggle(window: b, context: context())
+
+        XCTAssertEqual(outcome.result, .expandBlocked(windowName: "TestApp"))
+        XCTAssertTrue(space.isExpanded(a), "the refused return leaves the coverer full-size")
+        XCTAssertFalse(space.isExpanded(b), "the new window is not expanded over it")
+        XCTAssertEqual(harness.frame(of: b), bFrame)
+        XCTAssertEqual(harness.frame(of: a), bounds)
+    }
+
+    /// A refused expansion changes nothing: the coverer is returned only
+    /// after the new window actually covers the layout.
+    func testARefusedExpansionLeavesTheCovererExpanded() {
+        let a = harness.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+        _ = space.expandToggle(window: a, context: context())
+        let b = harness.addWindow(frame: CGRect(x: 200, y: 200, width: 700, height: 500))
+        let bFrame = harness.frame(of: b)!
+        harness.gateway.refuseNextWrites(harness.handle(of: b)!)
+
+        let outcome = space.expandToggle(window: b, context: context())
+
+        XCTAssertEqual(outcome.result, .expandRefused(windowName: "TestApp"))
+        XCTAssertTrue(space.isExpanded(a), "the coverer never moved")
+        XCTAssertEqual(harness.frame(of: a), bounds)
+        XCTAssertEqual(harness.frame(of: b), bFrame)
+    }
+
+    /// A retained expansion that lands on the swipe back but cannot return
+    /// the coverer gives the screen back: the new window is rolled back to
+    /// the frame it had, and the refusal is narrated.
+    func testADeferredExpansionLandingRollsBackWhenTheCovererRefuses() {
+        let originalA = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let a = harness.addWindow(frame: originalA)
+        _ = space.expandToggle(window: a, context: context())
+        let b = harness.addWindow(frame: CGRect(x: 200, y: 200, width: 700, height: 500))
+        let bFrame = harness.frame(of: b)!
+        harness.canvasVisible = false
+        XCTAssertEqual(space.expandToggle(window: b, context: context()).result, .deferred)
+        harness.gateway.clearWrites()
+
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!)
+        harness.canvasVisible = true
+        space.reassert(.grid, context: context())
+
+        XCTAssertTrue(space.isExpanded(a), "the coverer keeps covering: its return was refused")
+        XCTAssertEqual(harness.frame(of: a), bounds)
+        XCTAssertFalse(space.isExpanded(b), "the expansion that could not be exclusive was rolled back")
+        XCTAssertEqual(harness.frame(of: b), bFrame)
+        XCTAssertNotNil(space.error, "the swipe back narrates the refusal")
+        XCTAssertNil(space.deferredRequests[b], "the refused expansion is dropped")
+    }
+
+    /// Two expansions requested on a hidden canvas would both land on the
+    /// swipe back. The older request is superseded before either lands, so
+    /// it never expands only to collapse again: the newest request wins.
+    func testANewHiddenExpansionSupersedesTheOlderRetainedOne() {
+        let a = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        let b = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: b)
+        harness.canvasVisible = false
+
+        XCTAssertEqual(space.expandToggle(window: a, context: context()).result, .deferred)
+        XCTAssertEqual(space.expandToggle(window: b, context: context()).result, .deferred)
+        XCTAssertNil(
+            space.deferredRequests[a],
+            "the older expansion is superseded before it lands")
+
+        harness.canvasVisible = true
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(
+            harness.frame(of: a), harness.rect(.topLeft),
+            "the superseded expansion never landed")
+        XCTAssertFalse(space.isExpanded(a))
+        XCTAssertEqual(harness.frame(of: b), bounds, "the newest expansion lands")
+        XCTAssertTrue(space.isExpanded(b))
+    }
+
+    /// A deferred expansion landing on the swipe back applies the rule
+    /// too: the window that was already covering the layout is parked for
+    /// its tile when the request is retained, and reconciled with it.
+    func testADeferredExpansionLandingReturnsTheCurrentCovererToItsTile() {
+        let a = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        _ = space.expandToggle(window: a, context: context())
+        let b = harness.addWindow()
+        harness.apply(slot: .bottomRight, requester: b)
+        harness.gateway.clearWrites()
+        harness.canvasVisible = false
+
+        XCTAssertEqual(space.expandToggle(window: b, context: context()).result, .deferred)
+        XCTAssertTrue(
+            space.isExpanded(a),
+            "a hidden canvas moves nothing: the coverer is returned only when the expansion lands")
+        XCTAssertTrue(harness.gateway.writes.isEmpty, "a hidden canvas is never written blind")
+
+        harness.canvasVisible = true
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(harness.frame(of: a), harness.rect(.topLeft), "the coverer returns to its tile")
+        XCTAssertFalse(space.isExpanded(a))
+        XCTAssertEqual(harness.frame(of: b), bounds)
+        XCTAssertTrue(space.isExpanded(b))
+    }
+
     // MARK: Splitter reset / restore
 
     func testResetSplittersParksTheBackupAndReasserts() {

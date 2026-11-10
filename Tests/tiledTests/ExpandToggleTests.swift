@@ -231,6 +231,147 @@ final class ExpandToggleTests: XCTestCase {
             tileRect(.bottomRight, in: CGRect(x: 0, y: 0, width: 800, height: 600)))
     }
 
+    // MARK: Title-bar double-click
+
+    /// A title-bar double-click runs the toggle for the window under the
+    /// click, not the one holding keyboard focus, and attaches an unmanaged
+    /// window exactly as a first `⌥⇧⏎` press would.
+    func testTitleBarDoubleClickExpandsTheClickedWindowRegardlessOfFocus() {
+        let focused = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = focused
+        let clicked = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        let clickedFrame = gateway.frame(of: clicked)!
+
+        gateway.simulateTitleBarDoubleClick(on: clicked)
+
+        XCTAssertEqual(
+            gateway.frame(of: clicked), bounds(for: clickedFrame),
+            "the double-clicked window expands")
+        XCTAssertEqual(
+            gateway.frame(of: focused), CGRect(x: 0, y: 0, width: 800, height: 600),
+            "the focused window is not the gesture's target")
+        let id = controller.registeredID(for: clicked)!
+        XCTAssertTrue(canvas.isExpanded(id))
+        XCTAssertNil(canvas.state.slot(of: id), "expanding never tiles")
+    }
+
+    /// A second title-bar double-click is the same toggle: the window
+    /// returns to the frame it had before the first one.
+    func testTitleBarDoubleClickTogglesBackToThePreviousFrame() {
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let handle = gateway.addWindow(frame: original)
+        gateway.focused = handle
+
+        gateway.simulateTitleBarDoubleClick(on: handle)
+        XCTAssertEqual(gateway.frame(of: handle), bounds(for: original))
+
+        gateway.simulateTitleBarDoubleClick(on: handle)
+        XCTAssertEqual(gateway.frame(of: handle), original)
+    }
+
+    /// The gesture has no action caller, so a refusal travels the
+    /// late-receipt route: it speaks once instead of being silently lost.
+    func testTitleBarDoubleClickRefusalSpeaksThroughTheLateReceipt() {
+        let handle = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+        gateway.focused = handle
+        gateway.refuseNextWrites(handle)
+        var receipts: [ActionReceipt] = []
+        controller.onLateReceipt = { receipts.append($0) }
+
+        gateway.simulateTitleBarDoubleClick(on: handle)
+
+        XCTAssertEqual(receipts.count, 1)
+        XCTAssertFalse(receipts[0].performed)
+        XCTAssertEqual(
+            receipts[0].announcement,
+            "TestApp couldn't be expanded: the app refused to resize it.")
+    }
+
+    /// Re-subscribing (the permission-grant retry) replaces the handler: one
+    /// gesture still answers once, never twice.
+    func testTitleBarDoubleClickResubscriptionReplacesTheHandler() {
+        let handle = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+        gateway.focused = handle
+        controller.observeTitleBarDoubleClicks()
+        var receipts = 0
+        controller.onLateReceipt = { _ in receipts += 1 }
+
+        gateway.simulateTitleBarDoubleClick(on: handle)
+
+        XCTAssertEqual(receipts, 1)
+    }
+
+    // MARK: One full-size window
+
+    /// Expanding a second window returns the first to its tile: a canvas
+    /// shows one full-size window at a time.
+    func testExpandingSecondWindowReturnsTheFirstToItsTile() {
+        let a = gateway.addWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        gateway.focused = a
+        controller.handle(slot: .topLeft)
+        let aTile = gateway.frame(of: a)!
+
+        controller.handleExpandToggle()
+        XCTAssertEqual(gateway.frame(of: a), bounds(for: aTile))
+
+        let b = gateway.addWindow(frame: CGRect(x: 900, y: 0, width: 800, height: 600))
+        gateway.focused = b
+        controller.handle(slot: .bottomRight)
+
+        let receipt = controller.handleExpandToggle()
+
+        XCTAssertTrue(receipt.performed)
+        XCTAssertNil(receipt.announcement, "a landed expansion stays silent")
+        XCTAssertEqual(gateway.frame(of: a), aTile, "the first window returns to its tile")
+        XCTAssertEqual(canvas.state.slot(of: 1), .topLeft)
+        XCTAssertFalse(canvas.isExpanded(1), "only the second window stays full-size")
+        XCTAssertTrue(canvas.isExpanded(2))
+        XCTAssertEqual(gateway.frame(of: b), bounds(for: aTile))
+        XCTAssertEqual(canvas.state.slot(of: 2), .bottomRight)
+    }
+
+    /// An untiled full-size window has no tile to return to: expanding a
+    /// second window restores its pre-expand frame, the documented
+    /// collapse return.
+    func testExpandingSecondWindowRestoresAnUntiledFirstToItsFrame() {
+        let originalA = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let a = gateway.addWindow(frame: originalA)
+        gateway.focused = a
+        controller.handleExpandToggle()
+        XCTAssertEqual(gateway.frame(of: a), bounds(for: originalA))
+
+        let b = gateway.addWindow(frame: CGRect(x: 950, y: 120, width: 700, height: 500))
+        gateway.focused = b
+        controller.handleExpandToggle()
+
+        XCTAssertEqual(gateway.frame(of: a), originalA)
+        XCTAssertFalse(canvas.isExpanded(1))
+        XCTAssertTrue(canvas.isExpanded(2))
+    }
+
+    /// The coverer's app can refuse the return. The canvas will not stage
+    /// two full-size windows, so the new expansion is refused and its
+    /// sentence names the window that would not move.
+    func testRefusedReturnBlocksTheSecondExpansionAndAnswers() {
+        let a = gateway.addWindow(frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+        gateway.focused = a
+        controller.handleExpandToggle()
+        let b = gateway.addWindow(frame: CGRect(x: 950, y: 120, width: 700, height: 500))
+        let bFrame = gateway.frame(of: b)!
+        gateway.focused = b
+        gateway.refuseNextWrites(a)
+
+        let receipt = controller.handleExpandToggle()
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement,
+            "TestApp couldn't return to its tile, so nothing was expanded.")
+        XCTAssertEqual(gateway.frame(of: b), bFrame)
+        XCTAssertTrue(canvas.isExpanded(1), "the coverer stays expanded, truthfully")
+        XCTAssertFalse(canvas.isExpanded(2))
+    }
+
     // MARK: Untile interaction
 
     func testUntileWhileExpandedLeavesSizedFrame() {

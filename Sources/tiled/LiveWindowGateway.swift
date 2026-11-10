@@ -317,6 +317,22 @@ final class LiveWindowGateway: WindowGateway {
     /// subscription still gets its app element observed, so its first
     /// window fires like any other birth.
     private var appLaunchObserver: NSObjectProtocol?
+    /// Title-bar double-click callback: one handler for the window under a
+    /// title-bar double-click, whatever app owns it. Set by
+    /// `observeTitleBarDoubleClicks`; nil until the controller subscribes.
+    private var titleBarDoubleClickHandler: ((WindowHandle) -> Void)?
+    /// The process's one title-bar tap and its run-loop source. Nil when the
+    /// tap could not install (pre-trust, or a denied event tap); a later
+    /// subscription retries, so the grant is enough to recover.
+    private var titleBarTap: CFMachPort?
+    private var titleBarTapSource: CFRunLoopSource?
+    /// Whether a consumed mouse-down still owes its paired mouse-up: the
+    /// app must never receive an unmatched release.
+    private var swallowTitleBarMouseUp = false
+    /// Test seam: replaces the system-wide AX title-bar read. Production
+    /// leaves it nil; tests script the hit so the gesture decision and its
+    /// consumption run without an Accessibility grant.
+    private var testTitleBarWindow: ((CGPoint) -> WindowHandle?)?
     /// Display-to-Space cache, refreshed on a short interval and
     /// invalidated by the workspace notification, so one menu build
     /// never walks the window-server Space table once per row.
@@ -353,6 +369,11 @@ final class LiveWindowGateway: WindowGateway {
     /// close-while-running prune runs without an Accessibility grant;
     /// production reads AX.
     private let windowList: (pid_t) -> [AXUIElement]?
+    /// The title-bar tap factory. Injected so the wiring tests never arm a
+    /// real session event tap (which would consume the test machine's
+    /// clicks); production creates the tap at session level.
+    private let titleBarTapFactory:
+        (CGEventTapCallBack, CGEventMask, UnsafeMutableRawPointer?) -> CFMachPort?
 
     init(
         observerDriver: AXObserverDriver = LiveAXObserverDriver(),
@@ -378,6 +399,14 @@ final class LiveWindowGateway: WindowGateway {
         },
         windowList: @escaping (pid_t) -> [AXUIElement]? = {
             LiveWindowGateway.appWindowList(pid: $0)
+        },
+        titleBarTapFactory: @escaping (
+            CGEventTapCallBack, CGEventMask, UnsafeMutableRawPointer?
+        ) -> CFMachPort? = {
+            CGEvent.tapCreate(
+                tap: .cgSessionEventTap, place: .headInsertEventTap,
+                options: .defaultTap, eventsOfInterest: $1, callback: $0,
+                userInfo: $2)
         }
     ) {
         self.observerDriver = observerDriver
@@ -385,6 +414,7 @@ final class LiveWindowGateway: WindowGateway {
         self.runningProcessIDs = runningProcessIDs
         self.ownProcessID = ownProcessID
         self.windowList = windowList
+        self.titleBarTapFactory = titleBarTapFactory
         self.spaceTable = spaceTable
         self.existingSpacesTable = existingSpacesTable
         self.now = now
@@ -451,6 +481,11 @@ final class LiveWindowGateway: WindowGateway {
             workspaceNotifications.removeObserver(appLaunchObserver)
         }
         releaseFocusObserver()
+        if let titleBarTapSource {
+            CFRunLoopRemoveSource(
+                CFRunLoopGetMain(), titleBarTapSource, CFRunLoopMode.commonModes)
+        }
+        if let titleBarTap { CGEvent.tapEnable(tap: titleBarTap, enable: false) }
     }
 
     // MARK: WindowGateway
@@ -1500,6 +1535,165 @@ final class LiveWindowGateway: WindowGateway {
         _ = AXIsProcessTrustedWithOptions(opts)
     }
 
+    // MARK: Title-bar double-click
+
+    /// One left-mouse edge the title-bar tap routes. The point is Quartz
+    /// global (top-left origin), the space the AX hit test reads. Split from
+    /// `CGEvent` so the gesture decision is testable without a live tap.
+    enum TitleBarMouseEvent: Equatable {
+        case down(clickCount: Int, point: CGPoint)
+        case up
+    }
+
+    /// The AX messaging timeout for the title-bar hit test. The tap callback
+    /// must answer inside the system's tap deadline, so a busy app's read is
+    /// bounded much tighter than the ordinary write timeout (one second).
+    private static let titleBarHitTestTimeout: Float = 0.05
+
+    func observeTitleBarDoubleClicks(_ onDoubleClick: @escaping (WindowHandle) -> Void) {
+        titleBarDoubleClickHandler = onDoubleClick
+        installTitleBarTapIfNeeded()
+    }
+
+    /// Test seam: scripts the title-bar hit test. Production never calls it.
+    func setTestTitleBarWindow(_ read: ((CGPoint) -> WindowHandle?)?) {
+        testTitleBarWindow = read
+    }
+
+    /// The tap's decision for one mouse edge. Returns true when the event is
+    /// Tiled's title-bar gesture and must not reach the app: a second (or
+    /// fourth, for two quick double-clicks) left click on a title bar is
+    /// consumed, and its paired release with it, so the app never sees the
+    /// double-click its own title-bar action would answer.
+    @discardableResult
+    func handleTitleBarMouseEvent(_ event: TitleBarMouseEvent) -> Bool {
+        switch event {
+        case let .down(clickCount, point):
+            // A single click and the odd counts inside a multi-click run
+            // pass through: only a completed double-click is the gesture.
+            guard clickCount > 1, clickCount.isMultiple(of: 2) else { return false }
+            guard let window = titleBarWindow(atQuartzPoint: point) else { return false }
+            swallowTitleBarMouseUp = true
+            let handler = titleBarDoubleClickHandler
+            // The tap callback must return before the expand writes any
+            // frames, so the delivery hops to the main queue.
+            DispatchQueue.main.async { handler?(window) }
+            return true
+        case .up:
+            guard swallowTitleBarMouseUp else { return false }
+            swallowTitleBarMouseUp = false
+            return true
+        }
+    }
+
+    /// Whether an AX role answers the title-bar gesture: the window role is
+    /// the title bar's own (the draggable toolbar region reports it too).
+    /// Content reports a child role (`AXScrollArea`, `AXGroup`, a control),
+    /// never the window, so a content double-click is never swallowed.
+    static func isTitleBarRole(_ role: CFTypeRef?) -> Bool {
+        (role as? String) == kAXWindowRole as String
+    }
+
+    /// The window whose title bar is at `point`, or nil when the point is
+    /// content or empty space: the deepest AX element under the point must
+    /// carry the window role, and Tiled never expands itself.
+    private func titleBarWindow(atQuartzPoint point: CGPoint) -> WindowHandle? {
+        if let testTitleBarWindow { return testTitleBarWindow(point) }
+        let systemWide = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(systemWide, Self.titleBarHitTestTimeout)
+        var hit: AXUIElement?
+        guard
+            AXUIElementCopyElementAtPosition(
+                systemWide, Float(point.x), Float(point.y), &hit) == .success,
+            let element = hit
+        else { return nil }
+        AXUIElementSetMessagingTimeout(element, Self.titleBarHitTestTimeout)
+        var roleValue: CFTypeRef?
+        guard
+            AXUIElementCopyAttributeValue(
+                element, kAXRoleAttribute as CFString, &roleValue) == .success,
+            Self.isTitleBarRole(roleValue)
+        else { return nil }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success, pid > 0,
+            pid != ownProcessID()
+        else { return nil }
+        return titleBarHandle(for: element, pid: pid)
+    }
+
+    /// Stable handle for the window under a title-bar double-click. The tap
+    /// callback runs on the system's deadline, so this takes the cheap path
+    /// only: an exact element match, else a fresh binding. It skips the
+    /// stale-binding prune and its window-list read, which a hung app could
+    /// hold for a second and get the whole tap disabled.
+    private func titleBarHandle(for element: AXUIElement, pid: pid_t) -> WindowHandle {
+        for (handle, binding) in bindings {
+            if let registered = binding.element, CFEqual(registered, element) {
+                return handle
+            }
+        }
+        return bindFreshHandle(for: element, pid: pid)
+    }
+
+    /// Installs the one title-bar tap. A failed creation (pre-trust, or a
+    /// denied event tap) leaves the system gesture alone; the next
+    /// subscription retries.
+    private func installTitleBarTapIfNeeded() {
+        guard titleBarTap == nil, titleBarDoubleClickHandler != nil else { return }
+        let mask =
+            (CGEventMask(1) << CGEventType.leftMouseDown.rawValue)
+            | (CGEventMask(1) << CGEventType.leftMouseUp.rawValue)
+        guard
+            let tap = titleBarTapFactory(
+                Self.titleBarTapCallback, mask,
+                Unmanaged.passUnretained(self).toOpaque())
+        else {
+            if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+                NSLog("Tiled: title-bar tap unavailable; the system gesture stands")
+            }
+            return
+        }
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, CFRunLoopMode.commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        titleBarTap = tap
+        titleBarTapSource = source
+    }
+
+    /// The C callback: forwards to the instance, which decides consumption.
+    private static let titleBarTapCallback: CGEventTapCallBack = {
+        _, type, event, refcon in
+        guard let refcon else { return Unmanaged.passUnretained(event) }
+        let gateway = Unmanaged<LiveWindowGateway>
+            .fromOpaque(refcon).takeUnretainedValue()
+        return gateway.handleTitleBarTap(type: type, event: event)
+    }
+
+    /// Maps one `CGEvent` to the gesture decision, re-arming the tap when the
+    /// system disables it. A disabled tap also drops the unmatched-release
+    /// claim: the click whose release it was waiting on is gone.
+    private func handleTitleBarTap(
+        type: CGEventType, event: CGEvent
+    ) -> Unmanaged<CGEvent>? {
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            swallowTitleBarMouseUp = false
+            if let titleBarTap { CGEvent.tapEnable(tap: titleBarTap, enable: true) }
+        case .leftMouseDown:
+            let count = Int(event.getIntegerValueField(.mouseEventClickState))
+            if handleTitleBarMouseEvent(
+                .down(clickCount: count, point: event.location))
+            {
+                return nil
+            }
+        case .leftMouseUp:
+            if handleTitleBarMouseEvent(.up) { return nil }
+        default:
+            break
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
     // MARK: Handle registry
 
     /// Drops focus-only bindings for `pid` that its app no longer lists,
@@ -1613,6 +1807,13 @@ final class LiveWindowGateway: WindowGateway {
                 }
             }
         }
+        return bindFreshHandle(for: element, pid: pid)
+    }
+
+    /// Issues a fresh handle bound to `element`: the shared tail of window
+    /// identity resolution. Callers scan the registry for an existing match
+    /// first; this never reuses one.
+    private func bindFreshHandle(for element: AXUIElement, pid: pid_t) -> WindowHandle {
         let handle = WindowHandle(id: nextHandleID)
         nextHandleID += 1
         let token = UInt(CFHash(element))

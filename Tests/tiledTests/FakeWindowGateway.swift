@@ -194,6 +194,22 @@ final class FakeWindowGateway: WindowGateway {
         return handle
     }
 
+    private var titleBarDoubleClickHandler: ((WindowHandle) -> Void)?
+    /// Title-bar double-click subscriptions issued, in order. Lets tests
+    /// pin that a trust grant re-subscribes the gesture.
+    private(set) var titleBarDoubleClickSubscriptions = 0
+
+    func observeTitleBarDoubleClicks(_ onDoubleClick: @escaping (WindowHandle) -> Void) {
+        titleBarDoubleClickSubscriptions += 1
+        titleBarDoubleClickHandler = onDoubleClick
+    }
+
+    /// Test control: simulates the tap resolving a title-bar double-click
+    /// to `handle`, exactly as the live adapter delivers the gesture.
+    func simulateTitleBarDoubleClick(on handle: WindowHandle) {
+        titleBarDoubleClickHandler?(handle)
+    }
+
     /// Mission Control Space currently shown per display. Empty means
     /// "unknown", so keys fall back to per-display behavior.
     var activeSpaces: [CGDirectDisplayID: SpaceID] = [:]

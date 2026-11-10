@@ -231,6 +231,14 @@ enum MenuText {
         "Couldn't read that window's frame, so it wasn't expanded."
     }
 
+    /// A canvas shows one full-size window at a time, so the new expansion
+    /// waits on the window already covering the layout. Its app refused to
+    /// return it to its tile, which leaves the rule unenforceable: nothing
+    /// was expanded, and the sentence names the window that would not move.
+    static func expandBlockedAnnouncement(windowName: String?) -> String {
+        "\(windowName ?? "The full-size window") couldn't return to its tile, so nothing was expanded."
+    }
+
     /// Pressing evict on an untiled window: nothing holds a slot, so the
     /// key answers instead of staying silent: the hotkey path never
     /// no-ops quietly.

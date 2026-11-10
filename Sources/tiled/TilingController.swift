@@ -280,6 +280,13 @@ final class TilingController {
         // installing real event monitors; AppDelegate wires the
         // production registrar.
         observeCursorMove { [weak self] point in self?.cursorMoved(to: point) }
+        // A double-click on a title bar runs the expand toggle for that
+        // window; the gateway owns the tap and consumes the click. Pre-trust
+        // the live tap cannot install, so subscribe now when AX is already
+        // trusted and let the permission flow call it again once it is.
+        if gateway.isTrusted {
+            observeTitleBarDoubleClicks()
+        }
         // Focus moving to another display or Space changes the status
         // glyph with no tiling action. Subscribe now when AX is already
         // trusted; the permission flow calls `observeFocus()` again
@@ -313,6 +320,28 @@ final class TilingController {
         gateway.observeWindowCreations { [weak self] in
             self?.handleWindowCreated($0)
         }
+    }
+
+    // MARK: Title-bar double-click
+
+    /// Subscribes the title-bar double-click gesture through the gateway,
+    /// replacing any previous subscription. Safe to call more than once:
+    /// the permission flow calls it again once Accessibility trust arrives,
+    /// because the live event tap cannot install before it.
+    func observeTitleBarDoubleClicks() {
+        gateway.observeTitleBarDoubleClicks { [weak self] handle in
+            self?.titleBarDoubleClicked(handle)
+        }
+    }
+
+    /// One title-bar double-click, resolved to its window by the gateway.
+    /// The action is the `⌥⇧⏎` toggle for that window rather than whatever
+    /// holds keyboard focus. The gesture has no caller to return a receipt
+    /// to, so it travels the late-receipt route: a landed expansion stays
+    /// silent, and a refusal speaks once and reaches the menu.
+    private func titleBarDoubleClicked(_ handle: WindowHandle) {
+        let receipt = handleExpandToggle(for: handle)
+        onLateReceipt?(receipt)
     }
 
     // MARK: Focus observation
@@ -502,7 +531,8 @@ final class TilingController {
         switch outcome.result {
         case .placed, .alreadyTiled, .deferred: claimed = true
         case .refused: claimed = hadSlot
-        case .nothingToEvict, .expandRefused, .expandNoFrame, .switched, .alreadyInLayout:
+        case .nothingToEvict, .expandRefused, .expandNoFrame, .expandBlocked,
+            .switched, .alreadyInLayout:
             claimed = false
         }
         if claimed { discardDeferredRestores(for: handle) }
@@ -645,6 +675,12 @@ final class TilingController {
                 canvas: space, performed: false,
                 notice: canvas?.error ?? announcement,
                 announcement: announcement)
+        case .expandBlocked(let windowName):
+            let announcement = MenuText.expandBlockedAnnouncement(windowName: windowName)
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: canvas?.error ?? announcement,
+                announcement: announcement)
         // `.nothingToEvict`, `.switched`, and `.alreadyInLayout` come from
         // the evict and switch entry points, not from `place`; the arms
         // keep the shared Result switch exhaustive. They are unreachable
@@ -702,6 +738,12 @@ final class TilingController {
                 announcement: announcement)
         case .expandNoFrame:
             let announcement = MenuText.expandNoFrameAnnouncement()
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: canvas?.error ?? announcement,
+                announcement: announcement)
+        case .expandBlocked(let windowName):
+            let announcement = MenuText.expandBlockedAnnouncement(windowName: windowName)
             return ActionReceipt(
                 canvas: space, performed: false,
                 notice: canvas?.error ?? announcement,
@@ -1981,8 +2023,9 @@ final class TilingController {
     /// Expands the focused window to fill its screen; pressing again
     /// retiles it to its previous tile (or restores its previous frame
     /// when it wasn't tiled). Layout state is untouched: a tiled window
-    /// keeps its slot while expanded, exactly like focusing it. Returns
-    /// the one receipt the menu and hotkey paths present.
+    /// keeps its slot while expanded, exactly like focusing it. One window
+    /// per canvas stays expanded: expanding a second returns the first to
+    /// its tile. Returns the one receipt the menu and hotkey paths present.
     @discardableResult
     func handleExpandToggle() -> ActionReceipt {
         pruneDeadWindows()
@@ -1990,8 +2033,27 @@ final class TilingController {
             dbg("no focused window for expand toggle")
             return noFocusedWindowReceipt(on: directory.focusedKey())
         }
+        return expandToggle(handle)
+    }
+
+    /// The same toggle for a window named by the caller: the title-bar tap
+    /// resolves the window under the gesture, which is not necessarily the
+    /// one holding keyboard focus.
+    @discardableResult
+    func handleExpandToggle(for handle: WindowHandle) -> ActionReceipt {
+        pruneDeadWindows()
+        return expandToggle(handle)
+    }
+
+    private func expandToggle(_ handle: WindowHandle) -> ActionReceipt {
         let liveID = register.liveID(for: handle)
-        let key = liveID.flatMap { directory.owner(of: $0) } ?? directory.focusedKey()
+        // A managed window keeps its owning canvas; an unmanaged one is
+        // claimed by the canvas its frame sits on (else focused), exactly
+        // like a slot request's requester.
+        let key = directory.keyForRequester(
+            owned: liveID.flatMap { directory.owner(of: $0) },
+            frame: gateway.frame(of: handle),
+            preTileFrame: liveID.flatMap { record(of: $0)?.preTileFrame })
         let id = liveID ?? register.claim(handle, on: key)
         let wasExpanded = directory.storedCanvas(for: key)?.isExpanded(id) == true
         let outcome = directory.withCanvas(key) { canvas in
@@ -2001,9 +2063,9 @@ final class TilingController {
         }
         // Only a landed toggle (or a deferred one whose state stands)
         // claims the handle for this canvas. A refused expand (including
-        // the no-readable-frame refusal) leaves the window exactly where
-        // it was, so a deferred pre-tile restore on another canvas is
-        // still live and must not be discarded.
+        // the no-readable-frame and blocked-by-the-coverer refusals) leaves
+        // the window exactly where it was, so a deferred pre-tile restore
+        // on another canvas is still live and must not be discarded.
         let expandedNow = directory.storedCanvas(for: key)?.isExpanded(id) == true
         switch outcome.result {
         case .placed:
@@ -2011,7 +2073,7 @@ final class TilingController {
         case .deferred:
             discardDeferredRestores(for: handle)
         case .refused, .alreadyTiled, .nothingToEvict, .expandRefused,
-            .expandNoFrame, .switched, .alreadyInLayout:
+            .expandNoFrame, .expandBlocked, .switched, .alreadyInLayout:
             break
         }
         onChange?()

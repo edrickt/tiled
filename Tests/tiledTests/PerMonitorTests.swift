@@ -326,6 +326,27 @@ final class PerMonitorTests: XCTestCase {
             GridLayout().rect(for: .topLeft, in: Self.right.visibleFrame))
     }
 
+    /// One full-size window per canvas, not per app: an expansion on one
+    /// display never returns the other display's expanded window.
+    func testEachMonitorKeepsItsOwnExpandedWindow() {
+        let leftHandle = tileOnLeft()
+        controller.handle(slot: .topLeft)
+        let rightHandle = tileOnRight()
+        controller.handle(slot: .topLeft)
+
+        gateway.focused = leftHandle
+        controller.handleExpandToggle()
+        gateway.focused = rightHandle
+        controller.handleExpandToggle()
+
+        XCTAssertEqual(
+            gateway.frame(of: leftHandle), Self.left.visibleFrame,
+            "the left expansion survives the right display's expansion")
+        XCTAssertEqual(gateway.frame(of: rightHandle), Self.right.visibleFrame)
+        XCTAssertTrue(controller.canvas(for: leftID).isExpanded(1))
+        XCTAssertTrue(controller.canvas(for: rightID).isExpanded(2))
+    }
+
     func testUntileAllOnlyDissolvesTheFocusedMonitor() {
         tileOnLeft()
         controller.handle(slot: .topLeft)

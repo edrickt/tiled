@@ -208,6 +208,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // failed; re-subscribe now that AX is trusted so already-running
         // apps size their new windows without a relaunch.
         controller.observeWindowCreations()
+        // The title-bar tap needs the same trust: install it now that the
+        // grant has landed, so a first-run launch does not leave the
+        // double-click gesture dead until relaunch.
+        controller.observeTitleBarDoubleClicks()
         menuBar.refresh()
         switch AppStartCompletion.make(
             afterPermissionWait: afterPermissionWait,

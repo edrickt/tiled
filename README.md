@@ -19,7 +19,8 @@ Native macOS window tiling with global hotkeys. It covers quarters, sixths, and 
 - Live shared-edge resizing with per-column splitters
 - Independent canvases per display and per Mission Control Space
 - Remappable shortcuts with visible conflict and registration states
-- Undo for displacements, plus expand, evict, and splitter reset
+- Undo for displacements, plus expand (`⌥⇧⏎` or a title-bar
+  double-click), evict, and splitter reset
 
 ## Install
 
@@ -39,7 +40,8 @@ shasum -a 256 -c Tiled-<version>.zip.sha256
 ## Try it in 30 seconds
 
 1. Focus any window and press `⌥⇧U`. It tiles into the top-left slot.
-2. Press `⌥⇧⏎` to expand it, then `⌥⇧⏎` again to drop it back.
+2. Press `⌥⇧⏎` to expand it (a title-bar double-click does the same), then
+   `⌥⇧⏎` again to drop it back.
 3. Press `⌥⇧\` to switch the layout on the display under the pointer,
    then `⌃⌥⇧⌘Z` to undo.
 4. Open the menu bar menu for the same actions by click, including
@@ -59,7 +61,7 @@ and dead combos.
 
 ```bash
 swift build            # debug build
-make check             # unit suite (1121 tests) and the published count
+make check             # unit suite (1162 tests) and the published count
 make app               # release build bundled as build/Tiled.app
 ```
 

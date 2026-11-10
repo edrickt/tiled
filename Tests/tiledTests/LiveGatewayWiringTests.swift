@@ -27,7 +27,10 @@ final class LiveGatewayWiringTests: XCTestCase {
             writeRetrySleep: writeRetrySleep,
             runningProcessIDs: runningProcessIDs,
             ownProcessID: ownProcessID,
-            windowList: windowList)
+            windowList: windowList,
+            // Never arm a real session tap in the suite: it would consume
+            // the test machine's clicks for the rest of the run.
+            titleBarTapFactory: { _, _, _ in nil })
     }
 
     // MARK: Space lookup and cache
@@ -898,5 +901,94 @@ final class LiveGatewayWiringTests: XCTestCase {
         XCTAssertEqual(
             gateway.frame(of: handle), original,
             "the live frame is still the old one: the caller sees the truth on its next read")
+    }
+
+    // MARK: Title-bar double-click
+
+    /// The gesture consumes the second click and delivers the window after
+    /// the tap callback returns: the expand writes frames on the main queue.
+    func testTitleBarDoubleClickConsumesTheSecondClickAndDeliversTheWindow() {
+        let gateway = makeGateway()
+        let handle = WindowHandle(id: 41)
+        let point = CGPoint(x: 10, y: 20)
+        gateway.setTestTitleBarWindow { $0 == point ? handle : nil }
+        let delivered = expectation(description: "expand delivered")
+        var windows: [WindowHandle] = []
+        gateway.observeTitleBarDoubleClicks {
+            windows.append($0)
+            delivered.fulfill()
+        }
+
+        XCTAssertTrue(
+            gateway.handleTitleBarMouseEvent(.down(clickCount: 2, point: point)),
+            "a second click on a title bar is Tiled's and never reaches the app")
+        XCTAssertEqual(windows, [], "the expand runs after the tap returns")
+        wait(for: [delivered], timeout: 1)
+        XCTAssertEqual(windows, [handle])
+    }
+
+    /// The consumed down takes its paired up with it: the app must never
+    /// receive an unmatched release.
+    func testTheConsumedDownPairsWithAConsumedUp() {
+        let gateway = makeGateway()
+        gateway.setTestTitleBarWindow { _ in WindowHandle(id: 7) }
+        gateway.observeTitleBarDoubleClicks { _ in }
+
+        XCTAssertTrue(gateway.handleTitleBarMouseEvent(.down(clickCount: 2, point: .zero)))
+        XCTAssertTrue(gateway.handleTitleBarMouseEvent(.up), "the release is consumed too")
+        XCTAssertFalse(gateway.handleTitleBarMouseEvent(.up), "an unrelated release passes")
+    }
+
+    /// Single clicks and the odd counts inside a multi-click run belong to
+    /// the app: only a completed double-click is the gesture.
+    func testSingleClicksAndOddCountsReachTheApp() {
+        let gateway = makeGateway()
+        gateway.setTestTitleBarWindow { _ in WindowHandle(id: 1) }
+        var windows: [WindowHandle] = []
+        gateway.observeTitleBarDoubleClicks { windows.append($0) }
+
+        XCTAssertFalse(gateway.handleTitleBarMouseEvent(.down(clickCount: 1, point: .zero)))
+        XCTAssertFalse(gateway.handleTitleBarMouseEvent(.down(clickCount: 3, point: .zero)))
+        XCTAssertTrue(windows.isEmpty)
+    }
+
+    /// Two quick double-clicks make the second pair click counts 3 and 4:
+    /// the completed (even) click is the gesture both times.
+    func testASecondQuickDoubleClickIsTheGestureAgain() {
+        let gateway = makeGateway()
+        gateway.setTestTitleBarWindow { _ in WindowHandle(id: 9) }
+        let delivered = expectation(description: "both toggles delivered")
+        delivered.expectedFulfillmentCount = 2
+        var windows: [WindowHandle] = []
+        gateway.observeTitleBarDoubleClicks {
+            windows.append($0)
+            delivered.fulfill()
+        }
+
+        XCTAssertTrue(gateway.handleTitleBarMouseEvent(.down(clickCount: 2, point: .zero)))
+        XCTAssertTrue(gateway.handleTitleBarMouseEvent(.down(clickCount: 4, point: .zero)))
+        wait(for: [delivered], timeout: 1)
+        XCTAssertEqual(windows.count, 2, "each completed double-click toggles once")
+    }
+
+    /// A double-click whose point is content (or empty space) is not a
+    /// title-bar hit, so the app keeps its own behavior.
+    func testAContentDoubleClickReachesTheApp() {
+        let gateway = makeGateway()
+        gateway.setTestTitleBarWindow { _ in nil }
+        var windows: [WindowHandle] = []
+        gateway.observeTitleBarDoubleClicks { windows.append($0) }
+
+        XCTAssertFalse(gateway.handleTitleBarMouseEvent(.down(clickCount: 2, point: .zero)))
+        XCTAssertTrue(windows.isEmpty)
+    }
+
+    /// The hit-test predicate accepts only the window role: content reports
+    /// a child role and must never be mistaken for the title bar.
+    func testTitleBarRoleIsTheWindowRoleOnly() {
+        XCTAssertTrue(LiveWindowGateway.isTitleBarRole("AXWindow" as CFString))
+        XCTAssertFalse(LiveWindowGateway.isTitleBarRole("AXScrollArea" as CFString))
+        XCTAssertFalse(LiveWindowGateway.isTitleBarRole("AXButton" as CFString))
+        XCTAssertFalse(LiveWindowGateway.isTitleBarRole(nil))
     }
 }

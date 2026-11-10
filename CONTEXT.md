@@ -106,7 +106,7 @@ _Avoid_: switch (undo covers swaps and evictions too), eviction (one cause and o
 _Code_: `TilingSpace.UndoChapter`, `TilingSpace.displacedCount`
 
 **Expand**:
-Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it into that slot, or restores its pre-expand frame when it had none. An expanded window never grows (see Reflow) and never re-houses or steps aside (see Re-house); on eviction it untangles.
+Covering the layout: the ⌥⇧⏎ toggle resizes one window to fill its screen without releasing its slot; a second press retiles it into that slot, or restores its pre-expand frame when it had none. A double-click on a title bar is the same toggle for the window under the pointer, and Tiled consumes the click so the app's own title-bar double-click action never runs; a click on content is never a title-bar gesture. A canvas shows one expanded window at a time: expanding a second fills the screen and returns the coverer to its tile, and a coverer whose app refuses that return rolls the new expansion back and refuses it. An expanded window never grows (see Reflow) and never re-houses or steps aside (see Re-house); on eviction it untangles.
 _Avoid_: maximize, zoom, fullscreen
 
 **Drag-out**:

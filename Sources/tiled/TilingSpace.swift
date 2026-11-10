@@ -180,6 +180,11 @@ struct TilingSpace {
             /// no geometry to return to on collapse, the canvas will not
             /// guess. Nothing was written, and this is not an app refusal.
             case expandNoFrame
+            /// Expanding was refused because the window already covering
+            /// the layout would not return to its tile: a canvas shows one
+            /// full-size window at a time, so the new expansion is written
+            /// over no one. The named window stays expanded.
+            case expandBlocked(windowName: String?)
             /// An explicit layout switch untiled `untiled` windows. The
             /// layout changed even when a restore was refused.
             case switched(layout: LayoutKind, untiled: Int)
@@ -1329,28 +1334,51 @@ struct TilingSpace {
     /// canvas still hidden defers the request again; a genuine refusal
     /// narrates the shared message. An expand lands by writing the screen
     /// frame and recording `expanded[id]`, so the plan that follows leaves
-    /// the covering window where it is.
+    /// the covering window where it is. The one-full-size rule holds here
+    /// too: a landing expansion returns any current coverer to its tile,
+    /// and gives the screen back (as a refusal) when that return is
+    /// refused. The reassert plan runs after this pass, so a rolled-back
+    /// window is re-derived into its slot there.
     private mutating func reconcileDeferredRequests(context: Context) {
         guard !deferredRequests.isEmpty else { return }
         // The record is the ownership primitive: a request whose window
         // left this canvas is stale and simply dropped.
         let pending = deferredRequests.filter { records[$0.key] != nil }
+        // A request issued while this loop runs (a collapse an expansion
+        // had to park) wins over an older retained one for the same
+        // window, so an empty table is rebuilt as the loop goes.
+        deferredRequests = [:]
         var failures = 0
-        deferredRequests = Self.reconcile(pending) { id, request in
+        for (id, request) in pending {
+            let result: FrameWriter.Result
             switch request {
             case .slot:
-                return applyLayout(for: id, context: context, on: context.space)
+                result = applyLayout(for: id, context: context, on: context.space)
             case .expand(let saved):
-                let result = writeExpandedFrame(id, to: visibleFrame, context: context)
+                result = writeExpandedFrame(id, to: visibleFrame, context: context)
                 if result == .written || result == .skippedNoOp {
                     expanded[id] = saved
+                    if returnOtherExpandedToTile(besides: id, context: context) != nil {
+                        // The coverer would not return to its tile, so
+                        // this expansion cannot land without breaking the
+                        // rule: give the screen back.
+                        let restored = writeExpandedFrame(id, to: saved, context: context)
+                        if restored == .written || restored == .skippedNoOp {
+                            expanded[id] = nil
+                        }
+                        failures += 1
+                    }
                 }
                 if result == .refused { failures += 1 }
-                return result
             case .collapse(let frame):
-                let result = writeExpandedFrame(id, to: frame, context: context)
+                result = writeExpandedFrame(id, to: frame, context: context)
                 if result == .refused { failures += 1 }
-                return result
+            }
+            if result == .deferredOffSpace {
+                // A newer request issued during this pass for the same
+                // window (a collapse an earlier expansion parked) stays:
+                // it is the user's last intent.
+                if deferredRequests[id] == nil { deferredRequests[id] = request }
             }
         }
         if failures > 0 {
@@ -1718,6 +1746,10 @@ struct TilingSpace {
     /// to its previous tile (or restores its previous frame when it
     /// wasn't tiled). Layout state is untouched: a tiled window keeps its
     /// slot while expanded, exactly like focusing it.
+    ///
+    /// One window per canvas is expanded at a time: once the new window
+    /// covers the layout, the window that was covering it returns to its
+    /// tile (see `returnOtherExpandedToTile`).
     mutating func expandToggle(window id: WindowID, context: Context) -> Outcome {
         if expanded[id] != nil {
             return collapseExpanded(id, context: context)
@@ -1748,18 +1780,75 @@ struct TilingSpace {
             // splitters from the screen-sized frame.
             context.tracker.clearPendingReassert(id)
             expanded[id] = current
+            // One full-size window per canvas: the window that was
+            // covering the layout returns to its tile now that this one
+            // covers instead. An app that refuses the return gets the
+            // screen back: an action that reports a refusal must not have
+            // moved another window.
+            if let blocked = returnOtherExpandedToTile(besides: id, context: context) {
+                let restored = writeExpandedFrame(id, to: current, context: context)
+                if restored == .written || restored == .skippedNoOp {
+                    expanded[id] = nil
+                    context.log("expand win\(id) BLOCKED by \(blocked); rolled back")
+                    return Outcome(result: .expandBlocked(windowName: blocked))
+                }
+                // Both refusals at once: keep the state truthful (this
+                // window covers the layout, the old one still covers
+                // under it) and leave the refusal notice standing.
+                context.log("expand win\(id): coverer and rollback both refused")
+                return Outcome()
+            }
+            // A retained expansion for another window is superseded only
+            // once this expansion actually won the canvas: the newest
+            // request is the one that lands on the swipe back.
+            supersedeOtherPendingExpansions(besides: id)
             context.log("expand win\(id) -> \(target)")
             return Outcome()
         case .deferredOffSpace:
             // The canvas is not visible: retain the expansion so the
             // swipe-back reassert issues it, and narrate the deferral —
-            // never an app refusal (the app did nothing wrong).
+            // never an app refusal (the app did nothing wrong). The
+            // retained request is the newest, so it supersedes older ones;
+            // the coverer is returned only when this one actually lands.
             deferredRequests[id] = .expand(saved: current)
+            supersedeOtherPendingExpansions(besides: id)
             return Outcome(result: .deferred)
         case .refused:
             error = Self.refusalMessage(count: 1)
             return Outcome(result: .expandRefused(windowName: appName(id, context: context)))
         }
+    }
+
+    /// Returns every other expanded window on this canvas to its tile (or
+    /// its saved pre-expand frame): a canvas shows one full-size window at
+    /// a time. Returns the app name of the first window whose return its
+    /// app refused; that window stays expanded, truthfully covering the
+    /// layout, and the caller refuses the new expansion rather than stage
+    /// two full-size windows.
+    private mutating func returnOtherExpandedToTile(
+        besides id: WindowID, context: Context
+    ) -> String? {
+        var refused: String?
+        let others = expanded.keys.sorted().filter { $0 != id }
+        for other in others {
+            let outcome = collapseExpanded(other, context: context)
+            guard case .expandRefused(let name) = outcome.result,
+                refused == nil
+            else { continue }
+            refused = name ?? appName(other, context: context) ?? "A window"
+        }
+        return refused
+    }
+
+    /// Drops retained expansions for other windows on this canvas: the
+    /// newest expansion is the one that lands when the Space returns, and
+    /// an older request must never land first only to be collapsed.
+    private mutating func supersedeOtherPendingExpansions(besides id: WindowID) {
+        let pending = deferredRequests.compactMap { key, request -> WindowID? in
+            guard case .expand = request, key != id else { return nil }
+            return key
+        }
+        for key in pending { deferredRequests[key] = nil }
     }
 
     /// Unexpands `id`, recording the refusal on this canvas and returning

@@ -238,6 +238,12 @@ final class MenuTextTests: XCTestCase {
             MenuText.expandRefusedAnnouncement(windowName: nil),
             "That window couldn't be expanded: the app refused to resize it.")
         XCTAssertEqual(
+            MenuText.expandBlockedAnnouncement(windowName: "Safari"),
+            "Safari couldn't return to its tile, so nothing was expanded.")
+        XCTAssertEqual(
+            MenuText.expandBlockedAnnouncement(windowName: nil),
+            "The full-size window couldn't return to its tile, so nothing was expanded.")
+        XCTAssertEqual(
             MenuText.nothingToEvictAnnouncement(),
             "That window isn't tiled: nothing to evict.")
         XCTAssertEqual(

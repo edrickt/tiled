@@ -554,8 +554,8 @@
  [
   "TilingSpace.swift",
   "deferred placement/expand reconcile never runs (retained requests dropped)",
-  "        let pending = deferredRequests.filter { records[$0.key] != nil }\n        var failures = 0\n        deferredRequests = Self.reconcile(pending) { id, request in",
-  "        let pending: [WindowID: DeferredRequest] = [:]\n        var failures = 0\n        deferredRequests = Self.reconcile(pending) { id, request in"
+  "        let pending = deferredRequests.filter { records[$0.key] != nil }",
+  "        let pending: [WindowID: DeferredRequest] = [:]"
  ],
  [
   "TilingSpace.swift",
@@ -1138,5 +1138,95 @@
   "fullscreen keeps a pending echo (late rollback after presentation)",
   "        lastKnownFrames[id] = frame\n        cancelExpected(id)",
   "        lastKnownFrames[id] = frame\n        _ = id"
+ ],
+ [
+  "TilingSpace.swift",
+  "a refused coverer return leaves the new expansion full-size (no rollback)",
+  "                let restored = writeExpandedFrame(id, to: current, context: context)",
+  "                let restored: FrameWriter.Result = .written"
+ ],
+ [
+  "TilingSpace.swift",
+  "second expansion never returns the coverer to its tile",
+  "        let others = expanded.keys.sorted().filter { $0 != id }",
+  "        let others: [WindowID] = []"
+ ],
+ [
+  "TilingSpace.swift",
+  "retained expansion is not superseded (older request lands and collapses)",
+  "        for key in pending { deferredRequests[key] = nil }",
+  "        _ = pending"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "title-bar gesture accepts single and odd clicks",
+  "            guard clickCount > 1, clickCount.isMultiple(of: 2) else { return false }",
+  "            guard clickCount > 0 else { return false }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "any AX element counts as a title bar (content double-clicks swallowed)",
+  "        (role as? String) == kAXWindowRole as String",
+  "        role != nil"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "title-bar gesture swallows the down but not its paired release",
+  "        case .up:\n            guard swallowTitleBarMouseUp else { return false }\n            swallowTitleBarMouseUp = false\n            return true",
+  "        case .up:\n            return false"
+ ],
+ [
+  "TilingController.swift",
+  "title-bar double-click expands the focused window, not the clicked one",
+  "        let receipt = handleExpandToggle(for: handle)\n        onLateReceipt?(receipt)",
+  "        let receipt = handleExpandToggle()\n        onLateReceipt?(receipt)"
+ ],
+ [
+  "TilingSpace.swift",
+  "a deferred expansion's refused coverer return leaves it full-size (no rollback)",
+  "                        let restored = writeExpandedFrame(id, to: saved, context: context)",
+  "                        let restored: FrameWriter.Result = .written"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "title-bar tap is never installed (subscription only stores the handler)",
+  "    func observeTitleBarDoubleClicks(_ onDoubleClick: @escaping (WindowHandle) -> Void) {\n        titleBarDoubleClickHandler = onDoubleClick\n        installTitleBarTapIfNeeded()\n    }",
+  "    func observeTitleBarDoubleClicks(_ onDoubleClick: @escaping (WindowHandle) -> Void) {\n        titleBarDoubleClickHandler = onDoubleClick\n    }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "title-bar tap ignores the paired mouse-up (unmatched release can leak)",
+  "        let mask =\n            (CGEventMask(1) << CGEventType.leftMouseDown.rawValue)\n            | (CGEventMask(1) << CGEventType.leftMouseUp.rawValue)",
+  "        let mask = CGEventMask(1) << CGEventType.leftMouseDown.rawValue"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "title-bar callback ignores the real click count (every left click is a double-click)",
+  "            let count = Int(event.getIntegerValueField(.mouseEventClickState))",
+  "            let count = 2"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "disabled tap keeps the stale paired-release claim (eats the next release)",
+  "        case .tapDisabledByTimeout, .tapDisabledByUserInput:\n            swallowTitleBarMouseUp = false",
+  "        case .tapDisabledByTimeout, .tapDisabledByUserInput:"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "title-bar gesture swallows the down but claims no paired release",
+  "            swallowTitleBarMouseUp = true",
+  "            swallowTitleBarMouseUp = false"
+ ],
+ [
+  "TilingController.swift",
+  "controller subscribes the title-bar tap before Accessibility trust",
+  "        if gateway.isTrusted {\n            observeTitleBarDoubleClicks()\n        }",
+  "        observeTitleBarDoubleClicks()"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "any AX role counts as a title bar (role predicate ignores the window role)",
+  "    static func isTitleBarRole(_ role: CFTypeRef?) -> Bool {\n        (role as? String) == kAXWindowRole as String\n    }",
+  "    static func isTitleBarRole(_ role: CFTypeRef?) -> Bool {\n        role is String\n    }"
  ]
 ]
