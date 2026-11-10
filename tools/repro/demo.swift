@@ -8,11 +8,9 @@ import ApplicationServices
 //
 // Line: four untiled windows -> each tiled to a quarter corner -> the
 // bottom-left window dragged to the center to untile it (the top-left
-// survivor reflows into the left half) -> the left half's right edge
-// dragged right to widen, then back left past the halfway to shrink ->
-// the left-half window swapped into the bottom left -> then swapped with
-// the top right (the blocker takes the vacated slot) -> expand to fill
-// the screen -> un-expand back into its tile.
+// survivor reflows into the left half) and closed -> the left half's
+// right edge dragged right to widen, then back to a left half -> expand
+// to fill the screen -> un-expand back into its tile.
 
 // MARK: AX helpers (trimmed from suite.swift)
 
@@ -69,6 +67,19 @@ func hostWindows() -> [(el: AXUIElement, title: String, frame: CGRect)] {
 
 func actualFrame(_ t: String) -> CGRect? {
     hostWindows().first(where: { $0.title == t })?.frame
+}
+
+/// Closes an untiled window through its close button: after the drag-out
+/// scene the floating window leaves the stage instead of idling over the
+/// rest of the demo.
+func closeWindow(_ t: String) {
+    guard let w = hostWindows().first(where: { $0.title == t }) else { return }
+    var v: CFTypeRef?
+    AXUIElementCopyAttributeValue(w.el, kAXCloseButtonAttribute as CFString, &v)
+    if let btn = v {
+        AXUIElementPerformAction(btn as! AXUIElement, kAXPressAction as CFString)
+    }
+    usleep(600_000)
 }
 
 // MARK: input simulation
@@ -192,18 +203,14 @@ if let f = actualFrame("HOSTC") {
 }
 usleep(beat)
 
-print("==> the left half's right edge resizes right, then back past halfway")
+print("==> the floating window closes: the stage holds the three tiles")
+closeWindow("HOSTC")
+usleep(beat)
+
+print("==> the left half's right edge resizes right, then settles back at a left half")
 dragEdge("HOSTA", "right", 150)
 usleep(beat)
-dragEdge("HOSTA", "right", -350)
-usleep(beat)
-
-print("==> the left-half window swaps into the bottom left")
-tile("HOSTA", "BL")
-usleep(beat)
-
-print("==> then swaps with the top right; the blocker takes the vacated slot")
-tile("HOSTA", "TR")
+dragEdge("HOSTA", "right", -180)
 usleep(beat)
 
 print("==> expand to fill the screen")
