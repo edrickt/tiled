@@ -458,6 +458,19 @@ func doTile(_ t: String, _ slot: String) {
 // The controller receives the same notification stream as a native drag.
 func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
     guard let slot = tiled[t], let f = actualFrame(t) else { return }
+    // A splitter commits only under a held button: a resize-shaped AX
+    // tick with the button up is a programmatic change, which updates
+    // the tracker's baseline but never moves a fraction (see
+    // DragTracker.processResize). So the simulated drag presses first,
+    // drives the frame in steps while the button is down, and lifts
+    // after the last tick has landed: the release is what flushes the
+    // deferred neighbour reassert (`mouseLifted`, wired to a global
+    // left-mouse-up monitor), exactly like a real edge drag. The press
+    // is a real click gesture at the window's centre, so the press
+    // evidence exists but the gesture stays a resize (origin+size
+    // ticks), never a title-bar move.
+    let center = CGPoint(x: f.midX, y: f.midY)
+    post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: center, mouseButton: .left))
     let steps = 8
     for i in 1...steps {
         let t2 = CGFloat(i) / CGFloat(steps)
@@ -476,18 +489,11 @@ func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
     }
     usleep(600_000)
 
-    // End the simulated drag with a real release. The controller defers
-    // neighbour resizes until the click lifts (`mouseLifted`, wired to a
-    // global left-mouse-up monitor), so nothing moves under a held
-    // button: without a release the splitter advances and the windows
-    // stay exactly where they were. The press is posted too, so the app
-    // sees a real click gesture rather than a bare up event.
-    if let f = actualFrame(t) {
-        let c = CGPoint(x: f.midX, y: f.midY)
-        post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: c, mouseButton: .left))
-        post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: c, mouseButton: .left))
-        usleep(700_000)
-    }
+    // Lift the button only after the final frame tick has streamed in:
+    // a tick trailing the mouse-up re-arms the pending resize for the
+    // *next* mouse-up, and no next one comes.
+    post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: center, mouseButton: .left))
+    usleep(700_000)
 
     // mirror splitter updates from the final frame
     guard let fin = actualFrame(t) else { return }
