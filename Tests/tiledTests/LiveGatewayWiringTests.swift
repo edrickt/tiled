@@ -299,7 +299,7 @@ final class LiveGatewayWiringTests: XCTestCase {
         // routing somewhere stale.
         let gateway = makeGateway()
         var births = 0
-        gateway.observeWindowCreations { _ in births += 1 }
+        gateway.observeWindowCreations { _, _ in births += 1 }
 
         gateway.handleAXNotification(
             notification: kAXWindowCreatedNotification as String, token: 12345, pid: 999999)
@@ -312,7 +312,7 @@ final class LiveGatewayWiringTests: XCTestCase {
         // unroutable and must miss without crashing, exactly as before.
         let gateway = makeGateway()
         var births = 0
-        gateway.observeWindowCreations { _ in births += 1 }
+        gateway.observeWindowCreations { _, _ in births += 1 }
 
         gateway.handleAXNotification(
             notification: kAXWindowCreatedNotification as String, token: 12345)
@@ -334,7 +334,7 @@ final class LiveGatewayWiringTests: XCTestCase {
             runningProcessIDs: { [ownPID, otherPID] },
             ownProcessID: { ownPID })
         var births = 0
-        gateway.observeWindowCreations { _ in births += 1 }
+        gateway.observeWindowCreations { _, _ in births += 1 }
 
         XCTAssertEqual(
             driver.observers.map(\.pid), [otherPID],
@@ -352,7 +352,7 @@ final class LiveGatewayWiringTests: XCTestCase {
             runningProcessIDs: { [] },
             ownProcessID: { ownPID })
         var births = 0
-        gateway.observeWindowCreations { _ in births += 1 }
+        gateway.observeWindowCreations { _, _ in births += 1 }
 
         gateway.appLaunched(pid: ownPID)
         gateway.appLaunched(pid: otherPID)
@@ -373,7 +373,7 @@ final class LiveGatewayWiringTests: XCTestCase {
             runningProcessIDs: { [ownPID] },
             ownProcessID: { ownPID })
         var births: [WindowHandle] = []
-        gateway.observeWindowCreations { births.append($0) }
+        gateway.observeWindowCreations { handle, _ in births.append(handle) }
 
         gateway.handleAXNotification(
             notification: kAXWindowCreatedNotification as String,
@@ -583,6 +583,148 @@ final class LiveGatewayWiringTests: XCTestCase {
                 candidates: [handle: binding]),
             handle,
             "a jitter-scale drift is churn, not a birth")
+    }
+
+    // MARK: Churn pre-filter (the direct birth path's one ambiguity)
+
+    func testChurnCandidateIsACloseFrameOfTheSameObservedPid() {
+        // The direct birth path consults the app's fresh window list only
+        // for a shape that could be a churned identity: a held observed
+        // window of the same pid whose last-read frame is within the churn
+        // tolerance. Everything else writes the quarter footprint at once.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let frame = CGRect(x: 0, y: 4, width: 839, height: 1015)
+        let handle = WindowHandle(id: 7)
+        let binding = LiveWindowGateway.WindowBinding(
+            element: AXUIElementCreateApplication(me), pid: me,
+            frames: FakeWindowFrames(frame: frame), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: frame)
+        let bindings = [handle: binding]
+
+        XCTAssertTrue(
+            LiveWindowGateway.hasChurnCandidate(
+                frame: frame, pid: me, bindings: bindings),
+            "a same-app window at the newborn's exact frame may be churn")
+        XCTAssertTrue(
+            LiveWindowGateway.hasChurnCandidate(
+                frame: frame.offsetBy(dx: 1.5, dy: -1), pid: me,
+                bindings: bindings),
+            "jitter inside the churn tolerance is still a candidate")
+        XCTAssertFalse(
+            LiveWindowGateway.hasChurnCandidate(
+                frame: frame.offsetBy(dx: 20, dy: 0), pid: me,
+                bindings: bindings),
+            "a frame the window moved to is a new window, not a candidate")
+        XCTAssertFalse(
+            LiveWindowGateway.hasChurnCandidate(
+                frame: frame, pid: me + 1, bindings: bindings),
+            "another app's window never candidates")
+    }
+
+    func testChurnCandidateNeedsAnObservedHeldFrame() {        // Focus-only bindings never shadow a birth, and a candidate with no
+        // held element or no last-read frame cannot be the churned
+        // identity, so none of them buys the list read.
+        let me = ProcessInfo.processInfo.processIdentifier
+        let frame = CGRect(x: 0, y: 4, width: 839, height: 1015)
+        let handle = WindowHandle(id: 7)
+
+        let focusOnly = LiveWindowGateway.WindowBinding(
+            element: AXUIElementCreateApplication(me), pid: me,
+            frames: FakeWindowFrames(frame: frame), token: 42,
+            observedKey: nil, changeHandler: nil,
+            destructionHandler: nil, lastFrame: frame)
+        XCTAssertFalse(
+            LiveWindowGateway.hasChurnCandidate(
+                frame: frame, pid: me, bindings: [handle: focusOnly]),
+            "a focus-only binding is not a churn candidate")
+
+        let noBaseline = LiveWindowGateway.WindowBinding(
+            element: AXUIElementCreateApplication(me), pid: me,
+            frames: FakeWindowFrames(frame: frame), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: nil)
+        XCTAssertFalse(
+            LiveWindowGateway.hasChurnCandidate(
+                frame: frame, pid: me, bindings: [handle: noBaseline]),
+            "without a last-read frame there is no candidate")
+
+        let noElement = LiveWindowGateway.WindowBinding(
+            element: nil, pid: me,
+            frames: FakeWindowFrames(frame: frame), token: 42,
+            observedKey: 42, changeHandler: nil,
+            destructionHandler: nil, lastFrame: frame)
+        XCTAssertFalse(
+            LiveWindowGateway.hasChurnCandidate(
+                frame: frame, pid: me, bindings: [handle: noElement]),
+            "without a held element there is no identity to churn from")
+    }
+
+    // MARK: Direct birth route
+
+    func testBirthRouteReportsAnAlreadyBoundElement() {
+        // A focus read adopted the window before its creation notice, or an
+        // earlier delivery won: the existing handle is reported, whatever
+        // the frame says, and the controller's duplicate guard drops it.
+        let existing = WindowHandle(id: 9)
+        let frame = CGRect(x: 10, y: 10, width: 800, height: 600)
+
+        XCTAssertEqual(
+            LiveWindowGateway.birthRoute(
+                frame: frame, existing: existing, managed: true, seen: false,
+                churnCandidate: true),
+            .existing(existing),
+            "an already-bound element reports its handle before any other rule")
+        XCTAssertEqual(
+            LiveWindowGateway.birthRoute(
+                frame: nil, existing: existing, managed: false, seen: false,
+                churnCandidate: false),
+            .existing(existing),
+            "an unreadable frame cannot demote an already-bound element")
+    }
+
+    func testBirthRouteNeverBirthsAnObservedOrSeenWindow() {
+        let frame = CGRect(x: 10, y: 10, width: 800, height: 600)
+
+        XCTAssertEqual(
+            LiveWindowGateway.birthRoute(
+                frame: frame, existing: nil, managed: true, seen: false,
+                churnCandidate: false),
+            .alreadyKnown,
+            "an observed token or identity is not a birth")
+        XCTAssertEqual(
+            LiveWindowGateway.birthRoute(
+                frame: frame, existing: nil, managed: false, seen: true,
+                churnCandidate: false),
+            .alreadyKnown,
+            "a token already seen is not a birth")
+    }
+
+    func testBirthRouteFallsBackOnlyForUnreadableOrChurnedDeliveries() {
+        let frame = CGRect(x: 10, y: 10, width: 800, height: 600)
+
+        XCTAssertEqual(
+            LiveWindowGateway.birthRoute(
+                frame: nil, existing: nil, managed: false, seen: false,
+                churnCandidate: false),
+            .unreadable,
+            "an unreadable frame drops to the list diff, never to a write")
+        XCTAssertEqual(
+            LiveWindowGateway.birthRoute(
+                frame: frame, existing: nil, managed: false, seen: false,
+                churnCandidate: true),
+            .confirmChurn,
+            "a possible churned identity is confirmed before any write")
+    }
+
+    func testBirthRouteSizesEveryOtherNewborn() {
+        XCTAssertEqual(
+            LiveWindowGateway.birthRoute(
+                frame: CGRect(x: 10, y: 10, width: 800, height: 600),
+                existing: nil, managed: false, seen: false,
+                churnCandidate: false),
+            .birth,
+            "a genuine newborn is written at once")
     }
 
     func testDeliveredDestroyedNotificationCallsTheDestroyHandler() {

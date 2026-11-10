@@ -6,6 +6,24 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A new window's quarter write is now the birth's first effect, so the
+  window stops being shown at the app's own size and then resized. The
+  window-creation notification names the new window itself, so Tiled reads
+  that window's frame once and hands it over with the birth, and the write
+  follows immediately; the reads that used to sit before the write (the
+  app's window list, a liveness probe, a second frame read) now follow it
+  or are skipped. On the live harness the write lands about a display
+  refresh earlier (orderFront to quarter footprint: 29.5 ms median before,
+  16.3 ms after), so the app's own window-opening animation retargets to
+  the quarter footprint almost immediately instead of the window sitting
+  at the app's size for several animation steps and then snapping. The
+  app's window list is still read when the delivered window could be a
+  churned identity (a Terminal tab switch), so tab switches keep adopting
+  instead of resizing a tiled window. The untile exits were already a
+  single direct write to the quarter footprint and are unchanged.
+
 ## [1.4.0] - 2026-11-10
 
 ### Added

@@ -456,6 +456,70 @@ final class WindowBirthTests: XCTestCase {
             CGRect(x: 2000, y: 500, width: 800, height: 500),
             "the parked birth lands on the drop display's quarter")
     }
+
+    // MARK: Immediate landing
+
+    func testBirthWriteLandsBeforeAnyFurtherFrameRead() {
+        // The delivered frame is the birth's one read: nothing looks at the
+        // window between the creation notification and the quarter write,
+        // so the app's own opening animation is retargeted about a display
+        // refresh earlier instead of the app's size being shown first.
+        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
+        var readsAtWrite: Int?
+        gateway.willWrite = { _ in readsAtWrite = self.gateway.frameReads }
+
+        let handle = gateway.simulateWindowCreated(frame: birth)
+
+        XCTAssertEqual(
+            readsAtWrite, 0,
+            "no frame read sits between the delivered birth and its write")
+        XCTAssertEqual(gateway.writes.count, 1, "one birth, one write")
+        XCTAssertEqual(
+            gateway.frame(of: handle),
+            CGRect(x: 10, y: 110, width: 800, height: 500))
+    }
+
+    func testAGivenBirthWriteDoesNotProbeLiveness() {
+        // The frame read already proved the window answered, so a birth
+        // that writes never pays the death probe first.
+        _ = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+
+        XCTAssertEqual(
+            gateway.livenessProbes, 0,
+            "a delivered birth sizes without a pre-write liveness probe")
+    }
+
+    func testRefusedBirthProbesLivenessBeforeNarrating() {
+        // A given window that refuses is still a refusal: the death probe
+        // runs only after the write fails, and its alive answer narrates.
+        gateway.willWrite = { self.gateway.refuseNextWrites($0) }
+        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
+
+        let handle = gateway.simulateWindowCreated(frame: birth)
+
+        XCTAssertEqual(gateway.frame(of: handle), birth, "a refused birth leaves the window alone")
+        XCTAssertEqual(gateway.livenessProbes, 1, "the failed write asks whether the window died")
+        XCTAssertNil(controller.registeredID(for: handle))
+        XCTAssertEqual(
+            canvas.error, TilingSpace.refusalMessage(count: 1),
+            "an alive window that refused narrates the refusal")
+    }
+
+    func testBirthDyingBetweenDeliveryAndWriteDropsSilently() {
+        // The frame was read, then the window died before the write: that is
+        // still the silent dead-on-arrival the birth contract never
+        // narrates, and its binding is released.
+        gateway.willWrite = { self.gateway.kill($0) }
+
+        let handle = gateway.simulateWindowCreated(
+            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+
+        XCTAssertTrue(gateway.writes.isEmpty, "a window that died draws no birth write")
+        XCTAssertNil(controller.registeredID(for: handle))
+        XCTAssertNil(canvas.error, "a dead delivery is never a refusal")
+        XCTAssertEqual(gateway.releaseCalls, [handle], "the confirmed-dead binding is released")
+    }
 }
 
 /// The canvas exits that share the sizing: drag-out and hidden-Space

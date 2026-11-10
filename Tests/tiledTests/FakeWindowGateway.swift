@@ -83,10 +83,20 @@ final class FakeWindowGateway: WindowGateway {
     }
 
     func frame(of handle: WindowHandle) -> CGRect? {
+        frameReads += 1
         guard let window = windows[handle], window.alive else { return nil }
         if hideFrames.contains(handle) { return nil }
         return window.frame
     }
+
+    /// Frame reads the controller issued, in order. A birth delivered with
+    /// its frame must not read the window again before its write.
+    private(set) var frameReads = 0
+
+    /// Liveness probes the controller issued. A birth sizes the delivered
+    /// window without probing; only a refused write asks whether the
+    /// window died in between.
+    private(set) var livenessProbes = 0
 
     /// Called with each handle before a frame write. Lets a test script a
     /// refusal at an exact write in a multi-write sequence, where
@@ -149,6 +159,7 @@ final class FakeWindowGateway: WindowGateway {
     var hideFrames: Set<WindowHandle> = []
 
     func liveness(of handle: WindowHandle) -> Liveness {
+        livenessProbes += 1
         guard let window = windows[handle] else { return .dead }
         if probeDead.contains(handle) { return .dead }
         if !window.alive { return .dead }
@@ -174,23 +185,26 @@ final class FakeWindowGateway: WindowGateway {
         focusChangeHandler?()
     }
 
-    private var creationHandler: ((WindowHandle) -> Void)?
+    private var creationHandler: ((WindowHandle, CGRect?) -> Void)?
     /// Birth-hook subscriptions issued, in order. Lets tests pin that a
     /// trust grant re-subscribes already-running apps.
     private(set) var creationSubscriptions = 0
 
-    func observeWindowCreations(_ onCreated: @escaping (WindowHandle) -> Void) {
+    func observeWindowCreations(
+        _ onCreated: @escaping (WindowHandle, CGRect?) -> Void
+    ) {
         creationSubscriptions += 1
         creationHandler = onCreated
     }
 
     /// Test control: simulates the OS delivering a window-creation
     /// notification. Creates the window, then routes it through the
-    /// creation handler exactly as the live adapter routes a birth.
+    /// creation handler with the frame the live adapter reads on the
+    /// delivery path.
     @discardableResult
     func simulateWindowCreated(frame: CGRect) -> WindowHandle {
         let handle = addWindow(frame: frame)
-        creationHandler?(handle)
+        creationHandler?(handle, frame)
         return handle
     }
 

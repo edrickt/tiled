@@ -84,10 +84,17 @@ struct FrameWriter {
     /// the gateway accepted the write. `bounds` is the canvas's one
     /// visible frame, the frame the target derived from: a clamped write
     /// is repinned against it, never against the window's own frame.
+    ///
+    /// `live` is the frame the caller already read: a birth hands over
+    /// the frame the creation notification delivered, so the no-op
+    /// baseline costs no AX round trip and the write can follow the
+    /// read immediately. Nil reads the live frame here, the policy's
+    /// own answer for a caller that has not read it.
     @discardableResult
     func write(
         _ id: WindowID, handle: WindowHandle, to target: CGRect,
-        bounds: CGRect, on space: TilingSpaceKey, check: Check
+        bounds: CGRect, on space: TilingSpaceKey, check: Check,
+        live: CGRect? = nil
     ) -> Result {
         // A write to a canvas the user cannot see waits for the swipe
         // back: sizing an off-Space window can pull it onto the visible
@@ -105,7 +112,7 @@ struct FrameWriter {
         // nothing and emits no echo, so a marked expectation here
         // would never converge and the late check would misread an
         // already-correct window.
-        let liveBefore = gateway.frame(of: handle)
+        let liveBefore = live ?? gateway.frame(of: handle)
         if let live = liveBefore,
             DragTracker.framesClose(live, target, tolerance: DragTracker.noOpWriteTolerance)
         {

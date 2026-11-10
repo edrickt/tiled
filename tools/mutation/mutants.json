@@ -1228,5 +1228,59 @@
   "any AX role counts as a title bar (role predicate ignores the window role)",
   "    static func isTitleBarRole(_ role: CFTypeRef?) -> Bool {\n        (role as? String) == kAXWindowRole as String\n    }",
   "    static func isTitleBarRole(_ role: CFTypeRef?) -> Bool {\n        role is String\n    }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "direct birth reports a bound element as a newborn (one window, two records)",
+  "        if let existing { return .existing(existing) }",
+  "        if let existing { return .birth }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "direct birth re-births an observed or seen window (a managed window becomes a record)",
+  "        if managed || seen { return .alreadyKnown }",
+  "        if managed || seen { return .birth }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "direct birth writes an unreadable delivery (no geometry to size)",
+  "        guard frame != nil else { return .unreadable }",
+  "        guard frame != nil else { return .confirmChurn }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "direct birth ignores the churn candidate (a tab switch quarter-sizes the tile)",
+  "        if churnCandidate { return .confirmChurn }",
+  "        if churnCandidate { return .birth }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "churn pre-filter never finds a candidate (a tab switch quarter-sizes the tile)",
+  "                && ($0.lastFrame.map { churnFramesClose($0, frame) } ?? false)",
+  "                && false"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "churn pre-filter counts focus-only bindings (a birth on a focus-adopted window confirms)",
+  "            $0.pid == pid && $0.observedKey != nil && $0.element != nil",
+  "            $0.pid == pid && $0.element != nil"
+ ],
+ [
+  "FrameWriter.swift",
+  "birth write re-reads the live frame (the delivered frame is ignored)",
+  "        let liveBefore = live ?? gateway.frame(of: handle)",
+  "        let liveBefore = gateway.frame(of: handle)"
+ ],
+ [
+  "TilingController.swift",
+  "birth re-reads the window instead of using the delivered frame",
+  "        guard let live = delivered ?? gateway.frame(of: handle), live != .zero else {",
+  "        guard let live = gateway.frame(of: handle), live != .zero else {"
+ ],
+ [
+  "TilingController.swift",
+  "a birth that dies before its write narrates a refusal (dead windows named, binding kept)",
+  "            guard gateway.liveness(of: handle) != .dead else {\n                gateway.release(handle)\n                register.forget(id)\n                dbg(\"birth win\\(id): dead on arrival, no write\")\n                return\n            }\n",
+  ""
  ]
 ]

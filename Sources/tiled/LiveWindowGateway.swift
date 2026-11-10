@@ -119,7 +119,8 @@ final class LiveAXObserverDriver: AXObserverDriver {
             LiveWindowGateway.active?.handleAXNotification(
                 notification: notification as String,
                 token: UInt(CFHash(element)),
-                pid: creationPid(from: element))
+                pid: creationPid(from: element),
+                element: element)
             return
         }
         LiveWindowGateway.active?.handleAXNotification(
@@ -298,9 +299,9 @@ final class LiveWindowGateway: WindowGateway {
     private var spaceChangeHandler: (() -> Void)?
     private var spaceChangeObserver: NSObjectProtocol?
     /// Birth callback: one handler for every created window, whatever
-    /// app owns it. Set by `observeWindowCreations`; nil until the
-    /// controller subscribes.
-    private var creationHandler: ((WindowHandle) -> Void)?
+    /// app owns it, with the frame read once on the delivery path. Set
+    /// by `observeWindowCreations`; nil until the controller subscribes.
+    private var creationHandler: ((WindowHandle, CGRect?) -> Void)?
     /// App element per creation-subscribed pid, retained so the birth
     /// router can list the app's windows and so the notification can be
     /// removed. Keyed by pid, alongside the shared observers.
@@ -1008,7 +1009,9 @@ final class LiveWindowGateway: WindowGateway {
     /// window of another app is a birth by product rule; filtering
     /// subroles would add an AX role read to every app's first window
     /// and protect nothing the audit found broken.
-    func observeWindowCreations(_ onCreated: @escaping (WindowHandle) -> Void) {
+    func observeWindowCreations(
+        _ onCreated: @escaping (WindowHandle, CGRect?) -> Void
+    ) {
         creationHandler = onCreated
         for pid in runningProcessIDs() {
             subscribeCreations(for: pid)
@@ -1168,13 +1171,141 @@ final class LiveWindowGateway: WindowGateway {
         return best
     }
 
-    /// One window-creation notification for `pid`: diffs the app's window
-    /// list against its observed bindings and baseline, and routes each
-    /// genuine newborn to the birth callback. Dead-on-arrival windows are
-    /// dropped before the callback, never reported.
-    private func windowCreated(pid: pid_t) {
+    /// One window-creation notification. The notification names the
+    /// newborn element, so the birth path uses it directly: its frame is
+    /// read once and handed to the callback, and the controller writes the
+    /// quarter footprint from it — the only AX work before that write is
+    /// the read that names the geometry. A delivery that needs the app's
+    /// fresh window list (a possible churned identity, or a creation with
+    /// no delivered element) falls through to the list diff, which owns
+    /// the adoption rule.
+    private func windowCreated(pid: pid_t, element: AXUIElement?) {
         guard let handler = creationHandler else { return }
-        guard let listed = Self.appWindowList(pid: pid) else { return }
+        if let element, deliverBirth(element: element, pid: pid, handler: handler) {
+            return
+        }
+        windowCreatedByListDiff(pid: pid, handler: handler)
+    }
+
+    /// The route one creation notification takes on the direct birth path:
+    /// the decision half of `deliverBirth`, pure and pinned without AX.
+    enum BirthRoute: Equatable {
+        /// No readable frame: the list diff drops it as unreadable.
+        case unreadable
+        /// The delivered element is already bound: report that handle.
+        case existing(WindowHandle)
+        /// An observed token or identity: already managed, never a birth.
+        case alreadyKnown
+        /// A close-frame observed window may be its churned identity:
+        /// confirm against the app's fresh window list before any write.
+        case confirmChurn
+        /// A genuine newborn: report it and size it at once.
+        case birth
+    }
+
+    /// Orders the direct path's answers: an already-bound element reports
+    /// its handle first (a focus read or an earlier delivery owns it), an
+    /// observed token or identity is never a birth, an unreadable frame
+    /// drops to the list diff, and only a possible churn pays for the
+    /// app's fresh window list. Everything left is a newborn.
+    static func birthRoute(
+        frame: CGRect?, existing: WindowHandle?, managed: Bool,
+        seen: Bool, churnCandidate: Bool
+    ) -> BirthRoute {
+        if let existing { return .existing(existing) }
+        if managed || seen { return .alreadyKnown }
+        guard frame != nil else { return .unreadable }
+        if churnCandidate { return .confirmChurn }
+        return .birth
+    }
+
+    /// The direct birth path. The delivered element is read once, and the
+    /// route decides whether that read is a report, a drop, or the size
+    /// write the controller issues immediately. A close-frame observed
+    /// window of the same pid is the one ambiguous shape — a churned
+    /// identity (Terminal replaces its window element on every tab switch)
+    /// — so it returns false and the list diff confirms it; every other
+    /// birth hands the frame over for the write with no further AX work.
+    private func deliverBirth(
+        element: AXUIElement, pid: pid_t,
+        handler: (WindowHandle, CGRect?) -> Void
+    ) -> Bool {
+        Self.applyMessagingTimeout(element)
+        // The one read before the write.
+        let frame = Self.frame(of: element)
+        let token = UInt(CFHash(element))
+        // A focus read may have adopted this window first, and a managed
+        // window re-notified reuses its handle: report the existing handle
+        // rather than forking a second record for one window.
+        let existing = bindings.first(where: {
+            $0.value.pid == pid
+                && ($0.value.element.map { CFEqual($0, element) } ?? false)
+        })?.key
+        let observed = bindings.filter {
+            $0.value.pid == pid && $0.value.observedKey != nil
+        }
+        let route = Self.birthRoute(
+            frame: frame,
+            existing: existing,
+            managed: Self.isManagedBirth(
+                token: token, element: element,
+                observedTokens: Set(observed.values.map(\.token)),
+                observedElements: observed.values.compactMap(\.element)),
+            seen: creationSeenTokens[pid]?.contains(token) ?? false,
+            churnCandidate: frame.map {
+                Self.hasChurnCandidate(frame: $0, pid: pid, bindings: bindings)
+            } ?? false)
+        switch route {
+        case .unreadable, .confirmChurn:
+            return false
+        case .existing(let handle):
+            handler(handle, frame)
+            return true
+        case .alreadyKnown:
+            return true
+        case .birth:
+            guard let frame else { return false }
+            creationSeenTokens[pid, default: []].insert(token)
+            let handle = WindowHandle(id: nextHandleID)
+            nextHandleID += 1
+            let frames = AXWindowFrames(element: element)
+            bindings[handle] = WindowBinding(pid: pid, frames: frames, token: token)
+            adopt(handle, element: element, token: token, frames: frames, pid: pid)
+            if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
+                NSLog(
+                    "Tiled: [DEBUG-birth] pid=%d route=direct newborn=1 frame=%@",
+                    pid, "\(frame)")
+            }
+            handler(handle, frame)
+            return true
+        }
+    }
+
+    /// Whether an observed window of `pid` sits close enough to `frame`
+    /// that the newborn could be its churned identity: a held element plus
+    /// a last-read frame within the churn tolerance. The app-list half of
+    /// `churnedHandle` is deliberately left out — this is the cheap
+    /// pre-filter that decides whether paying that read is necessary, so
+    /// it must be a superset of what `churnedHandle` can adopt from.
+    static func hasChurnCandidate(
+        frame: CGRect, pid: pid_t, bindings: [WindowHandle: WindowBinding]
+    ) -> Bool {
+        bindings.values.contains {
+            $0.pid == pid && $0.observedKey != nil && $0.element != nil
+                && ($0.lastFrame.map { churnFramesClose($0, frame) } ?? false)
+        }
+    }
+
+    /// One window-creation notification for `pid`, resolved by diffing the
+    /// app's window list against its observed bindings and baseline: the
+    /// fallback for a creation with no delivered element and the
+    /// confirmation half of the churn rule. Routes each genuine newborn to
+    /// the birth callback. Dead-on-arrival windows are dropped before the
+    /// callback, never reported.
+    private func windowCreatedByListDiff(
+        pid: pid_t, handler: (WindowHandle, CGRect?) -> Void
+    ) {
+        guard let listed = windowList(pid) else { return }
         // A focus read adopts a window before its creation notification
         // is processed; that focus-only binding (never observed, never
         // sized) must not shadow the birth the way a managed window's
@@ -1185,7 +1316,7 @@ final class LiveWindowGateway: WindowGateway {
         let observedTokens = Set(observedBindings.values.map(\.token))
         let observedElements = observedBindings.values.compactMap(\.element)
         var seen = creationSeenTokens[pid] ?? []
-        var newborns: [AXUIElement] = []
+        var newborns: [(element: AXUIElement, frame: CGRect?)] = []
         for element in listed {
             let token = UInt(CFHash(element))
             guard
@@ -1196,16 +1327,19 @@ final class LiveWindowGateway: WindowGateway {
                 !seen.contains(token)
             else { continue }
             seen.insert(token)
-            newborns.append(element)
+            // The one frame read this element gets: the churn match and the
+            // callback both use it, so the list diff never reads twice.
+            newborns.append((element, Self.frame(of: element)))
         }
         creationSeenTokens[pid] = seen
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1", !newborns.isEmpty {
-            let frames = newborns.map { Self.frame(of: $0).map { "\($0)" } ?? "unreadable" }
+            let frames = newborns.map { $0.frame.map { "\($0)" } ?? "unreadable" }
             NSLog(
                 "Tiled: [DEBUG-birth] pid=%d listed=%d observed=%d newborn=%d frames=%@",
-                pid, listed.count, observedBindings.count, newborns.count, frames.joined(separator: "; "))
+                pid, listed.count, observedBindings.count, newborns.count,
+                frames.joined(separator: "; "))
         }
-        for element in newborns {
+        for (element, newbornFrame) in newborns {
             // A focus read may have adopted this window first: reuse that
             // handle so focus and birth share one identity instead of
             // forking a second record for the same window. A managed
@@ -1215,7 +1349,7 @@ final class LiveWindowGateway: WindowGateway {
                 $0.value.pid == pid
                     && ($0.value.element.map { CFEqual($0, element) } ?? false)
             })?.key
-            if existing == nil, let newbornFrame = Self.frame(of: element) {
+            if existing == nil, let newbornFrame {
                 // Tab churn: the same on-screen window under a new
                 // identity adopts its observed handle, never births.
                 existing = Self.churnedHandle(
@@ -1235,7 +1369,7 @@ final class LiveWindowGateway: WindowGateway {
                     release(existing)
                     continue
                 }
-                handler(existing)
+                handler(existing, newbornFrame)
                 continue
             }
             let handle = WindowHandle(id: nextHandleID)
@@ -1249,7 +1383,7 @@ final class LiveWindowGateway: WindowGateway {
                 release(handle)
                 continue
             }
-            handler(handle)
+            handler(handle, newbornFrame)
         }
     }
 
@@ -1936,7 +2070,8 @@ final class LiveWindowGateway: WindowGateway {
     /// than a refcon id. A released handle has forgotten its token, and
     /// the notification falls through.
     func handleAXNotification(
-        notification: String, token: UInt, pid: pid_t? = nil
+        notification: String, token: UInt, pid: pid_t? = nil,
+        element: AXUIElement? = nil
     ) {
         if ProcessInfo.processInfo.environment["TILED_DEBUG"] == "1" {
             NSLog("Tiled: [DEBUG-obs] notification %@ arrived", notification)
@@ -1944,10 +2079,11 @@ final class LiveWindowGateway: WindowGateway {
         // A creation notification arrives with the newborn window's
         // element, never the subscribed app element: the owner read off
         // the delivered element names the pid, and the app element's
-        // token map stays as the fallback.
+        // token map stays as the fallback. The element itself is the
+        // birth's geometry: the direct path reads it once and writes.
         if notification == kAXWindowCreatedNotification as String {
             if let pid = pid ?? creationPIDs[token] {
-                windowCreated(pid: pid)
+                windowCreated(pid: pid, element: element)
             }
             return
         }
