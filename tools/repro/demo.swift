@@ -2,14 +2,17 @@ import AppKit
 import ApplicationServices
 
 // The demo suite: the same live machinery run-repro.sh drives, paced for
-// showing off instead of verifying. No assertion mirrors — every scene
-// performs one headline operation and holds long enough for a screen
-// recording to catch it (scripts/run-repro.sh tools/repro/demo.swift).
+// showing off instead of verifying. No assertion mirrors — every step
+// performs one operation and waits one uniform beat, so the recording
+// has an even rhythm (scripts/run-repro.sh tools/repro/demo.swift).
 //
-// Scene line: scattered desktop -> hotkey-tile the quarters -> live
-// splitter drags -> a title-bar drag-out untile -> undo snaps the window
-// back -> the layout switch to sixths -> a per-third row resize -> undo
-// the resize -> evict everyone back to a scattered desktop.
+// Line: four untiled windows -> each tiled to a quarter corner -> the
+// bottom-left window dragged to the center to untile it (the top-left
+// survivor reflows into the left half) -> the left half's right edge
+// dragged right to widen, then back left past the halfway to shrink ->
+// the left-half window swapped into the bottom left -> then swapped with
+// the top right (the blocker takes the vacated slot) -> expand to fill
+// the screen -> un-expand back into its tile.
 
 // MARK: AX helpers (trimmed from suite.swift)
 
@@ -85,8 +88,6 @@ func focus(_ t: String) {
 let slotKeyFor: [String: CGKeyCode] = [
     "TL": CGKeyCode(32), "TR": CGKeyCode(31),
     "BL": CGKeyCode(46), "BR": CGKeyCode(47),
-    "sixthTopLeft": CGKeyCode(32), "sixthTopRight": CGKeyCode(31),
-    "sixthBottomLeft": CGKeyCode(46), "sixthBottomRight": CGKeyCode(47),
 ]
 
 func hotkey(_ slot: String) {
@@ -98,29 +99,13 @@ func hotkey(_ slot: String) {
     }
 }
 
-func pressUndo() {
-    let src = CGEventSource(stateID: .hidSystemState)
-    for down in [true, false] {
-        let e = CGEvent(keyboardEventSource: src, virtualKey: 6, keyDown: down)
-        e?.flags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
-        post(e)
-    }
-}
-
-func pressLayoutSwitch() {
-    let src = CGEventSource(stateID: .hidSystemState)
-    for down in [true, false] {
-        let e = CGEvent(keyboardEventSource: src, virtualKey: 42, keyDown: down) // backslash
-        e?.flags = [.maskAlternate, .maskShift]
-        post(e)
-    }
-}
-
-func pressEvict(_ t: String) {
+/// The focused window's ⌥⇧⏎ expand toggle: fills the screen, then
+/// restores the frame it had before expanding.
+func pressExpand(_ t: String) {
     focus(t)
     let src = CGEventSource(stateID: .hidSystemState)
     for down in [true, false] {
-        let e = CGEvent(keyboardEventSource: src, virtualKey: 51, keyDown: down) // ⌫
+        let e = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: down) // ⏎
         e?.flags = [.maskAlternate, .maskShift]
         post(e)
     }
@@ -137,8 +122,7 @@ let primaryTop = screen.frame.maxY
 /// A real hand drag of one tiled edge: press first, step the frame while
 /// the button is down, lift after the last tick lands (a splitter
 /// commits only under a held button — see suite.swift's dragEdge).
-/// Deliberately slow: a ~2.4s glide reads as a gesture in a recording
-/// instead of a jump cut.
+/// A ~2.4s glide reads as a gesture in a recording instead of a jump.
 func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
     guard let f = actualFrame(t) else { return }
     let center = CGPoint(x: f.midX, y: f.midY)
@@ -164,8 +148,9 @@ func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
     usleep(900_000)
 }
 
-/// A real cursor drag across the screen (a title-bar grab, a drop
-/// wherever the hand lets go), paced like the edge drags.
+/// A real cursor drag across the screen: a title-bar grab, a drop
+/// wherever the hand lets go — past the untile distance the window
+/// untiles where dropped and the freed cells reflow.
 func drag(from: CGPoint, to: CGPoint) {
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left))
     let steps = 60
@@ -179,11 +164,6 @@ func drag(from: CGPoint, to: CGPoint) {
     usleep(900_000)
 }
 
-func hold(_ seconds: Double, _ scene: String) {
-    print("==> \(scene)")
-    usleep(useconds_t(seconds * 1_000_000))
-}
-
 func tile(_ t: String, _ slot: String) {
     focus(t)
     hotkey(slot)
@@ -192,51 +172,47 @@ func tile(_ t: String, _ slot: String) {
 
 // MARK: the demo
 
-// Every state holds long enough that a 1s-interval recording gives it
-// several frames, and consecutive tiles sit two seconds apart so each
-// placement lands as its own visible step.
-hold(5.0, "a messy desktop")
+// One uniform beat between every action: the recording keeps an even
+// rhythm instead of grouping actions with long scene holds between
+// groups. Drag gestures themselves run ~2.4s; everything else waits the
+// same two seconds before the next step.
+let beat: useconds_t = 2_000_000
+
+print("==> four untiled windows")
+usleep(4_000_000)
 
 for (t, slot) in [("HOSTA", "TL"), ("HOSTB", "TR"), ("HOSTC", "BL"), ("HOSTD", "BR")] {
     tile(t, slot)
-    usleep(2_000_000)
+    usleep(beat)
 }
-hold(5.0, "hotkeys tile the quarters")
 
-dragEdge("BL", "right", 150)
-hold(4.0, "a splitter drag reshapes the column")
-dragEdge("TL", "bottom", -80)
-hold(4.0, "row dividers move independently")
-
-if let f = actualFrame("HOSTA") {
-    let grab = CGPoint(x: f.midX, y: f.minY + 10)
-    let drop = CGPoint(x: vf.midX, y: vf.midY + 120)
-    drag(from: grab, to: drop)
+print("==> drag the bottom left to the center: it untiles where dropped")
+if let f = actualFrame("HOSTC") {
+    drag(from: CGPoint(x: f.midX, y: f.minY + 10), to: CGPoint(x: vf.midX, y: vf.midY))
 }
-hold(5.0, "drag a tile out: it floats where dropped")
+usleep(beat)
 
-pressUndo()
-hold(5.0, "undo snaps it back into its slot")
+print("==> the left half's right edge resizes right, then back past halfway")
+dragEdge("HOSTA", "right", 150)
+usleep(beat)
+dragEdge("HOSTA", "right", -350)
+usleep(beat)
 
-pressLayoutSwitch()
-hold(5.0, "the layout switch untiles to the quarter footprint")
+print("==> the left-half window swaps into the bottom left")
+tile("HOSTA", "BL")
+usleep(beat)
 
-for (t, slot) in [("HOSTA", "sixthTopLeft"), ("HOSTB", "sixthTopRight"), ("HOSTC", "sixthBottomLeft"), ("HOSTD", "sixthBottomRight")] {
-    tile(t, slot)
-    usleep(2_000_000)
-}
-hold(5.0, "the same keys tile sixths")
+print("==> then swaps with the top right; the blocker takes the vacated slot")
+tile("HOSTA", "TR")
+usleep(beat)
 
-dragEdge("sixthBottomLeft", "top", 60)
-hold(4.0, "one third's row divider, the rest held")
+print("==> expand to fill the screen")
+pressExpand("HOSTA")
+usleep(beat)
 
-pressUndo()
-hold(4.0, "undo steps the drag back")
+print("==> un-expand back into its tile")
+pressExpand("HOSTA")
+usleep(beat)
 
-for t in ["HOSTA", "HOSTB", "HOSTC", "HOSTD"] {
-    pressEvict(t)
-    usleep(2_000_000)
-}
-hold(5.0, "evict everyone: back to a messy desktop")
-
+usleep(3_000_000)
 print("demo done")
