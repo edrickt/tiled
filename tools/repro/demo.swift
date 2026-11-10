@@ -9,8 +9,11 @@ import ApplicationServices
 // Line: four untiled windows -> each tiled to a quarter corner -> the
 // bottom-left window dragged to the center to untile it (the top-left
 // survivor reflows into the left half) and closed -> the left half's
-// right edge dragged right to widen, then back to a left half -> expand
-// to fill the screen -> un-expand back into its tile.
+// right edge dragged right to widen, then back to a left half -> the red
+// left half swaps with the blue top right (blue takes the vacated left
+// half), the blue left half swaps with the orange bottom right (orange
+// takes the vacated left half) -> the blue tile fills the screen and
+// returns. The demo ends on the tiled state; nothing is closed.
 
 // MARK: AX helpers (trimmed from suite.swift)
 
@@ -213,12 +216,20 @@ usleep(beat)
 dragEdge("HOSTA", "right", -180)
 usleep(beat)
 
-print("==> expand to fill the screen")
-pressExpand("HOSTA")
+print("==> the red left half swaps with the blue top right")
+tile("HOSTA", "TR")
 usleep(beat)
 
-print("==> un-expand back into its tile")
-pressExpand("HOSTA")
+print("==> the blue left half swaps with the orange bottom right")
+tile("HOSTB", "BR")
+usleep(beat)
+
+print("==> the blue tile fills the screen")
+pressExpand("HOSTB")
+usleep(beat)
+
+print("==> and returns to its tile")
+pressExpand("HOSTB")
 usleep(beat)
 
 usleep(3_000_000)
