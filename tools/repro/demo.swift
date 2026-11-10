@@ -13,7 +13,10 @@ import ApplicationServices
 // left half swaps with the blue top right (blue takes the vacated left
 // half), the blue left half swaps with the orange bottom right (orange
 // takes the vacated left half) -> the blue tile fills the screen and
-// returns. The demo ends on the tiled state; nothing is closed.
+// returns -> the red tile's bottom-left corner drags both neighbours at
+// once -> the blue tile is dragged out and floats where dropped while
+// the right half reabsorbs. The recording ends there, every window
+// still on screen.
 
 // MARK: AX helpers (trimmed from suite.swift)
 
@@ -125,6 +128,19 @@ func pressExpand(_ t: String) {
     }
 }
 
+/// The focused window's ⌥⇧⌫ evict: it leaves the grid and floats at the
+/// quarter footprint, and the freed cells reflow into the mergeable
+/// survivor.
+func pressEvict(_ t: String) {
+    focus(t)
+    let src = CGEventSource(stateID: .hidSystemState)
+    for down in [true, false] {
+        let e = CGEvent(keyboardEventSource: src, virtualKey: 51, keyDown: down) // ⌫
+        e?.flags = [.maskAlternate, .maskShift]
+        post(e)
+    }
+}
+
 // MARK: screen metrics
 
 let screen = NSScreen.screens[0]
@@ -152,6 +168,30 @@ func dragEdge(_ t: String, _ edge: String, _ delta: CGFloat) {
         case "bottom": nf.size.height = max(f.height + delta * t2, 80)
         default: break
         }
+        if let el = hostWindows().first(where: { $0.title == t })?.el {
+            setRawFrame(el, nf)
+        }
+        usleep(60_000)
+    }
+    usleep(700_000)
+    post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: center, mouseButton: .left))
+    usleep(900_000)
+}
+
+/// A real hand drag of one corner: two edges move in the same gesture,
+/// so the column and row dividers both commit and both neighbours
+/// reshape at once.
+func dragCorner(_ t: String, _ dx: CGFloat, _ dy: CGFloat) {
+    guard let f = actualFrame(t) else { return }
+    let center = CGPoint(x: f.midX, y: f.midY)
+    post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: center, mouseButton: .left))
+    let steps = 40
+    for i in 1...steps {
+        let t2 = CGFloat(i) / CGFloat(steps)
+        var nf = f
+        nf.origin.x = f.minX + dx * t2
+        nf.size.width = max(f.width - dx * t2, 80)
+        nf.size.height = max(f.height + dy * t2, 80)
         if let el = hostWindows().first(where: { $0.title == t })?.el {
             setRawFrame(el, nf)
         }
@@ -232,5 +272,22 @@ print("==> and returns to its tile")
 pressExpand("HOSTB")
 usleep(beat)
 
-usleep(3_000_000)
+print("==> the red tile's bottom-left corner drags both neighbours at once")
+dragCorner("HOSTA", -80, 80)
+usleep(beat)
+
+print("==> untile the blue tile: drag it out, it floats where dropped")
+if let f = actualFrame("HOSTB") {
+    drag(from: CGPoint(x: f.midX, y: f.minY + 10), to: CGPoint(x: vf.midX, y: vf.midY + 120))
+}
+usleep(beat)
+
+// The reflow reassert can bury the floated window under the survivor
+// it shrank beside; raise it so the ending shows all three windows.
+if let w = hostWindows().first(where: { $0.title == "HOSTB" })?.el {
+    AXUIElementPerformAction(w, kAXRaiseAction as CFString)
+}
+usleep(1_000_000)
+
+usleep(8_000_000)
 print("demo done")
