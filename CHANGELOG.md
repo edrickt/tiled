@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-10
+
 ### Fixed
 
 - A new window's quarter write is now the birth's first effect, so the
