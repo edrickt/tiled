@@ -32,3 +32,28 @@ hermetic cycle does not set `TILED_EXHAUSTIVE`).
 
 This section is the only gate policy. Specs, tickets, and reports point
 here; they do not restate or add gates.
+
+## Codebase navigation
+
+The file router is `docs/agents/codebase-map.md`: read it before the first
+broad search (`ls`, tree-wide `grep`/`glob`, or reading whole directories).
+It is verified against the working tree and lists per-file purposes, entry
+points, test suites, and the directories not worth reading.
+
+Top-level layout: `Sources/tiled/` holds the 42 flat Swift sources;
+`Tests/tiledTests/` holds the hermetic suites; `Makefile` plus `scripts/`
+are the commands; `docs/` holds the guides and ADRs.
+
+Most changes start at one of: `Sources/tiled/TilingController.swift`
+(action routing), `Sources/tiled/TilingSpace.swift` (canvas and placement
+pipeline), `Sources/tiled/LiveWindowGateway.swift` (AX adapter),
+`Sources/tiled/MenuModel.swift` (menu structure),
+`Sources/tiled/SettingsShortcutsTab.swift` (shortcut editor).
+
+Do not read generated or historical directories (`build/`, `.build/`,
+`docs/release-notes/`, `docs/superpowers/`, `.scratch/`, `.audit/`,
+`usage`); the map's Don't read section gives the reason for each.
+
+Domain docs are worth reading per concept, not front to back: `CONTEXT.md`
+before naming a concept, and the one relevant `docs/adr/*.md` before
+changing the area it covers.
