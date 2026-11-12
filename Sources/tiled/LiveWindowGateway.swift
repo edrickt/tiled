@@ -991,20 +991,19 @@ final class LiveWindowGateway: WindowGateway {
         retargetFocusObserver()
     }
 
-    /// One birth subscription for every app: subscribes each running
+    /// One creation subscription for every app: subscribes each running
     /// app's app element now, and future launches via the launch
     /// observer, so a brand-new app's first window fires like any other
     /// birth. Windows already open are only baselined, never reported.
     ///
     /// Tiled's own pid is never subscribed: its Settings/Welcome windows
-    /// are born at their designed size, and a birth would resize them to
-    /// the quarter footprint and make them managed windows (the audited
-    /// 440×480 Settings window appearing at 840×510). The skip is
-    /// subscribe-time, in `subscribeCreations`, so both the running-app
-    /// pass and the launch observer share it; with no observer on the own
-    /// pid, its creation notifications never arrive.
+    /// are Tiled's own UI, not windows for the tiling board (the audited
+    /// 440×480 Settings window was being adopted as if it were one). The
+    /// skip is subscribe-time, in `subscribeCreations`, so both the
+    /// running-app pass and the launch observer share it; with no
+    /// observer on the own pid, its creation notifications never arrive.
     ///
-    /// Other apps' dialogs and sheets are still sized. The creation
+    /// Other apps' dialogs and sheets are still reported. The creation
     /// notification names a window, not a role, and a newly created
     /// window of another app is a birth by product rule; filtering
     /// subroles would add an AX role read to every app's first window
@@ -1117,9 +1116,9 @@ final class LiveWindowGateway: WindowGateway {
     /// observed, or its identity matches an observed window. Tokens are
     /// hashes, so identity confirms before a handle is reused or issued.
     /// Focus-only bindings — adopted by a focus read, never observed or
-    /// sized — never shadow a birth: the newborn loop reuses their handle
-    /// instead. Internal so the rule is pinned without an Accessibility
-    /// grant.
+    /// given a record — never shadow a birth: the newborn loop reuses
+    /// their handle instead. Internal so the rule is pinned without an
+    /// Accessibility grant.
     static func isManagedBirth(
         token: UInt, element: AXUIElement,
         observedTokens: Set<UInt>, observedElements: [AXUIElement]
@@ -1134,10 +1133,10 @@ final class LiveWindowGateway: WindowGateway {
     /// triple is a tab switch (Terminal replaces its window element on
     /// every switch while still reporting one window), never a new
     /// window: the caller adopts instead of birthing, or every switch
-    /// quarter-sizes the tile. A held element the app still lists is a
-    /// live window (a Firefox tab tear-off shares the source frame
-    /// mid-drag), so it never matches — that birth still parks for the
-    /// drop. When several candidates match, the closest frame wins and
+    /// forges a second identity for the tile. A held element the app
+    /// still lists is a live window (a Firefox tab tear-off shares the
+    /// source frame mid-drag), so it never matches — that window is still
+    /// a birth. When several candidates match, the closest frame wins and
     // exact ties break to the smallest handle id, so the adoption never
     /// depends on Dictionary iteration order. Internal so the rule is
     /// pinned without an Accessibility grant.
@@ -1173,8 +1172,8 @@ final class LiveWindowGateway: WindowGateway {
 
     /// One window-creation notification. The notification names the
     /// newborn element, so the birth path uses it directly: its frame is
-    /// read once and handed to the callback, and the controller writes the
-    /// quarter footprint from it — the only AX work before that write is
+    /// read once and handed to the callback, and the controller records
+    /// the newborn at that frame — the only AX work before the adoption is
     /// the read that names the geometry. A delivery that needs the app's
     /// fresh window list (a possible churned identity, or a creation with
     /// no delivered element) falls through to the list diff, which owns
@@ -1197,9 +1196,9 @@ final class LiveWindowGateway: WindowGateway {
         /// An observed token or identity: already managed, never a birth.
         case alreadyKnown
         /// A close-frame observed window may be its churned identity:
-        /// confirm against the app's fresh window list before any write.
+        /// confirm against the app's fresh window list before the report.
         case confirmChurn
-        /// A genuine newborn: report it and size it at once.
+        /// A genuine newborn: report it and adopt it at once.
         case birth
     }
 
@@ -1220,18 +1219,18 @@ final class LiveWindowGateway: WindowGateway {
     }
 
     /// The direct birth path. The delivered element is read once, and the
-    /// route decides whether that read is a report, a drop, or the size
-    /// write the controller issues immediately. A close-frame observed
-    /// window of the same pid is the one ambiguous shape — a churned
-    /// identity (Terminal replaces its window element on every tab switch)
-    /// — so it returns false and the list diff confirms it; every other
-    /// birth hands the frame over for the write with no further AX work.
+    /// route decides whether that read is a report, a drop, or the newborn
+    /// the controller adopts immediately. A close-frame observed window of
+    /// the same pid is the one ambiguous shape — a churned identity
+    /// (Terminal replaces its window element on every tab switch) — so it
+    /// returns false and the list diff confirms it; every other birth
+    /// hands the frame over for the adoption with no further AX work.
     private func deliverBirth(
         element: AXUIElement, pid: pid_t,
         handler: (WindowHandle, CGRect?) -> Void
     ) -> Bool {
         Self.applyMessagingTimeout(element)
-        // The one read before the write.
+        // The one read before the adoption.
         let frame = Self.frame(of: element)
         let token = UInt(CFHash(element))
         // A focus read may have adopted this window first, and a managed
@@ -1308,8 +1307,8 @@ final class LiveWindowGateway: WindowGateway {
         guard let listed = windowList(pid) else { return }
         // A focus read adopts a window before its creation notification
         // is processed; that focus-only binding (never observed, never
-        // sized) must not shadow the birth the way a managed window's
-        // does.
+        // given a record) must not shadow the birth the way a managed
+        // window's does.
         let observedBindings = bindings.filter {
             $0.value.pid == pid && $0.value.observedKey != nil
         }
@@ -2255,7 +2254,8 @@ final class LiveWindowGateway: WindowGateway {
         // element, never the subscribed app element: the owner read off
         // the delivered element names the pid, and the app element's
         // token map stays as the fallback. The element itself is the
-        // birth's geometry: the direct path reads it once and writes.
+        // birth's geometry: the direct path reads it once and hands it
+        // over for the record.
         if notification == kAXWindowCreatedNotification as String {
             if let pid = pid ?? creationPIDs[token] {
                 windowCreated(pid: pid, element: element)

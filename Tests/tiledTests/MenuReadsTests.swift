@@ -208,11 +208,12 @@ final class MenuReadsTests: XCTestCase {
         ])
     }
 
-    func testABackgroundBirthRefusalReachesTheMenuWithItsDisplayName() {
-        // A birth on a display the user is not focused on is refused by
-        // its app. The birth returns no receipt and the focused canvas's
-        // error is empty, so the aggregated background row is the only
-        // place the refusal can surface.
+    func testABackgroundReassertRefusalReachesTheMenuWithItsDisplayName() {
+        // A window tiles on a display the user is not focused on. A
+        // display change reasserts that background canvas and the app
+        // refuses the write. The reassert returns no receipt and the
+        // focused canvas's error is empty, so the aggregated background
+        // row is the only place the refusal can surface.
         let left = ScreenInfo(
             id: ScreenID(rawValue: 1),
             frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
@@ -231,20 +232,29 @@ final class MenuReadsTests: XCTestCase {
             screens: { [left, right] }, deathConfirmation: 0)
         controller.onChange = {}
 
-        let focused = gateway.addWindow(
+        // Tile Mail on the right display's canvas, then move focus to a
+        // window on the left: the right canvas is now a background one.
+        let mail = gateway.addWindow(
+            frame: CGRect(x: 2000, y: 100, width: 800, height: 600), appName: "Mail")
+        gateway.focused = mail
+        controller.handle(slot: .topLeft)
+        let rightCanvas = TilingSpaceKey(screen: right.id, space: nil)
+        XCTAssertEqual(controller.canvas(for: rightCanvas).state.tiledWindows.count, 1)
+
+        let notes = gateway.addWindow(
             frame: CGRect(x: 100, y: 100, width: 800, height: 600), appName: "Notes")
-        gateway.focused = focused
+        gateway.focused = notes
 
-        // Every write is refused: the new window's birth sizing on the
-        // other display cannot land.
-        gateway.willWrite = { handle in gateway.refuseNextWrites(handle) }
-        gateway.simulateWindowCreated(
-            frame: CGRect(x: 2000, y: 100, width: 800, height: 600))
-        gateway.willWrite = nil
+        // Move the tiled window off its tile, then refuse the reassert's
+        // write that the display change issues.
+        gateway.refuseNextWrites(mail)
+        gateway.simulateSilentChange(
+            mail, to: CGRect(x: 1900, y: 200, width: 700, height: 500))
+        NotificationCenter.default.post(
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
 
-        let birthCanvas = TilingSpaceKey(screen: right.id, space: nil)
         XCTAssertEqual(
-            controller.canvas(for: birthCanvas).error,
+            controller.canvas(for: rightCanvas).error,
             "Couldn't move that window: the app refused to resize it.")
         XCTAssertEqual(controller.focusedTilingSpace.screen, left.id)
 

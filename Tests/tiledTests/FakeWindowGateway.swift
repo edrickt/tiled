@@ -83,20 +83,10 @@ final class FakeWindowGateway: WindowGateway {
     }
 
     func frame(of handle: WindowHandle) -> CGRect? {
-        frameReads += 1
         guard let window = windows[handle], window.alive else { return nil }
         if hideFrames.contains(handle) { return nil }
         return window.frame
     }
-
-    /// Frame reads the controller issued, in order. A birth delivered with
-    /// its frame must not read the window again before its write.
-    private(set) var frameReads = 0
-
-    /// Liveness probes the controller issued. A birth sizes the delivered
-    /// window without probing; only a refused write asks whether the
-    /// window died in between.
-    private(set) var livenessProbes = 0
 
     /// Called with each handle before a frame write. Lets a test script a
     /// refusal at an exact write in a multi-write sequence, where
@@ -159,7 +149,6 @@ final class FakeWindowGateway: WindowGateway {
     var hideFrames: Set<WindowHandle> = []
 
     func liveness(of handle: WindowHandle) -> Liveness {
-        livenessProbes += 1
         guard let window = windows[handle] else { return .dead }
         if probeDead.contains(handle) { return .dead }
         if !window.alive { return .dead }

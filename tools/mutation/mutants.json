@@ -307,15 +307,15 @@
  ],
  [
   "LiveWindowGateway.swift",
-  "churn ignores geometry (any same-app birth adopts instead of sizing)",
+  "churn ignores geometry (any same-app birth adopts)",
   "                Self.churnFramesClose(base, frame),",
   "                true,"
  ],
  [
   "TilingController.swift",
   "destroyed notification ignored (slots linger until the prune tick)",
-  "        guard let id = register.liveID(for: handle) else { return }\n        pendingBirthSizes.removeValue(forKey: id)\n        guard gateway.liveness(of: handle) == .dead else {",
-  "        guard let id = register.liveID(for: handle) else { return }\n        pendingBirthSizes.removeValue(forKey: id)\n        guard false, gateway.liveness(of: handle) == .dead else {"
+  "        guard let id = register.liveID(for: handle) else { return }\n        guard gateway.liveness(of: handle) == .dead else {",
+  "        guard let id = register.liveID(for: handle) else { return }\n        guard false, gateway.liveness(of: handle) == .dead else {"
  ],
  [
   "FrameWriter.swift",
@@ -1093,7 +1093,7 @@
  ],
  [
   "TilingController.swift",
-  "births size on the cursor display (multi-display windows jump screens)",
+  "births record on the cursor display (multi-display windows jump screens)",
   "        directory.owningScreenInfo(for: frame).map { directory.key(for: $0.id) }\n            ?? directory.cursorKey()",
   "        directory.cursorKey()"
  ],
@@ -1297,13 +1297,13 @@
  ],
  [
   "LiveWindowGateway.swift",
-  "direct birth writes an unreadable delivery (no geometry to size)",
+  "direct birth reports an unreadable delivery (no geometry to adopt)",
   "        guard frame != nil else { return .unreadable }",
   "        guard frame != nil else { return .confirmChurn }"
  ],
  [
   "LiveWindowGateway.swift",
-  "direct birth ignores the churn candidate (a tab switch quarter-sizes the tile)",
+  "direct birth ignores the churn candidate (a tab switch forges a second identity for the tile)",
   "        if churnCandidate { return .confirmChurn }",
   "        if churnCandidate { return .birth }"
  ],
@@ -1320,12 +1320,6 @@
   "            $0.pid == pid && $0.element != nil"
  ],
  [
-  "FrameWriter.swift",
-  "birth write re-reads the live frame (the delivered frame is ignored)",
-  "        let liveBefore = live ?? gateway.frame(of: handle)",
-  "        let liveBefore = gateway.frame(of: handle)"
- ],
- [
   "TilingController.swift",
   "birth re-reads the window instead of using the delivered frame",
   "        guard let live = delivered ?? gateway.frame(of: handle), live != .zero else {",
@@ -1333,8 +1327,8 @@
  ],
  [
   "TilingController.swift",
-  "a birth that dies before its write narrates a refusal (dead windows named, binding kept)",
-  "            guard gateway.liveness(of: handle) != .dead else {\n                gateway.release(handle)\n                register.forget(id)\n                dbg(\"birth win\\(id): dead on arrival, no write\")\n                return\n            }\n",
+  "birth records nothing (a new window leaves no managed record)",
+  "        directory.withCanvas(key) {\n            $0.recordBirth(id, handle: handle, frame: live)\n        }\n",
   ""
  ]
 ]

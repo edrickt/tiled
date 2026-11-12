@@ -72,12 +72,12 @@ protocol WindowGateway: AnyObject {
     func observeSpaceChanges(_ onChange: @escaping () -> Void)
     /// Calls `onCreated` with a fresh handle and the frame the OS
     /// delivered it at, for every window the OS creates, in any app: the
-    /// birth-sizing hook. The frame is read once on the delivery path and
-    /// handed over, so the birth write follows the notification with no
-    /// second read; nil means the frame could not be read, and the
-    /// controller's unreadable-birth rule then claims and writes nothing.
-    /// Replaces any previous handler. The live adapter subscribes each
-    /// running app (and future launches) to the window-creation
+    /// birth-adoption hook. The frame is read once on the delivery path
+    /// and handed over, so the controller can record the newborn where the
+    /// app put it with no second read; nil means the frame could not be
+    /// read, and the controller's unreadable-birth rule then claims
+    /// nothing. Replaces any previous handler. The live adapter subscribes
+    /// each running app (and future launches) to the window-creation
     /// notification; the fake exposes `simulateWindowCreated` for tests.
     func observeWindowCreations(
         _ onCreated: @escaping (WindowHandle, CGRect?) -> Void)

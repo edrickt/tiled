@@ -146,6 +146,6 @@ _Code_: `FrameWriter.Result.stands` (the one read every push path shares); `Menu
 _Avoid_: refused, ignored write, hidden-canvas failure, rollback
 
 **Birth**:
-A window the OS has just created, sized in place to the quarter footprint and never auto-tiled. The creation notification names the newborn window itself, and its frame is read once on delivery and handed over with the birth, so the quarter write is the birth's first effect: the app's own window-opening animation is retargeted to that footprint instead of the app's size being shown first. Every other read (liveness, the app's window list, a second frame read) follows the write, or runs only when the delivered window could be a churned identity. Only a landed or deferred write claims a birth: a refused, dead-on-arrival, or unreadable one leaves the window exactly as its app opened it.
-_Avoid_: auto-tile, new-window tiling, open animation (the app's own animation is retargeted, not produced, by Tiled)
+A window the OS has just created. Tiled adopts it as an untiled managed window at the frame its app opened it at: it never resizes a birth and never auto-tiles it, so the size and position the app chose are what the user sees. The creation notification names the newborn window itself, and its frame is read once on delivery and handed over with the birth, so the record needs no second look at the window. The gateway still adopts a churned identity (a Terminal tab switch replaces its window element) instead of birthing it, and an unreadable or dead-on-arrival delivery claims nothing.
+_Avoid_: auto-tile, new-window tiling, new-window resizing, quarter-sized birth
 _Code_: `TilingController.handleWindowCreated(_:at:)`, `LiveWindowGateway.BirthRoute`

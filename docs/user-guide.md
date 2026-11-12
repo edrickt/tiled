@@ -210,14 +210,10 @@ tell you which app took it.
   switches: a key with no slot in the active layout is inert and says where
   it belongs. The menu names the effect and how to undo it ("Switched to
   Sixths · 3 windows untiled. Undo from the Tiled menu.").
-- New windows land at quarter size as their first visible frame, top edge
-  kept, and stay floating; Tiled never auto-tiles. The quarter write is the
-  creation notification's first effect, so the app's own window-opening
-  animation retargets to the quarter footprint almost immediately instead
-  of the window sitting at the app's own size and then snapping down. A
+- New windows keep the size and position their app gives them and stay
+  floating; Tiled never resizes a new window and never auto-tiles one. A
   window born while the mouse button is down (tearing a tab off Firefox)
-  sizes at the drop point on mouse-up, so the resize never fights the
-  drag.
+  is adopted where the app drops it, so no resize fights the drag.
 - A display change (unplug, rearrange, resolution) re-asserts every visible
   canvas immediately. Canvas identity follows the physical display's
   CoreGraphics display number, so reordering screens never moves a display's

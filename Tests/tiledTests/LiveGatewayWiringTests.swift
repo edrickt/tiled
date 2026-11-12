@@ -325,7 +325,7 @@ final class LiveGatewayWiringTests: XCTestCase {
     func testBirthSubscriptionSkipsTheAppsOwnProcess() {
         // The audited bug: the running-app list contains Tiled itself, so
         // its own Settings/Welcome window was subscribed as a birth and
-        // resized to the quarter footprint. The skip is subscribe-time.
+        // adopted as if it were a user window. The skip is subscribe-time.
         let driver = FakeAXObserverDriver()
         let ownPID: pid_t = 4242
         let otherPID: pid_t = 777
@@ -591,7 +591,7 @@ final class LiveGatewayWiringTests: XCTestCase {
         // The direct birth path consults the app's fresh window list only
         // for a shape that could be a churned identity: a held observed
         // window of the same pid whose last-read frame is within the churn
-        // tolerance. Everything else writes the quarter footprint at once.
+        // tolerance. Everything else is a genuine newborn.
         let me = ProcessInfo.processInfo.processIdentifier
         let frame = CGRect(x: 0, y: 4, width: 839, height: 1015)
         let handle = WindowHandle(id: 7)
@@ -708,23 +708,23 @@ final class LiveGatewayWiringTests: XCTestCase {
                 frame: nil, existing: nil, managed: false, seen: false,
                 churnCandidate: false),
             .unreadable,
-            "an unreadable frame drops to the list diff, never to a write")
+            "an unreadable frame drops to the list diff, never to a report")
         XCTAssertEqual(
             LiveWindowGateway.birthRoute(
                 frame: frame, existing: nil, managed: false, seen: false,
                 churnCandidate: true),
             .confirmChurn,
-            "a possible churned identity is confirmed before any write")
+            "a possible churned identity is confirmed before any report")
     }
 
-    func testBirthRouteSizesEveryOtherNewborn() {
+    func testBirthRouteReportsEveryOtherNewborn() {
         XCTAssertEqual(
             LiveWindowGateway.birthRoute(
                 frame: CGRect(x: 10, y: 10, width: 800, height: 600),
                 existing: nil, managed: false, seen: false,
                 churnCandidate: false),
             .birth,
-            "a genuine newborn is written at once")
+            "a genuine newborn is reported at once")
     }
 
     func testDeliveredDestroyedNotificationCallsTheDestroyHandler() {

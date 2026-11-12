@@ -57,9 +57,9 @@ final class UntiledSizeTests: XCTestCase {
     }
 }
 
-/// Windows are always sized to a quarter at creation: the cursor
-/// display's canvas decides where, never how big. The window stays
-/// floating, and only a landed write claims state.
+/// A newly created window is adopted as an untiled managed window at the
+/// frame its app opened it at: Tiled never resizes a birth, never writes
+/// it, and never auto-tiles it. Only readable geometry claims a record.
 final class WindowBirthTests: XCTestCase {
     private static let screen = ScreenInfo(
         id: ScreenID(rawValue: 1),
@@ -84,48 +84,38 @@ final class WindowBirthTests: XCTestCase {
         harness.fireCursorMove(to: CGPoint(x: 500, y: 500))
     }
 
-    func testNewWindowIsSizedToQuarterRegardlessOfLayout() {
-        // A Sixths canvas still births a quarter: the layout never decides
-        // the floating size.
+    func testNewWindowIsAdoptedAtTheFrameItsAppChose() {
+        // Whatever layout the canvas shows, a birth keeps the app's frame:
+        // Tiled never resizes a new window to a quarter.
         controller.handleSwitchLayout(to: .sixths)
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
 
-        let landed = gateway.frame(of: handle)!
-        XCTAssertEqual(landed, CGRect(x: 10, y: 110, width: 800, height: 500))
-        let id = controller.registeredID(for: handle)
-        XCTAssertNotNil(id)
-        XCTAssertNil(
-            canvas.state.slot(of: id!), "a birth sizes, never tiles")
-        XCTAssertEqual(gateway.writes.count, 1, "one birth, one write")
-    }
-
-    func testBirthNearScreenEdgeRepinsInsideAtQuarterSize() {
-        // A Sixths-canvas birth spilling off the canvas repins inside at
-        // quarter size, hugging the screen edge instead of spilling off.
-        controller.handleSwitchLayout(to: .sixths)
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 1500, y: 900, width: 200, height: 200))
+        let handle = gateway.simulateWindowCreated(frame: birth)
 
         XCTAssertEqual(
-            gateway.frame(of: handle),
-            CGRect(x: 800, y: 500, width: 800, height: 500))
+            gateway.frame(of: handle), birth, "a birth is never resized")
+        XCTAssertTrue(gateway.writes.isEmpty, "a birth draws no write")
+        let id = controller.registeredID(for: handle)
+        XCTAssertNotNil(id, "a birth is still an untiled managed window")
+        XCTAssertNil(
+            canvas.state.slot(of: id!), "a birth is never auto-tiled")
+        XCTAssertEqual(
+            canvas.record(of: id!)?.preTileFrame, birth,
+            "the record keeps the frame the app opened")
     }
 
-    func testZeroFrameBirthDrawsNoWrite() {
-        gateway.clearWrites()
-
+    func testZeroFrameBirthClaimsNothing() {
         let handle = gateway.simulateWindowCreated(frame: .zero)
 
         XCTAssertTrue(
             gateway.writes.isEmpty,
-            "a window with no readable geometry draws no birth write")
+            "a window with no readable geometry draws no write")
         XCTAssertNil(
             controller.registeredID(for: handle),
             "a window with no readable geometry claims no record")
     }
 
-    func testUnreadableBirthDrawsNoWriteAndClaimsNothing() {
+    func testUnreadableBirthClaimsNothing() {
         let handle = gateway.addWindow(
             frame: CGRect(x: 10, y: 10, width: 800, height: 600))
         gateway.hideFrames.insert(handle)
@@ -134,42 +124,13 @@ final class WindowBirthTests: XCTestCase {
         controller.handleWindowCreated(handle)
 
         XCTAssertTrue(
-            gateway.writes.isEmpty,
-            "an unreadable birth draws no birth write")
+            gateway.writes.isEmpty, "an unreadable birth draws no write")
         XCTAssertNil(
             controller.registeredID(for: handle),
             "an unreadable birth claims no record")
     }
 
-    func testBirthOnQuartersCanvasUsesQuarterSize() {
-        controller.handleSwitchLayout(to: .quarters)
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 20, y: 30, width: 900, height: 700))
-
-        XCTAssertEqual(
-            gateway.frame(of: handle),
-            CGRect(x: 20, y: 230, width: 800, height: 500))
-    }
-
-    func testBirthWriteRefusalLeavesWindowAlone() {
-        gateway.willWrite = { self.gateway.refuseNextWrites($0) }
-        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
-
-        let handle = gateway.simulateWindowCreated(frame: birth)
-
-        XCTAssertEqual(
-            gateway.frame(of: handle), birth,
-            "a refused birth leaves the window alone")
-        XCTAssertNil(
-            controller.registeredID(for: handle),
-            "a refused birth claims no record")
-        XCTAssertEqual(
-            canvas.error, TilingSpace.refusalMessage(count: 1),
-            "a refused birth narrates the refusal")
-        gateway.willWrite = nil
-    }
-
-    func testBirthThenCloseDropsWithoutGhostWrite() {
+    func testBirthThenCloseClaimsNothing() {
         let handle = gateway.addWindow(
             frame: CGRect(x: 10, y: 10, width: 800, height: 600))
         gateway.kill(handle)
@@ -179,54 +140,69 @@ final class WindowBirthTests: XCTestCase {
 
         XCTAssertTrue(
             gateway.writes.isEmpty,
-            "a window dead on arrival draws no birth write")
+            "a window dead on arrival draws no write")
         XCTAssertNil(controller.registeredID(for: handle))
     }
 
+    func testDuplicateDeliveryKeepsTheFirstRecord() {
+        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
+        let handle = gateway.simulateWindowCreated(frame: birth)
+        let id = controller.registeredID(for: handle)
+
+        controller.handleWindowCreated(handle, at: birth)
+
+        XCTAssertEqual(
+            controller.registeredID(for: handle), id,
+            "a duplicate delivery keeps the first birth's record")
+        XCTAssertEqual(
+            canvas.record(of: id!)?.preTileFrame, birth,
+            "the duplicate never rewrites the recorded frame")
+        XCTAssertTrue(gateway.writes.isEmpty)
+    }
+
     func testBirthSubscriptionResubscribesOnTrustGrant() {
-        controller.handleSwitchLayout(to: .sixths)
         XCTAssertEqual(
             gateway.creationSubscriptions, 1,
-            "init subscribes the birth hook once")
+            "init subscribes the creation hook once")
 
         controller.observeWindowCreations()
 
         XCTAssertEqual(
             gateway.creationSubscriptions, 2,
             "a trust grant re-subscribes already-running apps")
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
+        let handle = gateway.simulateWindowCreated(frame: birth)
         XCTAssertEqual(
-            gateway.frame(of: handle), CGRect(x: 10, y: 110, width: 800, height: 500),
-            "the latest subscription still sizes births")
+            gateway.frame(of: handle), birth,
+            "the latest subscription still adopts births where the app put them")
+        XCTAssertNotNil(controller.registeredID(for: handle))
     }
 
-    func testRetileAfterBirthDiscardsBirthSizing() {
-        controller.handleSwitchLayout(to: .sixths)
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
-        let birthFrame = gateway.frame(of: handle)!
+    func testRetilingABirthUsesItsOwnFrameAsThePreTileFrame() {
+        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
+        let handle = gateway.simulateWindowCreated(frame: birth)
         gateway.focused = handle
-        controller.handle(slot: .sixthTopLeft)
+        controller.handle(slot: .topLeft)
         let id = controller.registeredID(for: handle)!
 
-        XCTAssertEqual(canvas.state.slot(of: id), .sixthTopLeft)
+        XCTAssertEqual(canvas.state.slot(of: id), .topLeft)
         XCTAssertEqual(
-            canvas.record(of: id)?.preTileFrame, birthFrame,
-            "the tile reads the sized frame as its pre-tile frame")
+            canvas.record(of: id)?.preTileFrame, birth,
+            "the tile reads the app's frame as its pre-tile frame")
         XCTAssertNil(
             canvas.deferredRestores[handle],
             "tiling a birth leaves no stale restore behind")
         XCTAssertTrue(controller.untile(window: id).performed)
         XCTAssertEqual(
-            gateway.frame(of: handle), birthFrame,
-            "untile restores the sized frame, not a stale one")
+            gateway.frame(of: handle),
+            CGRect(x: 10, y: 110, width: 800, height: 500),
+            "the untile exit still sizes the quarter footprint from that frame")
     }
 
-    func testBirthMidDragParksUnsizedUntilMouseUp() {
+    func testBirthMidDragIsAdoptedWhereTheAppPutIt() {
         // Tearing a tab off Firefox delivers the birth while the button
-        // is down: nothing is written mid-gesture, so the resize never
-        // fights the drag.
+        // is down: there is no resize to park, so the window is simply
+        // adopted where the app put it.
         controller.isMouseDown = { true }
         let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
 
@@ -236,39 +212,18 @@ final class WindowBirthTests: XCTestCase {
             gateway.frame(of: handle), birth,
             "a mid-drag birth leaves the window where the app put it")
         XCTAssertTrue(
-            gateway.writes.isEmpty,
-            "a mid-drag birth draws no write until the drop")
+            gateway.writes.isEmpty, "a mid-drag birth draws no write")
         XCTAssertNotNil(controller.registeredID(for: handle))
-    }
 
-    func testBirthMidDragSizesAtDropPointOnMouseUp() {
-        // The parked birth lands at the drop point's quarter footprint
-        // on mouse-up: the drag decides where, Tiled decides how big.
-        controller.isMouseDown = { true }
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
-        gateway.clearWrites()
-        gateway.simulateSilentChange(
-            handle, to: CGRect(x: 300, y: 400, width: 800, height: 600))
         controller.isMouseDown = { false }
-
         controller.mouseLifted()
-
         XCTAssertEqual(
-            gateway.frame(of: handle), CGRect(x: 300, y: 500, width: 800, height: 500),
-            "the parked birth sizes hung from the drop frame's top edge")
-        XCTAssertEqual(gateway.writes.count, 1, "one drop, one write")
-        let id = controller.registeredID(for: handle)!
-        XCTAssertNil(
-            canvas.state.slot(of: id), "a sized birth still never tiles")
-        XCTAssertEqual(
-            canvas.record(of: id)?.preTileFrame, gateway.frame(of: handle),
-            "the record reads the sized drop frame as its pre-tile frame")
+            gateway.frame(of: handle), birth,
+            "mouse-up has no parked size to land")
+        XCTAssertTrue(gateway.writes.isEmpty)
     }
 
-    func testBirthTiledMidDragKeepsTileOnMouseUp() {
-        // A hotkey while holding the button tiles the parked birth: the
-        // mouse-up flush must never yank it back to the quarter size.
+    func testBirthTiledMidDragKeepsTile() {
         controller.isMouseDown = { true }
         let handle = gateway.simulateWindowCreated(
             frame: CGRect(x: 10, y: 10, width: 800, height: 600))
@@ -285,15 +240,12 @@ final class WindowBirthTests: XCTestCase {
         XCTAssertEqual(
             gateway.frame(of: handle), tiled,
             "a birth tiled mid-drag keeps its tile on mouse-up")
-        XCTAssertTrue(
-            gateway.writes.isEmpty,
-            "the flush writes nothing for a window that already tiled")
+        XCTAssertTrue(gateway.writes.isEmpty)
     }
 
-    func testBirthSizesOnTheWindowsOwnDisplay() {
-        // Cursor on display 1, window opens on display 2: the birth is
-        // sized from display 2's visible frame and recorded there — never
-        // pinned into the cursor's display.
+    func testBirthRecordsOnTheWindowsOwnDisplay() {
+        // Cursor on display 1, window opens on display 2: the record
+        // lives on display 2's canvas, never the cursor's.
         let second = ScreenInfo(
             id: ScreenID(rawValue: 2),
             frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
@@ -310,14 +262,12 @@ final class WindowBirthTests: XCTestCase {
             deathConfirmation: 0)
         harness.fireCursorMove(to: CGPoint(x: 500, y: 500))
         gateway.clearWrites()
+        let birth = CGRect(x: 1700, y: 100, width: 800, height: 600)
 
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 1700, y: 100, width: 800, height: 600))
+        let handle = gateway.simulateWindowCreated(frame: birth)
 
         XCTAssertEqual(
-            gateway.frame(of: handle),
-            CGRect(x: 1700, y: 200, width: 800, height: 500),
-            "a birth sizes in place, on the window's own display")
+            gateway.frame(of: handle), birth, "a birth keeps its frame")
         let id = controller.registeredID(for: handle)!
         XCTAssertNotNil(
             controller.canvas(
@@ -331,9 +281,9 @@ final class WindowBirthTests: XCTestCase {
             "the cursor's canvas claims nothing")
     }
 
-    func testAnOffDisplayBirthFallsToTheCursorDisplayNotTheMainOne() {
-        // Cursor on display 2, frame owned by no display: the birth sizes
-        // on the cursor's canvas, never on the main display by policy.
+    func testAnOffDisplayBirthRecordsOnTheCursorDisplay() {
+        // Cursor on display 2, frame owned by no display: the record
+        // falls to the cursor's canvas, never the main display by policy.
         let second = ScreenInfo(
             id: ScreenID(rawValue: 2),
             frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
@@ -350,14 +300,12 @@ final class WindowBirthTests: XCTestCase {
             deathConfirmation: 0)
         harness.fireCursorMove(to: CGPoint(x: 2000, y: 500))
         gateway.clearWrites()
+        let birth = CGRect(x: 4000, y: 3000, width: 800, height: 600)
 
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 4000, y: 3000, width: 800, height: 600))
+        let handle = gateway.simulateWindowCreated(frame: birth)
 
         XCTAssertEqual(
-            gateway.frame(of: handle),
-            CGRect(x: 2400, y: 500, width: 800, height: 500),
-            "an unowned birth takes the cursor display's quarter, not main's")
+            gateway.frame(of: handle), birth, "a birth keeps its frame")
         let id = controller.registeredID(for: handle)!
         XCTAssertNotNil(
             controller.canvas(
@@ -371,154 +319,24 @@ final class WindowBirthTests: XCTestCase {
             "the main display's canvas claims nothing")
     }
 
-    func testBirthRefreshesStaleCanvasGeometry() {
-        // The canvas was established, then the visible frame shrank with
-        // no display-change notification (Dock shown): the next birth
-        // sizes from the live geometry, not the stored one.
-        let shrunk = ScreenInfo(
-            id: Self.screen.id,
-            frame: Self.screen.frame,
-            visibleFrame: CGRect(x: 0, y: 50, width: 1600, height: 950),
-            name: Self.screen.name,
-            displayID: Self.screen.displayID)
-        _ = gateway.simulateWindowCreated(
-            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
-        gateway.clearWrites()
-        harness.screens = [shrunk]
-
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
-
-        XCTAssertEqual(
-            gateway.frame(of: handle),
-            CGRect(x: 10, y: 135, width: 800, height: 475),
-            "a birth sizes from the live visible frame")
-    }
-
-    func testBirthAfterSwipeSizesOnTheActiveCanvas() {
-        // Swiped to Space B, a window opens: the birth targets the active
-        // canvas and writes immediately — no deferral, no stale restore.
+    func testBirthAfterSwipeRecordsOnTheActiveCanvas() {
+        // Swiped to Space B, a window opens: the record lands on the
+        // active canvas, with no write and no parked restore.
         let secondSpace = SpaceID(rawValue: 102)
         gateway.activeSpaces[Self.screen.displayID] = secondSpace
         gateway.simulateSpaceChange()
         gateway.clearWrites()
+        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
 
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
+        let handle = gateway.simulateWindowCreated(frame: birth)
 
-        XCTAssertEqual(
-            gateway.frame(of: handle),
-            CGRect(x: 10, y: 110, width: 800, height: 500),
-            "a birth on the active Space sizes at once")
+        XCTAssertEqual(gateway.frame(of: handle), birth)
         let id = controller.registeredID(for: handle)!
-        XCTAssertNotNil(
-            controller.canvas(
-                for: TilingSpaceKey(screen: Self.screen.id, space: secondSpace)
-            ).record(of: id))
+        let key = TilingSpaceKey(screen: Self.screen.id, space: secondSpace)
+        XCTAssertNotNil(controller.canvas(for: key).record(of: id))
         XCTAssertTrue(
-            controller.canvas(
-                for: TilingSpaceKey(screen: Self.screen.id, space: secondSpace)
-            ).deferredRestores.isEmpty,
-            "an active-Space birth parks no restore")
-    }
-
-    func testParkedBirthFlushesOnTheDropDisplay() {
-        // Mid-drag birth on display 2 while the cursor sits on display 1:
-        // the mouse-up sizes from the drop frame's display, not the
-        // cursor's.
-        let second = ScreenInfo(
-            id: ScreenID(rawValue: 2),
-            frame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
-            visibleFrame: CGRect(x: 1600, y: 0, width: 1600, height: 1000),
-            name: "Display 2",
-            displayID: CGDirectDisplayID(43))
-        let secondSpace = SpaceID(rawValue: 102)
-        harness = ControllerHarness(
-            screens: [Self.screen, second],
-            activeSpaces: [
-                Self.screen.displayID: Self.spaceA,
-                second.displayID: secondSpace,
-            ],
-            deathConfirmation: 0)
-        harness.fireCursorMove(to: CGPoint(x: 500, y: 500))
-        controller.isMouseDown = { true }
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 1700, y: 100, width: 800, height: 600))
-        gateway.clearWrites()
-        gateway.simulateSilentChange(
-            handle, to: CGRect(x: 2000, y: 400, width: 800, height: 600))
-        controller.isMouseDown = { false }
-
-        controller.mouseLifted()
-
-        XCTAssertEqual(
-            gateway.frame(of: handle),
-            CGRect(x: 2000, y: 500, width: 800, height: 500),
-            "the parked birth lands on the drop display's quarter")
-    }
-
-    // MARK: Immediate landing
-
-    func testBirthWriteLandsBeforeAnyFurtherFrameRead() {
-        // The delivered frame is the birth's one read: nothing looks at the
-        // window between the creation notification and the quarter write,
-        // so the app's own opening animation is retargeted about a display
-        // refresh earlier instead of the app's size being shown first.
-        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
-        var readsAtWrite: Int?
-        gateway.willWrite = { _ in readsAtWrite = self.gateway.frameReads }
-
-        let handle = gateway.simulateWindowCreated(frame: birth)
-
-        XCTAssertEqual(
-            readsAtWrite, 0,
-            "no frame read sits between the delivered birth and its write")
-        XCTAssertEqual(gateway.writes.count, 1, "one birth, one write")
-        XCTAssertEqual(
-            gateway.frame(of: handle),
-            CGRect(x: 10, y: 110, width: 800, height: 500))
-    }
-
-    func testAGivenBirthWriteDoesNotProbeLiveness() {
-        // The frame read already proved the window answered, so a birth
-        // that writes never pays the death probe first.
-        _ = gateway.simulateWindowCreated(
-            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
-
-        XCTAssertEqual(
-            gateway.livenessProbes, 0,
-            "a delivered birth sizes without a pre-write liveness probe")
-    }
-
-    func testRefusedBirthProbesLivenessBeforeNarrating() {
-        // A given window that refuses is still a refusal: the death probe
-        // runs only after the write fails, and its alive answer narrates.
-        gateway.willWrite = { self.gateway.refuseNextWrites($0) }
-        let birth = CGRect(x: 10, y: 10, width: 800, height: 600)
-
-        let handle = gateway.simulateWindowCreated(frame: birth)
-
-        XCTAssertEqual(gateway.frame(of: handle), birth, "a refused birth leaves the window alone")
-        XCTAssertEqual(gateway.livenessProbes, 1, "the failed write asks whether the window died")
-        XCTAssertNil(controller.registeredID(for: handle))
-        XCTAssertEqual(
-            canvas.error, TilingSpace.refusalMessage(count: 1),
-            "an alive window that refused narrates the refusal")
-    }
-
-    func testBirthDyingBetweenDeliveryAndWriteDropsSilently() {
-        // The frame was read, then the window died before the write: that is
-        // still the silent dead-on-arrival the birth contract never
-        // narrates, and its binding is released.
-        gateway.willWrite = { self.gateway.kill($0) }
-
-        let handle = gateway.simulateWindowCreated(
-            frame: CGRect(x: 10, y: 10, width: 800, height: 600))
-
-        XCTAssertTrue(gateway.writes.isEmpty, "a window that died draws no birth write")
-        XCTAssertNil(controller.registeredID(for: handle))
-        XCTAssertNil(canvas.error, "a dead delivery is never a refusal")
-        XCTAssertEqual(gateway.releaseCalls, [handle], "the confirmed-dead binding is released")
+            controller.canvas(for: key).deferredRestores.isEmpty,
+            "a birth parks no restore")
     }
 }
 
