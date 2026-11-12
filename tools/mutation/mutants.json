@@ -1171,6 +1171,60 @@
  ],
  [
   "LiveWindowGateway.swift",
+  "a window-role answer alone is a title bar (an unwarmed tree answers any point: Firefox content double-clicks swallowed)",
+  "        guard pid > 0, pid != ownProcessID, let axFrame,\n            Self.answersTitleBarGesture(role: role, isWindowTitle: isWindowTitle),\n            Self.pointIsInTitleBarStrip(point, of: axFrame)\n        else { return false }",
+  "        guard Self.answersTitleBarGesture(role: role, isWindowTitle: isWindowTitle) else { return false }"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "any pid answers the title bar (Tiled expands itself)",
+  "        guard pid > 0, pid != ownProcessID, let axFrame,",
+  "        guard pid > 0, let axFrame,"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "the title-bar strip swallows the whole window (content double-clicks swallowed)",
+  "    static let titleBarStripHeight: CGFloat = 28",
+  "    static let titleBarStripHeight: CGFloat = 100000"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "the strip starts at the frame's bottom edge (the strip follows the wrong edge)",
+  "        let topEdge = axFrame.minY",
+  "        let topEdge = axFrame.maxY"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "the strip starts at the screen top, not the window's top edge (the shipped re-flip: every window below the menu bar loses the gesture)",
+  "        let topEdge = axFrame.minY",
+  "        let topEdge: CGFloat = 0"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "the strip ignores the window's x bounds (a point beside the title bar answers)",
+  "        return axFrame.minX <= point.x && point.x <= axFrame.maxX\n            && topEdge <= point.y && point.y <= topEdge + titleBarStripHeight",
+  "        return topEdge <= point.y && point.y <= topEdge + titleBarStripHeight"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "the window's title text is not a title bar (a double-click on the centered title falls through to macOS)",
+  "        return isWindowTitle && Self.isTitleTextRole(role)",
+  "        return false"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "any static text is the title bar (content text double-clicks swallowed)",
+  "        return isWindowTitle && Self.isTitleTextRole(role)",
+  "        return isWindowTitle || Self.isTitleTextRole(role)"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a unified toolbar is not a title bar (a double-click on an empty toolbar falls through)",
+  "        if Self.isTitleBarRole(role) || Self.isTitleBarToolbarRole(role) {",
+  "        if Self.isTitleBarRole(role) {"
+ ],
+ [
+  "LiveWindowGateway.swift",
   "title-bar gesture swallows the down but not its paired release",
   "        case .up:\n            guard swallowTitleBarMouseUp else { return false }\n            swallowTitleBarMouseUp = false\n            return true",
   "        case .up:\n            return false"

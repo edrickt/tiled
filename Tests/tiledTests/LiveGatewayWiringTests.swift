@@ -1125,12 +1125,184 @@ final class LiveGatewayWiringTests: XCTestCase {
         XCTAssertTrue(windows.isEmpty)
     }
 
-    /// The hit-test predicate accepts only the window role: content reports
-    /// a child role and must never be mistaken for the title bar.
-    func testTitleBarRoleIsTheWindowRoleOnly() {
+    /// The role predicates name the answers a title bar can give: the
+    /// window's own background, a unified toolbar's background, and the
+    /// window's title text. Content and controls report other roles.
+    func testTheTitleBarRolePredicatesNameTheTitleBarToolbarAndTitleText() {
         XCTAssertTrue(LiveWindowGateway.isTitleBarRole("AXWindow" as CFString))
         XCTAssertFalse(LiveWindowGateway.isTitleBarRole("AXScrollArea" as CFString))
         XCTAssertFalse(LiveWindowGateway.isTitleBarRole("AXButton" as CFString))
         XCTAssertFalse(LiveWindowGateway.isTitleBarRole(nil))
+        XCTAssertTrue(LiveWindowGateway.isTitleBarToolbarRole("AXToolbar" as CFString))
+        XCTAssertFalse(LiveWindowGateway.isTitleBarToolbarRole("AXWindow" as CFString))
+        XCTAssertTrue(LiveWindowGateway.isTitleTextRole("AXStaticText" as CFString))
+        XCTAssertFalse(LiveWindowGateway.isTitleTextRole("AXButton" as CFString))
+    }
+
+    /// A double-click on the centered title text — the natural target on a
+    /// standard window's title bar, where the hit test answers the static
+    /// text role — answers the gesture when that text is the window's own
+    /// title. A static text that is not the title, a button, and content
+    /// never do: their double-click keeps the app's own behavior.
+    func testTheGestureAcceptsTheTitleBarToolbarAndTheWindowsOwnTitle() {
+        XCTAssertTrue(
+            LiveWindowGateway.answersTitleBarGesture(
+                role: "AXWindow" as CFString, isWindowTitle: false),
+            "the title bar's own background")
+        XCTAssertTrue(
+            LiveWindowGateway.answersTitleBarGesture(
+                role: "AXToolbar" as CFString, isWindowTitle: false),
+            "a unified toolbar's draggable background")
+        XCTAssertTrue(
+            LiveWindowGateway.answersTitleBarGesture(
+                role: "AXStaticText" as CFString, isWindowTitle: true),
+            "the window's own title text")
+        XCTAssertFalse(
+            LiveWindowGateway.answersTitleBarGesture(
+                role: "AXStaticText" as CFString, isWindowTitle: false),
+            "content text is not the title bar")
+        XCTAssertFalse(
+            LiveWindowGateway.answersTitleBarGesture(
+                role: "AXButton" as CFString, isWindowTitle: true),
+            "a control is never the title bar, however the hit walk answered")
+        XCTAssertFalse(
+            LiveWindowGateway.answersTitleBarGesture(
+                role: "AXScrollArea" as CFString, isWindowTitle: false))
+        XCTAssertFalse(
+            LiveWindowGateway.answersTitleBarGesture(
+                role: nil, isWindowTitle: false))
+    }
+
+    // MARK: Title-bar strip
+
+    /// The strip gate's worked example, with values taken outside the code
+    /// under test: a window whose AX frame is (x: 100, y: 200, w: 800,
+    /// h: 600). An AX frame is top-left-origin global (screen) coordinates —
+    /// the same space as the Quartz event point — so the window's top edge
+    /// is y 200 and its title-bar strip is y 200…228, the standard title-bar
+    /// height.
+    private static let stripFrame = CGRect(
+        x: 100, y: 200, width: 800, height: 600)
+
+    private func stripContains(_ point: CGPoint) -> Bool {
+        LiveWindowGateway.pointIsInTitleBarStrip(point, of: Self.stripFrame)
+    }
+
+    /// A role answer must agree with geometry before it counts as a title
+    /// bar: the point lies in the window's top strip. A point below the
+    /// strip — the shape of an unwarmed accessibility tree answering the
+    /// window role for any point in the window (Firefox over its content) —
+    /// is content, not a title bar.
+    func testTheStripAcceptsTheTitleBarAndRejectsPointsBelowIt() {
+        XCTAssertTrue(stripContains(CGPoint(x: 500, y: 210)), "inside the strip")
+        XCTAssertTrue(stripContains(CGPoint(x: 100, y: 200)), "the top-left corner")
+        XCTAssertTrue(stripContains(CGPoint(x: 900, y: 228)), "the strip's last row")
+        XCTAssertFalse(
+            stripContains(CGPoint(x: 500, y: 500)),
+            "the window's middle is content, however the app answers the hit test")
+        XCTAssertFalse(stripContains(CGPoint(x: 500, y: 229)), "below the strip")
+        XCTAssertFalse(
+            stripContains(CGPoint(x: 500, y: 199)), "above the window's top edge")
+    }
+
+    /// The strip is bounded by the window horizontally too: a point in the
+    /// strip's rows but outside the window's x range is not a title bar.
+    func testTheStripRejectsPointsOutsideTheWindowHorizontally() {
+        XCTAssertFalse(stripContains(CGPoint(x: 99, y: 210)))
+        XCTAssertFalse(stripContains(CGPoint(x: 901, y: 210)))
+    }
+
+    /// The strip hangs from the window's own top edge, not from the screen
+    /// top: a window lower on its display keeps its title bar. Re-flipping
+    /// an AX frame that is already top-left-origin (measuring the strip from
+    /// the screen top) is the exact regression this pins.
+    func testTheStripFollowsTheWindowTopEdgeNotTheScreenTop() {
+        let lowerFrame = CGRect(x: 100, y: 100, width: 800, height: 600)
+        XCTAssertTrue(
+            LiveWindowGateway.pointIsInTitleBarStrip(
+                CGPoint(x: 500, y: 110), of: lowerFrame),
+            "the window's top strip")
+        XCTAssertFalse(
+            LiveWindowGateway.pointIsInTitleBarStrip(
+                CGPoint(x: 500, y: 310), of: lowerFrame),
+            "a point the re-flip bug placed at the window top")
+    }
+
+    /// The reported shape: a tiled (or zoomed) window hangs from the visible
+    /// frame below the menu bar, so its AX top edge is not 0. Its title-bar
+    /// strip must still be found at the window's top — the exact case the
+    /// re-flipped frame lost, handing the double-click back to macOS.
+    func testTheStripFindsAWindowThatSitsBelowTheMenuBar() {
+        let tiledFrame = CGRect(x: 0, y: 31, width: 840, height: 1019)
+        XCTAssertTrue(
+            LiveWindowGateway.pointIsInTitleBarStrip(
+                CGPoint(x: 400, y: 31), of: tiledFrame),
+            "the strip's first row, at the window's top edge")
+        XCTAssertTrue(
+            LiveWindowGateway.pointIsInTitleBarStrip(
+                CGPoint(x: 400, y: 55), of: tiledFrame),
+            "well inside the strip")
+        XCTAssertFalse(
+            LiveWindowGateway.pointIsInTitleBarStrip(
+                CGPoint(x: 400, y: 60), of: tiledFrame),
+            "below the strip")
+        XCTAssertFalse(
+            LiveWindowGateway.pointIsInTitleBarStrip(
+                CGPoint(x: 400, y: 300), of: tiledFrame),
+            "the tiled window's content")
+    }
+
+    /// The strip height is the standard macOS title-bar height (28pt —
+    /// measured live: TextEdit answers the window role for the top 30pt and
+    /// a content role from 35pt). Pinning it keeps a future edit from
+    /// silently widening the swallow zone onto toolbar controls.
+    func testTheTitleBarStripIsTheStandardTitleBarHeight() {
+        XCTAssertEqual(LiveWindowGateway.titleBarStripHeight, 28)
+    }
+
+    /// The full hit verdict requires an element that answers the gesture, a
+    /// live pid that is not Tiled's, and a frame whose strip contains the
+    /// point, together. This is the decision the AX shell feeds; in
+    /// particular a window-role answer over the window's middle — the shape
+    /// of an unwarmed accessibility tree answering any point (Firefox over
+    /// its content) — is not a title bar, and a frame the app will not
+    /// answer fails closed.
+    func testTheHitVerdictRequiresRolePidAndStripTogether() {
+        let role = "AXWindow" as CFString
+        let stripPoint = CGPoint(x: 500, y: 210)
+        func hit(_ role: CFTypeRef?, _ frame: CGRect?, _ point: CGPoint,
+                 isWindowTitle: Bool = false,
+                 pid: pid_t = 4021, ownProcessID: pid_t = 0) -> Bool {
+            LiveWindowGateway.isTitleBarHit(
+                role: role, axFrame: frame, point: point,
+                isWindowTitle: isWindowTitle, pid: pid,
+                ownProcessID: ownProcessID)
+        }
+
+        XCTAssertTrue(
+            hit(role, Self.stripFrame, stripPoint),
+            "role, pid, and strip agree: the gesture answers")
+        XCTAssertTrue(
+            hit("AXStaticText" as CFString, Self.stripFrame, stripPoint,
+                isWindowTitle: true),
+            "the window's title text answers too")
+        XCTAssertFalse(
+            hit(role, Self.stripFrame, CGPoint(x: 500, y: 500)),
+            "a window-role answer over the window's middle is the app's fallback")
+        XCTAssertFalse(
+            hit("AXWebArea" as CFString, Self.stripFrame, stripPoint),
+            "a content role is never a title bar")
+        XCTAssertFalse(
+            hit("AXStaticText" as CFString, Self.stripFrame, stripPoint),
+            "a static text that is not the window's title is content")
+        XCTAssertFalse(
+            hit(role, nil, stripPoint),
+            "a frame the app will not answer fails closed")
+        XCTAssertFalse(
+            hit(role, Self.stripFrame, stripPoint, pid: 0),
+            "a pid the window server did not name is no window at all")
+        XCTAssertFalse(
+            hit(role, Self.stripFrame, stripPoint, pid: 77, ownProcessID: 77),
+            "Tiled never expands itself")
     }
 }

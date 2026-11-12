@@ -6,6 +6,22 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Double-clicking anywhere in a window's content no longer runs the expand
+  toggle. The title-bar gesture required the AX hit test at the point to
+  report the window role, but apps whose accessibility tree is built on
+  demand (Firefox) answer the window role for any point in the window until
+  the tree warms up, so the first double-clicks after idle expanded the
+  window no matter where they landed. The point must also land in the
+  window's title-bar strip, the standard title-bar height, measured from the
+  window's own top edge — where real title bars answer.
+- The expand gesture covers the whole title bar a double-click lands on: its
+  background, an empty unified toolbar, and the window's centered title
+  text. A hit on the title text — the usual double-click target — or on an
+  empty unified toolbar used to fall through to the app's own Zoom/Minimize
+  action instead of expanding.
+
 ## [1.4.1] - 2026-11-10
 
 ### Fixed

@@ -1720,17 +1720,63 @@ final class LiveWindowGateway: WindowGateway {
         }
     }
 
-    /// Whether an AX role answers the title-bar gesture: the window role is
-    /// the title bar's own (the draggable toolbar region reports it too).
-    /// Content reports a child role (`AXScrollArea`, `AXGroup`, a control),
-    /// never the window, so a content double-click is never swallowed.
+    /// The window role: the title bar's own background, and the reason a
+    /// double-click on the title bar strip answers the gesture.
     static func isTitleBarRole(_ role: CFTypeRef?) -> Bool {
         (role as? String) == kAXWindowRole as String
     }
 
+    /// The toolbar role: a unified toolbar's background is the draggable
+    /// toolbar region that runs the same system double-click gesture. Its
+    /// controls (traffic lights, buttons, search fields) carry their own
+    /// roles and are not the title bar.
+    static func isTitleBarToolbarRole(_ role: CFTypeRef?) -> Bool {
+        (role as? String) == kAXToolbarRole as String
+    }
+
+    /// The static text role: how a standard window exposes its title — the
+    /// centered text a double-click on the title bar usually lands on.
+    static func isTitleTextRole(_ role: CFTypeRef?) -> Bool {
+        (role as? String) == kAXStaticTextRole as String
+    }
+
+    /// Whether a hit-test answer answers the title-bar gesture. The window
+    /// role and a unified toolbar's background do; a static text answers
+    /// only when it is the window's own title (`isWindowTitle`), never
+    /// arbitrary content text. Buttons, controls, and content answer
+    /// nothing, so their double-click keeps the app's own behavior.
+    static func answersTitleBarGesture(
+        role: CFTypeRef?, isWindowTitle: Bool
+    ) -> Bool {
+        if Self.isTitleBarRole(role) || Self.isTitleBarToolbarRole(role) {
+            return true
+        }
+        return isWindowTitle && Self.isTitleTextRole(role)
+    }
+
+    /// The full title-bar verdict for one hit-test answer at `point`: an
+    /// element that answers the gesture, a live pid that is not Tiled's,
+    /// and a window frame whose title-bar strip contains the point — the
+    /// whole decision the shell's AX plumbing feeds. A role alone is not a
+    /// title bar: apps whose accessibility tree is built on demand answer
+    /// the window role for any point in the window until the tree warms up
+    /// (Firefox over its content), so the role must agree with geometry,
+    /// and a missing frame fails closed.
+    static func isTitleBarHit(
+        role: CFTypeRef?, axFrame: CGRect?, point: CGPoint,
+        isWindowTitle: Bool, pid: pid_t, ownProcessID: pid_t
+    ) -> Bool {
+        guard pid > 0, pid != ownProcessID, let axFrame,
+            Self.answersTitleBarGesture(role: role, isWindowTitle: isWindowTitle),
+            Self.pointIsInTitleBarStrip(point, of: axFrame)
+        else { return false }
+        return true
+    }
+
     /// The window whose title bar is at `point`, or nil when the point is
     /// content or empty space: the deepest AX element under the point must
-    /// carry the window role, and Tiled never expands itself.
+    /// answer the title-bar gesture and the point must land in that
+    /// window's title-bar strip, and Tiled never expands itself.
     private func titleBarWindow(atQuartzPoint point: CGPoint) -> WindowHandle? {
         if let testTitleBarWindow { return testTitleBarWindow(point) }
         let systemWide = AXUIElementCreateSystemWide()
@@ -1742,17 +1788,146 @@ final class LiveWindowGateway: WindowGateway {
             let element = hit
         else { return nil }
         AXUIElementSetMessagingTimeout(element, Self.titleBarHitTestTimeout)
-        var roleValue: CFTypeRef?
+        guard let roleValue = Self.elementRole(element) else { return nil }
+        var pid: pid_t = 0
+        AXUIElementGetPid(element, &pid)
+        // The window element whose frame defines the strip: the hit element
+        // itself for the window role, else its enclosing window (a toolbar
+        // or the window's title text lives inside it).
+        guard
+            let (window, isWindowTitle) = Self.titleBarWindowElement(
+                for: element, role: roleValue)
+        else { return nil }
+        guard Self.isTitleBarHit(
+            role: roleValue, axFrame: Self.axFrame(of: window), point: point,
+            isWindowTitle: isWindowTitle, pid: pid,
+            ownProcessID: ownProcessID())
+        else { return nil }
+        return titleBarHandle(for: window, pid: pid)
+    }
+
+    /// The window element a title-bar candidate belongs to, plus whether the
+    /// hit is that window's own title text. The window role answers itself.
+    /// A toolbar answers through its enclosing window. A static text answers
+    /// only when it is the window's title UI element — the centered title,
+    /// never arbitrary content text. Everything else (buttons, controls,
+    /// content) is nil, so the click reaches the app.
+    private static func titleBarWindowElement(
+        for element: AXUIElement, role: CFTypeRef?
+    ) -> (AXUIElement, Bool)? {
+        if Self.isTitleBarRole(role) { return (element, false) }
+        guard
+            Self.isTitleBarToolbarRole(role) || Self.isTitleTextRole(role),
+            let window = Self.enclosingWindow(of: element)
+        else { return nil }
+        if Self.isTitleBarToolbarRole(role) { return (window, false) }
+        guard Self.isWindowTitleElement(element, of: window) else { return nil }
+        return (window, true)
+    }
+
+    /// Levels the title-bar candidate walk climbs: a title text or a toolbar
+    /// sits one or two levels below its window, and the bound keeps a
+    /// malformed accessibility tree from stalling the tap.
+    private static let titleBarWalkBound = 4
+
+    /// The nearest ancestor of `element` that carries the window role, or
+    /// nil when the tree does not reach one within `titleBarWalkBound`.
+    private static func enclosingWindow(of element: AXUIElement) -> AXUIElement? {
+        var current = element
+        for _ in 0..<Self.titleBarWalkBound {
+            guard
+                let parent = Self.elementAttribute(
+                    current, kAXParentAttribute as String)
+            else { return nil }
+            AXUIElementSetMessagingTimeout(parent, Self.titleBarHitTestTimeout)
+            if Self.isTitleBarRole(Self.elementRole(parent)) { return parent }
+            current = parent
+        }
+        return nil
+    }
+
+    /// Whether `element` is `window`'s title UI element: the title text a
+    /// double-click on the title bar usually lands on. Fails closed when the
+    /// app exposes no title element, so content text is never mistaken for
+    /// the title bar.
+    private static func isWindowTitleElement(
+        _ element: AXUIElement, of window: AXUIElement
+    ) -> Bool {
+        guard
+            let title = Self.elementAttribute(
+                window, kAXTitleUIElementAttribute as String)
+        else { return false }
+        return CFEqual(title, element)
+    }
+
+    /// The AX frame of a window (top-left-origin global coordinates), the
+    /// same space as the Quartz point the tap hit-tests. Nil when the app
+    /// does not answer. A missing frame is not a title-bar hit: the strip
+    /// the point must fall in cannot be checked, so the click passes
+    /// through.
+    private static func axFrame(of element: AXUIElement) -> CGRect? {
+        guard
+            let origin = Self.readPoint(element, Self.positionAttribute),
+            let size = Self.readSize(element, Self.sizeAttribute)
+        else { return nil }
+        return CGRect(origin: origin, size: size)
+    }
+
+    /// One AX element attribute read, or nil when the app will not answer or
+    /// the value is not an element.
+    private static func elementAttribute(
+        _ element: AXUIElement, _ name: String
+    ) -> AXUIElement? {
+        var value: CFTypeRef?
         guard
             AXUIElementCopyAttributeValue(
-                element, kAXRoleAttribute as CFString, &roleValue) == .success,
-            Self.isTitleBarRole(roleValue)
+                element, name as CFString, &value) == .success,
+            let value, CFGetTypeID(value) == AXUIElementGetTypeID()
         else { return nil }
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(element, &pid) == .success, pid > 0,
-            pid != ownProcessID()
+        return (value as! AXUIElement)
+    }
+
+    /// One AX role read, or nil when the app will not answer.
+    private static func elementRole(_ element: AXUIElement) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard
+            AXUIElementCopyAttributeValue(
+                element, kAXRoleAttribute as CFString, &value) == .success
         else { return nil }
-        return titleBarHandle(for: element, pid: pid)
+        return value
+    }
+
+    /// The standard macOS title-bar height: the strip a hit-test answer
+    /// must land in. Windows whose draggable toolbar is taller keep the
+    /// system's own double-click action below the strip; a larger strip
+    /// would swallow double-clicks on toolbar controls and content top
+    /// edges of the very apps the strip exists for.
+    static let titleBarStripHeight: CGFloat = 28
+
+    /// Whether a Quartz-global point lies in the title-bar strip of a
+    /// window whose AX frame is `axFrame`.
+    ///
+    /// A role answer alone is not a title bar: apps whose accessibility
+    /// tree is built on demand answer the window role for any point in the
+    /// window until the tree warms up (Firefox answers `AXWindow` over its
+    /// content on the first query after idle, which swallowed every
+    /// double-click in it as the expand gesture). The role must agree with
+    /// geometry: the point sits in the window's top strip, the standard
+    /// title-bar height.
+    ///
+    /// Both sides are already in the same top-left-origin global space:
+    /// AX position counts down from the primary display's top and the
+    /// Quartz point counts from the same origin, so no flip belongs here.
+    /// Re-flipping the frame (measuring the strip from the screen top
+    /// instead of the window's top edge) loses the gesture for every
+    /// window that does not touch the screen top — every tiled window —
+    /// and hands its title-bar double-click back to macOS.
+    static func pointIsInTitleBarStrip(
+        _ point: CGPoint, of axFrame: CGRect
+    ) -> Bool {
+        let topEdge = axFrame.minY
+        return axFrame.minX <= point.x && point.x <= axFrame.maxX
+            && topEdge <= point.y && point.y <= topEdge + titleBarStripHeight
     }
 
     /// Stable handle for the window under a title-bar double-click. The tap

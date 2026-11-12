@@ -60,9 +60,11 @@ slot combo:
 the same toggle for the window under the pointer, even when it is not
 focused. Tiled consumes that click, so the macOS "double-click a window's
 title bar" action (Zoom, Minimize, or whatever System Settings names) never
-runs for the title bars it recognizes; a double-click on a window's content
-is never mistaken for a title bar and stays with the app. Tiled's own
-Settings window keeps the system behavior.
+runs for the title bars it recognizes: a window's top strip — its background,
+an empty unified toolbar, and its title text, the centered title a
+double-click usually lands on. A double-click on a window's content or on a
+toolbar control is never mistaken for a title bar and stays with the app.
+Tiled's own Settings window keeps the system behavior.
 
 A display and Space shows one expanded window at a time. Expanding a second
 one fills the screen with the new window and returns the coverer to its tile
