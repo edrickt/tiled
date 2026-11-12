@@ -6,6 +6,21 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-12
+
+### Changed
+
+- New windows keep the size and position their app opens them at. Tiled
+  used to resize every new window to the quarter footprint — since 1.4.1
+  as the creation notification's first effect — so a new window opened at
+  quarter size instead of the size its app chose. That resize is gone:
+  Tiled still adopts the window as an untiled, floating window on its own
+  display's canvas, so slot hotkeys act on it exactly as before, but it
+  never resizes or auto-tiles it. The mid-drag parking and the off-Space
+  birth deferral existed only to serve that resize, so they are gone too:
+  a window born during a drag stays where the app drops it, and a birth
+  on a hidden Space writes nothing.
+
 ## [1.4.2] - 2026-11-12
 
 ### Fixed

@@ -6,7 +6,7 @@
 
 Native macOS window tiling with global hotkeys. It covers quarters, sixths, and live edge resizing.
 
-**1.4.1 · macOS 13+ · Apple Silicon + Intel · MIT**
+**1.5.0 · macOS 13+ · Apple Silicon + Intel · MIT**
 
 [![Release](https://img.shields.io/github/v/release/edrickt/tiled)](https://github.com/edrickt/tiled/releases/latest) ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
@@ -61,7 +61,7 @@ and dead combos.
 
 ```bash
 swift build            # debug build
-make check             # unit suite (1179 tests) and the published count
+make check             # unit suite (1170 tests) and the published count
 make app               # release build bundled as build/Tiled.app
 ```
 
