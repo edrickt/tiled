@@ -68,9 +68,9 @@ enum MenuModel {
         /// reason, so the combo summary would misdiagnose it.
         var hotkeyBackendError: String? = nil
         /// Other visible canvases' refusals, already display-qualified.
-        /// A birth or reassert refusal returns no receipt, so the menu is
-        /// its only visible surface; `tileError` carries the focused
-        /// canvas's own sentence.
+        /// A reassert refusal returns no receipt, so the menu is its only
+        /// visible surface; `tileError` carries the focused canvas's own
+        /// sentence.
         var backgroundTileErrors: [String] = []
         /// Whether a splitter backup is parked: the manage row reads
         /// "Restore Previous Splitters" instead of "Reset Splitters".

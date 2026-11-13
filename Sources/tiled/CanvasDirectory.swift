@@ -412,8 +412,8 @@ final class CanvasDirectory {
 
     /// Every visible canvas's refusal, in stable display + Space order.
     /// Deliberately not `visibleKeys()`: a canvas whose only trace is an
-    /// error (a refused birth leaves no window or chapter behind) still
-    /// owes the menu its row.
+    /// error (a refused expand leaves an untiled record, no slot and no
+    /// chapter behind) still owes the menu its row.
     func visibleErrors() -> [(space: TilingSpaceKey, error: String)] {
         spaces
             .compactMap { key, canvas -> (space: TilingSpaceKey, error: String)? in

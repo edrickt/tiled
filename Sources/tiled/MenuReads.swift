@@ -4,8 +4,8 @@
 /// warnings, rows, trust, focus, and expand state are read once here too.
 /// The tiled window list and the background refusal rows are the
 /// deliberate aggregate exception: the menu describes every visible canvas
-/// there, so a background canvas's refusal (a birth or reassert has no
-/// receipt) cannot hide behind focus.
+/// there, so a background canvas's refusal (a reassert has no receipt)
+/// cannot hide behind focus.
 ///
 /// Nothing re-resolves focus: a background canvas's menu can never carry
 /// the focused canvas's refusal, and the menu and glyph can never describe

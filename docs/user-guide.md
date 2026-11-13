@@ -220,8 +220,10 @@ tell you which app took it.
   is adopted where the app drops it, so no resize fights the drag.
 - A display change (unplug, rearrange, resolution) re-asserts every visible
   canvas immediately. Canvas identity follows the physical display's
-  CoreGraphics display number, so reordering screens never moves a display's
-  arrangement to another display. Hidden Spaces are marked stale instead:
+  persistent CoreGraphics UUID (not its transient display number), so
+  reordering screens — or a display returning under a new number after a
+  replug or sleep/wake — never moves a display's arrangement to another
+  display. Hidden Spaces are marked stale instead:
   Tiled never writes an off-Space window, because an AX resize can pull it
   onto the visible Space. Swiping back re-asserts that Space against the new
   bounds. A display that disappears keeps its canvas: its last geometry,
