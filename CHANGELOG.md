@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-12
+
 ### Fixed
 
 - An expanded window now follows a changed screen. A display change
@@ -15,6 +17,9 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ran, so it no longer covered the screen while the canvas still called it
   expanded. The reassert never moves an expanded window into its slot;
   only the toggle does that.
+- Documentation truth: the user guide now names the persistent display UUID
+  as the canvas identity key (not the transient display number), and stale
+  comments describing a refused birth are gone.
 
 ## [1.5.0] - 2026-11-12
 
