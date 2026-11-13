@@ -1606,6 +1606,84 @@ final class TilingSpaceTests: XCTestCase {
         XCTAssertTrue(space.isExpanded(a))
     }
 
+    /// An app can refuse the re-fill too. The canvas must not claim the
+    /// screen matched: the refusal narrates through the reassert's standard
+    /// refusal sentence, and the window keeps both its frame and its
+    /// expanded state (the toggle still owns collapse).
+    func testReassertNarratesARefusedExpandedRefill() {
+        let a = harness.addWindow()
+        _ = space.expandToggle(window: a, context: context())
+        XCTAssertEqual(harness.frame(of: a), bounds)
+        harness.gateway.simulateSilentChange(
+            harness.handle(of: a)!, to: CGRect(x: 5, y: 5, width: 100, height: 100))
+        harness.gateway.clearWrites()
+        harness.clearExpectedWrites()
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!)
+
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(
+            harness.expectedWrites, [a],
+            "the refused re-fill still arms the expanded window's write")
+        XCTAssertEqual(
+            harness.frame(of: a), CGRect(x: 5, y: 5, width: 100, height: 100),
+            "a refused write leaves the window where it was")
+        XCTAssertTrue(space.isExpanded(a), "a refusal never un-expands the window")
+        XCTAssertEqual(
+            space.error, "Couldn't move that window: the app refused to resize it.",
+            "the refused re-fill narrates like every other reassert refusal")
+    }
+
+    /// A recordless expanded entry is defensive state (production clears
+    /// expansion with the record), and it claims nothing: no write, no
+    /// refusal narration. Without the record filter the write path refuses
+    /// for the missing record and the reassert grows a phantom error.
+    func testReassertIgnoresAnExpandedEntryWithNoRecord() {
+        let a = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        space.expanded[999] = .zero
+        harness.gateway.clearWrites()
+
+        space.reassert(.grid, context: context())
+
+        XCTAssertNil(space.error, "a recordless expanded entry must not narrate a refusal")
+        XCTAssertTrue(harness.gateway.writes.isEmpty, "nothing was written for the phantom id")
+        XCTAssertTrue(space.isExpanded(999), "the defense changes no state")
+    }
+
+    /// A hidden canvas never writes the re-fill blind; the swipe back
+    /// re-asserts against the refreshed visible frame and re-fills the
+    /// expanded window then.
+    func testSwipeBackReFillsAnExpandedWindowToTheNewVisibleFrame() {
+        let originalVisibleFrame = bounds
+        let a = harness.addWindow()
+        _ = space.expandToggle(window: a, context: context())
+        XCTAssertEqual(harness.frame(of: a), originalVisibleFrame)
+
+        // The display's visible frame changes while the canvas is hidden:
+        // the stored frame is refreshed, but the canvas cannot write.
+        harness.canvasVisible = false
+        let newVisibleFrame = CGRect(x: 0, y: 0, width: 1200, height: 900)
+        harness.bounds = newVisibleFrame
+        space.visibleFrame = newVisibleFrame
+        harness.gateway.clearWrites()
+        space.reassert(.grid, context: context())
+        XCTAssertTrue(
+            harness.gateway.writes.isEmpty,
+            "a hidden canvas never writes an expanded window blind")
+        XCTAssertEqual(
+            harness.frame(of: a), originalVisibleFrame,
+            "the window waits for the swipe back")
+
+        harness.canvasVisible = true
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(
+            harness.frame(of: a), newVisibleFrame,
+            "the swipe back re-fills the expanded window to the new visible frame")
+        XCTAssertTrue(space.isExpanded(a))
+    }
+
     func testReassertReportsPluralRefusalsOnTheCanvas() {
         let a = harness.addWindow()
         let b = harness.addWindow()
