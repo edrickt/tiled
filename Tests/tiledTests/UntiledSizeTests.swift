@@ -104,6 +104,31 @@ final class WindowBirthTests: XCTestCase {
             "the record keeps the frame the app opened")
     }
 
+    /// The creation notification hands over the newborn's one frame read.
+    /// The birth must record that delivered frame, not take a second look
+    /// at the window: a later read can catch an intermediate frame while
+    /// the app is still opening or moving the window, and the gateway read
+    /// is the contract that keeps the birth a single AX read. The fake's
+    /// stored frame deliberately differs from the delivery so a re-read is
+    /// observable.
+    func testBirthRecordsTheDeliveredFrameAndNeverReReadsTheWindow() {
+        let storedFrame = CGRect(x: 500, y: 500, width: 400, height: 300)
+        let deliveredFrame = CGRect(x: 10, y: 20, width: 800, height: 600)
+        let handle = gateway.addWindow(frame: storedFrame)
+
+        controller.handleWindowCreated(handle, at: deliveredFrame)
+
+        let id = controller.registeredID(for: handle)
+        XCTAssertNotNil(id, "a readable delivery claims the window")
+        XCTAssertEqual(
+            canvas.record(of: id!)?.preTileFrame, deliveredFrame,
+            "the record carries the frame delivered with the birth, not a re-read"
+        )
+        XCTAssertEqual(
+            gateway.frame(of: handle), storedFrame,
+            "the birth is not a write and does not move the window")
+    }
+
     func testZeroFrameBirthClaimsNothing() {
         let handle = gateway.simulateWindowCreated(frame: .zero)
 
