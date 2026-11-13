@@ -1,6 +1,6 @@
 # tiled codebase map
 
-Verified against `fa4f10f` (2026-11-12). Native macOS window manager: a SwiftPM executable (`main.swift` -> `AppDelegate`) that tiles windows into quarters or sixths with global hotkeys; the abstraction to learn first is the canvas (`TilingSpace`), one display's one Mission Control Space, driven by `TilingController` through the `WindowGateway` seam.
+Verified against `e5bb550` (2026-11-12). Native macOS window manager: a SwiftPM executable (`main.swift` -> `AppDelegate`) that tiles windows into quarters or sixths with global hotkeys; the abstraction to learn first is the canvas (`TilingSpace`), one display's one Mission Control Space, driven by `TilingController` through the `WindowGateway` seam.
 
 Maintenance: after adding, moving, or deleting a source file, update the File index and bump `Verified against` to the commit you checked.
 
@@ -73,7 +73,7 @@ Maintenance: after adding, moving, or deleting a source file, update the File in
 
 ## Tests
 
-Suites live in `Tests/tiledTests/` (80 files, 1170 tests at this commit). The hermetic suite needs no AX grant, no display, and no runloop; it drives the engine through `FakeWindowGateway.swift`, `TilingSpaceHarness.swift`, and `ControllerHarness.swift`, with `LiveGatewayFakes.swift` covering the live adapter's hermetic seam.
+Suites live in `Tests/tiledTests/` (80 files, 1175 tests at this commit). The hermetic suite needs no AX grant, no display, and no runloop; it drives the engine through `FakeWindowGateway.swift`, `TilingSpaceHarness.swift`, and `ControllerHarness.swift`, with `LiveGatewayFakes.swift` covering the live adapter's hermetic seam.
 
 | Layer | Suites |
 |---|---|
