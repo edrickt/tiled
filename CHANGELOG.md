@@ -6,6 +6,16 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- An expanded window now follows a changed screen. A display change
+  (resolution, Dock or menu bar, a replug or sleep/wake, a swipe back)
+  re-asserts the canvas, and the reassert re-fills the expanded window to
+  the new visible frame; it used to keep the frame it had when the toggle
+  ran, so it no longer covered the screen while the canvas still called it
+  expanded. The reassert never moves an expanded window into its slot;
+  only the toggle does that.
+
 ## [1.5.0] - 2026-11-12
 
 ### Changed

@@ -74,6 +74,10 @@ full-size windows would cover each other); the spoken answer names the
 window that would not move. Expansions on another display or Space are
 independent.
 
+An expanded window follows the screen it covers: a display change or a
+resolution change re-fills it to the new visible frame (it never moves into
+its slot; only the toggle does that).
+
 Press the toggle again and the window returns to its previous tile, or to
 its previous frame if it wasn't tiled. The layout is never erased: a tiled
 window keeps its slot while expanded (the expanded window just covers the

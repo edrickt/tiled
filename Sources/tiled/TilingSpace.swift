@@ -2080,6 +2080,23 @@ struct TilingSpace {
         var plan = reassertPlan(source)
         grid = plan.grid
         var failures: [Failure] = []
+        // An expanded window covers the canvas, so it is not on the grid and
+        // `reassertPlan` leaves it out — but its one job is to fill *this*
+        // canvas's screen, and a reassert is exactly when that screen's
+        // geometry is (re)established: a display change, a swipe back, or a
+        // splitter reset re-derives every tiled occupant under the one
+        // visible frame, and the expanded window must follow it too or it
+        // keeps a frame sized for a screen that no longer exists. It stays
+        // expanded (the plan's exclusion is untouched); only its target is
+        // re-derived.
+        for id in expanded.keys.sorted() where records[id] != nil {
+            if writeExpandedFrame(id, to: visibleFrame, context: context) == .refused {
+                failures.append(
+                    Failure(
+                        windowName: appName(id, context: context) ?? "A window",
+                        kind: .move, frame: visibleFrame))
+            }
+        }
         var pass = writeRects(plan.rects, context: context)
         failures += pass.failures
         // A neighbour whose app rounds or insets the frame it is written

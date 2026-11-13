@@ -419,6 +419,69 @@ final class ExpandToggleTests: XCTestCase {
             bounds(for: CGRect(x: 120, y: 90, width: 700, height: 500)))
     }
 
+    // MARK: Display changes
+
+    /// A display geometry change (resolution, Dock, menu bar) re-asserts the
+    /// canvas. The expanded window's job is to cover that screen, so the
+    /// reassert must rewrite it to the new visible frame; otherwise it keeps
+    /// the old screen size and no longer fills the display while the canvas
+    /// still calls it expanded.
+    func testADisplayChangeReExpandsToTheNewVisibleFrame() {
+        let original = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let handle = gateway.addWindow(frame: original)
+        gateway.focused = handle
+        controller.handleExpandToggle()
+        XCTAssertEqual(gateway.frame(of: handle), Self.screen.visibleFrame)
+
+        let resized = ScreenInfo(
+            id: ScreenID(rawValue: 1),
+            frame: CGRect(x: 0, y: 0, width: 1200, height: 800),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1200, height: 780),
+            name: "Display 1")
+        harness.screens = [resized]
+        postDisplayChange()
+
+        XCTAssertEqual(
+            gateway.frame(of: handle), resized.visibleFrame,
+            "an expanded window still fills its screen after the display changes")
+        XCTAssertTrue(canvas.isExpanded(handle.id))
+    }
+
+    /// The rule is the same for an untiled expanded window: expansion covers
+    /// the canvas's screen, so a display change re-derives its frame too.
+    func testADisplayChangeReExpandsAnUntiledWindowToTheNewVisibleFrame() {
+        let handle = gateway.addWindow(
+            frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+        gateway.focused = handle
+        controller.handleExpandToggle()
+
+        let resized = ScreenInfo(
+            id: ScreenID(rawValue: 1),
+            frame: CGRect(x: 0, y: 0, width: 1000, height: 700),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1000, height: 680),
+            name: "Display 1")
+        harness.screens = [resized]
+        postDisplayChange()
+
+        XCTAssertEqual(
+            gateway.frame(of: handle), resized.visibleFrame,
+            "an untiled expanded window follows the screen it covers")
+        XCTAssertTrue(canvas.isExpanded(handle.id))
+    }
+
+    /// Fires the controller's display-change observer and waits for it.
+    private func postDisplayChange() {
+        let reasserted = expectation(description: "display change reassert")
+        let token = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { _ in reasserted.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+        NotificationCenter.default.post(
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        wait(for: [reasserted], timeout: 1.0)
+    }
+
     // MARK: Receipts
 
     func testExpandWithNoFocusedWindowIsSafeNoop() {
