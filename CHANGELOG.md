@@ -6,6 +6,22 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Double-clicking anywhere in a window's top strip now runs the expand
+  toggle, including over tabs. The gesture used to answer only the title
+  bar's background, an empty unified toolbar, and the window's title text,
+  but tabbed windows (Firefox) answer a different accessibility role for
+  the same strip point across runs, so most of the strip fell through to
+  the app and the gesture only worked near the strip's top-left. The strip
+  geometry still decides — a double-click below it stays with the app —
+  but the role no longer does.
+- A slow second click no longer expands the window by accident. The gesture
+  used to follow the system's click count alone, so two deliberate single
+  clicks inside the system's double-click interval ran the expand toggle.
+  The completing click must now land within two tenths of a second of the
+  click that opened it; a slower second click stays with the app.
+
 ## [1.5.2] - 2026-11-21
 
 ### Fixed

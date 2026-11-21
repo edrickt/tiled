@@ -1127,50 +1127,15 @@ final class LiveGatewayWiringTests: XCTestCase {
 
     /// The role predicates name the answers a title bar can give: the
     /// window's own background, a unified toolbar's background, and the
-    /// window's title text. Content and controls report other roles.
-    func testTheTitleBarRolePredicatesNameTheTitleBarToolbarAndTitleText() {
+    /// The window role names the title bar's own background: the hit
+    /// element itself is the window, so no parent walk is needed. Every
+    /// other role resolves through its enclosing window; the strip decides.
+    func testTheTitleBarRolePredicateNamesTheWindowBackground() {
         XCTAssertTrue(LiveWindowGateway.isTitleBarRole("AXWindow" as CFString))
+        XCTAssertFalse(LiveWindowGateway.isTitleBarRole("AXToolbar" as CFString))
+        XCTAssertFalse(LiveWindowGateway.isTitleBarRole("AXRadioButton" as CFString))
         XCTAssertFalse(LiveWindowGateway.isTitleBarRole("AXScrollArea" as CFString))
-        XCTAssertFalse(LiveWindowGateway.isTitleBarRole("AXButton" as CFString))
         XCTAssertFalse(LiveWindowGateway.isTitleBarRole(nil))
-        XCTAssertTrue(LiveWindowGateway.isTitleBarToolbarRole("AXToolbar" as CFString))
-        XCTAssertFalse(LiveWindowGateway.isTitleBarToolbarRole("AXWindow" as CFString))
-        XCTAssertTrue(LiveWindowGateway.isTitleTextRole("AXStaticText" as CFString))
-        XCTAssertFalse(LiveWindowGateway.isTitleTextRole("AXButton" as CFString))
-    }
-
-    /// A double-click on the centered title text — the natural target on a
-    /// standard window's title bar, where the hit test answers the static
-    /// text role — answers the gesture when that text is the window's own
-    /// title. A static text that is not the title, a button, and content
-    /// never do: their double-click keeps the app's own behavior.
-    func testTheGestureAcceptsTheTitleBarToolbarAndTheWindowsOwnTitle() {
-        XCTAssertTrue(
-            LiveWindowGateway.answersTitleBarGesture(
-                role: "AXWindow" as CFString, isWindowTitle: false),
-            "the title bar's own background")
-        XCTAssertTrue(
-            LiveWindowGateway.answersTitleBarGesture(
-                role: "AXToolbar" as CFString, isWindowTitle: false),
-            "a unified toolbar's draggable background")
-        XCTAssertTrue(
-            LiveWindowGateway.answersTitleBarGesture(
-                role: "AXStaticText" as CFString, isWindowTitle: true),
-            "the window's own title text")
-        XCTAssertFalse(
-            LiveWindowGateway.answersTitleBarGesture(
-                role: "AXStaticText" as CFString, isWindowTitle: false),
-            "content text is not the title bar")
-        XCTAssertFalse(
-            LiveWindowGateway.answersTitleBarGesture(
-                role: "AXButton" as CFString, isWindowTitle: true),
-            "a control is never the title bar, however the hit walk answered")
-        XCTAssertFalse(
-            LiveWindowGateway.answersTitleBarGesture(
-                role: "AXScrollArea" as CFString, isWindowTitle: false))
-        XCTAssertFalse(
-            LiveWindowGateway.answersTitleBarGesture(
-                role: nil, isWindowTitle: false))
     }
 
     // MARK: Title-bar strip
@@ -1260,49 +1225,90 @@ final class LiveGatewayWiringTests: XCTestCase {
         XCTAssertEqual(LiveWindowGateway.titleBarStripHeight, 28)
     }
 
-    /// The full hit verdict requires an element that answers the gesture, a
-    /// live pid that is not Tiled's, and a frame whose strip contains the
-    /// point, together. This is the decision the AX shell feeds; in
-    /// particular a window-role answer over the window's middle — the shape
-    /// of an unwarmed accessibility tree answering any point (Firefox over
-    /// its content) — is not a title bar, and a frame the app will not
-    /// answer fails closed.
-    func testTheHitVerdictRequiresRolePidAndStripTogether() {
-        let role = "AXWindow" as CFString
+    /// The full hit verdict requires a live pid that is not Tiled's and a
+    /// frame whose strip contains the point, together — whatever role the
+    /// hit test named. This is the decision the AX shell feeds: the whole
+    /// strip answers (a Firefox tab answers `AXRadioButton` for the same
+    /// point that answers `AXWindow` on the next run), while a point below
+    /// the strip — the shape of an unwarmed accessibility tree answering
+    /// any point (Firefox over its content) — is content, and a frame the
+    /// app will not answer fails closed.
+    func testTheHitVerdictRequiresPidAndStripTogetherWhateverTheRole() {
         let stripPoint = CGPoint(x: 500, y: 210)
-        func hit(_ role: CFTypeRef?, _ frame: CGRect?, _ point: CGPoint,
-                 isWindowTitle: Bool = false,
+        func hit(_ frame: CGRect?, _ point: CGPoint,
                  pid: pid_t = 4021, ownProcessID: pid_t = 0) -> Bool {
             LiveWindowGateway.isTitleBarHit(
-                role: role, axFrame: frame, point: point,
-                isWindowTitle: isWindowTitle, pid: pid,
+                axFrame: frame, point: point, pid: pid,
                 ownProcessID: ownProcessID)
         }
 
         XCTAssertTrue(
-            hit(role, Self.stripFrame, stripPoint),
-            "role, pid, and strip agree: the gesture answers")
-        XCTAssertTrue(
-            hit("AXStaticText" as CFString, Self.stripFrame, stripPoint,
-                isWindowTitle: true),
-            "the window's title text answers too")
+            hit(Self.stripFrame, stripPoint),
+            "pid and strip agree: the gesture answers, whatever the role")
         XCTAssertFalse(
-            hit(role, Self.stripFrame, CGPoint(x: 500, y: 500)),
-            "a window-role answer over the window's middle is the app's fallback")
+            hit(Self.stripFrame, CGPoint(x: 500, y: 500)),
+            "below the strip is content, however the app answers the hit test")
         XCTAssertFalse(
-            hit("AXWebArea" as CFString, Self.stripFrame, stripPoint),
-            "a content role is never a title bar")
-        XCTAssertFalse(
-            hit("AXStaticText" as CFString, Self.stripFrame, stripPoint),
-            "a static text that is not the window's title is content")
-        XCTAssertFalse(
-            hit(role, nil, stripPoint),
+            hit(nil, stripPoint),
             "a frame the app will not answer fails closed")
         XCTAssertFalse(
-            hit(role, Self.stripFrame, stripPoint, pid: 0),
+            hit(Self.stripFrame, stripPoint, pid: 0),
             "a pid the window server did not name is no window at all")
         XCTAssertFalse(
-            hit(role, Self.stripFrame, stripPoint, pid: 77, ownProcessID: 77),
+            hit(Self.stripFrame, stripPoint, pid: 77, ownProcessID: 77),
             "Tiled never expands itself")
+    }
+
+    // MARK: Title-bar timing
+
+    /// The timing window is two tenths of a second: only a crisp
+    /// double-click expands, so two deliberate single clicks never do.
+    func testTheTitleBarTimingWindowIsTwoTenthsOfASecond() {
+        XCTAssertEqual(LiveWindowGateway.titleBarDoubleClickMaxInterval, 0.2)
+    }
+
+    /// A completing click that follows its opener within the window is the
+    /// gesture: the odd down starts the window, the even down inside it
+    /// consumes the click and delivers the window after the tap returns.
+    func testACrispDoubleClickStillExpands() {
+        let gateway = makeGateway()
+        let handle = WindowHandle(id: 41)
+        let point = CGPoint(x: 10, y: 20)
+        gateway.setTestTitleBarWindow { $0 == point ? handle : nil }
+        let delivered = expectation(description: "expand delivered")
+        var windows: [WindowHandle] = []
+        gateway.observeTitleBarDoubleClicks {
+            windows.append($0)
+            delivered.fulfill()
+        }
+
+        XCTAssertFalse(
+            gateway.handleTitleBarMouseEvent(.down(clickCount: 1, point: point, time: 100.0)),
+            "the opening click is the app's")
+        XCTAssertTrue(
+            gateway.handleTitleBarMouseEvent(.down(clickCount: 2, point: point, time: 100.15)),
+            "the completing click inside the window is Tiled's")
+        wait(for: [delivered], timeout: 1)
+        XCTAssertEqual(windows, [handle])
+    }
+
+    /// A completing click past the window stays with the app: it consumes
+    /// nothing and arms no paired release, so the release passes through
+    /// too. A slow second click is two single clicks, not a double-click.
+    func testASlowSecondClickStaysWithTheApp() {
+        let gateway = makeGateway()
+        gateway.setTestTitleBarWindow { _ in WindowHandle(id: 7) }
+        var windows: [WindowHandle] = []
+        gateway.observeTitleBarDoubleClicks { windows.append($0) }
+
+        XCTAssertFalse(
+            gateway.handleTitleBarMouseEvent(.down(clickCount: 1, point: .zero, time: 50.0)))
+        XCTAssertFalse(
+            gateway.handleTitleBarMouseEvent(.down(clickCount: 2, point: .zero, time: 50.5)),
+            "half a second later is not a double-click")
+        XCTAssertTrue(windows.isEmpty)
+        XCTAssertFalse(
+            gateway.handleTitleBarMouseEvent(.up),
+            "nothing was swallowed, so the release passes too")
     }
 }

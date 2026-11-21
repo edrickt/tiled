@@ -330,6 +330,11 @@ final class LiveWindowGateway: WindowGateway {
     /// Whether a consumed mouse-down still owes its paired mouse-up: the
     /// app must never receive an unmatched release.
     private var swallowTitleBarMouseUp = false
+    /// When the last left-mouse down reached the tap, on the same
+    /// `TimeInterval` clock the gesture's `.down` carries. The tap's own
+    /// processing clock stamps both clicks, so the gate measures the
+    /// hand's speed, not the event-timestamp units.
+    private var lastTitleBarDownTime: TimeInterval?
     /// Test seam: replaces the system-wide AX title-bar read. Production
     /// leaves it nil; tests script the hit so the gesture decision and its
     /// consumption run without an Accessibility grant.
@@ -1674,9 +1679,18 @@ final class LiveWindowGateway: WindowGateway {
     /// global (top-left origin), the space the AX hit test reads. Split from
     /// `CGEvent` so the gesture decision is testable without a live tap.
     enum TitleBarMouseEvent: Equatable {
-        case down(clickCount: Int, point: CGPoint)
+        case down(clickCount: Int, point: CGPoint, time: TimeInterval = 0)
         case up
     }
+
+    /// The fastest a title-bar double-click may be spread and still count
+    /// as the gesture: the completed click must land within this window
+    /// after the click that opened it. The system click count alone follows
+    /// System Settings' double-click speed, which can be slow enough that
+    /// two deliberate single clicks read as a double-click and expand the
+    /// window by accident. Tiled's own gate is stricter, so only a crisp
+    /// double-click expands.
+    static let titleBarDoubleClickMaxInterval: TimeInterval = 0.2
 
     /// The AX messaging timeout for the title-bar hit test. The tap callback
     /// must answer inside the system's tap deadline, so a busy app's read is
@@ -1701,10 +1715,24 @@ final class LiveWindowGateway: WindowGateway {
     @discardableResult
     func handleTitleBarMouseEvent(_ event: TitleBarMouseEvent) -> Bool {
         switch event {
-        case let .down(clickCount, point):
+        case let .down(clickCount, point, time):
             // A single click and the odd counts inside a multi-click run
             // pass through: only a completed double-click is the gesture.
-            guard clickCount > 1, clickCount.isMultiple(of: 2) else { return false }
+            // Each odd down starts the timing window; the completing down
+            // must follow within `titleBarDoubleClickMaxInterval`, so a
+            // slow second click stays with the app instead of expanding by
+            // accident. No predecessor (the tap installed mid-sequence)
+            // falls back to the system's click count.
+            guard clickCount > 1, clickCount.isMultiple(of: 2) else {
+                lastTitleBarDownTime = time
+                return false
+            }
+            if let last = lastTitleBarDownTime, time >= last,
+                time - last > Self.titleBarDoubleClickMaxInterval
+            {
+                lastTitleBarDownTime = nil
+                return false
+            }
             guard let window = titleBarWindow(atQuartzPoint: point) else { return false }
             swallowTitleBarMouseUp = true
             let handler = titleBarDoubleClickHandler
@@ -1719,54 +1747,29 @@ final class LiveWindowGateway: WindowGateway {
         }
     }
 
-    /// The window role: the title bar's own background, and the reason a
-    /// double-click on the title bar strip answers the gesture.
+    /// The window role: the title bar's own background. The only role the
+    /// gesture still names: the hit element itself is the window, so no
+    /// parent walk is needed. Every other role — a unified toolbar, the
+    /// window's title text, Firefox's tabs — resolves through its enclosing
+    /// window below, and the strip decides.
     static func isTitleBarRole(_ role: CFTypeRef?) -> Bool {
         (role as? String) == kAXWindowRole as String
     }
 
-    /// The toolbar role: a unified toolbar's background is the draggable
-    /// toolbar region that runs the same system double-click gesture. Its
-    /// controls (traffic lights, buttons, search fields) carry their own
-    /// roles and are not the title bar.
-    static func isTitleBarToolbarRole(_ role: CFTypeRef?) -> Bool {
-        (role as? String) == kAXToolbarRole as String
-    }
-
-    /// The static text role: how a standard window exposes its title — the
-    /// centered text a double-click on the title bar usually lands on.
-    static func isTitleTextRole(_ role: CFTypeRef?) -> Bool {
-        (role as? String) == kAXStaticTextRole as String
-    }
-
-    /// Whether a hit-test answer answers the title-bar gesture. The window
-    /// role and a unified toolbar's background do; a static text answers
-    /// only when it is the window's own title (`isWindowTitle`), never
-    /// arbitrary content text. Buttons, controls, and content answer
-    /// nothing, so their double-click keeps the app's own behavior.
-    static func answersTitleBarGesture(
-        role: CFTypeRef?, isWindowTitle: Bool
-    ) -> Bool {
-        if Self.isTitleBarRole(role) || Self.isTitleBarToolbarRole(role) {
-            return true
-        }
-        return isWindowTitle && Self.isTitleTextRole(role)
-    }
-
-    /// The full title-bar verdict for one hit-test answer at `point`: an
-    /// element that answers the gesture, a live pid that is not Tiled's,
-    /// and a window frame whose title-bar strip contains the point — the
-    /// whole decision the shell's AX plumbing feeds. A role alone is not a
-    /// title bar: apps whose accessibility tree is built on demand answer
+    /// The full title-bar verdict for `point`: a live pid that is not
+    /// Tiled's and a window frame whose title-bar strip contains the point.
+    /// The whole strip answers — background, tabs, toolbar, title text —
+    /// whatever role the hit test names, because tabbed windows (Firefox)
+    /// answer a different role for the same strip point across runs and
+    /// pinning roles left most of the strip dead. A role alone is still not
+    /// a title bar: apps whose accessibility tree is built on demand answer
     /// the window role for any point in the window until the tree warms up
-    /// (Firefox over its content), so the role must agree with geometry,
-    /// and a missing frame fails closed.
+    /// (Firefox over its content), so geometry must agree — below the strip
+    /// is content, whatever the role — and a missing frame fails closed.
     static func isTitleBarHit(
-        role: CFTypeRef?, axFrame: CGRect?, point: CGPoint,
-        isWindowTitle: Bool, pid: pid_t, ownProcessID: pid_t
+        axFrame: CGRect?, point: CGPoint, pid: pid_t, ownProcessID: pid_t
     ) -> Bool {
         guard pid > 0, pid != ownProcessID, let axFrame,
-            Self.answersTitleBarGesture(role: role, isWindowTitle: isWindowTitle),
             Self.pointIsInTitleBarStrip(point, of: axFrame)
         else { return false }
         return true
@@ -1791,37 +1794,28 @@ final class LiveWindowGateway: WindowGateway {
         var pid: pid_t = 0
         AXUIElementGetPid(element, &pid)
         // The window element whose frame defines the strip: the hit element
-        // itself for the window role, else its enclosing window (a toolbar
-        // or the window's title text lives inside it).
-        guard
-            let (window, isWindowTitle) = Self.titleBarWindowElement(
-                for: element, role: roleValue)
+        // itself for the window role, else its enclosing window (a tab, a
+        // toolbar part, or the window's title text lives inside it).
+        guard let window = Self.titleBarWindowElement(
+            for: element, role: roleValue)
         else { return nil }
         guard Self.isTitleBarHit(
-            role: roleValue, axFrame: Self.axFrame(of: window), point: point,
-            isWindowTitle: isWindowTitle, pid: pid,
+            axFrame: Self.axFrame(of: window), point: point, pid: pid,
             ownProcessID: ownProcessID())
         else { return nil }
         return titleBarHandle(for: window, pid: pid)
     }
 
-    /// The window element a title-bar candidate belongs to, plus whether the
-    /// hit is that window's own title text. The window role answers itself.
-    /// A toolbar answers through its enclosing window. A static text answers
-    /// only when it is the window's title UI element — the centered title,
-    /// never arbitrary content text. Everything else (buttons, controls,
-    /// content) is nil, so the click reaches the app.
+    /// The window element a title-bar candidate belongs to. The window role
+    /// answers itself; every other role — tabs, toolbar parts, title text,
+    /// controls — answers through its enclosing window, found with a bounded
+    /// parent walk. Nil when the tree does not reach a window, so the click
+    /// reaches the app.
     private static func titleBarWindowElement(
         for element: AXUIElement, role: CFTypeRef?
-    ) -> (AXUIElement, Bool)? {
-        if Self.isTitleBarRole(role) { return (element, false) }
-        guard
-            Self.isTitleBarToolbarRole(role) || Self.isTitleTextRole(role),
-            let window = Self.enclosingWindow(of: element)
-        else { return nil }
-        if Self.isTitleBarToolbarRole(role) { return (window, false) }
-        guard Self.isWindowTitleElement(element, of: window) else { return nil }
-        return (window, true)
+    ) -> AXUIElement? {
+        if Self.isTitleBarRole(role) { return element }
+        return Self.enclosingWindow(of: element)
     }
 
     /// Levels the title-bar candidate walk climbs: a title text or a toolbar
@@ -1843,20 +1837,6 @@ final class LiveWindowGateway: WindowGateway {
             current = parent
         }
         return nil
-    }
-
-    /// Whether `element` is `window`'s title UI element: the title text a
-    /// double-click on the title bar usually lands on. Fails closed when the
-    /// app exposes no title element, so content text is never mistaken for
-    /// the title bar.
-    private static func isWindowTitleElement(
-        _ element: AXUIElement, of window: AXUIElement
-    ) -> Bool {
-        guard
-            let title = Self.elementAttribute(
-                window, kAXTitleUIElementAttribute as String)
-        else { return false }
-        return CFEqual(title, element)
     }
 
     /// The AX frame of a window (top-left-origin global coordinates), the
@@ -1986,11 +1966,15 @@ final class LiveWindowGateway: WindowGateway {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             swallowTitleBarMouseUp = false
+            lastTitleBarDownTime = nil
             if let titleBarTap { CGEvent.tapEnable(tap: titleBarTap, enable: true) }
         case .leftMouseDown:
             let count = Int(event.getIntegerValueField(.mouseEventClickState))
+            // The processing clock stamps both clicks: the gate measures
+            // the hand's speed between the two downs, not the event's units.
+            let now = CFAbsoluteTimeGetCurrent()
             if handleTitleBarMouseEvent(
-                .down(clickCount: count, point: event.location))
+                .down(clickCount: count, point: event.location, time: now))
             {
                 return nil
             }

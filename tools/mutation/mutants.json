@@ -1160,7 +1160,7 @@
  [
   "LiveWindowGateway.swift",
   "title-bar gesture accepts single and odd clicks",
-  "            guard clickCount > 1, clickCount.isMultiple(of: 2) else { return false }",
+  "            guard clickCount > 1, clickCount.isMultiple(of: 2) else {\n                lastTitleBarDownTime = time\n                return false\n            }",
   "            guard clickCount > 0 else { return false }"
  ],
  [
@@ -1171,9 +1171,9 @@
  ],
  [
   "LiveWindowGateway.swift",
-  "a window-role answer alone is a title bar (an unwarmed tree answers any point: Firefox content double-clicks swallowed)",
-  "        guard pid > 0, pid != ownProcessID, let axFrame,\n            Self.answersTitleBarGesture(role: role, isWindowTitle: isWindowTitle),\n            Self.pointIsInTitleBarStrip(point, of: axFrame)\n        else { return false }",
-  "        guard Self.answersTitleBarGesture(role: role, isWindowTitle: isWindowTitle) else { return false }"
+  "a point below the strip is a title bar (an unwarmed tree answers any point: Firefox content double-clicks swallowed)",
+  "        guard pid > 0, pid != ownProcessID, let axFrame,\n            Self.pointIsInTitleBarStrip(point, of: axFrame)\n        else { return false }",
+  "        guard pid > 0, pid != ownProcessID, let axFrame else { return false }"
  ],
  [
   "LiveWindowGateway.swift",
@@ -1204,24 +1204,6 @@
   "the strip ignores the window's x bounds (a point beside the title bar answers)",
   "        return axFrame.minX <= point.x && point.x <= axFrame.maxX\n            && topEdge <= point.y && point.y <= topEdge + titleBarStripHeight",
   "        return topEdge <= point.y && point.y <= topEdge + titleBarStripHeight"
- ],
- [
-  "LiveWindowGateway.swift",
-  "the window's title text is not a title bar (a double-click on the centered title falls through to macOS)",
-  "        return isWindowTitle && Self.isTitleTextRole(role)",
-  "        return false"
- ],
- [
-  "LiveWindowGateway.swift",
-  "any static text is the title bar (content text double-clicks swallowed)",
-  "        return isWindowTitle && Self.isTitleTextRole(role)",
-  "        return isWindowTitle || Self.isTitleTextRole(role)"
- ],
- [
-  "LiveWindowGateway.swift",
-  "a unified toolbar is not a title bar (a double-click on an empty toolbar falls through)",
-  "        if Self.isTitleBarRole(role) || Self.isTitleBarToolbarRole(role) {",
-  "        if Self.isTitleBarRole(role) {"
  ],
  [
   "LiveWindowGateway.swift",
@@ -1330,5 +1312,17 @@
   "birth records nothing (a new window leaves no managed record)",
   "        directory.withCanvas(key) {\n            $0.recordBirth(id, handle: handle, frame: live)\n        }\n",
   ""
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "a slow second click expands (the timing gate never fires)",
+  "time - last > Self.titleBarDoubleClickMaxInterval",
+  "false"
+ ],
+ [
+  "LiveWindowGateway.swift",
+  "the timing window swallows slow second clicks (two single clicks expand)",
+  "static let titleBarDoubleClickMaxInterval: TimeInterval = 0.2",
+  "static let titleBarDoubleClickMaxInterval: TimeInterval = 100000"
  ]
 ]
