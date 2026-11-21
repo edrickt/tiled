@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-11-21
+
 ### Fixed
 
 - Double-clicking anywhere in a window's top strip now runs the expand
