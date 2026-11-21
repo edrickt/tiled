@@ -622,6 +622,51 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertTrue(canvas.state.occupants.isEmpty)
     }
 
+    func testPruneOfUntiledBirthRaisesNothing() {
+        // The floating-window reorder bug: with tiled windows holding the
+        // layout, opening floating apps (births) and closing one must not
+        // raise the tiled occupants over the floating window in use.
+        // A birth release has no restored window to put below, so no raise.
+        harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let floatingInUse = gateway.simulateWindowCreated(
+            frame: CGRect(x: 200, y: 200, width: 600, height: 400))
+        let floatingClosing = gateway.simulateWindowCreated(
+            frame: CGRect(x: 300, y: 300, width: 500, height: 350))
+        gateway.focused = floatingInUse
+        gateway.clearRaiseCalls()
+        XCTAssertEqual(gateway.zOrder.last, floatingClosing, "newest floating starts on top")
+
+        gateway.kill(floatingClosing)
+        controller.pruneDeadWindows()
+
+        XCTAssertTrue(gateway.raiseCalls.isEmpty, "releasing an untiled birth raises nothing")
+        XCTAssertEqual(
+            gateway.zOrder.last, floatingInUse,
+            "the floating window in use stays on top of the tiled layout")
+    }
+
+    func testPruneOfDeadTiledWindowRaisesNothing() {
+        // A tiled window that died is gone: its survivors grow, but no
+        // restored window stays behind to put below, so raising would only
+        // bury an unrelated floating window the user is using.
+        let a = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let b = harness.addFocusedWindow()
+        controller.handle(slot: .bottomLeft)
+        let floating = gateway.simulateWindowCreated(
+            frame: CGRect(x: 200, y: 200, width: 600, height: 400))
+        gateway.focused = floating
+        gateway.clearRaiseCalls()
+
+        gateway.kill(a)
+        controller.pruneDeadWindows()
+
+        XCTAssertTrue(gateway.raiseCalls.isEmpty, "releasing a dead window raises nothing")
+        XCTAssertEqual(gateway.zOrder.last, floating, "the floating window stays on top")
+        _ = b
+    }
+
     // MARK: Destroyed notifications
 
     func testDestroyedNotificationReleasesTheSlotAtOnce() {

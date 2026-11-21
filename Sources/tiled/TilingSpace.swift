@@ -1582,7 +1582,13 @@ struct TilingSpace {
     /// it also releases a live record another canvas is about to claim, so
     /// a handle never resolves to two canvases at once.
     mutating func release(window id: WindowID, context: Context) -> Outcome {
-        leave(window: id, from: state.slot(of: id), context: context)
+        // No restored window stays on this canvas (the window is gone or
+        // moving canvases), so nothing must be put below the survivors:
+        // raising here would only bury unrelated floating windows the
+        // user is using in front of the layout.
+        var outcome = leave(window: id, from: state.slot(of: id), context: context)
+        outcome.raise = false
+        return outcome
     }
 
     /// Drag-out untile: the drop IS the placement, so the pre-tile frame
@@ -1637,7 +1643,10 @@ struct TilingSpace {
     /// The shared tail of every leave: drop the record, reflow the freed
     /// cells into the mergeable survivor, and make the survivor's growth
     /// undoable. The caller performs any frame write first, and gets the
-    /// survivor raise back.
+    /// survivor raise back when a restored window stays behind to put
+    /// below the arrangement. An untiled birth leaves no slot and no
+    /// restored window, so raising would only bury unrelated floating
+    /// windows the user is using in front of the layout.
     private mutating func leave(
         window id: WindowID, from slot: Slot?, context: Context
     ) -> Outcome {
@@ -1647,7 +1656,7 @@ struct TilingSpace {
         if let message = Self.failureMessage(reflow.failures) {
             error = message
         }
-        return Outcome(forget: [id], raise: true)
+        return Outcome(forget: [id], raise: slot != nil)
     }
 
     /// Prime the tracker's intent for the slot rects a following undo will

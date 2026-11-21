@@ -6,6 +6,20 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-11-21
+
+### Fixed
+
+- Floating windows no longer sink behind the tiled layout while they are
+  in use. Closing a window (or a window dying where Tiled can see it)
+  used to raise every tiled window above all other windows, so a floating
+  app opened alongside the layout — a new Terminal or AppCleaner window,
+  for example — could end up buried behind the tiles it was floating over.
+  Releasing a window that leaves no restored frame on the canvas now
+  raises nothing; only evicting, untiling, or dragging a tiled window out
+  — where the restored window stays on the canvas and belongs below the
+  survivors — still raises the arrangement above it.
+
 ## [1.5.1] - 2026-11-12
 
 ### Fixed
