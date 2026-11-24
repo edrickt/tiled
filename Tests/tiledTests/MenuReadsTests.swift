@@ -41,6 +41,25 @@ final class MenuReadsTests: XCTestCase {
             binding: { $0.defaultBinding })
     }
 
+    /// A failed registration must not be taught as a row's shortcut: the
+    /// same pass's warning row says the combo does not work, and the menu
+    /// re-advertised it one row lower (TS-07).
+    func testAFailedRegistrationIsNotAdvertisedAsARowShortcut() {
+        let failed = reads(for: controller.focusedTilingSpace, failedActions: [.undo])
+
+        XCTAssertNil(
+            failed.labels[.undo],
+            "a combo the warning row calls unregistered is not a row shortcut")
+        XCTAssertNotNil(
+            failed.labels[.slotKey(.topLeft)], "other actions keep their labels")
+        XCTAssertEqual(failed.hotkeyWarnings.count, 1, "the warning row still diagnoses it")
+
+        let healthy = reads(for: controller.focusedTilingSpace)
+        XCTAssertEqual(
+            healthy.labels[.undo], HotkeyStore.defaultBinding(for: .undo).label,
+            "a registration that works still advertises its combo")
+    }
+
     /// Tiles Safari on the right display, then refuses Mail's placement
     /// there; on the left, refuses Notes's placement. Both canvases now
     /// carry distinct errors, and focus sits on the left one.

@@ -69,7 +69,9 @@ final class MenuBarCharacterizationTests: XCTestCase {
             .resetSplitters: "⌥⇧R",
             .switchLayout: "⌥⇧\\",
             .settings: "⌃⌥⇧⌘,",
-            .undo: "⌃⌥⇧⌘Z",
+            // Undo is deliberately absent: its warning says the combo could
+            // not be registered, and a failed registration advertises no
+            // label on any surface (TS-07).
         ]
     }
 
@@ -94,7 +96,7 @@ final class MenuBarCharacterizationTests: XCTestCase {
             "Studio Display · Sixths · 1 tiled",
             "Top Left Sixth · Notes (⌃⌥Q)",
             "",
-            "Restore 2 Displaced Windows · ⌃⌥⇧⌘Z",
+            "Restore 2 Displaced Windows",
             "Untile 2 Windows",
             "Restore Previous Splitters · ⌥⇧R",
             "",

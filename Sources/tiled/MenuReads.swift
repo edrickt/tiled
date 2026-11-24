@@ -80,8 +80,14 @@ struct MenuReads {
         let rows = controller.tiledWindowsInfo
         self.rows = rows
         self.expandState = controller.focusedExpandState
+        // The one house rule for an advertised combo: a failed registration
+        // is not a shortcut. The warning row above already diagnoses it, and
+        // teaching the dead combo as the row's shortcut contradicted it on
+        // the same screenful. `HotkeyStore.registeredLabel` says the same
+        // thing for every other surface.
         var labels: [HotkeyAction: String] = [:]
-        for action in HotkeyAction.allCases {
+        for action in HotkeyAction.allCases
+        where !failedActions.contains(action) {
             if let label = binding(action).label { labels[action] = label }
         }
         self.labels = labels
