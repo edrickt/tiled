@@ -1672,8 +1672,49 @@ final class TilingController {
             dbg("destroyed win\(id): still live by the death standard; prune cadence decides")
             return
         }
+        // One dead reading is not the death standard the prune path holds
+        // itself to. A display teardown churns a live window's element and
+        // rescales its frame, which reads exactly like an absence, and
+        // releasing on that report untangles the user's arrangement during
+        // the transition. The report still accelerates the check — it
+        // starts the clock instead of waiting for the next prune — and the
+        // release waits the same `deathConfirmation` the tick uses.
+        let first = register.deathClock(id, seenAt: uptime())
+        guard uptime() - first >= deathConfirmation else {
+            dbg("destroyed win\(id): dead handle sighted, awaiting confirmation")
+            _ = scheduleVerify { [weak self] in
+                self?.confirmDestroyed(handle)
+            }
+            return
+        }
+        releaseDead(id: id, handle: handle)
+    }
+
+    /// The destroy report's confirmation: probe again once the death
+    /// window has run and release only if the death standard still agrees.
+    /// A live answer clears the clock and hands the window back to the
+    /// ordinary cadence, exactly as the prune path does on a recovered
+    /// probe.
+    private func confirmDestroyed(_ handle: WindowHandle) {
+        guard let id = register.liveID(for: handle) else { return }
+        guard gateway.liveness(of: handle) == .dead else {
+            register.clearDeath(id)
+            dbg("destroyed win\(id): live on confirmation; slot kept")
+            return
+        }
+        releaseDead(id: id, handle: handle)
+    }
+
+    /// Releases one confirmed-dead window's slot and record. The caller
+    /// owns the death standard: the prune's confirmation window or the
+    /// destroy report's.
+    private func releaseDead(id: WindowID, handle: WindowHandle) {
+        register.clearDeath(id)
         let key = directory.owner(of: id) ?? directory.focusedKey()
-        dbg("destroyed win\(id): releasing slot now")
+        dbg("destroyed win\(id): dead handle confirmed, releasing slot now")
+        // The window is gone: a pre-tile restore parked for it elsewhere
+        // can never land.
+        discardDeferredRestores(for: handle)
         gateway.release(handle)
         let outcome = directory.withCanvas(key) {
             $0.release(window: id, context: placementContext(for: key))

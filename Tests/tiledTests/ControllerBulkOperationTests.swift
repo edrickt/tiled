@@ -764,6 +764,60 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(canvas.state.tiledWindows.count, 1, "a maybe never untiles")
     }
 
+    func testDestroyedReportWaitsOutTheDeathConfirmationBeforeReleasing() {
+        // A display teardown churns a live window's element and rescales
+        // its frame: one liveness read is exactly the reading the prune
+        // path refuses to trust. The report starts the death clock and the
+        // slot is released only once the confirmation window has run.
+        var awake: TimeInterval = 100
+        harness = ControllerHarness(
+            screens: [Self.screen], deathConfirmation: 3, uptime: { awake })
+        let handle = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let id = controller.registeredID(for: handle)!
+
+        gateway.kill(handle)
+        gateway.simulateDestroyed(handle)
+
+        XCTAssertEqual(
+            canvas.state.tiledWindows.count, 1,
+            "a single dead report does not release the slot")
+        XCTAssertTrue(controller.hasPendingDeath(id), "the report started the clock")
+
+        awake += 3
+        harness.verifyFires.last?()
+
+        XCTAssertTrue(
+            canvas.state.occupants.isEmpty,
+            "the confirmation releases a window that is really gone")
+    }
+
+    func testDestroyedReportKeepsTheSlotWhenTheWindowAnswersAtConfirmation() {
+        // The same churn, but the window is still there: the confirmation
+        // probe finds it alive, so the report must not untile it after all.
+        var awake: TimeInterval = 100
+        harness = ControllerHarness(
+            screens: [Self.screen], deathConfirmation: 3, uptime: { awake })
+        let handle = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let id = controller.registeredID(for: handle)!
+        gateway.probeDead.insert(handle)
+
+        gateway.simulateDestroyed(handle)
+
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
+        XCTAssertTrue(controller.hasPendingDeath(id))
+
+        awake += 3
+        gateway.probeDead.remove(handle)
+        harness.verifyFires.last?()
+
+        XCTAssertEqual(
+            canvas.state.tiledWindows.count, 1,
+            "the window answered at confirmation: its slot stays")
+        XCTAssertFalse(controller.hasPendingDeath(id), "the recovered probe clears the clock")
+    }
+
     func testPruneTimerFiresAndReleasesSlots() {
         // The repeating timer, shrunk: the wiring (schedule → fire → prune
         // → onChange when the count changed) is what the nil-interval tests
