@@ -309,6 +309,17 @@ struct TilingSpace {
     /// An orphaned record (a refused first placement) is not enough.
     var holdsAnything: Bool { !state.occupants.isEmpty || !undoStack.isEmpty }
 
+    /// Whether the canvas holds nothing that replacing it would lose: no
+    /// occupancy, records, history, splitter backup, retained deferred
+    /// work, expansion, or notice. Used when a withheld-Space canvas is
+    /// re-keyed onto the Space its display now names.
+    var holdsNothing: Bool {
+        state.occupants.isEmpty && records.isEmpty && undoStack.isEmpty
+            && splitterBackup == nil && deferredRestores.isEmpty
+            && deferredRequests.isEmpty && expanded.isEmpty
+            && error == nil && notice == nil
+    }
+
     /// Whether `id` is currently expanded over the layout.
     func isExpanded(_ id: WindowID) -> Bool { expanded[id] != nil }
 
@@ -1388,7 +1399,13 @@ struct TilingSpace {
         if let record = records[id], record.preTileFrame != .zero {
             let target = grid.sizedUntileFrame(
                 keepingTopOf: record.preTileFrame, in: visibleFrame)
-            let from = state.slot(of: id).map { grid.rect(for: $0, in: visibleFrame) }
+            // The frame the window must leave is where it actually is: an
+            // expanded window keeps its slot while it covers the canvas, so
+            // the slot rect would never match its live frame and its silent
+            // ignore would go unreported.
+            let from = expanded[id] != nil
+                ? visibleFrame
+                : state.slot(of: id).map { grid.rect(for: $0, in: visibleFrame) }
             let result = context.frameWriter.write(
                 id, handle: record.handle, to: target,
                 bounds: visibleFrame, on: context.space, check: .none)

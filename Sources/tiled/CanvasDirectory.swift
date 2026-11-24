@@ -188,10 +188,12 @@ final class CanvasDirectory {
             let canvas = spaces[key]
         else { return key }
         let named = TilingSpaceKey(screen: screen, space: space)
-        if let existing = spaces[named],
-            !existing.records.isEmpty || !existing.state.occupants.isEmpty
-                || !existing.undoStack.isEmpty
-        {
+        // Only an empty named canvas is replaced: it may already carry a
+        // splitter backup, retained deferred work, an expansion, or a
+        // notice, and dropping any of those would be a silent loss. Two
+        // populated canvases would have to merge occupancy, and a stale
+        // canvas the manage list can still untile is the better failure.
+        if let existing = spaces[named], !existing.holdsNothing {
             return key
         }
         spaces[key] = nil

@@ -846,6 +846,22 @@ final class TilingSpaceTests: XCTestCase {
             "the released window's frame write is checked back")
     }
 
+    /// An expanded window keeps its slot while it covers the screen, so
+    /// the frame its restore must leave is the screen, not the slot: the
+    /// slot rect would never match its live frame and a silent ignore
+    /// would go unreported.
+    func testUntileOfAnExpandedWindowChecksTheScreenItLeaves() {
+        let id = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: id)
+        space.expandToggle(window: id, context: context())
+
+        let outcome = space.untile(window: id, reflowing: false, context: context())
+
+        XCTAssertEqual(
+            outcome.verifyRestores.first?.from, bounds,
+            "the expanded window's frame is the screen it covers")
+    }
+
     /// Undo's re-place keeps the window tiled, so its ignored write still
     /// rolls back (through the existing convergence check); the chapter
     /// must name every window whose re-place landed.

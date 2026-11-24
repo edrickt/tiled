@@ -502,17 +502,20 @@ final class TilingController {
         // `handle(slotKey:)`); a second sweep here doubled the cost of
         // every row click for no gain.
         guard let canvas = directory.owner(of: id),
-            let slot = directory.storedCanvas(for: canvas)?.state.slot(of: id)
+            let rowSlot = directory.storedCanvas(for: canvas)?.state.slot(of: id)
         else {
-            let sentence = MenuText.tileHereNoLongerTiledAnnouncement()
-            return ActionReceipt(
-                canvas: focusedTilingSpace, performed: false,
-                notice: sentence, announcement: sentence)
+            return tileHereNoLongerTiledReceipt()
         }
         // No focused window keeps the standard no-focused answer, exactly
         // as the slot key would answer it.
         guard let target = focusedTarget() else {
-            return handle(slotKey: slot.key)
+            return handle(slotKey: rowSlot.key)
+        }
+        // `focusedTarget` pruned: the row's window may have just been
+        // released, and a row whose premise is gone answers instead of
+        // tiling into a slot nobody owns.
+        guard let slot = directory.storedCanvas(for: canvas)?.state.slot(of: id) else {
+            return tileHereNoLongerTiledReceipt()
         }
         guard target.key == canvas else {
             let sentence = MenuText.tileHereOnAnotherCanvasAnnouncement()
@@ -526,6 +529,14 @@ final class TilingController {
         // again, right after the first sweep).
         let id = target.liveID ?? register.claim(target.handle, on: target.key)
         return place(slot: slot, requester: target.handle, id: id, on: target.key)
+    }
+
+    /// The row answered because the window it names is no longer tiled.
+    private func tileHereNoLongerTiledReceipt() -> ActionReceipt {
+        let sentence = MenuText.tileHereNoLongerTiledAnnouncement()
+        return ActionReceipt(
+            canvas: focusedTilingSpace, performed: false,
+            notice: sentence, announcement: sentence)
     }
 
     /// The old slot-request body: an expanded window comes back to earth,
@@ -847,7 +858,11 @@ final class TilingController {
     private func verifyRestore(
         _ restore: TilingSpace.RestoreVerification, on space: TilingSpaceKey
     ) {
-        guard let live = gateway.frame(of: restore.handle) else { return }
+        // The window is managed again (re-tiled within the check's delay):
+        // it sits on a tile by design, so the restore's question is moot.
+        guard register.liveID(for: restore.handle) == nil,
+            let live = gateway.frame(of: restore.handle)
+        else { return }
         let tolerance = DragTracker.echoTolerance
         guard DragTracker.framesClose(live, restore.from, tolerance: tolerance),
             !DragTracker.framesClose(live, restore.target, tolerance: tolerance)

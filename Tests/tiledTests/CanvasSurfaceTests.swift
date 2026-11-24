@@ -173,6 +173,38 @@ final class CanvasSurfaceTests: XCTestCase {
             "the write landed instead of deferring off the Space in view")
     }
 
+    /// Re-keying never replaces a named canvas that holds anything: a
+    /// splitter backup, retained deferred work, or a notice would be lost
+    /// with no way to tell the user.
+    func testAReKeyNeverDropsTheNamedCanvassSplitterBackup() {
+        gateway.activeSpaces = [Self.displayID: Self.namedSpace]
+        let namedWindow = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        controller.resetOrRestoreSplitters()
+        XCTAssertTrue(
+            controller.canvas(for: named).hasSplitterBackup,
+            "the named canvas parks a splitter backup")
+        controller.untile(window: controller.registeredID(for: namedWindow)!)
+
+        // The display now withholds the Space for a second window, which
+        // tiles onto the fallback; naming the Space again must not re-key
+        // over the backup.
+        gateway.activeSpaces = [:]
+        let withheldWindow = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        gateway.activeSpaces = [Self.displayID: Self.namedSpace]
+
+        controller.handle(slot: .topRight)
+
+        XCTAssertTrue(
+            controller.canvas(for: named).hasSplitterBackup,
+            "the named canvas's backup survives the re-key attempt")
+        XCTAssertEqual(
+            controller.canvas(for: withheld).state.occupant(of: .topRight),
+            controller.registeredID(for: withheldWindow),
+            "the withheld window keeps the canvas it was on")
+    }
+
     /// The audited hazard (A7): once the display names a Space, a
     /// populated withheld canvas is no longer the display the user sees.
     /// It stays in the manage list, but a display change's reassert must

@@ -239,44 +239,74 @@ final class AXLivenessTests: XCTestCase {
     // MARK: Bounded failed-probe fan-out (TO-01)
 
     /// A failed probe used to read every listed window's frame: two
-    /// synchronous main-thread AX round trips per window, unbounded. The
-    /// read plan keeps the list's shape but reads only a bounded prefix,
-    /// and the unread rest stays undeterminable so a cap can never prove a
-    /// live window absent.
-    func testFailedProbeReadsABoundedPrefixOfTheAppsWindowList() {
+    /// synchronous main-thread AX round trips per window, each bounded only
+    /// by its own messaging timeout, so a hung app's answers multiplied
+    /// into a frozen main loop. A responsive app's whole list is read
+    /// (absence must stay provable, or every closed window of a busy app
+    /// parks its slot as an unprunable "unknown").
+    func testAFailedProbeReadsTheWholeListWhileTheAppAnswers() {
         let baseline = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let clock = Date(timeIntervalSince1970: 0)
         var reads: [Int] = []
         let answers = LiveWindowGateway.listedFrameAnswers(
-            count: 120, identityIndex: nil, baseline: baseline,
+            count: 120, identityIndex: nil, baseline: baseline, now: { clock },
             read: { index in
                 reads.append(index)
                 return CGRect(
                     x: CGFloat(index + 1) * 500, y: 0, width: 400, height: 300)
             })
 
+        XCTAssertEqual(reads.count, 120, "a prompt app is read whole")
+        XCTAssertEqual(answers.listedFrames.count, 120)
         XCTAssertEqual(
-            reads.count, LiveWindowGateway.maxListedFrameReads,
-            "the fan-out is capped, not one read pair per listed window")
+            LiveWindowGateway.appWindowMatch(
+                baseline: baseline, listedFrames: answers.listedFrames,
+                identityListed: false),
+            false,
+            "every frame read and none matched: the window is really gone")
+        XCTAssertNil(answers.identityFrame)
+    }
+
+    /// A hung app's reads each take the AX timeout. The budget stops the
+    /// fan-out, and the windows it never reached stay undeterminable, so
+    /// the pass can never prove a live window absent from partial silence.
+    func testAFailedProbeStopsAtTheReadBudget() {
+        let baseline = CGRect(x: 0, y: 0, width: 400, height: 300)
+        var clock = Date(timeIntervalSince1970: 0)
+        var reads = 0
+        let answers = LiveWindowGateway.listedFrameAnswers(
+            count: 120, identityIndex: nil, baseline: baseline,
+            now: {
+                // Every read spends 0.6 s: the timeout a hung app imposes.
+                defer { clock = clock.addingTimeInterval(0.6) }
+                return clock
+            },
+            read: { _ in
+                reads += 1
+                return CGRect(x: 900, y: 0, width: 400, height: 300)
+            })
+
+        XCTAssertLessThanOrEqual(
+            reads, 2,
+            "the fan-out stops once the budget is spent (\(reads) reads)")
         XCTAssertEqual(answers.listedFrames.count, 120, "one entry per listed window")
-        XCTAssertEqual(
-            answers.listedFrames[0], CGRect(x: 500, y: 0, width: 400, height: 300))
         XCTAssertNil(answers.listedFrames[119], "an unread window is undeterminable")
         XCTAssertNil(
             LiveWindowGateway.appWindowMatch(
                 baseline: baseline, listedFrames: answers.listedFrames,
                 identityListed: false),
-            "a capped list cannot prove the window absent")
-        XCTAssertNil(answers.identityFrame)
+            "a partial list cannot prove the window absent")
     }
 
-    /// A list short enough to read whole keeps the exact old geometry
-    /// answer, death included: the cap only touches lists longer than it.
+    /// A list short enough to read inside the budget keeps the exact
+    /// geometry answer, death included.
     func testAShortListIsStillReadWholeSoAbsenceStillReadsDead() {
         let baseline = CGRect(x: 0, y: 0, width: 400, height: 300)
         let elsewhere = CGRect(x: 900, y: 900, width: 400, height: 300)
+        let clock = Date(timeIntervalSince1970: 0)
         var reads = 0
         let answers = LiveWindowGateway.listedFrameAnswers(
-            count: 2, identityIndex: nil, baseline: baseline,
+            count: 2, identityIndex: nil, baseline: baseline, now: { clock },
             read: { _ in
                 reads += 1
                 return elsewhere
@@ -290,14 +320,16 @@ final class AXLivenessTests: XCTestCase {
             false, "both frames read and neither matched: the window is gone")
     }
 
-    /// A window the app lists by identity needs no geometry for membership:
-    /// only its own frame is read, once, and reused for the baseline.
+    /// A window the app lists by identity needs no geometry for
+    /// membership: only its own frame is read, once, and reused for the
+    /// baseline.
     func testIdentityListedWindowReadsOnlyItsOwnFrame() {
         let baseline = CGRect(x: 0, y: 0, width: 400, height: 300)
         let moved = CGRect(x: 900, y: 900, width: 400, height: 300)
+        let clock = Date(timeIntervalSince1970: 0)
         var reads: [Int] = []
         let answers = LiveWindowGateway.listedFrameAnswers(
-            count: 40, identityIndex: 7, baseline: baseline,
+            count: 40, identityIndex: 7, baseline: baseline, now: { clock },
             read: { index in
                 reads.append(index)
                 return moved
@@ -318,8 +350,9 @@ final class AXLivenessTests: XCTestCase {
     /// nothing at all.
     func testNoBaselineReadsNoListedFrames() {
         var reads = 0
+        let clock = Date(timeIntervalSince1970: 0)
         let answers = LiveWindowGateway.listedFrameAnswers(
-            count: 9, identityIndex: nil, baseline: nil,
+            count: 9, identityIndex: nil, baseline: nil, now: { clock },
             read: { _ in
                 reads += 1
                 return .zero

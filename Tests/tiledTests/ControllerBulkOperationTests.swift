@@ -836,6 +836,54 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertFalse(controller.hasPendingDeath(id), "the recovered probe clears the clock")
     }
 
+    // MARK: Review follow-ups on the restore check (TE-02)
+
+    /// A restore's late check must go quiet once the window is managed
+    /// again: re-tiling it into the same slot within the check's delay puts
+    /// its live frame back where the tile was, which the check would
+    /// otherwise read as a silent ignore.
+    func testTheRestoreCheckIsSilentOnceTheWindowIsTiledAgain() {
+        let handle = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let id = controller.registeredID(for: handle)!
+        gateway.silentIgnore.insert(handle)
+        controller.untile(window: id)
+        guard harness.verifyFires.count >= 2 else {
+            return XCTFail("the restore should schedule its check")
+        }
+        let restoreCheck = harness.verifyFires[1]
+
+        gateway.silentIgnore.remove(handle)
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(
+            canvas.state.slot(of: controller.registeredID(for: handle)!), .topLeft,
+            "the window is tiled again, under a fresh id")
+
+        restoreCheck()
+
+        XCTAssertNil(
+            canvas.error,
+            "a re-tiled window is not a window that ignored its restore")
+    }
+
+    func testTileHereAfterTheRowsWindowDiedAnswersInsteadOfTilingTheSlot() {
+        let rowWindow = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let rowID = controller.registeredID(for: rowWindow)!
+        let other = harness.addFocusedWindow(
+            frame: CGRect(x: 900, y: 100, width: 500, height: 400))
+        gateway.kill(rowWindow)
+
+        let receipt = controller.handleTileHere(window: rowID)
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement, MenuText.tileHereNoLongerTiledAnnouncement())
+        XCTAssertNil(
+            canvas.state.slot(of: controller.registeredID(for: other) ?? 0),
+            "the focused window was not tiled into the dead row's slot")
+    }
+
     func testPruneTimerFiresAndReleasesSlots() {
         // The repeating timer, shrunk: the wiring (schedule → fire → prune
         // → onChange when the count changed) is what the nil-interval tests

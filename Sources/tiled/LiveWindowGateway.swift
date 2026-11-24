@@ -773,13 +773,17 @@ final class LiveWindowGateway: WindowGateway {
             let identityIndex = list.firstIndex { CFEqual($0, element) }
             // Frames only matter where the failed handle has a baseline to
             // compare them against; the count of listed windows still
-            // decides absence. The fan-out is bounded: every read is a
-            // synchronous main-thread round trip bounded only by its own
-            // messaging timeout, and an unread window stays undeterminable
-            // rather than being judged absent.
+            // decides absence. The fan-out is bounded by time, not by a
+            // count: every read is a synchronous main-thread round trip
+            // bounded only by its own messaging timeout, so a hung app's
+            // reads each cost that timeout, while a responsive app answers
+            // its whole list in microseconds — which is what lets the death
+            // standard still prove an absence instead of parking the slot
+            // as an unprunable "unknown".
             let (listedFrames, identityFrame) = Self.listedFrameAnswers(
                 count: list.count, identityIndex: identityIndex,
-                baseline: binding.lastFrame, read: { Self.frame(of: list[$0]) })
+                baseline: binding.lastFrame, now: now,
+                read: { Self.frame(of: list[$0]) })
             appAnswer = Self.AppWindowAnswer(
                 appWindowsError: listError, listedFrames: listedFrames,
                 processAlive: processAlive, identityListed: identityIndex != nil,
@@ -841,24 +845,28 @@ final class LiveWindowGateway: WindowGateway {
         var identityFrame: CGRect?
     }
 
-    /// How many listed windows' frames one failed-probe liveness check may
-    /// read. Each read is two synchronous main-thread AX round trips, each
-    /// bounded only by its own messaging timeout, so the fan-out is capped
-    /// instead of multiplying with every window the app owns. The prefix
-    /// still answers membership for the windows a busy app lists first;
-    /// everything past it stays undeterminable.
-    static let maxListedFrameReads = 4
+    /// How long one failed probe may spend reading the owning app's listed
+    /// frames, in total. Each read is two synchronous attributes bounded
+    /// only by its own messaging timeout, and a hung app's reads each take
+    /// that timeout; a responsive app answers every listed window in
+    /// microseconds. The budget bounds the pathological case without
+    /// giving up the complete list the death standard needs to prove an
+    /// absence: a count cap would turn every closed window of a busy app
+    /// into an "unknown" that never prunes and keeps its slot forever.
+    static let listedFrameReadBudget: TimeInterval = 1.0
 
     /// The frames one failed probe reads from the app's window list: one
-    /// entry per listed window, in list order. A bounded prefix is read and
-    /// the rest stay `nil` — undeterminable, never the "read and did not
-    /// match" that proves absence. A window the app's list names by
-    /// identity needs no geometry for membership, so only its own frame is
-    /// read, for the baseline refresh. No baseline means no comparison to
-    /// make, so nothing is read. `read` is the frame read for one index, so
-    /// a test can count the round trips without Accessibility.
+    /// entry per listed window, in list order. A window the app's list
+    /// names by identity needs no geometry for membership, so only its own
+    /// frame is read, for the baseline refresh. Otherwise the list is read
+    /// in order until the budget is spent; the unread rest stay `nil` —
+    /// undeterminable, never the "read and did not match" that proves
+    /// absence. No baseline means no comparison to make, so nothing is
+    /// read. `now` and `read` are the seam: a test spends the budget
+    /// without a hung app.
     static func listedFrameAnswers(
-        count: Int, identityIndex: Int?, baseline: CGRect?, read: (Int) -> CGRect?
+        count: Int, identityIndex: Int?, baseline: CGRect?, now: () -> Date,
+        read: (Int) -> CGRect?
     ) -> (listedFrames: [CGRect?], identityFrame: CGRect?) {
         guard baseline != nil, count > 0 else { return ([], nil) }
         var frames = [CGRect?](repeating: nil, count: count)
@@ -867,8 +875,12 @@ final class LiveWindowGateway: WindowGateway {
             frames[identityIndex] = frame
             return (frames, frame)
         }
-        for index in 0..<min(count, maxListedFrameReads) {
+        let deadline = now().addingTimeInterval(Self.listedFrameReadBudget)
+        for index in 0..<count {
             frames[index] = read(index)
+            // A read that took the timeout is the signal to stop: the rest
+            // of the list would cost the same silence again.
+            if now() >= deadline { break }
         }
         return (frames, nil)
     }
