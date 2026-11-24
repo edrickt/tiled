@@ -1836,6 +1836,64 @@ final class TilingSpaceTests: XCTestCase {
         assertHealthy("same-layout session")
     }
 
+    // MARK: Expansion across a re-place (TE-01)
+
+    /// Undo re-places a window that was left expanded after its chapter
+    /// was pushed. The re-place must end the expansion: otherwise the
+    /// next reassert re-fills the stale entry and the window covers the
+    /// neighbour it was just put beside.
+    func testUndoOfAReplacedWindowEndsItsStaleExpansion() {
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .rightHalf, requester: b)
+        // B takes A's tile: the swap chapter names both windows.
+        harness.apply(slot: .topLeft, requester: b)
+        XCTAssertEqual(space.state.slot(of: a), .rightHalf)
+        space.expandToggle(window: a, context: context())
+        XCTAssertTrue(space.isExpanded(a))
+        guard let chapter = space.undoStack.last?.snapshot else {
+            return XCTFail("the swap should snapshot both windows")
+        }
+
+        let result = harness.restoreEvictees(chapter)
+
+        XCTAssertTrue(result.failures.isEmpty)
+        XCTAssertEqual(space.state.slot(of: a), .topLeft)
+        XCTAssertFalse(
+            space.isExpanded(a),
+            "the undo put A back in a tile, so its expansion is over")
+        XCTAssertEqual(space.expandToggleState(of: a), .expands)
+
+        space.reassert(.grid, context: context())
+        XCTAssertEqual(
+            harness.frame(of: a), harness.rect(.topLeft),
+            "a reassert must not refill a stale expansion over the neighbour")
+    }
+
+    /// A swapped-out blocker whose collapse its app refused still moves
+    /// into the requester's vacated tile. The swap ends the expansion, so
+    /// the canvas must stop calling the window expanded.
+    func testSwapAfterARefusedCollapseDoesNotLeaveTheBlockerExpanded() {
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .rightHalf, requester: b)
+        space.expandToggle(window: a, context: context())
+        XCTAssertTrue(space.isExpanded(a))
+        // A's collapse is refused; the swap's own write is the next one.
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!)
+
+        harness.apply(slot: .topLeft, requester: b)
+
+        XCTAssertEqual(space.state.slot(of: a), .rightHalf)
+        XCTAssertEqual(space.state.slot(of: b), .topLeft)
+        XCTAssertFalse(
+            space.isExpanded(a),
+            "A now sits on a tile, so the canvas must stop calling it expanded")
+        XCTAssertEqual(space.expandToggleState(of: a), .expands)
+    }
+
     /// Structural health after any transition: no ghosts, at most one
     /// layout on screen, no cell double-booked, layout agrees.
     private func assertHealthy(

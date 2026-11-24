@@ -965,6 +965,11 @@ struct TilingSpace {
         let from: Slot?
         let to: Slot
         let previousRecord: WindowRecord?
+        /// The expansion the window wore before the move, if any. A move
+        /// that commits re-places the window onto a tile, so the canvas
+        /// stops calling it expanded; a rolled-back move never happened
+        /// and puts the entry back.
+        let previousExpanded: CGRect?
         /// The canvas the write targets. Nil is the display-less fallback
         /// of a legacy undo snapshot; everything else passes the action's
         /// canvas.
@@ -979,6 +984,7 @@ struct TilingSpace {
             self.from = canvas.state.slot(of: id)
             self.to = to
             self.previousRecord = canvas.records[id]
+            self.previousExpanded = canvas.expanded[id]
             self.space = space
         }
 
@@ -990,6 +996,11 @@ struct TilingSpace {
             in canvas: inout TilingSpace, context: TilingSpace.Context
         ) -> FrameWriter.Result {
             canvas.state.commit(window: id, into: to)
+            // A window moved into a slot is no longer covering the
+            // layout: leaving a stale entry here would make the next
+            // reassert (or a display change) re-fill it to the screen
+            // and cover the neighbour it was just placed beside.
+            canvas.expanded[id] = nil
             guard canvas.records[id] != nil else {
                 landing = .skippedNoOp
                 return .skippedNoOp
@@ -1020,6 +1031,7 @@ struct TilingSpace {
             }
             canvas.state.commit(window: id, into: from)
             canvas.records[id] = previousRecord
+            canvas.expanded[id] = previousExpanded
             guard reachedGateway, canvas.records[id] != nil else { return }
             guard canvas.applyLayout(
                 for: id, context: context, on: space ?? context.space) == .refused
