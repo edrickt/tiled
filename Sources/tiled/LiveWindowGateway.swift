@@ -733,16 +733,20 @@ final class LiveWindowGateway: WindowGateway {
             // sleep is still the window the app lists, not absence.
             // Geometry stays the fallback, because after a display
             // teardown a held element stops comparing equal.
-            let mine = list.first { CFEqual($0, element) }
+            let identityIndex = list.firstIndex { CFEqual($0, element) }
             // Frames only matter where the failed handle has a baseline to
             // compare them against; the count of listed windows still
-            // decides absence.
-            let listedFrames: [CGRect?] =
-                binding.lastFrame != nil ? list.map { Self.frame(of: $0) } : []
+            // decides absence. The fan-out is bounded: every read is a
+            // synchronous main-thread round trip bounded only by its own
+            // messaging timeout, and an unread window stays undeterminable
+            // rather than being judged absent.
+            let (listedFrames, identityFrame) = Self.listedFrameAnswers(
+                count: list.count, identityIndex: identityIndex,
+                baseline: binding.lastFrame, read: { Self.frame(of: list[$0]) })
             appAnswer = Self.AppWindowAnswer(
                 appWindowsError: listError, listedFrames: listedFrames,
-                processAlive: processAlive, identityListed: mine != nil,
-                identityFrame: mine.flatMap { Self.frame(of: $0) })
+                processAlive: processAlive, identityListed: identityIndex != nil,
+                identityFrame: identityFrame)
         }
         let pass = Self.livenessPass(
             probe: Self.LivenessProbe(error: probeError, frame: probedFrame),
@@ -798,6 +802,38 @@ final class LiveWindowGateway: WindowGateway {
         /// the list contains it and its frame reads. Refreshes the
         /// baseline after a move.
         var identityFrame: CGRect?
+    }
+
+    /// How many listed windows' frames one failed-probe liveness check may
+    /// read. Each read is two synchronous main-thread AX round trips, each
+    /// bounded only by its own messaging timeout, so the fan-out is capped
+    /// instead of multiplying with every window the app owns. The prefix
+    /// still answers membership for the windows a busy app lists first;
+    /// everything past it stays undeterminable.
+    static let maxListedFrameReads = 4
+
+    /// The frames one failed probe reads from the app's window list: one
+    /// entry per listed window, in list order. A bounded prefix is read and
+    /// the rest stay `nil` — undeterminable, never the "read and did not
+    /// match" that proves absence. A window the app's list names by
+    /// identity needs no geometry for membership, so only its own frame is
+    /// read, for the baseline refresh. No baseline means no comparison to
+    /// make, so nothing is read. `read` is the frame read for one index, so
+    /// a test can count the round trips without Accessibility.
+    static func listedFrameAnswers(
+        count: Int, identityIndex: Int?, baseline: CGRect?, read: (Int) -> CGRect?
+    ) -> (listedFrames: [CGRect?], identityFrame: CGRect?) {
+        guard baseline != nil, count > 0 else { return ([], nil) }
+        var frames = [CGRect?](repeating: nil, count: count)
+        if let identityIndex, frames.indices.contains(identityIndex) {
+            let frame = read(identityIndex)
+            frames[identityIndex] = frame
+            return (frames, frame)
+        }
+        for index in 0..<min(count, maxListedFrameReads) {
+            frames[index] = read(index)
+        }
+        return (frames, nil)
     }
 
     /// One window's liveness pass assembled from its raw answers. A

@@ -235,4 +235,98 @@ final class AXLivenessTests: XCTestCase {
             absentFromEmpty.verdict, .dead,
             "the app lists no windows at all: the window is really gone")
     }
+
+    // MARK: Bounded failed-probe fan-out (TO-01)
+
+    /// A failed probe used to read every listed window's frame: two
+    /// synchronous main-thread AX round trips per window, unbounded. The
+    /// read plan keeps the list's shape but reads only a bounded prefix,
+    /// and the unread rest stays undeterminable so a cap can never prove a
+    /// live window absent.
+    func testFailedProbeReadsABoundedPrefixOfTheAppsWindowList() {
+        let baseline = CGRect(x: 0, y: 0, width: 400, height: 300)
+        var reads: [Int] = []
+        let answers = LiveWindowGateway.listedFrameAnswers(
+            count: 120, identityIndex: nil, baseline: baseline,
+            read: { index in
+                reads.append(index)
+                return CGRect(
+                    x: CGFloat(index + 1) * 500, y: 0, width: 400, height: 300)
+            })
+
+        XCTAssertEqual(
+            reads.count, LiveWindowGateway.maxListedFrameReads,
+            "the fan-out is capped, not one read pair per listed window")
+        XCTAssertEqual(answers.listedFrames.count, 120, "one entry per listed window")
+        XCTAssertEqual(
+            answers.listedFrames[0], CGRect(x: 500, y: 0, width: 400, height: 300))
+        XCTAssertNil(answers.listedFrames[119], "an unread window is undeterminable")
+        XCTAssertNil(
+            LiveWindowGateway.appWindowMatch(
+                baseline: baseline, listedFrames: answers.listedFrames,
+                identityListed: false),
+            "a capped list cannot prove the window absent")
+        XCTAssertNil(answers.identityFrame)
+    }
+
+    /// A list short enough to read whole keeps the exact old geometry
+    /// answer, death included: the cap only touches lists longer than it.
+    func testAShortListIsStillReadWholeSoAbsenceStillReadsDead() {
+        let baseline = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let elsewhere = CGRect(x: 900, y: 900, width: 400, height: 300)
+        var reads = 0
+        let answers = LiveWindowGateway.listedFrameAnswers(
+            count: 2, identityIndex: nil, baseline: baseline,
+            read: { _ in
+                reads += 1
+                return elsewhere
+            })
+
+        XCTAssertEqual(reads, 2)
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(
+                baseline: baseline, listedFrames: answers.listedFrames,
+                identityListed: false),
+            false, "both frames read and neither matched: the window is gone")
+    }
+
+    /// A window the app lists by identity needs no geometry for membership:
+    /// only its own frame is read, once, and reused for the baseline.
+    func testIdentityListedWindowReadsOnlyItsOwnFrame() {
+        let baseline = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let moved = CGRect(x: 900, y: 900, width: 400, height: 300)
+        var reads: [Int] = []
+        let answers = LiveWindowGateway.listedFrameAnswers(
+            count: 40, identityIndex: 7, baseline: baseline,
+            read: { index in
+                reads.append(index)
+                return moved
+            })
+
+        XCTAssertEqual(reads, [7], "one read pair, not 40, plus a duplicate")
+        XCTAssertEqual(answers.listedFrames.count, 40)
+        XCTAssertEqual(answers.identityFrame, moved)
+        XCTAssertEqual(answers.listedFrames[7], moved)
+        XCTAssertEqual(
+            LiveWindowGateway.appWindowMatch(
+                baseline: baseline, listedFrames: answers.listedFrames,
+                identityListed: true),
+            true)
+    }
+
+    /// No baseline means no comparison to make, so a failed probe reads
+    /// nothing at all.
+    func testNoBaselineReadsNoListedFrames() {
+        var reads = 0
+        let answers = LiveWindowGateway.listedFrameAnswers(
+            count: 9, identityIndex: nil, baseline: nil,
+            read: { _ in
+                reads += 1
+                return .zero
+            })
+
+        XCTAssertEqual(reads, 0)
+        XCTAssertTrue(answers.listedFrames.isEmpty)
+        XCTAssertNil(answers.identityFrame)
+    }
 }
