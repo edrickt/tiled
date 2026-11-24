@@ -112,6 +112,60 @@ typealias ScreenProvider = () -> [ScreenInfo]
 #if canImport(AppKit)
 import AppKit
 
+/// The live display list, memoized behind the `ScreenProvider` seam.
+///
+/// Building one `ScreenInfo` per display asks the window server for each
+/// display's persistent CoreGraphics UUID, allocates a CF string, and
+/// parses it back into a UUID. The list is read far more often than it
+/// changes: once per mouse-move event (the status glyph's canvas) and once
+/// per menu row (its display name). Without a memo, moving the pointer is
+/// input-rate WindowServer IPC.
+///
+/// A display added, removed, or reconfigured is the one event that
+/// changes the answer, and that notification drops the memo. The memo is
+/// deliberately not time-based: a stale display list would size a window
+/// against a screen that no longer exists, which is worse than one
+/// WindowServer query after the change.
+final class ScreenInventory {
+    private let read: () -> [ScreenInfo]
+    private var cached: [ScreenInfo]?
+    private var observer: NSObjectProtocol?
+
+    init(read: @escaping () -> [ScreenInfo]) {
+        self.read = read
+        // Registered before the controller's own display observer, so a
+        // notification that reasserts the layout already sees the fresh
+        // list; the controller also invalidates explicitly, because that
+        // ordering is a convenience, not a contract.
+        observer = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.invalidate()
+        }
+    }
+
+    deinit {
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    /// The current display list, built once until the displays change.
+    func current() -> [ScreenInfo] {
+        if let cached { return cached }
+        let fresh = read()
+        cached = fresh
+        return fresh
+    }
+
+    /// Drops the memo. Called by the change notification, and by the
+    /// controller's observer before it reasserts the layout.
+    func invalidate() {
+        cached = nil
+    }
+}
+
 extension ScreenInfo {
     /// One entry per live display. The `ScreenID` combines the
     /// CoreGraphics display UUID with the live display number, so a

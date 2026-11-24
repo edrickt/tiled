@@ -43,6 +43,9 @@ final class TilingController {
     /// Convergence-check scheduler for the late silent-ignore verification.
     /// Injectable so tests fire verifications without waiting 3.5s.
     private let scheduleVerify: DragTracker.DragEndScheduler
+    /// The memoized display list behind the production `screens`
+    /// provider; nil when a suite injected its own list.
+    private let screenInventory: ScreenInventory?
     /// The one frame-write policy every push path shares: no-op skip,
     /// off-Space deferral, echo marking, and the convergence check each
     /// write declares. Lazy so its closures can capture self.
@@ -224,7 +227,24 @@ final class TilingController {
         self.now = now
         self.uptime = uptime
         self.isMouseDown = isMouseDown
-        self.screens = screens ?? { NSScreen.screens.enumerated().map { ScreenInfo(appKit: $0.element, index: $0.offset) } }
+        // The production list is memoized: every canvas read, cursor move,
+        // and menu row asks for it, and each uncached build queries the
+        // window server once per display for its persistent UUID. An
+        // injected provider is the test's own seam and is handed over as
+        // is: a suite replaces it to simulate a display change and expects
+        // the next read to see it, with no notification in between.
+        if let screens {
+            self.screenInventory = nil
+            self.screens = screens
+        } else {
+            let inventory = ScreenInventory {
+                NSScreen.screens.enumerated().map {
+                    ScreenInfo(appKit: $0.element, index: $0.offset)
+                }
+            }
+            self.screenInventory = inventory
+            self.screens = { inventory.current() }
+        }
         // Windows closed while tiled otherwise linger as ghosts until the
         // next hotkey; release their slots within seconds instead.
         // `pruneInterval == nil` schedules no tick: tests pass nil so no
@@ -254,6 +274,9 @@ final class TilingController {
         ) { [weak self] _ in
             guard let self else { return }
             self.dbg("screens changed; reasserting visible canvases")
+            // Drop the memo before anything re-reads: the reassert must
+            // size against the new display set, not the one being replaced.
+            self.screenInventory?.invalidate()
             self.directory.refreshAllFrames()
             self.directory.markAllStale()
             self.applyAll()

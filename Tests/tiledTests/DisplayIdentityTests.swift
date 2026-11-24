@@ -546,6 +546,48 @@ final class DisplayIdentityTests: XCTestCase {
     /// With no displays at all the canvas is genuinely display-less
     /// (`TilingSpaceKey.displayless`): there is no hidden canvas to
     /// protect, so it stays visible and still writes.
+    // MARK: The live display list's memo (TO-04)
+
+    /// Building one `ScreenInfo` per display queries the window server for
+    /// its persistent UUID. The list is read per mouse-move event and per
+    /// menu row, so it must be read once and invalidated by the one event
+    /// that changes it.
+    func testScreenInventoryReadsOnceUntilTheDisplaysChange() {
+        let screen = ScreenInfo(
+            id: ScreenID(rawValue: 1),
+            frame: Self.leftFrame, visibleFrame: Self.leftFrame, name: "Built-in")
+        var reads = 0
+        let inventory = ScreenInventory {
+            reads += 1
+            return [screen]
+        }
+
+        XCTAssertEqual(inventory.current().count, 1)
+        _ = inventory.current()
+        _ = inventory.current()
+        XCTAssertEqual(reads, 1, "one build, not one per mouse move or menu row")
+
+        NotificationCenter.default.post(
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+
+        _ = inventory.current()
+        XCTAssertEqual(reads, 2, "a display change drops the memo")
+    }
+
+    func testScreenInventoryInvalidatesExplicitly() {
+        var reads = 0
+        let inventory = ScreenInventory {
+            reads += 1
+            return []
+        }
+
+        _ = inventory.current()
+        inventory.invalidate()
+        _ = inventory.current()
+
+        XCTAssertEqual(reads, 2)
+    }
+
     func testDisplaylessCanvasStaysVisible() {
         let gateway = FakeWindowGateway()
         let controller = makeController(gateway: gateway, screens: { [] })
