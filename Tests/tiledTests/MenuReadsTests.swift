@@ -35,7 +35,7 @@ final class MenuReadsTests: XCTestCase {
         eventTapUnavailable: Bool = false
     ) -> MenuReads {
         MenuReads(
-            space: space, controller: controller,
+            space: space, controller: controller, isTrusted: true,
             failedActions: failedActions,
             eventTapUnavailable: eventTapUnavailable,
             binding: { $0.defaultBinding })
@@ -194,6 +194,7 @@ final class MenuReadsTests: XCTestCase {
 
         let reads = MenuReads(
             space: controller.focusedTilingSpace, controller: controller,
+            isTrusted: true,
             failedActions: [], binding: { $0.defaultBinding })
         XCTAssertEqual(
             Set(reads.rows.compactMap(\.appName)), ["Safari", "Notes"],
@@ -260,6 +261,7 @@ final class MenuReadsTests: XCTestCase {
 
         let reads = MenuReads(
             space: controller.focusedTilingSpace, controller: controller,
+            isTrusted: true,
             failedActions: [], binding: { $0.defaultBinding })
         XCTAssertNil(reads.tileError, "the focused canvas refused nothing")
         XCTAssertEqual(reads.backgroundTileErrors, [

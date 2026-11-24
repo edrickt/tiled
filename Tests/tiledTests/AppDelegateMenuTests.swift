@@ -326,7 +326,15 @@ final class AppDelegateMenuTests: XCTestCase {
         presenter.refresh()
         XCTAssertTrue(observed.isEmpty, "the first pass has no flip to report")
 
+        // A refresh pass alone never re-queries TCC: trust cannot change
+        // between two frames of a drag, and the query is a synchronous
+        // cross-process round trip.
         gateway.isTrusted = false
+        presenter.refresh()
+        XCTAssertTrue(observed.isEmpty, "the pass reuses the cached answer")
+
+        // Activation is the boundary that invalidates the cache.
+        presenter.trustMayHaveChanged()
         presenter.refresh()
         XCTAssertEqual(observed, [false], "the revoke reaches Settings once")
 
@@ -334,6 +342,7 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(observed, [false], "a steady state repeats nothing")
 
         gateway.isTrusted = true
+        presenter.trustMayHaveChanged()
         presenter.refresh()
         XCTAssertEqual(observed, [false, true], "a re-grant reaches Settings too")
     }

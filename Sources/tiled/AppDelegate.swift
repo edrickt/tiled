@@ -69,7 +69,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in self?.menuBar.refresh() }
+        ) { [weak self] _ in
+            // Activation is the boundary where Accessibility may have
+            // changed (the user granted or revoked it elsewhere), so the
+            // presenter's cached answer must not survive it.
+            self?.menuBar.trustMayHaveChanged()
+            self?.menuBar.refresh()
+        }
         if !settings.hideMenuBarIcon {
             menuBar.showIcon()
         }
@@ -252,6 +258,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 timer.invalidate()
                 return
             }
+            // The poll exists to see trust flip, so it must not read a
+            // cached answer.
+            self.menuBar.trustMayHaveChanged()
             if gateway.isTrusted {
                 self.start(afterPermissionWait: true)
             }
@@ -316,6 +325,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// tab is selectable here (first run, permission grant, hidden-icon
     /// recovery); the no-arg path keeps the General default.
     private func showSettings(selecting tab: SettingsWindowController.Tab?) {
+        // The Settings window re-probes its permission rows on show, and
+        // the user may have just granted from there: the menu's cached
+        // answer must not outlive that.
+        menuBar.trustMayHaveChanged()
         ensureSettingsController()
         if let tab {
             settingsController?.show(selecting: tab)

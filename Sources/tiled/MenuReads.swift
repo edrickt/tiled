@@ -36,9 +36,14 @@ struct MenuReads {
     /// describes the canvas the menu is scoped to.
     private let layoutByScreen: [ScreenID?: LayoutKind]
 
+    /// `isTrusted` is passed in, never read here: TCC is a synchronous
+    /// cross-process query and this type is built once per menu pass, which
+    /// a drag-resize drives every runloop tick. The presenter owns the
+    /// cached answer and refreshes it on the events that can change it.
     init(
         space: TilingSpaceKey,
         controller: TilingController,
+        isTrusted: Bool,
         failedActions: [HotkeyAction],
         eventTapUnavailable: Bool = false,
         binding: (HotkeyAction) -> HotkeyBinding
@@ -46,7 +51,7 @@ struct MenuReads {
         let canvas = controller.canvas(for: space)
         self.space = space
         self.canvas = canvas
-        self.isTrusted = controller.isTrusted
+        self.isTrusted = isTrusted
         self.tileError = canvas.error
         var backgroundErrors: [String] = []
         for entry in controller.visibleCanvasErrors() where entry.space != space {

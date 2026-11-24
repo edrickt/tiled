@@ -66,6 +66,13 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     var onTrustChange: ((Bool) -> Void)?
     /// The trust the last pass observed, so a flip is reported once.
     private var lastTrust: Bool?
+    /// The last Accessibility trust answer, reused across passes. Asking
+    /// TCC is a synchronous cross-process query, and `refresh` runs on
+    /// every runloop tick of a drag-resize, where trust cannot change
+    /// between two frames. The events that can change it (app activation,
+    /// opening the menu, the permission poll, showing Settings) invalidate
+    /// this first.
+    private var cachedTrust: Bool?
     private(set) var menuOpen = false
 
     init(
@@ -135,6 +142,7 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         statusItem = item
         lastSnapshot = snapshot
         lastTrust = snapshot.menu.isTrusted
+        cachedTrust = snapshot.menu.isTrusted
     }
 
     func hideIcon() {
@@ -212,6 +220,7 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         let reads = MenuReads(
             space: focus,
             controller: controller,
+            isTrusted: currentTrust(),
             failedActions: hotkeys?.failedActions ?? [],
             eventTapUnavailable: hotkeys.map { !$0.isEventTapAvailable } ?? false,
             binding: { self.hotkeyStore.binding(for: $0) })
@@ -298,6 +307,26 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         menuOpen = true
+        // Opening the menu is one of the few moments trust can have
+        // flipped since the last pass (the user may have just granted or
+        // revoked it), and the menu's own row states it.
+        trustMayHaveChanged()
+    }
+
+    /// Marks the cached Accessibility answer stale: the caller observed an
+    /// event that can flip trust. The next pass re-queries TCC; every other
+    /// pass reuses the answer.
+    func trustMayHaveChanged() {
+        cachedTrust = nil
+    }
+
+    /// The current trust answer, queried at most once per invalidated
+    /// pass.
+    private func currentTrust() -> Bool {
+        if let cachedTrust { return cachedTrust }
+        let fresh = controller.isTrusted
+        cachedTrust = fresh
+        return fresh
     }
 
     /// Refreshes the rows in place as the menu opens.
@@ -318,6 +347,9 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     /// not depend on that order.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusItem?.menu else { return }
+        // The rows state the permission row, so this pass must read the
+        // live answer rather than a flag cached during a drag.
+        trustMayHaveChanged()
         // Event delivery during menu tracking is not guaranteed to reach
         // the monitors, so seed the cursor display from the live mouse
         // location before resolving the glyph's key.
