@@ -525,7 +525,7 @@ final class TilingController {
         case .placed, .alreadyTiled, .deferred: claimed = true
         case .refused: claimed = hadSlot
         case .nothingToEvict, .expandRefused, .expandNoFrame, .expandBlocked,
-            .switched, .alreadyInLayout:
+            .noFrame, .switched, .alreadyInLayout:
             claimed = false
         }
         if claimed { discardDeferredRestores(for: handle) }
@@ -674,6 +674,12 @@ final class TilingController {
                 canvas: space, performed: false,
                 notice: canvas?.error ?? announcement,
                 announcement: announcement)
+        case .noFrame:
+            let announcement = MenuText.tileNoFrameAnnouncement()
+            return ActionReceipt(
+                canvas: space, performed: false,
+                notice: canvas?.error ?? announcement,
+                announcement: announcement)
         // `.nothingToEvict`, `.switched`, and `.alreadyInLayout` come from
         // the evict and switch entry points, not from `place`; the arms
         // keep the shared Result switch exhaustive. They are unreachable
@@ -747,7 +753,7 @@ final class TilingController {
                 canvas: space, performed: false,
                 notice: canvas?.error ?? announcement,
                 announcement: announcement)
-        case .nothingToEvict, .alreadyTiled, .switched, .alreadyInLayout:
+        case .nothingToEvict, .alreadyTiled, .noFrame, .switched, .alreadyInLayout:
             return ActionReceipt(
                 canvas: space, performed: false, notice: notice,
                 announcement: nil)
@@ -1981,7 +1987,7 @@ final class TilingController {
         case .deferred:
             discardDeferredRestores(for: handle)
         case .refused, .alreadyTiled, .nothingToEvict, .expandRefused,
-            .expandNoFrame, .expandBlocked, .switched, .alreadyInLayout:
+            .expandNoFrame, .expandBlocked, .noFrame, .switched, .alreadyInLayout:
             break
         }
         onChange?()

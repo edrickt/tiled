@@ -231,6 +231,14 @@ enum MenuText {
         "Couldn't read that window's frame, so it wasn't expanded."
     }
 
+    /// A slot request was refused because the window's live frame could not
+    /// be read: no pre-tile frame means no way back when it is untiled. The
+    /// app did nothing wrong, so the sentence blames the unreadable frame,
+    /// never the app.
+    static func tileNoFrameAnnouncement() -> String {
+        "Couldn't read that window's frame, so it wasn't tiled."
+    }
+
     /// A canvas shows one full-size window at a time, so the new expansion
     /// waits on the window already covering the layout. Its app refused to
     /// return it to its tile, which leaves the rule unenforceable: nothing

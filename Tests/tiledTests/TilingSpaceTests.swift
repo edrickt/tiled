@@ -671,6 +671,46 @@ final class TilingSpaceTests: XCTestCase {
             "the reflow chapter returns the survivor to the slot it held")
     }
 
+    // MARK: First tiling with no readable frame (TE-03)
+
+    /// The live frame is the only source of a first tiling's pre-tile
+    /// frame. Reading it a moment later (during the untile) is too late:
+    /// the window is already in the tile. Refusing the placement keeps the
+    /// record and leaves the window exactly where the app has it.
+    func testUnreadableFirstTilingFrameLeavesTheWindowUntilied() {
+        let id = harness.addWindow()
+        harness.gateway.hideFrames.insert(harness.handle(of: id)!)
+
+        let outcome = harness.apply(slot: .topLeft, requester: id)
+
+        XCTAssertNil(
+            space.state.slot(of: id),
+            "tiling a window with no readable pre-tile frame would strand it")
+        XCTAssertEqual(outcome.result, .noFrame)
+        XCTAssertTrue(harness.gateway.writes.isEmpty, "nothing was written")
+        XCTAssertNotNil(space.records[id], "the window stays managed, just untiled")
+    }
+
+    /// The refusal must land before anything is displaced: reading the
+    /// requester's frame after the eviction would untangle the blocker for
+    /// a request that then fails.
+    func testUnreadableFirstTilingLeavesTheBlockerTiled() {
+        let blocker = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: blocker)
+        let requester = harness.addWindow()
+        harness.gateway.hideFrames.insert(harness.handle(of: requester)!)
+
+        let outcome = harness.apply(slot: .topLeft, requester: requester)
+
+        XCTAssertEqual(outcome.result, .noFrame)
+        XCTAssertEqual(
+            space.state.slot(of: blocker), .topLeft,
+            "a refusal that displaces nobody leaves the blocker alone")
+        XCTAssertEqual(
+            harness.frame(of: blocker), harness.rect(.topLeft),
+            "the blocker never moved")
+    }
+
     // MARK: Silent-ignore verification (TE-02)
 
     /// A reflow survivor's growth is written through the shared policy

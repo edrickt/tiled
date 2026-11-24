@@ -484,6 +484,21 @@ final class ControllerBulkOperationTests: XCTestCase {
             "the menu must say the restore did not land, not claim a clean board")
     }
 
+    /// A slot key pressed on a window whose frame will not read answers
+    /// honestly: tiling it would record no pre-tile frame, so the untile
+    /// could never send it home and a neighbour would grow over it.
+    func testSlotKeyWithAnUnreadableFrameIsRefusedNotTiled() {
+        let handle = harness.addFocusedWindow()
+        gateway.hideFrames.insert(handle)
+
+        let receipt = controller.handle(slotKey: .topLeft)
+
+        XCTAssertFalse(receipt.performed)
+        XCTAssertEqual(
+            receipt.announcement, "Couldn't read that window's frame, so it wasn't tiled.")
+        XCTAssertTrue(canvas.state.occupants.isEmpty, "nothing was tiled")
+    }
+
     func testTiledWindowsInfoIsSortedBySlot() {
         // Tile in reverse slot order; presentation must sort by rawValue.
         harness.addFocusedWindow()

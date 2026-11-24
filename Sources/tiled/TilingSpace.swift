@@ -174,6 +174,11 @@ struct TilingSpace {
             case alreadyTiled
             /// The evict key found no slot to release.
             case nothingToEvict
+            /// A first tiling was refused because the window's live frame
+            /// could not be read: with no pre-tile frame recorded, a later
+            /// untile would have nowhere to send it. Nothing was written or
+            /// displaced, and this is not an app refusal.
+            case noFrame
             /// An expand or retile write was refused.
             case expandRefused(windowName: String?)
             /// Expanding was refused because no frame could be read: with
@@ -338,6 +343,15 @@ struct TilingSpace {
         guard decision != .noop else {
             return Outcome(result: .alreadyTiled)
         }
+        // A first tiling with no readable frame has no pre-tile frame to
+        // record, and a later untile would have nowhere to send the
+        // window: it would keep the tile it no longer owned while a
+        // neighbour reflowed over it. Refuse before anything is
+        // displaced, and leave the window exactly where its app has it.
+        if placeWouldLoseTheFrame(id, context: context) {
+            context.log("place win\(id): no readable frame, left untiled")
+            return Outcome(result: .noFrame)
+        }
         // Clear this canvas's slate (not the focused one: the requester
         // may tile onto a background display or Space while focus sits
         // elsewhere).
@@ -384,7 +398,12 @@ struct TilingSpace {
     ) -> Outcome {
         var commit = commit
         var outcome = Outcome()
-        if let placement = commit.failures.first(where: { $0.kind == .placement }) {
+        if commit.noFrame {
+            // The requester never landed: say so without blaming an app
+            // that did nothing, and without the eviction narrative a
+            // completed placement would carry.
+            outcome.result = .noFrame
+        } else if let placement = commit.failures.first(where: { $0.kind == .placement }) {
             // The requester's or displaced window's own write was refused:
             // the outcome names it for the announcement.
             outcome.result = .refused(windowName: placement.windowName)
@@ -853,6 +872,8 @@ struct TilingSpace {
         switch placement {
         case .noRecord:
             break
+        case .noFrame:
+            commit.noFrame = true
         case .refused(let failures, let released):
             commit.failures += failures
             commit.requesterReleased = released
@@ -989,13 +1010,17 @@ struct TilingSpace {
         /// transaction reports this instead of making `settle` re-probe
         /// record presence.
         var requesterReleased = false
+        /// The requester was never placed because its live frame could
+        /// not be read (`.noFrame`). Nothing was committed for it, so the
+        /// branch is not clean even though no write failed.
+        var noFrame = false
         /// Windows this branch untangled on a degraded path whose original
         /// decision (a swap) would not name them for forgetting.
         var forgotten: [WindowID] = []
 
         /// True when nothing failed: neither a placement write nor any
-        /// restore or reflow write.
-        var clean: Bool { failures.isEmpty }
+        /// restore or reflow write, and the requester actually landed.
+        var clean: Bool { failures.isEmpty && !noFrame }
     }
 
     /// One bulk restore's two answers: the refused writes for the action's
@@ -1014,6 +1039,8 @@ struct TilingSpace {
         case placed(deferred: Bool)
         case refused([Failure], released: Bool)
         case noRecord
+        /// No readable pre-tile frame: nothing was committed.
+        case noFrame
     }
 
     /// One window's move in an action: the slot it leaves, the slot it
@@ -1230,6 +1257,17 @@ struct TilingSpace {
     /// Places `id` into `slot`. A refusal rolls the occupancy back through
     /// the move transaction; a deferred off-Space write stands and is
     /// returned as such so the event narrates the deferral.
+    /// Whether placing `id` would have no pre-tile frame to record: a
+    /// first tiling whose live frame reads nil and whose record carries no
+    /// frame yet. The only window this can strand, so the refusal check
+    /// and `place` share one predicate.
+    private func placeWouldLoseTheFrame(_ id: WindowID, context: Context) -> Bool {
+        guard state.slot(of: id) == nil, let record = records[id],
+            record.preTileFrame == .zero
+        else { return false }
+        return context.gateway.frame(of: record.handle) == nil
+    }
+
     private mutating func place(
         window id: WindowID, into slot: Slot,
         context: Context, observed: inout [WindowID]
@@ -1240,7 +1278,15 @@ struct TilingSpace {
             // First tiling: remember where to restore when untiled.
             // A window moving between overlapping slots (e.g. Left -> BottomLeft)
             // keeps its original pre-tile frame.
-            record.preTileFrame = context.gateway.frame(of: record.handle) ?? record.preTileFrame
+            guard let live = context.gateway.frame(of: record.handle)
+                ?? (record.preTileFrame == .zero ? nil : record.preTileFrame)
+            else {
+                // Defensive: `apply` refused before anything was
+                // displaced. A caller that reaches `execute` directly gets
+                // the same refusal rather than a zero pre-tile frame.
+                return .noFrame
+            }
+            record.preTileFrame = live
             records[id] = record
         }
         let result = move.commit(in: &self, context: context)
