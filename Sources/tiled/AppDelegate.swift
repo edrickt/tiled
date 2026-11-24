@@ -58,6 +58,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onLateReceipt = { [weak self] receipt in
             self?.present(receipt)
         }
+        // Accessibility can be revoked (or re-granted) while Tiled runs.
+        // Every refresh pass reads trust for the menu, so a flip observed
+        // there is forwarded to Settings: its permission rows otherwise
+        // re-probe only on show(), and the two surfaces would describe
+        // different worlds.
+        menuBar.onTrustChange = { [weak self] _ in
+            self?.settingsController?.permissionStateDidChange()
+        }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main

@@ -58,6 +58,14 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     /// The last snapshot actually rendered. The menu and icon halves are
     /// compared separately so an icon-only change never rebuilds the menu.
     private var lastSnapshot: MenuBarSnapshot?
+    /// Fires when a pass observes Accessibility trust flip (either way).
+    /// The delegate forwards it to Settings, whose permission rows
+    /// otherwise re-probe only when the window is shown: a revoke while
+    /// Settings is open would leave the window teaching live combos while
+    /// the menu says the app is waiting for permission.
+    var onTrustChange: ((Bool) -> Void)?
+    /// The trust the last pass observed, so a flip is reported once.
+    private var lastTrust: Bool?
     private(set) var menuOpen = false
 
     init(
@@ -126,6 +134,7 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         item.menu = makeMenu(from: snapshot.menu)
         statusItem = item
         lastSnapshot = snapshot
+        lastTrust = snapshot.menu.isTrusted
     }
 
     func hideIcon() {
@@ -167,6 +176,13 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         // An open menu defers both halves; the close handler runs a fresh
         // pass, so the deferred snapshot must not become the baseline.
         if !menuOpen { lastSnapshot = snapshot }
+        // Trust is not part of the menu's rendering diff (the permission
+        // row is in the row list, but its sentence is not the whole story
+        // for Settings), so report a flip on its own: the other surfaces
+        // that show trust must be told, not left to their next show().
+        let flipped = lastTrust.map { $0 != snapshot.menu.isTrusted } ?? false
+        lastTrust = snapshot.menu.isTrusted
+        if flipped { onTrustChange?(snapshot.menu.isTrusted) }
     }
 
     /// The cursor moved to another display: redraw only the glyph, which

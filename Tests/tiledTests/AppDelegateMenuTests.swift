@@ -297,6 +297,47 @@ final class AppDelegateMenuTests: XCTestCase {
             "the glyph half names and fills its own passed canvas, not the menu's")
     }
 
+    /// Accessibility can be revoked while Tiled runs. The menu reads
+    /// trust on every pass; Settings re-probes only when shown, so the
+    /// presenter must report a flip for the delegate to forward.
+    func testRefreshReportsATrustFlipSoSettingsCanRefresh() {
+        let suiteName = "trust-flip-\(UUID())"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
+        let gateway = FakeWindowGateway()
+        gateway.isTrusted = true
+        let controller = TilingController(
+            gateway: gateway, pruneInterval: nil,
+            screens: { [ScreenInfo(
+                id: ScreenID(rawValue: 1),
+                frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+                visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+                name: "Built-in")] },
+            deathConfirmation: 0)
+        controller.onChange = {}
+        let presenter = MenuBarPresenter(
+            controller: controller,
+            hotkeyStore: HotkeyStore(defaults: defaults),
+            hotkeyService: { nil },
+            actionTarget: NSObject())
+        var observed: [Bool] = []
+        presenter.onTrustChange = { observed.append($0) }
+
+        presenter.refresh()
+        XCTAssertTrue(observed.isEmpty, "the first pass has no flip to report")
+
+        gateway.isTrusted = false
+        presenter.refresh()
+        XCTAssertEqual(observed, [false], "the revoke reaches Settings once")
+
+        presenter.refresh()
+        XCTAssertEqual(observed, [false], "a steady state repeats nothing")
+
+        gateway.isTrusted = true
+        presenter.refresh()
+        XCTAssertEqual(observed, [false, true], "a re-grant reaches Settings too")
+    }
+
     func testLabelOnlyRemapChangesThePresenterSnapshot() {
         // The store lives behind the presenter's snapshot assembly. Editing
         // one binding changes nothing but a label, yet the snapshot must
