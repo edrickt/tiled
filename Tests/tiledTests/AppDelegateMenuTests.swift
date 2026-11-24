@@ -9,6 +9,27 @@ import XCTest
 /// wiring (every case, so a selector or represented-object typo cannot
 /// degrade a menu row into a silent no-op).
 final class AppDelegateMenuTests: XCTestCase {
+    /// One preference domain per test, removed in `tearDown`: the presenter
+    /// builds stores whose bindings persist, and minting a UUID-named
+    /// domain per store without removing it grew the runner's preference
+    /// store on every run (TS-08).
+    private var suiteName = ""
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "AppDelegateMenuTests-\(UUID().uuidString)"
+    }
+
+    override func tearDown() {
+        UserDefaults().removePersistentDomain(forName: suiteName)
+        suiteName = ""
+        super.tearDown()
+    }
+
+    private func temporaryDefaults() -> UserDefaults {
+        UserDefaults(suiteName: suiteName)!
+    }
+
     // MARK: Monitor grouping (monitorPresentation)
 
     private func row(
@@ -273,7 +294,7 @@ final class AppDelegateMenuTests: XCTestCase {
         let presenter = MenuBarPresenter(
             controller: controller,
             hotkeyStore: HotkeyStore(
-                defaults: UserDefaults(suiteName: "menu-pass-\(UUID())")!),
+                defaults: temporaryDefaults()),
             hotkeyService: { nil },
             actionTarget: NSObject())
         let menuKey = TilingSpaceKey(screen: right.id, space: nil)
@@ -301,9 +322,7 @@ final class AppDelegateMenuTests: XCTestCase {
     /// trust on every pass; Settings re-probes only when shown, so the
     /// presenter must report a flip for the delegate to forward.
     func testRefreshReportsATrustFlipSoSettingsCanRefresh() {
-        let suiteName = "trust-flip-\(UUID())"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
+        let defaults = temporaryDefaults()
         let gateway = FakeWindowGateway()
         gateway.isTrusted = true
         let controller = TilingController(
@@ -352,9 +371,7 @@ final class AppDelegateMenuTests: XCTestCase {
     /// when the item is nil), so every pass built the whole NSMenu and
     /// rasterized the 22×16 glyph at drag rate, then dropped both.
     func testHiddenIconBuildsNoMenuAndDrawsNoGlyph() {
-        let suiteName = "hidden-icon-\(UUID())"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
+        let defaults = temporaryDefaults()
         let controller = TilingController(
             gateway: FakeWindowGateway(), pruneInterval: nil,
             screens: { [Self.firstDisplay] }, deathConfirmation: 0)
@@ -386,7 +403,7 @@ final class AppDelegateMenuTests: XCTestCase {
         // one binding changes nothing but a label, yet the snapshot must
         // differ so the ordinary diff rebuilds the menu; this is the hole
         // `force:` used to patch.
-        let defaults = UserDefaults(suiteName: "label-remap-\(UUID())")!
+        let defaults = temporaryDefaults()
         let store = HotkeyStore(defaults: defaults)
         let controller = TilingController(
             gateway: FakeWindowGateway(), pruneInterval: nil,
@@ -466,7 +483,7 @@ final class AppDelegateMenuTests: XCTestCase {
         let presenter = MenuBarPresenter(
             controller: controller,
             hotkeyStore: HotkeyStore(
-                defaults: UserDefaults(suiteName: "cursor-glyph-\(UUID())")!),
+                defaults: temporaryDefaults()),
             hotkeyService: { nil },
             actionTarget: NSObject(),
             seedCursorDisplay: seedCursorDisplay)
@@ -539,7 +556,7 @@ final class AppDelegateMenuTests: XCTestCase {
         let presenter = MenuBarPresenter(
             controller: controller,
             hotkeyStore: HotkeyStore(
-                defaults: UserDefaults(suiteName: "cursor-seed-\(UUID())")!),
+                defaults: temporaryDefaults()),
             hotkeyService: { nil },
             actionTarget: NSObject(),
             seedCursorDisplay: {
