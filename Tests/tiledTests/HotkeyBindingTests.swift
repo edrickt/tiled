@@ -172,6 +172,27 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertEqual(store.binding(for: .topLeft), custom)
     }
 
+    /// macOS owns these combos: no Tiled action may take ⌘Q or ⌘Tab away
+    /// from the whole system, even from a hand-edited store.
+    func testApplyRefusesSystemReservedCombos() {
+        let store = makeStore()
+        let old = store.binding(for: .topLeft)
+        let reserved = [
+            HotkeyBinding(modifiers: UInt32(cmdKey), keyCode: UInt32(kVK_ANSI_Q)),
+            HotkeyBinding(modifiers: UInt32(cmdKey), keyCode: UInt32(kVK_Tab)),
+            HotkeyBinding(modifiers: UInt32(cmdKey), keyCode: UInt32(kVK_Space)),
+        ]
+
+        for candidate in reserved {
+            XCTAssertEqual(
+                store.apply(candidate, for: .topLeft), .reserved,
+                "\(candidate.label ?? "combo") belongs to macOS")
+            XCTAssertEqual(
+                store.binding(for: .topLeft), old,
+                "a refused combo never replaces the stored binding")
+        }
+    }
+
     func testApplyRejectsAppActionDefaults() {
         let store = makeStore()
         let before = store.binding(for: .topLeft)

@@ -733,6 +733,16 @@ final class ShortcutsTab: NSObject {
                 // the only witness. A clean registration clears a resolved
                 // conflict without erasing a still-live failure elsewhere.
                 renderFailures()
+            case .reserved:
+                // Never bindable: macOS or the app shell owns the combo.
+                // Reachable only from a hand-edited or corrupt store, since
+                // the recorder passes reserved combos through untouched.
+                button.showBinding(hotkeyStore.binding(for: action))
+                let message =
+                    "\(candidate.label ?? "That combo") is reserved by macOS; " +
+                    "\(action.title) kept its old shortcut."
+                render(ShortcutNotice(failures: hotkeyFailureMessages(), conflict: message))
+                NSLog("Tiled: %@", message)
             case .duplicate(let actions):
                 // Keep the old binding and say, in words, who owns the
                 // combo: a shake alone left users retrying the same combo

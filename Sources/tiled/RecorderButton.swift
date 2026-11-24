@@ -132,6 +132,12 @@ final class RecorderButton: NSButton {
             cancelSilently()
             return event
         }
+        // A combo macOS or the app shell owns acts instead of binding: the
+        // event goes through untouched, so ⌘Q quits, ⌘W closes, ⌘Tab
+        // switches apps, and ⌘Space opens Spotlight. The recorder stays
+        // armed; the action that ran either deactivates the app or closes
+        // the window, and those existing hooks end the recording.
+        if HotkeyRecorder.isSystemReserved(event) { return event }
         guard let outcome = HotkeyRecorder.outcome(for: event) else {
             return nil // swallow non-decisive keys, stay armed
         }

@@ -32,6 +32,44 @@ struct HotkeyBinding: Equatable {
         ["modifiers": Int(modifiers), "keyCode": keyCode.map(Int.init) ?? -1]
     }
 
+    /// The combos macOS or this app's own shell owns. They are never
+    /// bindable: the recorder passes them through so they keep acting
+    /// (Quit, the app switcher, Spotlight, Mission Control), and
+    /// `HotkeyStore.apply` refuses them so a hand-edited or corrupt
+    /// default cannot register one either. Taking ⌘Q from the whole
+    /// system with one keystroke is not a tiling decision.
+    ///
+    /// Deliberately short: the system-wide combos a user reaches for
+    /// while a recorder is armed, each with the action it owns.
+    private static let systemReservedCombos: [(modifiers: UInt32, keyCode: UInt32)] = [
+        (UInt32(cmdKey), UInt32(kVK_ANSI_Q)),  // Quit
+        (UInt32(cmdKey), UInt32(kVK_ANSI_W)),  // Close Window
+        (UInt32(cmdKey | shiftKey), UInt32(kVK_ANSI_Q)),  // Log Out
+        (UInt32(cmdKey | optionKey | shiftKey), UInt32(kVK_ANSI_Q)),  // Log Out now
+        (UInt32(cmdKey | controlKey), UInt32(kVK_ANSI_Q)),  // Lock Screen
+        (UInt32(cmdKey | optionKey), UInt32(kVK_Escape)),  // Force Quit
+        (UInt32(cmdKey), UInt32(kVK_Space)),  // Spotlight
+        (UInt32(cmdKey | optionKey), UInt32(kVK_Space)),  // Finder search
+        (UInt32(cmdKey | controlKey), UInt32(kVK_Space)),  // Character Viewer
+        (UInt32(cmdKey), UInt32(kVK_Tab)),  // App switcher
+        (UInt32(cmdKey | shiftKey), UInt32(kVK_Tab)),  // App switcher, backwards
+        (UInt32(controlKey), UInt32(kVK_UpArrow)),  // Mission Control
+        (UInt32(controlKey), UInt32(kVK_DownArrow)),  // App Exposé
+        (UInt32(controlKey), UInt32(kVK_LeftArrow)),  // Space to the left
+        (UInt32(controlKey), UInt32(kVK_RightArrow)),  // Space to the right
+        (UInt32(cmdKey), UInt32(kVK_ANSI_Grave)),  // Cycle windows
+        (UInt32(cmdKey | shiftKey), UInt32(kVK_ANSI_Grave)),  // Cycle backwards
+    ]
+
+    /// Whether macOS or the app shell already owns this combo. A disabled
+    /// binding owns nothing, so it is never reserved.
+    var isSystemReserved: Bool {
+        guard let keyCode else { return false }
+        return Self.systemReservedCombos.contains {
+            $0.modifiers == modifiers && $0.keyCode == keyCode
+        }
+    }
+
     /// Display label, e.g. "⌥⇧U" or "⌃⌥⇧⌘F5". nil when disabled.
     /// Modifiers always render in ⌃⌥⇧⌘ order.
     var label: String? {
@@ -198,8 +236,11 @@ final class HotkeyStore {
         case applied
         /// The combo is already bound by the named actions. Conflicts are
         /// mutual: a slot claiming ⌥⇧R and Reset Splitters claiming ⌥⇧U
-        /// are the same refusal, so there is no separate "reserved" case.
+        /// are the same refusal, so there is no separate "taken" case.
         case duplicate(actions: [HotkeyAction])
+        /// The combo belongs to macOS or the app shell (⌘Q, ⌘Tab,
+        /// Spotlight, Mission Control): no Tiled action may take it.
+        case reserved
     }
     private let defaults: UserDefaults
     private static let prefix = "hotkey."
@@ -271,6 +312,7 @@ final class HotkeyStore {
     /// Disabled bindings never collide.
     @discardableResult
     func apply(_ candidate: HotkeyBinding, for action: HotkeyAction) -> ApplyResult {
+        guard !candidate.isSystemReserved else { return .reserved }
         let clashes = duplicates(of: candidate, ignoring: action)
         guard clashes.isEmpty else { return .duplicate(actions: clashes) }
         set(candidate, for: action)

@@ -92,6 +92,26 @@ final class RecorderButtonRoutingTests: XCTestCase {
         XCTAssertEqual(outcomes.count, 1)
     }
 
+    /// A combo macOS owns passes through untouched while armed: the app
+    /// menu's ⌘Q and AppKit's ⌘W must keep working, and no binding is
+    /// committed for them.
+    func testReservedComboPassesThroughAndNeverBinds() {
+        let button = RecorderButton(action: .slotKey(.topLeft))
+        let stored = HotkeyBinding(modifiers: UInt32(optionKey), keyCode: UInt32(kVK_ANSI_U))
+        button.showBinding(stored)
+        var outcomes: [HotkeyRecorder.Outcome] = []
+        button.beginRecording { outcomes.append($0) }
+
+        let passed = button.routeRecordedEvent(
+            keyDown(keyCode: UInt16(kVK_ANSI_Q), modifiers: [.command]))
+
+        XCTAssertNotNil(passed, "⌘Q reaches the app menu instead of becoming a binding")
+        XCTAssertTrue(outcomes.isEmpty, "a reserved combo is not a decision")
+        XCTAssertTrue(button.isRecording, "the recorder stays armed")
+        XCTAssertEqual(button.accessibilityValue() as? String, "recording")
+        XCTAssertEqual(button.title, "Press shortcut…")
+    }
+
     func testNonDecisiveKeyIsSwallowedAndStaysArmed() {
         let button = RecorderButton(action: .slotKey(.leftColumn))
         var fired = 0

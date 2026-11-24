@@ -50,6 +50,21 @@ enum HotkeyRecorder {
         }
     }
 
+    /// Whether this keypress is a combo macOS or the app shell already
+    /// owns. Reserved combos are passed through, never bound: while a
+    /// recorder is armed ⌘Q must still quit and ⌘Tab must still switch
+    /// apps, exactly as the app menu already promises.
+    static func isSystemReserved(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, !event.isARepeat else { return false }
+        let modifiers = carbonFlags(from: event.modifierFlags)
+        guard modifiers != 0, !modifierKeyCodes.contains(event.keyCode) else {
+            return false
+        }
+        return HotkeyBinding(
+            modifiers: modifiers, keyCode: UInt32(event.keyCode)
+        ).isSystemReserved
+    }
+
     static func outcome(for event: NSEvent) -> Outcome? {
         guard event.type == .keyDown, !event.isARepeat else { return nil }
         let carbonModifiers = carbonFlags(from: event.modifierFlags)

@@ -51,6 +51,43 @@ final class HotkeyRecorderTests: XCTestCase {
                 modifiers: UInt32(controlKey), keyCode: UInt32(kVK_Delete))))
     }
 
+    // MARK: System-reserved combos (TS-03)
+
+    /// The recorder must never turn a macOS combo into a global Tiled
+    /// binding: while armed, ⌘Q has to keep quitting and ⌘Tab has to keep
+    /// switching apps instead of being swallowed and captured.
+    func testSystemStandardCombosAreReserved() {
+        let combos: [(UInt16, NSEvent.ModifierFlags, String)] = [
+            (UInt16(kVK_ANSI_Q), [.command], "⌘Q"),
+            (UInt16(kVK_ANSI_Q), [.command, .shift], "⇧⌘Q"),
+            (UInt16(kVK_ANSI_Q), [.command, .control], "⌃⌘Q"),
+            (UInt16(kVK_ANSI_W), [.command], "⌘W"),
+            (UInt16(kVK_Space), [.command], "⌘Space"),
+            (UInt16(kVK_Tab), [.command], "⌘Tab"),
+            (UInt16(kVK_Tab), [.command, .shift], "⇧⌘Tab"),
+            (UInt16(kVK_UpArrow), [.control], "⌃↑"),
+            (UInt16(kVK_Escape), [.command, .option], "⌥⌘⎋"),
+            (UInt16(kVK_ANSI_Grave), [.command], "⌘`"),
+        ]
+        for (keyCode, modifiers, name) in combos {
+            XCTAssertTrue(
+                HotkeyRecorder.isSystemReserved(
+                    keyDown(keyCode: keyCode, modifiers: modifiers)),
+                "\(name) belongs to macOS")
+        }
+    }
+
+    func testATilingComboIsNotReserved() {
+        XCTAssertFalse(
+            HotkeyRecorder.isSystemReserved(
+                keyDown(keyCode: UInt16(kVK_ANSI_U), modifiers: [.option, .shift])),
+            "the default slot combo stays bindable")
+        XCTAssertFalse(
+            HotkeyRecorder.isSystemReserved(
+                keyDown(keyCode: UInt16(kVK_ANSI_Q), modifiers: [.option, .shift])),
+            "only the exact system combos are reserved, not their key")
+    }
+
     // MARK: Valid combos
 
     func testOptionShiftUProducesBinding() {
