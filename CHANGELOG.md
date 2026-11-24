@@ -6,6 +6,59 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.4] - 2026-11-24
+
+### Fixed
+
+- Undo and a swap end a window's stale expansion. A window expanded after its
+  undo chapter was pushed kept the expanded entry when the chapter re-placed
+  it, so the canvas called it full-screen while it sat on a tile, and the next
+  display change, swipe back, or splitter reset re-filled it over the window
+  placed beside it. A refused move restores the expansion.
+- Losing activation ends an armed shortcut recorder. Arming retires all
+  seventeen registrations and the local monitor only sees keys while Tiled is
+  active, so clicking another app left every global shortcut retired with no
+  visible cause.
+- A failed liveness probe bounds its frame reads by a time budget, and an
+  identity-listed window is read only for its own frame. An app with many
+  windows could previously stop the main thread for a second per window.
+- The recorder passes system-standard combos through instead of binding them;
+  ⌘Q, ⌘W, ⌘Tab and ⌘Space keep acting while a recording is armed.
+- The destroyed notification starts the death clock and confirms, instead of
+  releasing the slot on one dead reading that may be the lid-close transient the
+  confirmation window exists for.
+- A first tiling whose live frame cannot be read is refused before anything is
+  displaced. It used to record a zero pre-tile frame, so untiling wrote nothing
+  and left the window in its tile.
+- An Accessibility revoke reaches an open Settings window, so it and the menu
+  agree again.
+- A hidden menu-bar icon on an untrusted first run opens Settings. That
+  combination could leave no surface at all.
+- Reset/Restore Splitters prunes first and applies its outcome, so a
+  not-yet-pruned dead window is no longer reported as an app refusal.
+- A slot request for a window on a withheld canvas migrates to the canvas the
+  display names when that canvas holds nothing, instead of deferring every
+  write. The both-canvases-occupied merge remains open.
+- A refusal is counted once per window rather than once per corrective pass; a
+  named deferred-restore failure survives the request pass; an empty untile-all
+  placeholder cannot evict the oldest real undo chapter.
+- Restores, reflows and undo re-places verify their writes, so an app that
+  silently ignores one is reported instead of leaving the screen and the canvas
+  disagreeing.
+
+### Changed
+
+- Slot actions probe liveness for tiled records only, once per action. Untile
+  All and Tile Here no longer sweep twice.
+- The display list and the Space inventory are cached and invalidated on the
+  events that change them, instead of re-enumerated per mouse-move event, per
+  menu row, and per action.
+- The reassert reuses the write policy's frame read rather than reading every
+  written window a third time.
+- Accessibility trust is read once per invalidated pass, not once per drag tick.
+- With the icon hidden, a refresh returns before rasterizing the glyph.
+- Re-subscribing to an already-observed app no longer re-reads its window list.
+
 ## [1.5.3] - 2026-11-21
 
 ### Fixed
