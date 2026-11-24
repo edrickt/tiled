@@ -470,21 +470,29 @@ final class DisplayIdentityTests: XCTestCase {
             gateway.frame(of: window),
             GridLayout().rect(for: .topRight, in: Self.left.visibleFrame))
 
-        // The renumbered display now names a Space: the old withheld
-        // canvas is the stale fallback, so writes to it defer (A7).
+        // The renumbered display now names a Space. The withheld canvas's
+        // windows were tiled while that display's Space id was unreadable,
+        // so they are on the Space now named: the request migrates the
+        // canvas and lands instead of deferring forever against the Space
+        // the user is looking at (TO-09). A7's deferral still governs a
+        // canvas whose display is gone and display-change reasserts (the
+        // tests below).
         gateway.activeSpaces = [Self.renumberedLeftDisplayID: Self.spaceB]
         gateway.focused = window
-        let deferred = controller.handle(slot: .topLeft)
-        XCTAssertTrue(deferred.performed, "a deferral is never a failure")
+        let migrated = controller.handle(slot: .topLeft)
+        XCTAssertTrue(migrated.performed)
+        XCTAssertNil(migrated.announcement, "the write landed, so there is nothing to defer")
+        let named = TilingSpaceKey(
+            screen: Self.renumberedLeft.id, space: Self.spaceB)
         XCTAssertEqual(
-            deferred.announcement,
-            "That Space isn't visible yet: the change will apply when you return to it.")
+            controller.canvas(for: named).state.slot(of: id), .topLeft,
+            "the request migrated the withheld canvas onto the named Space")
         XCTAssertEqual(
-            controller.canvas(for: renumberedWithheld).state.slot(of: id), .topLeft,
-            "the deferred placement stands on the withheld canvas")
-        XCTAssertTrue(
+            gateway.frame(of: window),
+            GridLayout().rect(for: .topLeft, in: Self.left.visibleFrame))
+        XCTAssertFalse(
             controller.isMarkedStale(renumberedWithheld),
-            "the deferred write leaves the canvas marked stale for its reassert")
+            "nothing deferred, so no canvas is marked for a later reassert")
     }
 
     /// A canvas established with the OS withholding the Space id keys

@@ -144,6 +144,35 @@ final class CanvasSurfaceTests: XCTestCase {
             "the named canvas is untouched by the window's own request")
     }
 
+    /// TO-09: a window tiled while the Space was withheld lives on the
+    /// fallback canvas. Once the display names its Space that canvas can
+    /// never be written again, so every slot request from the window
+    /// committed state and deferred forever while the receipt claimed the
+    /// Space the user was looking at was not visible yet.
+    func testAWithheldWindowsSlotRequestMigratesToTheNamedCanvas() {
+        let window = addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let id = controller.registeredID(for: window)!
+        XCTAssertEqual(
+            controller.canvas(for: withheld).state.occupant(of: .topLeft), id,
+            "the window tiled onto the withheld canvas")
+        gateway.activeSpaces = [Self.displayID: Self.namedSpace]
+        gateway.clearWrites()
+
+        let receipt = controller.handle(slotKey: .topRight)
+
+        XCTAssertTrue(receipt.performed)
+        XCTAssertNil(
+            controller.canvas(for: withheld).state.slot(of: id),
+            "the stale canvas gave the window up")
+        XCTAssertEqual(
+            controller.canvas(for: named).state.occupant(of: .topRight), id,
+            "the window moved onto the Space the display names")
+        XCTAssertFalse(
+            gateway.writes.isEmpty,
+            "the write landed instead of deferring off the Space in view")
+    }
+
     /// The audited hazard (A7): once the display names a Space, a
     /// populated withheld canvas is no longer the display the user sees.
     /// It stays in the manage list, but a display change's reassert must

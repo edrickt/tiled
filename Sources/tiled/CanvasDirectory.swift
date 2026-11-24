@@ -153,7 +153,7 @@ final class CanvasDirectory {
     func keyForRequester(
         owned: TilingSpaceKey?, frame: CGRect?, preTileFrame: CGRect?
     ) -> TilingSpaceKey {
-        if let owned { return owned }
+        if let owned { return healedWithheldCanvas(owned) }
         if let frame, let info = screenInfo(for: frame) {
             return key(for: info.id)
         }
@@ -163,6 +163,42 @@ final class CanvasDirectory {
             return key(for: info.id)
         }
         return focusedKey()
+    }
+
+    /// Re-keys a display's withheld-Space fallback onto the Space the
+    /// display now names.
+    ///
+    /// A window tiled while the window server withheld the Space id lives
+    /// on the per-display fallback canvas. Once the display names its
+    /// Space, `isVisible` treats that canvas as hidden forever (writing an
+    /// off-Space window can pull it onto the visible Space), so every slot
+    /// request from its windows committed state and deferred, while the
+    /// receipt told the user the Space they were looking at was not
+    /// visible. The fallback only ever holds windows that were tiled while
+    /// that display's Space id was unreadable, i.e. windows on the Space
+    /// now named, so the canvas is simply re-keyed. Its records (and their
+    /// pre-tile frames) move with it, and nothing on screen moves.
+    ///
+    /// Only an empty named canvas is re-keyed: two populated canvases for
+    /// one display would have to merge their occupancy, and double-booking
+    /// cells is worse than a stale canvas the manage list can still untile.
+    private func healedWithheldCanvas(_ key: TilingSpaceKey) -> TilingSpaceKey {
+        guard key.space == nil, let screen = key.screen,
+            let space = activeSpaceID(on: screen),
+            let canvas = spaces[key]
+        else { return key }
+        let named = TilingSpaceKey(screen: screen, space: space)
+        if let existing = spaces[named],
+            !existing.records.isEmpty || !existing.state.occupants.isEmpty
+                || !existing.undoStack.isEmpty
+        {
+            return key
+        }
+        spaces[key] = nil
+        spaces[named] = canvas
+        if staleSpaces.remove(key) != nil { staleSpaces.insert(named) }
+        if lastFocusedSpace == key { lastFocusedSpace = named }
+        return named
     }
 
     /// The canvas a hotkey acts on: the focused window's display plus the
