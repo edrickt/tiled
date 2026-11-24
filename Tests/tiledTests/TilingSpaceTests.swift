@@ -671,6 +671,98 @@ final class TilingSpaceTests: XCTestCase {
             "the reflow chapter returns the survivor to the slot it held")
     }
 
+    // MARK: Refusal counting and deferred narration (TE-04, TE-05)
+
+    /// One window's refusal was counted once per achieved-edge pass: the
+    /// second pass rewrote it, was refused again, and the menu claimed two
+    /// windows had refused.
+    func testARepeatedRefusalAcrossAchievedEdgePassesIsCountedOnce() {
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        let bHandle = harness.handle(of: b)!
+        // B answers every write 2 pt to the right: the achieved edge moves
+        // the splitter and forces a second corrective pass.
+        harness.gateway.writtenFrame = { handle, target in
+            handle == bHandle ? target.offsetBy(dx: 2, dy: 0) : target
+        }
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topRight, requester: b)
+        // A resized display makes the reassert rewrite both windows.
+        let resized = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        harness.bounds = resized
+        space.visibleFrame = resized
+        // A refuses every write it is asked for.
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!, count: 100)
+
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(
+            space.error,
+            "Couldn't move that window: the app refused to resize it.",
+            "one refusing window is one refusal, not one per corrective pass")
+    }
+
+    /// One reassert ran both deferred reconciles; the request pass's
+    /// generic count replaced the named restore refusal the restore pass
+    /// had just produced, so the menu named no window and no restore.
+    func testANamedDeferredRestoreFailureSurvivesTheRequestPass() {
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topRight, requester: b)
+        harness.canvasVisible = false
+        // A deferred pre-tile restore for A ...
+        space.untile(window: a, reflowing: false, context: context())
+        // ... and a deferred expansion for B, both landing on the swipe back.
+        space.expandToggle(window: b, context: context())
+        harness.gateway.refuseNextWrites(harness.handle(of: a)!, count: 100)
+        harness.gateway.refuseNextWrites(harness.handle(of: b)!, count: 100)
+        harness.canvasVisible = true
+
+        space.reassert(.grid, context: context())
+
+        let error = space.error ?? ""
+        XCTAssertTrue(
+            error.contains("Couldn't restore “TestApp”"),
+            "the named restore failure must survive the request pass, got: \(error)")
+        XCTAssertTrue(
+            error.contains("Couldn't move"),
+            "the refused deferred request still names its own failure, got: \(error)")
+    }
+
+    /// Untile-all opens its chapter before it knows whether it can fill
+    /// it. With an unreadable frame it drops the placeholder, but the
+    /// depth cap had already evicted the oldest real chapter.
+    func testAnEmptyUntileAllChapterDoesNotEvictARealOne() {
+        let id = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: id)
+        let handle = harness.handle(of: id)!
+        space.undoStack = (1...TilingSpace.undoDepth).map { index in
+            (
+                snapshot: [
+                    EvictedWindow(
+                        handle: handle, slot: .topLeft,
+                        preTileFrame: CGRect(
+                            x: CGFloat(index), y: 0, width: 100, height: 100))
+                ],
+                requester: nil as WindowID?
+            )
+        }
+        harness.gateway.hideFrames.insert(handle)
+
+        space.untileAll(context: context())
+
+        XCTAssertEqual(
+            space.undoStack.count, TilingSpace.undoDepth,
+            "the dropped placeholder never costs a real chapter")
+        XCTAssertEqual(
+            space.undoStack.first?.snapshot.first?.preTileFrame.minX, 1,
+            "the oldest recoverable chapter survives")
+        XCTAssertEqual(
+            space.displacedCount, 1,
+            "the remaining chapters are real, not placeholders")
+    }
+
     // MARK: First tiling with no readable frame (TE-03)
 
     /// The live frame is the only source of a first tiling's pre-tile

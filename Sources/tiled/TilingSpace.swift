@@ -537,17 +537,28 @@ struct TilingSpace {
         guard let snapshot, !snapshot.isEmpty else { return }
         beginUndoChapter()
         undoStack[undoStack.count - 1] = (snapshot: snapshot, requester: requester)
+        trimUndoStack()
+    }
+
+    /// Keeps the freshest `undoDepth` recoveries, dropping the oldest. The
+    /// cap applies to a chapter that holds something: `beginUndoChapter`'s
+    /// placeholder may still be dropped (untile-all with no readable
+    /// frame), and evicting a real chapter for a placeholder that never
+    /// fills would lose a recovery to nothing.
+    private mutating func trimUndoStack() {
+        if undoStack.count > Self.undoDepth {
+            undoStack.removeFirst(undoStack.count - Self.undoDepth)
+        }
     }
 
     /// Opens an undo chapter with an empty placeholder. Untile-all fills
     /// it in only after its windows restored (the snapshot is built from
-    /// the frames they land on), and drops the placeholder when nothing
-    /// can be restored; the depth cap lives here so no caller repeats it.
+    /// the frames they land on) and drops it when nothing can be restored,
+    /// so the depth cap is applied by `trimUndoStack` once the chapter
+    /// holds something: a placeholder that never fills must not have
+    /// already evicted the oldest real recovery.
     mutating func beginUndoChapter() {
         undoStack.append((snapshot: [], requester: nil))
-        if undoStack.count > Self.undoDepth {
-            undoStack.removeFirst(undoStack.count - Self.undoDepth)
-        }
     }
 
     /// The convergence checks one settled plan owns: the placed windows,
@@ -967,7 +978,7 @@ struct TilingSpace {
     /// composes the canvas's one sentence, so no branch has to decide
     /// whether its failure outranks another.
     struct Failure: Equatable {
-        enum Kind: Equatable {
+        enum Kind: Hashable {
             /// A named placement or swap write: "X couldn't be tiled".
             case placement
             /// A reflow or reassert batch write, counted rather than named.
@@ -977,6 +988,10 @@ struct TilingSpace {
             case restore
         }
 
+        /// The window that refused. One window counts once per kind even
+        /// when a corrective pass rewrites it and is refused again: the
+        /// menu's count must name windows, not write attempts.
+        let window: WindowID
         let windowName: String
         let kind: Kind
         let frame: CGRect
@@ -1127,6 +1142,7 @@ struct TilingSpace {
             else { return }
             failures.append(
                 Failure(
+                    window: id,
                     windowName: canvas.appName(id, context: context) ?? "A window",
                     kind: .restore,
                     frame: canvas.grid.rect(for: from, in: canvas.visibleFrame)))
@@ -1221,9 +1237,24 @@ struct TilingSpace {
         for id: WindowID, slot: Slot, context: Context
     ) -> Failure {
         Failure(
+            window: id,
             windowName: appName(id, context: context) ?? "That window",
             kind: .placement,
             frame: grid.rect(for: slot, in: visibleFrame))
+    }
+
+    /// One failure per window per kind. A refused window an achieved-edge
+    /// pass rewrites and is refused again is one refusal, not two; two
+    /// windows of the same app stay two.
+    static func deduplicated(_ failures: [Failure]) -> [Failure] {
+        struct Key: Hashable {
+            let window: WindowID
+            let kind: Failure.Kind
+        }
+        var seen = Set<Key>()
+        return failures.filter {
+            seen.insert(Key(window: $0.window, kind: $0.kind)).inserted
+        }
     }
 
     /// The one canvas sentence for an action's failures. Each kind speaks
@@ -1231,6 +1262,7 @@ struct TilingSpace {
     /// restores keep their own wording, and a second refusal cannot
     /// overwrite the first.
     static func failureMessage(_ failures: [Failure]) -> String? {
+        let failures = deduplicated(failures)
         guard !failures.isEmpty else { return nil }
         var sentences: [String] = []
         let placements = failures.filter { $0.kind == .placement }
@@ -1405,7 +1437,9 @@ struct TilingSpace {
             }
             if !result.landed {
                 batch.failures.append(
-                    Failure(windowName: name, kind: .restore, frame: frame))
+                    Failure(
+                        window: evicted, windowName: name, kind: .restore,
+                        frame: frame))
             }
         }
         return batch
@@ -1431,13 +1465,14 @@ struct TilingSpace {
     /// Writes every deferred off-Space pre-tile restore now that the
     /// canvas is visible, then drops it: the restore's intent stands and
     /// lands here, exactly as a deferred reflow lands on the reassert. A
-    /// canvas still hidden defers it again; a genuine refusal narrates
-    /// the shared restore-failure message. The window is already untiled,
-    /// so its tracker entry is cleared after the write (no phantom
-    /// expectation).
-    private mutating func reconcileDeferredRestores(context: Context) {
-        guard !deferredRestores.isEmpty else { return }
-        var failures: [String] = []
+    /// canvas still hidden defers it again; a genuine refusal is returned
+    /// for the reassert's one sentence, so this pass's named failure can
+    /// never be replaced by the request pass's generic count. The window is
+    /// already untiled, so its tracker entry is cleared after the write (no
+    /// phantom expectation).
+    private mutating func reconcileDeferredRestores(context: Context) -> [Failure] {
+        guard !deferredRestores.isEmpty else { return [] }
+        var failures: [Failure] = []
         // A window that died while parked can never land its restore:
         // writing against its released handle reads as an app refusal and
         // the notice would name a window the user closed. Drop it here,
@@ -1451,13 +1486,15 @@ struct TilingSpace {
                 bounds: visibleFrame, on: context.space, check: .none)
             context.tracker.forget(restore.id)
             if result == .refused {
-                failures.append(context.gateway.appName(of: handle) ?? "A window")
+                failures.append(
+                    Failure(
+                        window: restore.id,
+                        windowName: context.gateway.appName(of: handle) ?? "A window",
+                        kind: .restore, frame: restore.frame))
             }
             return result
         }
-        if !failures.isEmpty {
-            error = MenuText.restoreFailureMessage(failures)
-        }
+        return failures
     }
 
     /// Re-issues every retained slot/expand request now that the canvas is
@@ -1471,8 +1508,9 @@ struct TilingSpace {
     /// and gives the screen back (as a refusal) when that return is
     /// refused. The reassert plan runs after this pass, so a rolled-back
     /// window is re-derived into its slot there.
-    private mutating func reconcileDeferredRequests(context: Context) {
-        guard !deferredRequests.isEmpty else { return }
+    @discardableResult
+    mutating func reconcileDeferredRequests(context: Context) -> [Failure] {
+        guard !deferredRequests.isEmpty else { return [] }
         // The record is the ownership primitive: a request whose window
         // left this canvas is stale and simply dropped.
         let pending = deferredRequests.filter { records[$0.key] != nil }
@@ -1480,8 +1518,15 @@ struct TilingSpace {
         // had to park) wins over an older retained one for the same
         // window, so an empty table is rebuilt as the loop goes.
         deferredRequests = [:]
-        var failures = 0
+        var failures: [Failure] = []
         for (id, request) in pending {
+            func noteRefusal() {
+                failures.append(
+                    Failure(
+                        window: id,
+                        windowName: appName(id, context: context) ?? "A window",
+                        kind: .move, frame: visibleFrame))
+            }
             let result: FrameWriter.Result
             switch request {
             case .slot:
@@ -1498,13 +1543,13 @@ struct TilingSpace {
                         if restored == .written || restored == .skippedNoOp {
                             expanded[id] = nil
                         }
-                        failures += 1
+                        noteRefusal()
                     }
                 }
-                if result == .refused { failures += 1 }
+                if result == .refused { noteRefusal() }
             case .collapse(let frame):
                 result = writeExpandedFrame(id, to: frame, context: context)
-                if result == .refused { failures += 1 }
+                if result == .refused { noteRefusal() }
             }
             if result == .deferredOffSpace {
                 // A newer request issued during this pass for the same
@@ -1513,9 +1558,7 @@ struct TilingSpace {
                 if deferredRequests[id] == nil { deferredRequests[id] = request }
             }
         }
-        if failures > 0 {
-            error = Self.refusalMessage(count: failures)
-        }
+        return failures
     }
 
     /// Applies `id`'s slot rect on `space` (nil selects the display-less
@@ -1614,6 +1657,7 @@ struct TilingSpace {
             else { continue }
             failures.append(
                 Failure(
+                    window: moves[index].id,
                     windowName: appName(moves[index].id, context: context) ?? "A window",
                     kind: .move,
                     frame: grid.rect(for: moves[index].to, in: visibleFrame)))
@@ -1671,6 +1715,7 @@ struct TilingSpace {
             case .refused:
                 pass.failures.append(
                     Failure(
+                        window: id,
                         windowName: appName(id, context: context) ?? "A window",
                         kind: .move, frame: target))
             case .skippedNoOp, .deferredOffSpace: break
@@ -1899,6 +1944,7 @@ struct TilingSpace {
                 notice = "Untiled \(noun)."
             } else {
                 undoStack[undoStack.count - 1] = (snapshot: snapshot, requester: nil)
+                trimUndoStack()
             }
         }
         outcome.forget = chapter.values.map { $0 }
@@ -2244,14 +2290,16 @@ struct TilingSpace {
         // A deferred pre-tile restore lands here, on the swipe back that
         // reasserts this canvas: the deferred window was never written
         // blind, and its frame is restored now that the canvas is visible.
-        reconcileDeferredRestores(context: context)
         // A deferred placement or expand/collapse lands here too: its
         // intent was retained, and re-issuing it now that the canvas is
-        // visible is what makes the swipe back honour the request.
-        reconcileDeferredRequests(context: context)
+        // visible is what makes the swipe back honour the request. Both
+        // passes return their refusals: composing one sentence keeps a
+        // named restore failure from being replaced by a request count in
+        // the same reassert.
+        var failures = reconcileDeferredRestores(context: context)
+        failures += reconcileDeferredRequests(context: context)
         var plan = reassertPlan(source)
         grid = plan.grid
-        var failures: [Failure] = []
         // An expanded window covers the canvas, so it is not on the grid and
         // `reassertPlan` leaves it out — but its one job is to fill *this*
         // canvas's screen, and a reassert is exactly when that screen's
@@ -2265,6 +2313,7 @@ struct TilingSpace {
             if writeExpandedFrame(id, to: visibleFrame, context: context) == .refused {
                 failures.append(
                     Failure(
+                        window: id,
                         windowName: appName(id, context: context) ?? "A window",
                         kind: .move, frame: visibleFrame))
             }
