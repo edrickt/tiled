@@ -61,11 +61,33 @@ final class AppLaunchPlanTests: XCTestCase {
         assertPlan(plan, .waitForPermission, welcome: false, settings: false)
     }
 
-    func testUntrustedFirstRunHiddenStillWaitsWithoutOpeningSettings() {
+    func testUntrustedFirstRunHiddenOpensSettingsAsTheOnlySurface() {
+        // Welcome is deferred on an untrusted launch, so nothing else
+        // would be on screen: the hide-icon recovery must outrank the
+        // first-run gate, or closing the explainer leaves the app with no
+        // icon and no window (while the hide-icon dialog promised Settings
+        // on relaunch).
         let plan = AppLaunchPlan.make(
             isTrusted: false, didDismissWelcome: false, hideMenuBarIcon: true)
 
-        assertPlan(plan, .waitForPermission, welcome: false, settings: false)
+        assertPlan(plan, .waitForPermission, welcome: false, settings: true)
+    }
+
+    func testHiddenIconRelaunchOpensSettingsInEveryTrustState() {
+        // The hide-icon confirm's relaunch sentence ("Settings opens
+        // automatically") must hold whatever the trust state, dismissed
+        // guide or not.
+        for isTrusted in [true, false] {
+            for didDismissWelcome in [true, false] {
+                let plan = AppLaunchPlan.make(
+                    isTrusted: isTrusted, didDismissWelcome: didDismissWelcome,
+                    hideMenuBarIcon: true)
+                XCTAssertTrue(
+                    plan.showsSettings || plan.showsWelcome,
+                    "trusted=\(isTrusted) dismissed=\(didDismissWelcome): "
+                        + "a hidden-icon launch must open a surface")
+            }
+        }
     }
 
     func testUntrustedDismissedHiddenWaitsAndShowsSettings() {

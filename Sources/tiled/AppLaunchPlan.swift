@@ -26,9 +26,13 @@ struct AppLaunchPlan: Equatable {
     ///
     /// Welcome belongs to a trusted first run. An untrusted first run is
     /// shown it by `start(afterPermissionWait:)` when the grant arrives,
-    /// so launch opens only the permission explainer. After the guide has
-    /// been dismissed, a launch with a hidden menu bar icon opens Settings
-    /// as the only way back in. Welcome wins when first run and hidden-icon
+    /// so launch opens the permission explainer instead. A launch with a
+    /// hidden menu bar icon opens Settings as the only way back in, and
+    /// that recovery outranks the first-run gate whenever Welcome cannot
+    /// serve as the surface: an untrusted first run shows no Welcome, so
+    /// hiding the icon there would otherwise leave the app with nothing on
+    /// screen at all (the hide-icon dialog promises Settings on relaunch).
+    /// Welcome still wins when a trusted first run and hidden-icon
     /// recovery coincide.
     static func make(
         isTrusted: Bool, didDismissWelcome: Bool, hideMenuBarIcon: Bool
@@ -37,7 +41,7 @@ struct AppLaunchPlan: Equatable {
         return AppLaunchPlan(
             mode: isTrusted ? .startNow : .waitForPermission,
             showsWelcome: isTrusted && firstRun,
-            showsSettings: !firstRun && hideMenuBarIcon)
+            showsSettings: hideMenuBarIcon && (!firstRun || !isTrusted))
     }
 }
 
