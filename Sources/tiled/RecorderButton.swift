@@ -12,6 +12,7 @@ final class RecorderButton: NSButton {
     let hotkeyAction: HotkeyAction
     private(set) var isRecording = false
     private var monitor: Any?
+    private var deactivationObserver: NSObjectProtocol?
     private var windowCloseObserver: NSObjectProtocol?
     private var completion: ((HotkeyRecorder.Outcome) -> Void)?
     /// Fires when a recorder arms: announce that the next keypress will be
@@ -100,6 +101,19 @@ final class RecorderButton: NSButton {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             return self.routeRecordedEvent(event)
+        }
+        // The local monitor only receives events while Tiled is active.
+        // Once the user activates another app the armed recorder can never
+        // see a key, so the suspension would outlive its surface and leave
+        // every global hotkey retired with nothing on screen to explain
+        // it. Losing activation ends the recording exactly as tabbing away
+        // does: no decision, the stored binding stays.
+        deactivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isRecording else { return }
+            self.cancelSilently()
         }
     }
 
@@ -191,6 +205,10 @@ final class RecorderButton: NSButton {
         if let monitor {
             NSEvent.removeMonitor(monitor)
             self.monitor = nil
+        }
+        if let deactivationObserver {
+            NotificationCenter.default.removeObserver(deactivationObserver)
+            self.deactivationObserver = nil
         }
     }
 }

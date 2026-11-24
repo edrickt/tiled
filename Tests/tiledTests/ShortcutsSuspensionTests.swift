@@ -205,4 +205,54 @@ final class ShortcutsSuspensionTests: XCTestCase {
             registrar.activeTokens.count, defaultActions(),
             "a tab rebuild restores the registrations")
     }
+
+    /// The local key monitor only sees events while Tiled is active: an
+    /// armed recorder that survives app deactivation can never see a key,
+    /// never clear itself, and leaves every global hotkey retired with no
+    /// visible cause. Losing activation must end the recording.
+    func testAppDeactivationRestoresRegistrations() {
+        let registrar = FakeHotkeyRegistrar()
+        let service = makeService(registrar)
+        let tab = makeTab(service)
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let recorder = findRecorder(key: .topLeft, in: view)
+        else { return XCTFail("expected a Top Left recorder") }
+        recorder.performClick(nil)
+        XCTAssertTrue(recorder.isRecording)
+        XCTAssertTrue(registrar.activeTokens.isEmpty)
+
+        // Clicking another app: the recorder can no longer receive a key.
+        NotificationCenter.default.post(
+            name: NSApplication.didResignActiveNotification, object: nil)
+
+        XCTAssertFalse(recorder.isRecording, "deactivation disarms the recorder")
+        XCTAssertFalse(service.isSuspended)
+        XCTAssertEqual(
+            registrar.activeTokens.count, defaultActions(),
+            "no hotkey stays retired after the app is deactivated")
+    }
+
+    /// The deactivation observer belongs to the armed state only: a
+    /// recorder that is not recording must not cancel (or announce) when
+    /// the app loses activation.
+    func testDeactivationAfterDisarmLeavesTheRecorderAlone() {
+        let registrar = FakeHotkeyRegistrar()
+        let service = makeService(registrar)
+        let tab = makeTab(service)
+        let view = tab.build(size: NSSize(width: 440, height: 480), window: nil)
+        guard let recorder = findRecorder(key: .topLeft, in: view)
+        else { return XCTFail("expected a Top Left recorder") }
+        recorder.performClick(nil)
+        _ = recorder.routeRecordedEvent(keyDown(keyCode: UInt16(kVK_Escape)))
+        XCTAssertFalse(recorder.isRecording)
+        let requestsAfterCancel = registrar.requests.count
+
+        NotificationCenter.default.post(
+            name: NSApplication.didResignActiveNotification, object: nil)
+
+        XCTAssertFalse(recorder.isRecording)
+        XCTAssertEqual(
+            registrar.requests.count, requestsAfterCancel,
+            "a disarmed recorder registers nothing on deactivation")
+    }
 }
