@@ -344,12 +344,30 @@ final class LiveWindowGateway: WindowGateway {
     /// never walks the window-server Space table once per row.
     private var spaceCache: [CGDirectDisplayID: SpaceID] = [:]
     private var spaceCacheStamp: Date?
+    /// The full per-display Space inventory, at the prune cadence rather
+    /// than the current-Space cadence: it changes only when a Space is
+    /// created or deleted, while every action copied the private table
+    /// for it. The workspace notification still drops it, so switching to
+    /// a newly created Space sees the new inventory before the next
+    /// action can judge a canvas vanished.
+    private var existingSpacesCache: [CGDirectDisplayID: Set<SpaceID>] = [:]
+    private var existingSpacesStamp: Date?
     /// The window-server Space table, injected so the cache policy is
     /// testable without the private SkyLight symbols.
     private let spaceTable: () -> [CGDirectDisplayID: SpaceID]
     /// The full per-display Space inventory, for retiring canvases whose
     /// Space was deleted. Injected for the same reason as `spaceTable`.
-    var existingSpaceIDs: [CGDirectDisplayID: Set<SpaceID>] { existingSpacesTable() }
+    var existingSpaceIDs: [CGDirectDisplayID: Set<SpaceID>] {
+        let current = now()
+        if let stamp = existingSpacesStamp,
+            current.timeIntervalSince(stamp) < Self.existingSpacesLifetime
+        {
+            return existingSpacesCache
+        }
+        existingSpacesStamp = current
+        existingSpacesCache = existingSpacesTable()
+        return existingSpacesCache
+    }
     private let existingSpacesTable: () -> [CGDirectDisplayID: Set<SpaceID>]
     /// The clock behind the cache lifetime. Injected so a test can age
     /// the cache without sleeping.
@@ -1443,6 +1461,7 @@ final class LiveWindowGateway: WindowGateway {
     /// posting a real notification.
     func spaceDidChange() {
         spaceCacheStamp = nil
+        existingSpacesStamp = nil
         spaceChangeHandler?()
     }
 
@@ -1450,6 +1469,13 @@ final class LiveWindowGateway: WindowGateway {
     /// menu build's repeated per-row lookups, short enough that a Space
     /// the workspace notification missed cannot misdirect a hotkey.
     private static let spaceCacheLifetime: TimeInterval = 0.1
+
+    /// Cache lifetime for the full Space inventory: it is consulted by the
+    /// vanished-canvas prune, and five seconds bounds how long a deleted
+    /// Space's canvas can outlive it. A Space switch invalidates it
+    /// immediately (see `spaceDidChange`), so a Space created in Mission
+    /// Control is known before the next action can prune its canvas.
+    private static let existingSpacesLifetime: TimeInterval = 5
 
     private func refreshSpaceCacheIfNeeded() {
         let current = now()

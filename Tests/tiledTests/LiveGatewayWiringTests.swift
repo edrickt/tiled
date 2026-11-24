@@ -13,6 +13,7 @@ final class LiveGatewayWiringTests: XCTestCase {
     private func makeGateway(
         observerDriver: FakeAXObserverDriver = FakeAXObserverDriver(),
         spaceTable: @escaping () -> [CGDirectDisplayID: SpaceID] = { [:] },
+        existingSpacesTable: @escaping () -> [CGDirectDisplayID: Set<SpaceID>] = { [:] },
         now: @escaping () -> Date = Date.init,
         writeRetrySleep: @escaping (TimeInterval) -> Void = { _ in },
         runningProcessIDs: @escaping () -> [pid_t] = { [] },
@@ -22,6 +23,7 @@ final class LiveGatewayWiringTests: XCTestCase {
         LiveWindowGateway(
             observerDriver: observerDriver,
             spaceTable: spaceTable,
+            existingSpacesTable: existingSpacesTable,
             now: now,
             workspaceNotifications: NotificationCenter(),
             writeRetrySleep: writeRetrySleep,
@@ -31,6 +33,66 @@ final class LiveGatewayWiringTests: XCTestCase {
             // Never arm a real session tap in the suite: it would consume
             // the test machine's clicks for the rest of the run.
             titleBarTapFactory: { _, _, _ in nil })
+    }
+
+    // MARK: Space inventory cache (TO-05)
+
+    /// The inventory is a private window-server table copy plus a UUID
+    /// string per display, and every action's vanished-canvas prune read
+    /// it. It changes only when a Space is created or deleted.
+    func testSpaceInventoryIsCachedAcrossActions() {
+        var reads = 0
+        var clock = Date(timeIntervalSince1970: 0)
+        let gateway = makeGateway(
+            existingSpacesTable: {
+                reads += 1
+                return [7: [SpaceID(rawValue: 70), SpaceID(rawValue: 71)]]
+            },
+            now: { clock })
+
+        XCTAssertEqual(gateway.existingSpaceIDs[7]?.count, 2)
+        clock = clock.addingTimeInterval(1)
+        XCTAssertEqual(gateway.existingSpaceIDs[7]?.count, 2)
+        XCTAssertEqual(reads, 1, "two actions, one inventory read")
+    }
+
+    func testSpaceChangeDropsTheSpaceInventory() {
+        var reads = 0
+        var clock = Date(timeIntervalSince1970: 0)
+        let gateway = makeGateway(
+            existingSpacesTable: {
+                reads += 1
+                return [7: [SpaceID(rawValue: 70)]]
+            },
+            now: { clock })
+
+        _ = gateway.existingSpaceIDs
+        gateway.spaceDidChange()
+        clock = clock.addingTimeInterval(0.01)
+        _ = gateway.existingSpaceIDs
+
+        XCTAssertEqual(
+            reads, 2,
+            "a Space switch invalidates the inventory before the next action")
+    }
+
+    func testSpaceInventoryExpiresAtThePruneCadence() {
+        var reads = 0
+        var clock = Date(timeIntervalSince1970: 0)
+        let gateway = makeGateway(
+            existingSpacesTable: {
+                reads += 1
+                return [7: [SpaceID(rawValue: 70)]]
+            },
+            now: { clock })
+
+        _ = gateway.existingSpaceIDs
+        clock = clock.addingTimeInterval(5.1)
+        _ = gateway.existingSpaceIDs
+
+        XCTAssertEqual(
+            reads, 2,
+            "the memo never outlives the deleted-Space detection window")
     }
 
     // MARK: Space lookup and cache
