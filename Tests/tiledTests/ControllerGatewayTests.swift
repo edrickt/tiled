@@ -972,6 +972,55 @@ final class ControllerGatewayTests: XCTestCase {
         XCTAssertEqual(canvas.state.occupant(of: .topRight), 2)
     }
 
+    // MARK: Liveness probe cost (TO-03)
+
+    /// Every adopted window keeps a record until it dies: sheets,
+    /// palettes, dialogs, every birth. Sweeping them all before every
+    /// action made hotkey latency grow with the number of open windows in
+    /// the system; only a tiled record can hold a slot a dead window keeps.
+    func testASlotActionProbesOnlyTiledRecordsForLiveness() {
+        for index in 0..<10 {
+            gateway.simulateWindowCreated(
+                frame: CGRect(x: CGFloat(index) * 60, y: 0, width: 320, height: 200))
+        }
+        let handle = gateway.addWindow(
+            frame: CGRect(x: 100, y: 100, width: 600, height: 400))
+        gateway.focused = handle
+        controller.handle(slot: .topLeft)
+        XCTAssertEqual(canvas.state.tiledWindows.count, 1)
+
+        gateway.resetLivenessProbes()
+        controller.handle(slot: .topRight)
+
+        XCTAssertEqual(
+            gateway.livenessProbes.count, 1,
+            "one tiled record, not every adopted window")
+    }
+
+    func testUntileAllProbesEachTiledRecordOnce() {
+        let handle = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        gateway.resetLivenessProbes()
+
+        controller.untileAll()
+
+        XCTAssertEqual(gateway.livenessProbes.count, 1, "one prune, not two")
+    }
+
+    func testTileHereProbesEachTiledRecordOnce() {
+        let handle = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let id = controller.registeredID(for: handle)!
+        let other = gateway.addWindow(
+            frame: CGRect(x: 900, y: 0, width: 400, height: 300))
+        gateway.focused = other
+        gateway.resetLivenessProbes()
+
+        controller.handleTileHere(window: id)
+
+        XCTAssertEqual(gateway.livenessProbes.count, 1, "one prune, not two")
+    }
+
     // MARK: Convergence verification (silent ignores)
 
     func testConvergedWriteSurvivesVerification() {

@@ -684,7 +684,9 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertEqual(gateway.zOrder.last, floatingClosing, "newest floating starts on top")
 
         gateway.kill(floatingClosing)
-        controller.pruneDeadWindows()
+        // Untiled records are the prune timer's sweep: an action probes
+        // only records that hold a slot, since only those can keep one.
+        controller.pruneDeadWindows(allRecords: true)
 
         XCTAssertTrue(gateway.raiseCalls.isEmpty, "releasing an untiled birth raises nothing")
         XCTAssertEqual(

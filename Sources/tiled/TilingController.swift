@@ -235,7 +235,7 @@ final class TilingController {
             pruneCancel = schedulePrune(pruneInterval) { [weak self] in
                 guard let self else { return }
                 let before = self.allTiledWindows.count
-                self.pruneDeadWindows()
+                self.pruneDeadWindows(allRecords: true)
                 if self.allTiledWindows.count != before {
                     self.onChange?()
                 }
@@ -475,7 +475,9 @@ final class TilingController {
     /// untiled answers instead of committing a stale slot.
     @discardableResult
     func handleTileHere(window id: WindowID) -> ActionReceipt {
-        pruneDeadWindows()
+        // Both branches below prune before they act (`focusedTarget` or
+        // `handle(slotKey:)`); a second sweep here doubled the cost of
+        // every row click for no gain.
         guard let canvas = directory.owner(of: id),
             let slot = directory.storedCanvas(for: canvas)?.state.slot(of: id)
         else {
@@ -495,7 +497,12 @@ final class TilingController {
                 canvas: canvas, performed: false,
                 notice: sentence, announcement: sentence)
         }
-        return handle(slotKey: slot.key)
+        // The target is already resolved and the row's slot is the one its
+        // own canvas holds, so this is the slot-key body without a second
+        // resolve (which would sweep liveness for every tiled record
+        // again, right after the first sweep).
+        let id = target.liveID ?? register.claim(target.handle, on: target.key)
+        return place(slot: slot, requester: target.handle, id: id, on: target.key)
     }
 
     /// The old slot-request body: an expanded window comes back to earth,
@@ -992,12 +999,23 @@ final class TilingController {
     /// tests can drive ghost cleanup without waiting on the runloop. Only
     /// confirmed deaths prune: a busy app's unanswerable probe is unknown,
     /// and pruning on a maybe would untile a live window.
-    func pruneDeadWindows() {
+    ///
+    /// The action path probes tiled records only: only they hold a slot a
+    /// dead window could keep, and probing every adopted window (sheets,
+    /// palettes, popovers, every birth) made hotkey latency grow with the
+    /// number of open windows in the system instead of the layout. The
+    /// prune timer's `allRecords` sweep still reclaims dead untiled
+    /// records, where their only cost is memory.
+    func pruneDeadWindows(allRecords: Bool = false) {
         pruneVanishedCanvases()
         var dead: [(key: TilingSpaceKey, id: WindowID, handle: WindowHandle)] = []
         for (key, canvas) in directory.allCanvases {
-            for (id, record) in canvas.records
-            where gateway.liveness(of: record.handle) == .dead {
+            let candidates: [WindowID] =
+                allRecords ? Array(canvas.records.keys) : canvas.state.tiledWindows
+            for id in candidates {
+                guard let record = canvas.records[id],
+                    gateway.liveness(of: record.handle) == .dead
+                else { continue }
                 dead.append((key, id, record.handle))
             }
         }
@@ -1087,7 +1105,8 @@ final class TilingController {
     /// retiles per display and per Space.
     @discardableResult
     private func untileAll(in space: TilingSpaceKey) -> ActionReceipt {
-        pruneDeadWindows()
+        // The public caller pruned; a second sweep here probed every tiled
+        // record twice per action.
         let hadWindows =
             directory.storedCanvas(for: space)?.state.tiledWindows.isEmpty == false
         let outcome = directory.withCanvas(space) {

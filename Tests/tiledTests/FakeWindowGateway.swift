@@ -148,7 +148,14 @@ final class FakeWindowGateway: WindowGateway {
     /// lid-close transient on the frame-read path.
     var hideFrames: Set<WindowHandle> = []
 
+    /// Handles whose liveness the controller probed, in order. Lets a
+    /// suite pin that an action never sweeps every adopted window.
+    private(set) var livenessProbes: [WindowHandle] = []
+
+    func resetLivenessProbes() { livenessProbes.removeAll() }
+
     func liveness(of handle: WindowHandle) -> Liveness {
+        livenessProbes.append(handle)
         guard let window = windows[handle] else { return .dead }
         if probeDead.contains(handle) { return .dead }
         if !window.alive { return .dead }
