@@ -784,6 +784,49 @@ final class TilingController {
         if !outcome.verify.isEmpty {
             scheduleVerification(of: outcome.verify, on: key)
         }
+        for restore in outcome.verifyRestores {
+            scheduleRestoreVerification(restore, on: key)
+        }
+    }
+
+    /// Late check for one restore write: the window has already left the
+    /// canvas, so a silent ignore cannot be rolled back. It is narrated
+    /// exactly like a refused restore instead, so the menu never claims a
+    /// clean board over a window still sitting in its old tile.
+    private func scheduleRestoreVerification(
+        _ restore: TilingSpace.RestoreVerification, on space: TilingSpaceKey
+    ) {
+        _ = scheduleVerify { [weak self] in
+            self?.verifyRestore(restore, on: space)
+        }
+    }
+
+    /// Fires one restore's late check. The question is only whether the
+    /// window left the tile it no longer owns: a frame where the tile put
+    /// it is the silent ignore this check exists for, and a frame anywhere
+    /// else took the write, however much the app rounded the quarter
+    /// target (the write policy repins a clamp, it never insists). A frame
+    /// read that fails is a can't-judge, exactly as the tracker's
+    /// convergence treats it.
+    private func verifyRestore(
+        _ restore: TilingSpace.RestoreVerification, on space: TilingSpaceKey
+    ) {
+        guard let live = gateway.frame(of: restore.handle) else { return }
+        let tolerance = DragTracker.echoTolerance
+        guard DragTracker.framesClose(live, restore.from, tolerance: tolerance),
+            !DragTracker.framesClose(live, restore.target, tolerance: tolerance)
+        else { return }
+        // A canvas the prune retired owes the user nothing: modify only
+        // an existing one, never establish a stale key just to carry a
+        // sentence about a window that is no longer managed.
+        directory.modifyCanvas(space) { canvas in
+            // A later error wins, exactly as the placement's late check.
+            if canvas.error == nil {
+                canvas.error = MenuText.restoreFailureMessage([restore.name])
+            }
+        }
+        dbg("verify restore FAILED: silent ignore, left in its old tile")
+        onChange?()
     }
 
     /// The collaborators one action needs. A fresh context is built per
@@ -1174,6 +1217,10 @@ final class TilingController {
         directory.withCanvas(space) { $0.error = nil; $0.notice = nil }
         var failures: [String] = []
         var failedWindows: Set<WindowHandle> = []
+        // Restore writes that landed still owe their late check; the
+        // window has left the canvas, so the check narrates a silent
+        // ignore instead of rolling anything back.
+        var restoreChecks: [(verification: TilingSpace.RestoreVerification, space: TilingSpaceKey)] = []
         // One window can be refused on both its pre-tile restore and its
         // chapter entry; the handle is stable across the id reissue, so
         // the undo story names that window once, not twice.
@@ -1219,8 +1266,12 @@ final class TilingController {
                 let occupantHandle = handle(of: id)
                 let name = appName(for: id) ?? "A window"
                 let refused = directory.withCanvas(destination) { canvas -> Bool in
-                    !canvas.restore(
+                    let landed = canvas.restore(
                         window: id, context: placementContext(for: destination))
+                    if let check = landed.verification {
+                        restoreChecks.append((check, destination))
+                    }
+                    return !landed.landed
                 }
                 if refused, let occupantHandle {
                     recordFailure(occupantHandle, name: name)
@@ -1250,9 +1301,13 @@ final class TilingController {
             // one is forgotten: it has no state left to own.
             let isDead = handle.map { gateway.liveness(of: $0) == .dead } ?? false
             let refused = directory.withCanvas(requesterSpace) { canvas -> Bool in
-                !canvas.restore(
+                let landed = canvas.restore(
                     window: requester, context: placementContext(for: requesterSpace),
                     keepingOccupancyOnRefusal: !isDead)
+                if let check = landed.verification {
+                    restoreChecks.append((check, requesterSpace))
+                }
+                return !landed.landed
             }
             if refused, let handle { recordFailure(handle, name: name) }
             // A retained requester owns its slot again; every other
@@ -1314,6 +1369,10 @@ final class TilingController {
             for window in result.forget {
                 register.forget(window)
             }
+            scheduleVerification(of: result.verify, on: destination)
+        }
+        for check in restoreChecks {
+            scheduleRestoreVerification(check.verification, on: check.space)
         }
         // The chapter's story, told once here: any refused frame surfaces
         // ahead of the success sentence, so a partial failure can never

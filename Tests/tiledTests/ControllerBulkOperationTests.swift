@@ -453,6 +453,37 @@ final class ControllerBulkOperationTests: XCTestCase {
             "the app ignored the resize; screen and state disagree until the next assertion")
     }
 
+    /// The untile's pre-tile restore is written through the shared policy
+    /// with no convergence check, and the record is gone by the time a
+    /// late check could judge it: an app that reports success and never
+    /// moves left a floating window in the tile a neighbour then grew
+    /// over, with no error anywhere. The restore now schedules its own
+    /// check, and the check narrates the ignore as the refusal it is.
+    func testUntileOfASilentlyIgnoringAppIsVerifiedAndNarrated() {
+        let handle = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        let id = controller.registeredID(for: handle)!
+        let tiledFrame = gateway.frame(of: handle)!
+        gateway.silentIgnore.insert(handle)
+        let before = harness.verifyFires.count
+
+        controller.untile(window: id)
+
+        XCTAssertEqual(
+            harness.verifyFires.count, before + 1,
+            "the restore write needs a late check")
+        XCTAssertNil(canvas.state.slot(of: id), "the untile released the slot")
+
+        harness.verifyFires.last?()
+
+        XCTAssertEqual(
+            gateway.frame(of: handle), tiledFrame,
+            "the app never moved the window out of its old tile")
+        XCTAssertNotNil(
+            canvas.error,
+            "the menu must say the restore did not land, not claim a clean board")
+    }
+
     func testTiledWindowsInfoIsSortedBySlot() {
         // Tile in reverse slot order; presentation must sort by rawValue.
         harness.addFocusedWindow()

@@ -304,7 +304,13 @@ final class DragTracker {
     }
     private var settleOverrides: [WindowID: SettleOverride] = [:]
 
-    private static let echoTolerance: CGFloat = 32
+    /// How close an app's applied frame must be to the write it answered
+    /// to count as that frame: apps round to their own grid (Terminal
+    /// rounds to character cells), so a few points of inset are the write
+    /// landing, not an app ignoring it. The tracker uses it to judge an
+    /// echo, and the controller's restore check uses the same distance so
+    /// a rounded restore is never narrated as a silent ignore.
+    static let echoTolerance: CGFloat = 32
     /// Writes within this distance of the window's current frame are
     /// no-ops: the app changes nothing and emits no AX notification, so
     /// marking them expected would leave an echo entry that never

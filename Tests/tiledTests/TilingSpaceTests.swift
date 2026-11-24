@@ -671,6 +671,72 @@ final class TilingSpaceTests: XCTestCase {
             "the reflow chapter returns the survivor to the slot it held")
     }
 
+    // MARK: Silent-ignore verification (TE-02)
+
+    /// A reflow survivor's growth is written through the shared policy
+    /// with no per-write check, and nothing else verified it: an app that
+    /// reports success and never moves left state saying "two-thirds"
+    /// while the screen stayed on a third, with no error. The settled
+    /// event now names every survivor it grew.
+    func testReflowSurvivorGrowthIsVerified() {
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .bottomLeft, requester: b)
+        harness.gateway.silentIgnore.insert(harness.handle(of: a)!)
+
+        let outcome = space.untile(window: b, reflowing: true, context: context())
+
+        XCTAssertEqual(space.state.slot(of: a), .leftHalf, "the survivor grew")
+        XCTAssertEqual(
+            outcome.verify, [a],
+            "the survivor's growth needs a late check, exactly like a placement")
+    }
+
+    /// A restore writes with no per-write check and then forgets the
+    /// record, so an app that ignored the write left a floating window
+    /// sitting in the tile it no longer owned, with no error. The restore
+    /// now reports the check its write needs (it cannot be rolled back:
+    /// the window has already left the canvas).
+    func testUntileReportsTheRestoreWriteForLateVerification() {
+        let id = harness.addWindow()
+        let original = harness.frame(of: id)!
+        harness.apply(slot: .topLeft, requester: id)
+        let target = space.grid.sizedUntileFrame(keepingTopOf: original, in: bounds)
+
+        let outcome = space.untile(window: id, reflowing: true, context: context())
+
+        XCTAssertEqual(
+            outcome.verifyRestores,
+            [TilingSpace.RestoreVerification(
+                handle: harness.handle(of: id)!, name: "TestApp", target: target,
+                from: harness.rect(.topLeft))],
+            "the released window's frame write is checked back")
+    }
+
+    /// Undo's re-place keeps the window tiled, so its ignored write still
+    /// rolls back (through the existing convergence check); the chapter
+    /// must name every window whose re-place landed.
+    func testRestoreEvicteesReportsRePlacedWindowsForVerification() {
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topLeft, requester: b)
+        guard let snapshot = space.undoStack.last?.snapshot else {
+            return XCTFail("the eviction should snapshot")
+        }
+
+        let result = harness.restoreEvictees(snapshot)
+
+        XCTAssertEqual(
+            result.restored.compactMap { space.records[$0]?.handle },
+            [harness.handle(of: a)!],
+            "the evictee is re-placed under a fresh id")
+        XCTAssertEqual(
+            result.verify, result.restored,
+            "every re-placed window's write is verified, like a placement")
+    }
+
     func testSkippedReflowWriteSeedsTheDragBaseline() {
         // The survivor's live frame already equals the slot it grows
         // into, so the reflow write skips. The skip still seeds the drag

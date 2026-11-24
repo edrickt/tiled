@@ -204,6 +204,32 @@ struct TilingSpace {
         var raise: Bool = false
         /// Windows whose convergence must be verified one delay later.
         var verify: [WindowID] = []
+        /// Restored windows whose frame write must be verified one delay
+        /// later. A restore releases the record, so the late check cannot
+        /// roll anything back: it narrates a silent ignore exactly as the
+        /// refusal it is, so the menu never claims a clean board over a
+        /// window still sitting in its old tile.
+        var verifyRestores: [RestoreVerification] = []
+    }
+
+    /// One restore write awaiting its late check: the frame the window was
+    /// meant to land on, the tile rect it held when the restore was
+    /// requested, and the name to say if it never left that tile.
+    struct RestoreVerification: Equatable {
+        let handle: WindowHandle
+        let name: String
+        let target: CGRect
+        /// The rect the window occupied when the restore was issued. A
+        /// window still sitting there did not take the write; a window
+        /// anywhere else did, however much its app rounded the target.
+        let from: CGRect
+    }
+
+    /// What one restore did: whether its write landed (false on a gateway
+    /// refusal), and the late check a landed write needs.
+    struct RestoreOutcome {
+        let landed: Bool
+        let verification: RestoreVerification?
     }
 
     /// What restoring one chapter group onto a canvas did: the windows
@@ -218,6 +244,11 @@ struct TilingSpace {
         }
 
         var restored: [WindowID] = []
+        /// Windows whose re-place landed and must be verified one delay
+        /// later, exactly as a placement is: an app that reported success
+        /// and never moved still has the window's record and slot, so the
+        /// check rolls it back instead of leaving state and screen apart.
+        var verify: [WindowID] = []
         var failures: [Failure] = []
         /// Windows the restore released: a refused re-tile forgets the
         /// record, so the coordinator forgets the id, death clock, and
@@ -392,6 +423,7 @@ struct TilingSpace {
         // anyone grows into it. The requester, the evicted, and expanded
         // windows never grow.
         var reflowSnapshot: [EvictedWindow] = []
+        var reflowVerifications: [WindowID] = []
         if commit.clean, let freed = commit.reflowFreed, !freed.isEmpty {
             // The re-housed window is the one "evictee" that stayed
             // tiled, so it may grow: it re-houses into the slot the
@@ -404,6 +436,7 @@ struct TilingSpace {
                     .filter { !commit.rehoused.contains($0) })
             let reflow = reflow(freed, excluding: skip, context: context)
             reflowSnapshot = reflow.undoEntries
+            reflowVerifications = reflow.moved
             actionFailures += reflow.failures
         }
         // Reflow can grow a re-housed window into a larger slot (the
@@ -448,7 +481,15 @@ struct TilingSpace {
             outcome.verify = verificationWindows(for: decision, requester: id)
             outcome.verify.append(
                 contentsOf: decision.windowsToRestore().filter { commit.rehoused.contains($0) })
+            // A reflow survivor's growth is a write like any other: this
+            // event owns its check, since the survivor is not the plan's
+            // requester or a re-housed evictee.
+            outcome.verify += reflowVerifications
         }
+        // A restore that left this canvas cannot be rolled back by a late
+        // check, but an app that reported success and never moved must
+        // still be narrated rather than leaving state and screen apart.
+        outcome.verifyRestores = commit.restoreVerifications
         outcome.observe = commit.observed
         // The reflow's survivors share the event's undo chapter: undo
         // restores the pre-event world in one ⌃⇧⌘Z (a move with no
@@ -561,13 +602,19 @@ struct TilingSpace {
             // a settle the gateway applied late) and seeds the drag
             // baseline; a deferred off-Space write stands and reconciles
             // when the canvas becomes visible.
-            if move.commit(in: &self, context: context).stands {
+            let landed = move.commit(in: &self, context: context)
+            if landed.stands {
                 // The re-place landed (or stands deferred): it claims the
                 // handle, so every canvas's older deferred restore for it
                 // is stale.
                 discardDeferredRestore(for: entry.handle)
                 context.discardDeferredRestores(entry.handle)
                 result.restored.append(id)
+                // A re-place that reached the gateway is verified exactly
+                // as a placement is: the window keeps its record and slot,
+                // so a silent ignore rolls back instead of leaving the
+                // canvas claiming a tile the screen never took.
+                if landed == .written { result.verify.append(id) }
             } else {
                 // The re-tile was refused: name the window before any
                 // record goes, then let the transaction restore the slot
@@ -628,10 +675,10 @@ struct TilingSpace {
             return evictedEntry(for: id, slot: slot, space: context.space)
         }
         primeTracker(for: state.occupants, context: context)
-        let failures = restore(tiled, context: context)
+        let restoreBatch = restore(tiled, context: context)
         adoptLayout(target)
         pushUndo(snapshot: snapshot, requester: nil)
-        if let message = Self.failureMessage(failures) {
+        if let message = Self.failureMessage(restoreBatch.failures) {
             error = message
         }
         notice = MenuText.switchedLayoutNotice(
@@ -640,7 +687,7 @@ struct TilingSpace {
         context.log("switchLayout -> \(target.rawValue) untiled=\(tiled.count)")
         return Outcome(
             result: .switched(layout: target, untiled: tiled.count),
-            forget: tiled)
+            forget: tiled, verifyRestores: restoreBatch.verifications)
     }
 
     /// Adopts a layout on this canvas. Callers empty the board first:
@@ -799,7 +846,7 @@ struct TilingSpace {
         let requesterEntry = previous.flatMap {
             snapshotEntry(for: id, fallback: $0, space: context.space)
         }
-        let restoreFailures = restore(
+        let restoreBatch = restore(
             evicted.filter { rehouse[$0] == nil }, context: context)
         let placement = place(
             window: id, into: slot, context: context, observed: &commit.observed)
@@ -815,7 +862,8 @@ struct TilingSpace {
         // A restore refusal is its own failure now: it names the window
         // beside a refused placement instead of being dropped by
         // precedence.
-        commit.failures += restoreFailures
+        commit.failures += restoreBatch.failures
+        commit.restoreVerifications += restoreBatch.verifications
         let clean = commit.clean
         if clean, let requesterEntry {
             snapshot.append(requesterEntry)
@@ -833,9 +881,10 @@ struct TilingSpace {
         for wid in evicted {
             guard let home = rehouse[wid] else { continue }
             guard clean else {
-                let failures = restore([wid], context: context)
-                commit.failures += failures
-                if !failures.isEmpty { restorationFailed = true }
+                let batch = restore([wid], context: context)
+                commit.failures += batch.failures
+                commit.restoreVerifications += batch.verifications
+                if !batch.failures.isEmpty { restorationFailed = true }
                 context.log("rehouse SKIPPED win\(wid): requester placement failed")
                 continue
             }
@@ -848,12 +897,13 @@ struct TilingSpace {
                 if write == .deferredOffSpace { commit.deferred = true }
                 commit.rehoused.insert(wid)
             } else {
-                let failures = restore([wid], context: context)
-                commit.failures += failures
+                let batch = restore([wid], context: context)
+                commit.failures += batch.failures
+                commit.restoreVerifications += batch.verifications
                 // Sticky: a later window's landed restore must not turn
                 // an earlier refusal back off and let the board claim
                 // every window went back.
-                if !failures.isEmpty { restorationFailed = true }
+                if !batch.failures.isEmpty { restorationFailed = true }
                 context.log(
                     "rehouse FAILED win\(wid) -> \(home.rawValue); falling back to eviction")
             }
@@ -870,7 +920,7 @@ struct TilingSpace {
             }
             commit.reflowFreed = freed
         }
-        if restoreFailures.isEmpty, !evicted.isEmpty {
+        if restoreBatch.failures.isEmpty, !evicted.isEmpty {
             // Ordinary eviction gets the same narrative as a layout
             // switch: a notice naming the displaced app plus the shared
             // one-step undo. The switch was never special; it was
@@ -924,6 +974,11 @@ struct TilingSpace {
         /// Windows that stayed tiled by re-housing: the request made room
         /// for them, so they keep their record and are never restored.
         var rehoused: Set<WindowID> = []
+        /// Restore writes that landed and need their late check: an app
+        /// can report success and never move, and the evicted window is
+        /// already out of the canvas, so the check narrates instead of
+        /// rolling back.
+        var restoreVerifications: [RestoreVerification] = []
         var observed: [WindowID] = []
         /// A placement or re-house write was deferred off-Space: its
         /// state stands, so the event narrates the deferral rather than
@@ -941,6 +996,13 @@ struct TilingSpace {
         /// True when nothing failed: neither a placement write nor any
         /// restore or reflow write.
         var clean: Bool { failures.isEmpty }
+    }
+
+    /// One bulk restore's two answers: the refused writes for the action's
+    /// failure list, and the late checks the landed ones need.
+    private struct RestoreBatch {
+        var failures: [Failure] = []
+        var verifications: [RestoreVerification] = []
     }
 
     /// What `place` did: the occupancy committed and the write landed (or
@@ -1225,12 +1287,14 @@ struct TilingSpace {
 
     /// Restores the window's slot-sized floating frame and releases its slot,
     /// going through the one write policy every other push shares: the sized
-    /// target keeps the pre-tile frame's origin and takes the canvas layout's
-    /// smallest slot footprint, kept inside the visible frame. A target the
+    /// target keeps the pre-tile frame's origin and takes the quarter
+    /// footprint, kept inside the visible frame. A target the
     /// window already holds is skipped, and a canvas the user cannot see
-    /// defers rather than writing blind. Returns false only when the
+    /// defers rather than writing blind. `landed` is false only when the
     /// gateway refused the write, so the caller can say so instead of
-    /// silently leaving a stray window behind. A refused write normally
+    /// silently leaving a stray window behind; a landed write also reports
+    /// the late check that reads its frame back, because an app can report
+    /// success and never move. A refused write normally
     /// releases the slot too; undo's fresh requester passes
     /// `keepingOccupancyOnRefusal` so the window stays the owner of the
     /// slot it visibly holds, mirroring `place`'s rollback. The footprint is
@@ -1239,12 +1303,14 @@ struct TilingSpace {
     @discardableResult
     mutating func restore(
         window id: WindowID, context: Context, keepingOccupancyOnRefusal: Bool = false
-    ) -> Bool {
+    ) -> RestoreOutcome {
         var restored = true
         var refused = false
+        var verification: RestoreVerification?
         if let record = records[id], record.preTileFrame != .zero {
             let target = grid.sizedUntileFrame(
                 keepingTopOf: record.preTileFrame, in: visibleFrame)
+            let from = state.slot(of: id).map { grid.rect(for: $0, in: visibleFrame) }
             let result = context.frameWriter.write(
                 id, handle: record.handle, to: target,
                 bounds: visibleFrame, on: context.space, check: .none)
@@ -1254,34 +1320,49 @@ struct TilingSpace {
                 deferredRestores[record.handle] = DeferredRestore(
                     id: id, frame: target)
             }
+            if result == .written, let from {
+                // Only a window leaving a tile can end up stranded in it;
+                // a record with no slot has no tile to be stuck in.
+                verification = RestoreVerification(
+                    handle: record.handle,
+                    name: appName(id, context: context) ?? "A window",
+                    target: target, from: from)
+            }
             restored = result.stands
             refused = result == .refused
         }
-        if refused, keepingOccupancyOnRefusal { return false }
+        if refused, keepingOccupancyOnRefusal {
+            return RestoreOutcome(landed: false, verification: nil)
+        }
         forget(id, context: context)
-        return restored
+        return RestoreOutcome(landed: restored, verification: verification)
     }
 
     /// Restores every window in `ids`, returning one failure per refused
-    /// quarter-sized write. The sized frame is captured before the restore releases
-    /// the record, so the failure carries the intent that did not land.
+    /// quarter-sized write and one late check per write that landed. The
+    /// sized frame is captured before the restore releases the record, so
+    /// the failure carries the intent that did not land and the check can
+    /// name the frame the window was meant to reach.
     private mutating func restore(
         _ ids: [WindowID], context: Context
-    ) -> [Failure] {
-        var failures: [Failure] = []
+    ) -> RestoreBatch {
+        var batch = RestoreBatch()
         for evicted in ids {
             let name = appName(evicted, context: context) ?? "A window"
             let raw = records[evicted]?.preTileFrame ?? .zero
             let frame = raw == .zero ? raw : grid.sizedUntileFrame(
                 keepingTopOf: raw, in: visibleFrame)
-            if !restore(
+            let result = restore(
                 window: evicted, context: context)
-            {
-                failures.append(
+            if let verification = result.verification {
+                batch.verifications.append(verification)
+            }
+            if !result.landed {
+                batch.failures.append(
                     Failure(windowName: name, kind: .restore, frame: frame))
             }
         }
-        return failures
+        return batch
     }
 
     /// One reconcile pass over a map of deferred work: attempt every
@@ -1433,6 +1514,11 @@ struct TilingSpace {
     /// travel to the action that triggered it.
     struct ReflowResult {
         var undoEntries: [EvictedWindow] = []
+        /// The survivors this pass grew, in the order their writes landed:
+        /// the settled event verifies each one, because a survivor that
+        /// reports success and never moves would leave state claiming a
+        /// slot the screen never took.
+        var moved: [WindowID] = []
         var failures: [Failure] = []
     }
 
@@ -1503,7 +1589,8 @@ struct TilingSpace {
                 move.from.flatMap {
                     evictedEntry(for: move.id, slot: $0, space: context.space)
                 }
-            })
+            },
+            moved: moves.map(\.id))
     }
 
     /// One push pass through the shared write policy: the pairs the
@@ -1566,11 +1653,20 @@ struct TilingSpace {
         notice = nil
         let slot = state.slot(of: id)
         let name = appName(id, context: context) ?? "A window"
-        if !restore(window: id, context: context) {
+        let restore = restore(window: id, context: context)
+        if !restore.landed {
             error = MenuText.restoreFailureMessage([name])
         }
-        guard reflowing else { return Outcome(forget: [id]) }
-        return leave(window: id, from: slot, context: context)
+        var outcome: Outcome
+        if reflowing {
+            outcome = leave(window: id, from: slot, context: context)
+        } else {
+            outcome = Outcome(forget: [id])
+        }
+        if let verification = restore.verification {
+            outcome.verifyRestores.append(verification)
+        }
+        return outcome
     }
 
     /// Evicts one window: the untile path, refusing early when the
@@ -1668,7 +1764,7 @@ struct TilingSpace {
         if let message = Self.failureMessage(reflow.failures) {
             error = message
         }
-        return Outcome(forget: [id], raise: slot != nil)
+        return Outcome(forget: [id], raise: slot != nil, verify: reflow.moved)
     }
 
     /// Prime the tracker's intent for the slot rects a following undo will
@@ -1711,8 +1807,12 @@ struct TilingSpace {
         var failures: [String] = []
         for id in state.tiledWindows {
             let name = appName(id, context: context) ?? "A window"
-            if !restore(window: id, context: context) {
+            let restored = restore(window: id, context: context)
+            if !restored.landed {
                 failures.append(name)
+            }
+            if let verification = restored.verification {
+                outcome.verifyRestores.append(verification)
             }
         }
         if !failures.isEmpty {
