@@ -577,6 +577,22 @@ final class ControllerBulkOperationTests: XCTestCase {
         XCTAssertFalse(canvas.hasSplitterBackup, "the restore consumes the backup")
     }
 
+    /// Reset Splitters was the one action that did not prune first, so a
+    /// window whose destroy report had not arrived yet was still written by
+    /// the reassert and the receipt blamed its app for a refusal about a
+    /// window that no longer exists.
+    func testResetSplittersPrunesADeadWindowInsteadOfBlamingItsApp() {
+        let handle = harness.addFocusedWindow()
+        controller.handle(slot: .topLeft)
+        gateway.kill(handle)
+
+        let receipt = controller.resetOrRestoreSplitters()
+
+        XCTAssertTrue(canvas.state.occupants.isEmpty, "the dead window released its slot")
+        XCTAssertNil(canvas.error, "no app was falsely accused")
+        XCTAssertTrue(receipt.performed)
+    }
+
     func testResetOrRestoreSplittersReportsARefusalAsNotPerformed() {
         let a = harness.addFocusedWindow()
         controller.handle(slot: .topLeft)

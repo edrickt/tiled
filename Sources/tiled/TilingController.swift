@@ -1152,16 +1152,25 @@ final class TilingController {
     /// did not). The receipt names which outcome happened.
     @discardableResult
     func resetOrRestoreSplitters() -> ActionReceipt {
+        // Every other action prunes first: a window whose destroy report
+        // has not arrived yet would otherwise be written by the reassert,
+        // and the receipt would blame its app for a refusal about a window
+        // that no longer exists.
+        pruneDeadWindows()
         let space = directory.focusedKey()
         let restored = directory.storedCanvas(for: space)?.hasSplitterBackup == true
-        directory.withCanvas(space) { canvas in
+        let outcome = directory.withCanvas(space) { canvas in
             if restored {
-                _ = canvas.restoreSplitters(context: placementContext(for: space))
-            } else {
-                canvas.visibleFrame = directory.visibleFrame(for: space)
-                _ = canvas.resetSplitters(context: placementContext(for: space))
+                return canvas.restoreSplitters(context: placementContext(for: space))
             }
+            canvas.visibleFrame = directory.visibleFrame(for: space)
+            return canvas.resetSplitters(context: placementContext(for: space))
         }
+        // The outcome owns the coordinator's effects (restored windows sit
+        // below, observations, verification), exactly as on every other
+        // action: discarding it left this the one path that could not apply
+        // what its canvas returned.
+        apply(outcome, on: space)
         onChange?()
         let error = directory.storedCanvas(for: space)?.error
         return receipt(
