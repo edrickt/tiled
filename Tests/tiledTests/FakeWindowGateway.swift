@@ -82,7 +82,14 @@ final class FakeWindowGateway: WindowGateway {
         return focused
     }
 
+    /// Handles whose frame the adapter read, in order. Lets a suite pin
+    /// that a push pass does not read a frame it already has.
+    private(set) var frameReads: [WindowHandle] = []
+
+    func resetFrameReads() { frameReads.removeAll() }
+
     func frame(of handle: WindowHandle) -> CGRect? {
+        frameReads.append(handle)
         guard let window = windows[handle], window.alive else { return nil }
         if hideFrames.contains(handle) { return nil }
         return window.frame

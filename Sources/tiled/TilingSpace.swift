@@ -1647,7 +1647,10 @@ struct TilingSpace {
     /// reconciliation when the canvas becomes visible — the placement
     /// path's contract, read through the same `Result.stands`.
     private struct WritePass {
-        var written: [(id: WindowID, target: CGRect)] = []
+        /// Each landed write with the frame the app showed afterwards
+        /// (`nil` when the policy's post-write read failed). The achieved
+        /// edge is read from here, not from a third gateway read.
+        var written: [(id: WindowID, target: CGRect, applied: CGRect?)] = []
         var failures: [Failure] = []
     }
 
@@ -1658,11 +1661,13 @@ struct TilingSpace {
         var pass = WritePass()
         for (id, target) in rects {
             guard let record = records[id] else { continue }
-            let result = context.frameWriter.write(
+            let report = context.frameWriter.writeReportingApplied(
                 id, handle: record.handle, to: target, bounds: visibleFrame,
                 on: context.space, check: .rollback)
-            switch result {
-            case .written: pass.written.append((id: id, target: target))
+            switch report.result {
+            case .written:
+                pass.written.append(
+                    (id: id, target: target, applied: report.applied))
             case .refused:
                 pass.failures.append(
                     Failure(
@@ -2312,15 +2317,18 @@ struct TilingSpace {
     /// the neighbour cannot give up. The readback is the one effect the
     /// pure plan cannot perform, so it lives here, in the effectful half.
     private mutating func reconcileAchievedEdges(
-        _ written: [(id: WindowID, target: CGRect)], context: Context
+        _ written: [(id: WindowID, target: CGRect, applied: CGRect?)], context: Context
     ) -> Bool {
         var reconciled = grid
         let occupied = unexpandedOccupiedSlots
         var changed = false
         for entry in written {
+            // The applied frame rides with the write. A policy read that
+            // failed is a can't-judge for this window: re-reading would
+            // pay the same timeout again for the same silence.
             guard let slot = state.slot(of: entry.id),
-                let record = records[entry.id],
-                let achieved = context.gateway.frame(of: record.handle)
+                records[entry.id] != nil,
+                let achieved = entry.applied
             else { continue }
             // The clamp signature is a size the app grew past the target
             // on that axis: only a floor refuses a shrink. A window that

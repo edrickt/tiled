@@ -89,6 +89,20 @@ struct FrameWriter {
         _ id: WindowID, handle: WindowHandle, to target: CGRect,
         bounds: CGRect, on space: TilingSpaceKey, check: Check
     ) -> Result {
+        writeReportingApplied(
+            id, handle: handle, to: target, bounds: bounds, on: space, check: check
+        ).result
+    }
+
+    /// `write`, plus the frame the app showed after the write when the
+    /// policy read one. Only the reassert needs it back: its achieved-edge
+    /// pass would otherwise read the same frame a third time (once for the
+    /// no-op check, once for the clamp check, once for the achieved edge),
+    /// and every read is a synchronous main-thread AX round trip.
+    func writeReportingApplied(
+        _ id: WindowID, handle: WindowHandle, to target: CGRect,
+        bounds: CGRect, on space: TilingSpaceKey, check: Check
+    ) -> (result: Result, applied: CGRect?) {
         // A write to a canvas the user cannot see waits for the swipe
         // back: sizing an off-Space window can pull it onto the visible
         // Space. The mark re-asserts the canvas later.
@@ -99,7 +113,7 @@ struct FrameWriter {
             // from the frame the canvas will write.
             seedBaseline(id, target)
             log("write win\(id) deferred off-Space")
-            return .deferredOffSpace
+            return (.deferredOffSpace, nil)
         }
         // No-op writes are skipped, not pushed: the app changes
         // nothing and emits no echo, so a marked expectation here
@@ -117,7 +131,7 @@ struct FrameWriter {
             cancelExpected(id)
             seedBaseline(id, target)
             log("write win\(id) no-op skip target=\(target)")
-            return .skippedNoOp
+            return (.skippedNoOp, nil)
         }
         markExpected(id, target)
         guard gateway.setFrame(handle, to: target) else {
@@ -129,7 +143,7 @@ struct FrameWriter {
             cancelExpected(id)
             seedBaseline(id, gateway.frame(of: handle) ?? liveBefore ?? target)
             log("write win\(id) refused target=\(target)")
-            return .refused
+            return (.refused, nil)
         }
         // Minimum-size clamp: an app that cannot go below its floor lands
         // the position exactly and snaps only the size (probed on live
@@ -138,7 +152,8 @@ struct FrameWriter {
         // the screen edge when the target hugged one. Repin the clamped
         // frame inside its bounds: it keeps its floor size and simply
         // stops shrinking at the screen edge, never off it.
-        if let applied = gateway.frame(of: handle),
+        let applied = gateway.frame(of: handle)
+        if let applied,
             let repinned = Self.repinnedInsideBounds(
                 applied: applied, target: target, bounds: bounds)
         {
@@ -152,14 +167,19 @@ struct FrameWriter {
                 cancelExpected(id)
                 seedBaseline(id, gateway.frame(of: handle) ?? applied)
                 log("write win\(id) clamp repair refused target=\(repinned)")
-                return .refused
+                return (.refused, nil)
             }
             markExpected(id, repinned)
             log("write win\(id) clamped at \(applied); repinned \(repinned)")
+            if case .rollback = check { scheduleCheck(id, space) }
+            log("write win\(id) target=\(target)")
+            // The repin carries the app's own applied size, so it is the
+            // achieved frame the reassert would otherwise read again.
+            return (.written, repinned)
         }
         if case .rollback = check { scheduleCheck(id, space) }
         log("write win\(id) target=\(target)")
-        return .written
+        return (.written, applied)
     }
 
     /// The frame to rewrite after an app clamped a write, or nil when

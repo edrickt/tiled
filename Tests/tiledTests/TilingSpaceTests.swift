@@ -777,6 +777,29 @@ final class TilingSpaceTests: XCTestCase {
             "every re-placed window's write is verified, like a placement")
     }
 
+    /// TE-07: every write already reads the frame before (no-op check)
+    /// and after (clamp check). The achieved-edge pass used to read the
+    /// same frame a third time, so a mouse-up reassert paid three AX
+    /// round trips per written window.
+    func testTheAchievedEdgePassReusesTheWritePolicysFrameRead() {
+        let a = harness.addWindow()
+        let b = harness.addWindow()
+        harness.apply(slot: .topLeft, requester: a)
+        harness.apply(slot: .topRight, requester: b)
+        // A resized display re-derives both rects, so both writes land.
+        let resized = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        harness.bounds = resized
+        space.visibleFrame = resized
+        harness.gateway.resetFrameReads()
+
+        space.reassert(.grid, context: context())
+
+        XCTAssertEqual(
+            harness.gateway.frameReads.count, 4,
+            "two reads per written window (before and after the write), "
+                + "no third read for the achieved edge")
+    }
+
     func testSkippedReflowWriteSeedsTheDragBaseline() {
         // The survivor's live frame already equals the slot it grows
         // into, so the reflow write skips. The skip still seeds the drag
