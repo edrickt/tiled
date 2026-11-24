@@ -137,9 +137,11 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         let snapshot = snapshot(
             menu: controller.focusedTilingSpace,
             icon: controller.cursorTilingSpace)
-        item.button?.image = StatusIconRenderer.image(for: snapshot.icon)
-        item.menu = makeMenu(from: snapshot.menu)
+        // Installed before the first paint so every rasterization goes
+        // through `draw`, the one place the glyph is rendered.
         statusItem = item
+        draw(snapshot.icon)
+        item.menu = makeMenu(from: snapshot.menu)
         lastSnapshot = snapshot
         lastTrust = snapshot.menu.isTrusted
         cachedTrust = snapshot.menu.isTrusted
@@ -174,6 +176,24 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         // runloop tick, and the permission poll fires once a second, but
         // the menu only cares about state, warnings, labels, and rows.
         // Building an NSMenu with submenus on every tick is pure waste.
+        // Trust is not part of the menu's rendering diff (the permission
+        // row is in the row list, but its sentence is not the whole story
+        // for Settings), so report a flip on its own: the other surfaces
+        // that show trust must be told, not left to their next show().
+        // This runs even with no icon: the trust flip is the one thing a
+        // hidden-icon pass still owes anyone.
+        let flipped = lastTrust.map { $0 != snapshot.menu.isTrusted } ?? false
+        lastTrust = snapshot.menu.isTrusted
+        if flipped { onTrustChange?(snapshot.menu.isTrusted) }
+        // No status item means there is no surface to draw or rebuild: the
+        // statusItem-optional comparisons below (`nil == nil`) used to force
+        // both halves true forever, so a hidden icon built the whole 17-item
+        // NSMenu and rasterized the 22x16 glyph at drag rate, then dropped
+        // both. `showIcon` remains the only builder.
+        guard statusItem != nil else {
+            lastSnapshot = snapshot
+            return
+        }
         let plan = Self.refreshPlan(
             menuChanged: lastSnapshot?.menu != snapshot.menu || statusItem?.menu == nil,
             iconChanged:
@@ -184,13 +204,6 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
         // An open menu defers both halves; the close handler runs a fresh
         // pass, so the deferred snapshot must not become the baseline.
         if !menuOpen { lastSnapshot = snapshot }
-        // Trust is not part of the menu's rendering diff (the permission
-        // row is in the row list, but its sentence is not the whole story
-        // for Settings), so report a flip on its own: the other surfaces
-        // that show trust must be told, not left to their next show().
-        let flipped = lastTrust.map { $0 != snapshot.menu.isTrusted } ?? false
-        lastTrust = snapshot.menu.isTrusted
-        if flipped { onTrustChange?(snapshot.menu.isTrusted) }
     }
 
     /// The cursor moved to another display: redraw only the glyph, which
@@ -254,10 +267,12 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     }
 
     private func draw(_ icon: StatusIcon.Snapshot) {
+        iconDraws += 1
         statusItem?.button?.image = StatusIconRenderer.image(for: icon)
     }
 
     private func makeMenu(from snapshot: MenuModel.Snapshot) -> NSMenu {
+        menuBuilds += 1
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
@@ -319,6 +334,11 @@ final class MenuBarPresenter: NSObject, NSMenuDelegate {
     func trustMayHaveChanged() {
         cachedTrust = nil
     }
+
+    /// Test seams: how many NSMenus this presenter has built and how many
+    /// glyphs it has rasterized. A hidden icon must do neither.
+    private(set) var menuBuilds = 0
+    private(set) var iconDraws = 0
 
     /// The current trust answer, queried at most once per invalidated
     /// pass.

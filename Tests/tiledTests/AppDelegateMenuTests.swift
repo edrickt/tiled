@@ -347,6 +347,40 @@ final class AppDelegateMenuTests: XCTestCase {
         XCTAssertEqual(observed, [false, true], "a re-grant reaches Settings too")
     }
 
+    /// A hidden icon has no surface to draw or rebuild, but the refresh
+    /// plan forced both halves true (`statusItem?.menu == nil` is true
+    /// when the item is nil), so every pass built the whole NSMenu and
+    /// rasterized the 22×16 glyph at drag rate, then dropped both.
+    func testHiddenIconBuildsNoMenuAndDrawsNoGlyph() {
+        let suiteName = "hidden-icon-\(UUID())"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
+        let controller = TilingController(
+            gateway: FakeWindowGateway(), pruneInterval: nil,
+            screens: { [Self.firstDisplay] }, deathConfirmation: 0)
+        controller.onChange = {}
+        let presenter = MenuBarPresenter(
+            controller: controller,
+            hotkeyStore: HotkeyStore(defaults: defaults),
+            hotkeyService: { nil },
+            actionTarget: NSObject())
+
+        presenter.refresh()
+        presenter.refresh()
+
+        XCTAssertEqual(presenter.menuBuilds, 0, "no status item, no menu build")
+        XCTAssertEqual(presenter.iconDraws, 0, "no status item, no glyph")
+
+        presenter.showIcon()
+        XCTAssertEqual(presenter.menuBuilds, 1, "showIcon is the one builder")
+        XCTAssertEqual(presenter.iconDraws, 1)
+
+        presenter.hideIcon()
+        presenter.refresh()
+        XCTAssertEqual(presenter.menuBuilds, 1, "a hidden icon builds nothing")
+        XCTAssertEqual(presenter.iconDraws, 1)
+    }
+
     func testLabelOnlyRemapChangesThePresenterSnapshot() {
         // The store lives behind the presenter's snapshot assembly. Editing
         // one binding changes nothing but a label, yet the snapshot must
