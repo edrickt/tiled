@@ -9,6 +9,9 @@ final class FakeAXObserverDriver: AXObserverDriver {
     final class Observer: AXObserverHandle {
         let pid: pid_t
         private(set) var notifications: [String] = []
+        /// Removals the adapter asked for, with the element's token: a
+        /// churned identity must unregister the element it left.
+        private(set) var removedNotifications: [(notification: String, token: UInt?)] = []
         private(set) var runLoopSourceAdded = false
 
         init(pid: pid_t) {
@@ -17,6 +20,11 @@ final class FakeAXObserverDriver: AXObserverDriver {
 
         func record(_ notification: String) {
             notifications.append(notification)
+        }
+
+        func recordRemoval(_ notification: String, element: AXUIElement?) {
+            removedNotifications.append(
+                (notification, element.map { UInt(CFHash($0)) }))
         }
 
         func setRunLoopSource(_ added: Bool) {
@@ -49,6 +57,15 @@ final class FakeAXObserverDriver: AXObserverDriver {
         guard let observer = observer as? Observer else { return .failure }
         if let error = addFailures[notification] { return error }
         observer.record(notification)
+        return .success
+    }
+
+    func removeNotification(
+        _ notification: String, from observer: AXObserverHandle,
+        element: AXUIElement?
+    ) -> AXError {
+        guard let observer = observer as? Observer else { return .failure }
+        observer.recordRemoval(notification, element: element)
         return .success
     }
 

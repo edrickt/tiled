@@ -49,6 +49,13 @@ protocol AXObserverDriver: AnyObject {
     func addNotification(
         _ notification: String, to observer: AXObserverHandle,
         element: AXUIElement?) -> AXError
+    /// Removes one notification for one AXUIElement. A churned identity
+    /// stops observing the element it left; leaving the registration on the
+    /// shared observer would retain the element for the life of the
+    /// process.
+    func removeNotification(
+        _ notification: String, from observer: AXObserverHandle,
+        element: AXUIElement?) -> AXError
     func addRunLoopSource(_ observer: AXObserverHandle)
     func removeRunLoopSource(_ observer: AXObserverHandle)
 }
@@ -86,6 +93,17 @@ final class LiveAXObserverDriver: AXObserverDriver {
         }
         return AXObserverAddNotification(
             observer.observer, element, notification as CFString, nil)
+    }
+
+    func removeNotification(
+        _ notification: String, from observer: AXObserverHandle,
+        element: AXUIElement?
+    ) -> AXError {
+        guard let observer = observer as? LiveObserver, let element else {
+            return .invalidUIElement
+        }
+        return AXObserverRemoveNotification(
+            observer.observer, element, notification as CFString)
     }
 
     func addRunLoopSource(_ observer: AXObserverHandle) {
@@ -689,10 +707,11 @@ final class LiveWindowGateway: WindowGateway {
     /// Test seam: apply the adoption update the live `handle(for:)` path
     /// performs, without a live AXUIElement.
     func adoptTestWindow(
-        _ handle: WindowHandle, token: UInt, frames: WindowFrames
+        _ handle: WindowHandle, token: UInt, frames: WindowFrames,
+        element: AXUIElement? = nil
     ) {
         guard let pid = bindings[handle]?.pid else { return }
-        adopt(handle, element: nil, token: token, frames: frames, pid: pid)
+        adopt(handle, element: element, token: token, frames: frames, pid: pid)
     }
 
     /// An app quit. Its windows are gone: drop every binding for the pid
@@ -1014,6 +1033,20 @@ final class LiveWindowGateway: WindowGateway {
         }
     }
 
+    /// Removes the three window notifications from an element the identity
+    /// churn left behind. Best effort: the element may already be gone, and
+    /// a failed removal leaves nothing worse than the registration this
+    /// call exists to drop.
+    private func removeChanges(on observer: AXObserverHandle, element: AXUIElement) {
+        for name in [
+            kAXWindowResizedNotification, kAXWindowMovedNotification,
+            kAXUIElementDestroyedNotification,
+        ] {
+            _ = observerDriver.removeNotification(
+                name, from: observer, element: element)
+        }
+    }
+
     /// Registers the resize and move notifications for one element, then
     /// reports how the attempt ended. Only a landed registration is
     /// remembered: a window whose notifications could not be registered
@@ -1096,9 +1129,15 @@ final class LiveWindowGateway: WindowGateway {
         }
         let appElement = AXUIElementCreateApplication(pid)
         Self.applyMessagingTimeout(appElement)
-        seedSeenWindows(appElement, pid: pid)
-        creationAppElements[pid] = appElement
         let key = UInt(CFHash(appElement))
+        // An app whose creation observer is already registered has already
+        // been baselined. `observeWindowCreations` is called at launch and
+        // again when Accessibility trust arrives; reading every running
+        // app's window list before the registry's dedupe repeated the whole
+        // launch sweep at exactly the moment the app must become responsive.
+        guard registry.needsWork(key: key) else { return }
+        seedSeenWindows(pid: pid)
+        creationAppElements[pid] = appElement
         creationPIDs[key] = pid
         switch registry.begin(key: key, pid: pid) {
         case .skip:
@@ -1162,11 +1201,11 @@ final class LiveWindowGateway: WindowGateway {
     /// Baselines one app's currently open windows, so only later
     /// creations route to the callback. An unreadable list baselines
     /// nothing: the next notification retries from the same state.
-    private func seedSeenWindows(_ appElement: AXUIElement, pid: pid_t) {
-        var listRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            appElement, kAXWindowsAttribute as CFString, &listRef
-        ) == .success, let list = listRef as? [AXUIElement] else { return }
+    /// Baselines the app's already-open windows so they are never reported
+    /// as births. Reads the list through the injected seam, like every
+    /// other list read: the app element is the same one it names.
+    private func seedSeenWindows(pid: pid_t) {
+        guard let list = windowList(pid) else { return }
         creationSeenTokens[pid, default: []].formUnion(
             list.map { UInt(CFHash($0)) })
     }
@@ -2188,6 +2227,7 @@ final class LiveWindowGateway: WindowGateway {
     ) {
         guard var binding = bindings[handle] else { return }
         let oldKey = binding.observedKey
+        let oldElement = binding.element
         if let element {
             binding.element = element
             Self.applyMessagingTimeout(element)
@@ -2197,6 +2237,16 @@ final class LiveWindowGateway: WindowGateway {
         if let oldKey, oldKey != token {
             registry.forget(key: oldKey)
             if tokenIndex[oldKey] == handle { tokenIndex[oldKey] = nil }
+            // The identity churned: the old element must stop observing.
+            // The registration would otherwise retain the element and its
+            // three notifications on the shared per-pid observer for the
+            // life of the process (Terminal replaces its window element on
+            // every tab switch).
+            if let observer = observers[pid], let oldElement, let element,
+                oldElement !== element
+            {
+                removeChanges(on: observer, element: oldElement)
+            }
             binding.observedKey = token
             tokenIndex[token] = handle
             bindings[handle] = binding
@@ -2590,7 +2640,7 @@ final class LiveWindowGateway: WindowGateway {
         /// pending, so a re-entrant `observe` (the same element requested
         /// twice before the AX calls return) cannot double-register.
         mutating func begin(key: UInt, pid: pid_t) -> Step {
-            guard registeredKeys[key] == nil, !pendingKeys.contains(key) else {
+            guard needsWork(key: key) else {
                 return .skip
             }
             pendingKeys.insert(key)
@@ -2625,6 +2675,12 @@ final class LiveWindowGateway: WindowGateway {
 
         /// Whether the element's change notifications are registered.
         func isObserved(key: UInt) -> Bool { registeredKeys[key] != nil }
+
+        /// Whether a registration request for `key` has anything to do:
+        /// neither registered nor an attempt still in flight.
+        func needsWork(key: UInt) -> Bool {
+            registeredKeys[key] == nil && !pendingKeys.contains(key)
+        }
 
         /// Forgets a pid's observer and returns the element keys that were
         /// registered on it, so the caller can drop the object they were

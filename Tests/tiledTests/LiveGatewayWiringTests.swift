@@ -35,6 +35,64 @@ final class LiveGatewayWiringTests: XCTestCase {
             titleBarTapFactory: { _, _, _ in nil })
     }
 
+    // MARK: Birth subscription dedupe (TO-06)
+
+    /// The launch sweep and the post-trust re-subscribe both loop every
+    /// running app. The seed read came before the registry's dedupe, so the
+    /// second sweep re-read every app's window list for observers that were
+    /// already in place.
+    func testReSubscribingAlreadyObservedAppsDoesNotReReadTheirWindowLists() {
+        var reads: [pid_t] = []
+        let gateway = makeGateway(
+            runningProcessIDs: { [11, 12] },
+            windowList: { pid in
+                reads.append(pid)
+                return []
+            })
+
+        gateway.observeWindowCreations { _, _ in }
+        XCTAssertEqual(reads.sorted(), [11, 12], "the launch sweep baselines each app once")
+
+        gateway.observeWindowCreations { _, _ in }
+
+        XCTAssertEqual(
+            reads.sorted(), [11, 12],
+            "an already-observed app is not re-read on the post-trust sweep")
+    }
+
+    // MARK: Churned identity unregisters (TO-07)
+
+    /// An app that replaces its window element (Terminal does on every tab
+    /// switch) re-registers on the new element but left the old element's
+    /// three notifications on the shared per-pid observer forever.
+    func testAChurnedIdentityUnregistersTheOldElementsNotifications() {
+        let driver = FakeAXObserverDriver()
+        let gateway = makeGateway(observerDriver: driver)
+        let oldElement = AXUIElementCreateApplication(100)
+        let newElement = AXUIElementCreateApplication(101)
+        let frames = CGRect(x: 10, y: 20, width: 200, height: 100)
+        let handle = gateway.registerTestWindow(
+            pid: 100, token: UInt(CFHash(oldElement)),
+            frames: FakeWindowFrames(frame: frames), element: oldElement)
+        gateway.observe(handle, onChange: {}, onDestroyed: {})
+        XCTAssertEqual(
+            driver.observers.first?.notifications.count, 3,
+            "the first registration covers the three window notifications")
+
+        gateway.adoptTestWindow(
+            handle, token: UInt(CFHash(newElement)),
+            frames: FakeWindowFrames(frame: frames), element: newElement)
+
+        let removals = driver.observers.first?.removedNotifications ?? []
+        XCTAssertEqual(removals.count, 3, "the old element is unregistered")
+        XCTAssertEqual(
+            Set(removals.map(\.token)), [UInt(CFHash(oldElement))],
+            "every removal names the element the identity left")
+        XCTAssertEqual(
+            driver.observers.first?.notifications.count, 6,
+            "the new element still registers its three")
+    }
+
     // MARK: Space inventory cache (TO-05)
 
     /// The inventory is a private window-server table copy plus a UUID
